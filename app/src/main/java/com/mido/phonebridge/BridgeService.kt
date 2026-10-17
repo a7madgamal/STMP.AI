@@ -12,6 +12,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.mido.phonebridge.audit.AuditClassify
 import com.mido.phonebridge.audit.AuditDraft
 import com.mido.phonebridge.audit.AuditOutcome
 import com.mido.phonebridge.audit.AuditLog
@@ -299,6 +300,22 @@ class HttpServer(
             val body = if (method == "POST") readBody(session) else JSONObject()
             draft.requestBody(body)
 
+            val req = Req(
+                method = method,
+                path = path,
+                query = query,
+                pathParams = resolved.pathParams,
+                body = body,
+                remote = remote
+            )
+
+            // PRE-GATE. Input that can never succeed must not cost a tap: the modal
+            // is a decision, and there is no decision to make about `count=-1`.
+            // Runs before the description, so a bad request never even builds a
+            // modal. A throw here is REJECTED_INVALID (4xx, noise) by construction —
+            // see the catch below, where `gated()` is still false.
+            resolved.route.validate?.invoke(req)
+
             val summary = describe(resolved.plugin.id, resolved.route.path, body)
             draft.summary(summary)
 
@@ -339,14 +356,6 @@ class HttpServer(
                 is ApprovalGate.GateResult.Approved -> draft.outcome(AuditOutcome.APPROVED)
             }
 
-            val req = Req(
-                method = method,
-                path = path,
-                query = query,
-                pathParams = resolved.pathParams,
-                body = body,
-                remote = remote
-            )
             val resp = runBlocking { resolved.route.handler(req) }
             val bodyText = resp.body.toString()
             draft.response(resp.status, bodyText)
@@ -356,18 +365,14 @@ class HttpServer(
             // caller's fault (bad input, unknown id) → 4xx, noise. AFTER the gate the
             // human already approved and the server still failed → a real fault.
             val st = httpStatusFor(e.code)
-            val preGate = !draft.gated()
-            draft.outcome(
-                if (preGate && st.requestStatus < 500) AuditOutcome.REJECTED_INVALID
-                else AuditOutcome.HANDLER_FAILED
-            )
+            draft.outcome(AuditClassify.forError(st.requestStatus, draft.gated()))
             draft.error(e.code)
             val bodyObj = err(e.code, e.message ?: e.code)
             draft.response(st.requestStatus, bodyObj.toString())
             Dispatched(st, bodyObj)
         } catch (e: Exception) {
             Log.e(TAG, "unhandled", e)
-            draft.outcome(AuditOutcome.HANDLER_FAILED)
+            draft.outcome(AuditClassify.forCrash())
             draft.error("internal_error")
             val bodyObj = err("internal_error", e.message ?: "error")
             draft.response(500, bodyObj.toString())
@@ -637,7 +642,7 @@ class HttpServer(
         newFixedLengthResponse(status, "application/json", obj.toString())
 
     private fun httpStatusFor(code: String): Response.Status = when (code) {
-        "bad_request", "bad_count", "bad_package", "bad_time_min", "bad_time_max", "bad_max", "unsupported_action", "missing_reply_text", "decode_error" -> Response.Status.BAD_REQUEST
+        "bad_request", "bad_count", "bad_package", "bad_time_min", "bad_time_max", "bad_time_range", "bad_max", "unsupported_action", "missing_reply_text", "decode_error" -> Response.Status.BAD_REQUEST
         "notification_gone" -> Response.Status.GONE
         // A bad id pre-fetch throws not_found BEFORE the modal (gmail trash,
         // calendar delete/update/move). Without this entry it fell to the `else`

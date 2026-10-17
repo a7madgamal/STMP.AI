@@ -24,7 +24,12 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
     private val base = "https://www.googleapis.com/calendar/v3"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/calendar/events", "List your calendar events", Verb.READ) { list(it) },
+        Route(
+            "GET", "/calendar/events", "List your calendar events", Verb.READ,
+            // Same parsers run pre-gate and in the handler, so a bad window answers
+            // 400 without a tap and the two paths cannot drift.
+            validate = { requireWindow(it); requireMax(it); requireSingleEvents(it) }
+        ) { list(it) },
         Route("POST", "/calendar/events", "CREATE CALENDAR EVENT", Verb.WRITE) { create(it) },
         Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT", Verb.EDIT) { update(it) },
         Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT", Verb.DELETE) { delete(it) },
@@ -167,20 +172,34 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * there is NO implicit "today" and NO guessed timezone. The caller's window
      * is the contract.
      */
-    private fun list(req: Req): Resp {
+    /** Both ends of the window, and their order. A reversed window is a 400, not a 500. */
+    private fun requireWindow(req: Req): Pair<String, String> {
         val timeMin = requireRfc3339(req, "timeMin")
         val timeMax = requireRfc3339(req, "timeMax")
-        require(timeMin < timeMax) { "timeMin must be before timeMax" }
+        if (timeMin >= timeMax) {
+            throw PluginError("bad_time_range", "timeMin must be before timeMax: '$timeMin' vs '$timeMax'")
+        }
+        return timeMin to timeMax
+    }
 
-        val max = req.query["max"]?.let { raw ->
-            val v = raw.trim().toIntOrNull()
-                ?: throw PluginError("bad_max", "max must be an integer, got '$raw'")
-            if (v < 1) throw PluginError("bad_max", "max must be >= 1, got $v")
-            v.coerceAtMost(2500)
-        } ?: 250
+    /** `max`: absent means 250; present must be a positive integer. Never guessed. */
+    private fun requireMax(req: Req): Int = req.query["max"]?.let { raw ->
+        val v = raw.trim().toIntOrNull()
+            ?: throw PluginError("bad_max", "max must be an integer, got '$raw'")
+        if (v < 1) throw PluginError("bad_max", "max must be >= 1, got $v")
+        v.coerceAtMost(2500)
+    } ?: 250
+
+    /** `singleEvents`: absent means true; present must be exactly true or false. */
+    private fun requireSingleEvents(req: Req): Boolean =
+        req.query["singleEvents"]?.trim()?.let { parseBool("singleEvents", it) } ?: true
+
+    private fun list(req: Req): Resp {
+        val (timeMin, timeMax) = requireWindow(req)
+        val max = requireMax(req)
 
         // Defaults chosen for the common case; overridable, never guessed.
-        val singleEvents = req.query["singleEvents"]?.trim()?.let { parseBool("singleEvents", it) } ?: true
+        val singleEvents = requireSingleEvents(req)
         val orderBy = req.query["orderBy"]?.trim()?.takeIf { it.isNotBlank() } ?: "startTime"
         val pageToken = req.query["pageToken"]?.takeIf { it.isNotBlank() }
         val q = req.query["q"]?.takeIf { it.isNotBlank() }

@@ -29,6 +29,19 @@ data class Route(
     val describe: String,
     /** What this route does: the audit label, and (R2) the policy key. */
     val verb: Verb,
+    /**
+     * Pre-gate validation, run BEFORE the approval modal can open.
+     *
+     * Input that can never succeed must never cost the human a tap: `count=-1`
+     * on a read is the caller's mistake, and asking someone to approve it is
+     * noise in the strict sense — it can only end in a 400.
+     *
+     * Throwing [PluginError] here is recorded as `REJECTED_INVALID` (a 4xx, so
+     * noise) and answers immediately. A route with nothing to check leaves it
+     * null; a route whose input lives in the body is already covered because
+     * [Plugin.describeRows] runs pre-gate too.
+     */
+    val validate: ((Req) -> Unit)? = null,
     val handler: suspend (Req) -> Resp
 )
 

@@ -29,7 +29,13 @@ class GmailPlugin(private val ctx: Context) : Plugin {
 
     override fun routes(): List<Route> = listOf(
         Route("GET", "/gmail/profile", "Show your Gmail profile", Verb.READ) { profile() },
-        Route("GET", "/gmail/messages", "List your Gmail messages", Verb.READ) { list(it) },
+        Route(
+            "GET", "/gmail/messages", "List your Gmail messages", Verb.READ,
+            // A bad `max` used to fall back to 20 silently — a caller asking for 5000
+            // got a short page and no clue why. Now it is a pre-gate 400: no tap, and
+            // the answer names the problem.
+            validate = { requireMax(it) }
+        ) { list(it) },
         Route("GET", "/gmail/messages/{id}", "Read a Gmail message", Verb.READ) { get(it) },
         Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels", Verb.EDIT) { modify(it) },
         Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL", Verb.DELETE) { trash(it) },
@@ -99,6 +105,14 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         )
     )
 
+    /** `max`: absent means 20, present must be 1..100. Never silently clamped. */
+    private fun requireMax(req: Req): Int = req.query["max"]?.let { raw ->
+        val v = raw.trim().toIntOrNull()
+            ?: throw PluginError("bad_max", "max must be an integer, got '$raw'")
+        if (v < 1 || v > 100) throw PluginError("bad_max", "max must be 1..100, got $v")
+        v
+    } ?: 20
+
     private fun requireBodyString(req: Req, key: String): String {
         val v = req.body.optString(key).trim()
         if (v.isBlank()) throw PluginError("bad_request", "missing required '$key'")
@@ -143,7 +157,7 @@ class GmailPlugin(private val ctx: Context) : Plugin {
 
     private fun list(req: Req): Resp {
         val q = req.query["q"]?.takeIf { it.isNotBlank() } ?: "in:inbox"
-        val max = (req.query["max"]?.toIntOrNull() ?: 20).coerceIn(1, 100)
+        val max = requireMax(req)
         val pageToken = req.query["pageToken"]
 
         val url = StringBuilder("$base/messages?maxResults=$max&q=${enc(q)}")

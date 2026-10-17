@@ -18,7 +18,13 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
     override val displayName = "Notifications"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/notifications", "List your notifications", Verb.READ) { list(it) },
+        Route(
+            "GET", "/notifications", "List your notifications", Verb.READ,
+            // Same parser runs before the gate and inside the handler, so a filter
+            // typo answers 400 without ever costing a tap — and the two paths cannot
+            // drift apart, because there is only one implementation.
+            validate = { requirePackageFilter(it); requireCount(it) }
+        ) { list(it) },
         Route("POST", "/notifications/{id}/action", "Fire a notification action", Verb.EXECUTE) { action(it) },
         Route("POST", "/notifications/{id}/dismiss", "Dismiss a notification", Verb.EXECUTE) { dismiss(it) }
     )
@@ -99,21 +105,26 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
         )
     }
 
+    /** `package` filter: absent is fine, blank is a hard 400. */
+    private fun requirePackageFilter(req: Req): String? = req.query["package"]?.let { raw ->
+        val v = raw.trim()
+        if (v.isEmpty()) throw PluginError("bad_package", "package must not be empty")
+        v
+    }
+
+    /** `count` filter: absent is fine, anything not a non-negative integer is a hard 400. */
+    private fun requireCount(req: Req): Int? = req.query["count"]?.let { raw ->
+        val v = raw.trim().toIntOrNull()
+            ?: throw PluginError("bad_count", "count must be an integer, got '$raw'")
+        if (v < 0) throw PluginError("bad_count", "count must be >= 0, got $v")
+        v
+    }
+
     private fun list(req: Req): Resp {
         // Optional filters. Absent => current behavior (everything).
         // Malformed => hard 400, never a silent fallback to "all".
-        val packageFilter: String? = req.query["package"]?.let { raw ->
-            val v = raw.trim()
-            if (v.isEmpty()) throw PluginError("bad_package", "package must not be empty")
-            v
-        }
-
-        val count: Int? = req.query["count"]?.let { raw ->
-            val v = raw.trim().toIntOrNull()
-                ?: throw PluginError("bad_count", "count must be an integer, got '$raw'")
-            if (v < 0) throw PluginError("bad_count", "count must be >= 0, got $v")
-            v
-        }
+        val packageFilter: String? = requirePackageFilter(req)
+        val count: Int? = requireCount(req)
 
         var all = NotifStore.listJson(ctx)
 
