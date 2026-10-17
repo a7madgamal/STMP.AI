@@ -1,11 +1,13 @@
 package com.mido.phonebridge.notify
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -113,7 +115,9 @@ object NotifyOverlay {
 
         var root: View? = null
         var timeout: Runnable? = null
-        var drain: View? = null
+
+        /** Cancelled when the card ends, so the drain never outlives its own card. */
+        var drainAnim: ValueAnimator? = null
     }
 
     /**
@@ -160,35 +164,34 @@ object NotifyOverlay {
 
         val radius = dp(CORNER_DP).toFloat()
 
-        // FrameLayout so the countdown can be the card's BACKGROUND, behind the text,
-        // rather than a separate strip the eye has to find.
+        // The countdown fill lives UNDER the text as a layer of the card's own
+        // background, NOT as a MATCH_PARENT child. A MATCH_PARENT child inside a
+        // WRAP_CONTENT FrameLayout forces the parent to match ITS parent — i.e. the
+        // full window — which is why 0.6.1 drew a full-screen-height card. The
+        // layered background can never stretch the card: the card's size is decided
+        // by the text row alone, and the drain is clipped to whatever that turns out
+        // to be. One view does layout; the other only follows it.
+        val drain = GradientDrawable().apply {
+            setColor(ACCENT_FILL)
+            cornerRadius = radius
+        }
         val card = FrameLayout(ctx).apply {
-            background = GradientDrawable().apply {
-                setColor(BG)
-                cornerRadius = radius
-            }
-            // Rounded clipping, so the draining fill follows the card's corners instead
-            // of squaring them off.
+            background = LayerDrawable(
+                arrayOf(
+                    GradientDrawable().apply { setColor(BG); cornerRadius = radius },
+                    drain
+                )
+            )
+            // Rounded clipping so the fill follows the card's corners instead of
+            // squaring them off.
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, radius)
                 }
             }
             clipToOutline = true
-            // The card owns its own rectangle: that is what makes dragging possible.
-            // See the touch listener below for the trade that costs.
             isClickable = true
         }
-
-        // The countdown: a low-alpha accent that drains left to right. `scaleX` with
-        // pivotX 0 avoids a relayout per frame, so it cannot stutter away from the
-        // timer it represents.
-        val drain = View(ctx).apply {
-            setBackgroundColor(ACCENT_FILL)
-            pivotX = 0f
-            scaleX = 1f
-        }
-        card.addView(drain, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -314,7 +317,6 @@ object NotifyOverlay {
         }
 
         entry.root = card
-        entry.drain = drain
         // Stamped on attach, not on entry into show(): `main.post` may run late behind
         // other UI work, and a `shownAt` taken earlier would inflate every recorded
         // duration by exactly that delay.
@@ -326,14 +328,22 @@ object NotifyOverlay {
         card.translationY = dp(8).toFloat()
         card.animate().alpha(1f).translationY(0f).setDuration(FADE_IN_MS).start()
 
-        // The bar and the clock end at the same instant, so what the human sees and
+        // The drain and the clock end at the same instant, so what the human sees and
         // what the gate decides cannot disagree. Linear on purpose: a countdown that
-        // eases is a countdown that lies.
-        drain.animate()
-            .scaleX(0f)
-            .setDuration(entry.windowMs)
-            .setInterpolator(LinearInterpolator())
-            .start()
+        // eases is a countdown that lies about the time left. The fill is a background
+        // LAYER, not a child view, so the drain animates its right inset from 0 to the
+        // full card width — the visible fill shrinks left-to-right as the window runs.
+        val layer = card.background as LayerDrawable
+        val drainAnim = ValueAnimator.ofInt(0, dp(CARD_WIDTH_DP)).apply {
+            duration = entry.windowMs
+            interpolator = LinearInterpolator()
+            addUpdateListener { va ->
+                val rightInset = va.animatedValue as Int
+                layer.setLayerInsetRight(1, rightInset)
+            }
+            start()
+        }
+        entry.drainAnim = drainAnim
 
         val timeout = Runnable {
             if (!entry.settled) {
@@ -380,13 +390,18 @@ object NotifyOverlay {
             return
         }
         card.animate().cancel()
-        // The background drain has its own animator (the child, not the card). Left
-        // running it would keep scaling through the fade-out; harmless, but it is the
-        // kind of thing that becomes a real bug the moment the fade is removed.
-        entry.drain?.animate()?.cancel()
+        // The background drain has its own animator. Left running it would keep
+        // shrinking the fill through the fade-out; harmless, but it is the kind of
+        // thing that becomes a real bug the moment the fade is removed.
+        entry.drainAnim?.cancel()
+        // Fixed distance, not `card.height / 4`: the card may not have been laid out
+        // yet when a prompt ends (height 0), and a zero-distance translate is exactly
+        // the "appears for 1ms then vanishes" flash. A fixed dip value is the same
+        // travel for every card and never collapses to nothing.
+        val density = entry.ctx.resources.displayMetrics.density
         card.animate()
             .alpha(0f)
-            .translationY(card.height / 4f)
+            .translationY((10 * density))
             .setDuration(FADE_OUT_MS)
             .withEndAction {
                 runCatching { wm(entry.ctx).removeView(card) }
@@ -423,7 +438,7 @@ object NotifyOverlay {
                         "overlay torn down with the service"
                     )
                 )
-                entry.drain?.animate()?.cancel()
+                entry.drainAnim?.cancel()
                 entry.root?.let { runCatching { wm(entry.ctx).removeView(it) } }
             }
         }
