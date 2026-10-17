@@ -137,6 +137,13 @@ class BridgeService : Service() {
             return START_NOT_STICKY
         }
 
+        // Wire the one alarm that must never be silent: an error code nobody classified.
+        // It answers 500 (the safe direction) but says so in the ring, so "we crashed"
+        // and "nobody taught me this code" stay distinguishable.
+        com.mido.phonebridge.core.ErrorCodes.unclassified = { code ->
+            Debug.log("UNCLASSIFIED error code '$code' -> 500 (defect)")
+        }
+
         if (server == null) {
             val bind = tailnetAddress()
             if (bind == null) {
@@ -834,8 +841,19 @@ class HttpServer(
         throw PluginError("bad_request", "invalid JSON body: ${e.message}")
     }
 
+    /**
+     * The one place an integer status becomes NanoHTTPD's enum.
+     *
+     * The previous form was `values().firstOrNull { ... } ?: Response.Status.OK` — an
+     * unmapped status silently became **200 OK**. That is the worst possible direction
+     * for this fallback: a failure reported as success. Unknown now answers 500, loudly,
+     * because "we could not represent this status" must never read as "it worked".
+     */
     private fun statusOf(code: Int): Response.Status =
-        Response.Status.values().firstOrNull { it.requestStatus == code } ?: Response.Status.OK
+        Response.Status.values().firstOrNull { it.requestStatus == code } ?: run {
+            Log.e(TAG, "no NanoHTTPD status for $code -> 500 (defect)")
+            Response.Status.INTERNAL_ERROR
+        }
 
     private fun err(code: String, msg: String): JSONObject =
         JSONObject().put("ok", false).put("error", code).put("detail", msg)
@@ -843,20 +861,6 @@ class HttpServer(
     private fun json(status: Response.Status, obj: JSONObject): Response =
         newFixedLengthResponse(status, "application/json", obj.toString())
 
-    private fun httpStatusFor(code: String): Response.Status = when (code) {
-        "bad_request", "bad_count", "bad_package", "bad_time_min", "bad_time_max", "bad_time_range", "bad_max", "unsupported_action", "missing_reply_text", "decode_error" -> Response.Status.BAD_REQUEST
-        "notification_gone" -> Response.Status.GONE
-        // A bad id pre-fetch throws not_found BEFORE the modal (gmail trash,
-        // calendar delete/update/move). Without this entry it fell to the `else`
-        // branch and answered 500 with a correct not_found body — the mapper lie
-        // the phonebridge-api skill carried as a known build defect.
-        "not_found" -> Response.Status.NOT_FOUND
-        "not_clearable", "google_error" -> Response.Status.CONFLICT
-        "listener_unavailable" -> Response.Status.SERVICE_UNAVAILABLE
-        "policy_unavailable" -> Response.Status.SERVICE_UNAVAILABLE
-        "auth_required", "auth_expired" -> Response.Status.UNAUTHORIZED
-        "auth_not_configured" -> Response.Status.SERVICE_UNAVAILABLE
-        "auth_error", "secure_storage_error" -> Response.Status.INTERNAL_ERROR
-        else -> Response.Status.INTERNAL_ERROR
-    }
+    private fun httpStatusFor(code: String): Response.Status =
+        statusOf(com.mido.phonebridge.core.ErrorCodes.statusFor(code))
 }
