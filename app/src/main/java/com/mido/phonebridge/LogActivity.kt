@@ -30,6 +30,7 @@ class LogActivity : Activity() {
 
     private lateinit var listContainer: LinearLayout
     private lateinit var summaryLine: TextView
+    private lateinit var noiseChip: Button
 
     private var hideNoise = true
     private var pluginFilter: String? = null
@@ -64,7 +65,11 @@ class LogActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, UiKit.dp(this@LogActivity, 8))
         }
-        chips.addView(chip("hide noise") { hideNoise = !hideNoise; render() })
+        // The label names what the tap DOES, so it flips with the state.
+        // A fixed label lies half the time: it reads "hide noise" even while
+        // noise is already visible.
+        noiseChip = chip("") { hideNoise = !hideNoise; render() }
+        chips.addView(noiseChip)
         chips.addView(chip("all") { pluginFilter = null; outcomeFilter = null; render() })
         chips.addView(chip("denied") { outcomeFilter = AuditOutcome.DENIED; render() })
         chips.addView(chip("timeout") { outcomeFilter = AuditOutcome.TIMEOUT; render() })
@@ -101,6 +106,8 @@ class LogActivity : Activity() {
             .filter { !(hideNoise && it.noise) }
             .filter { pluginFilter == null || it.plugin == pluginFilter }
             .filter { outcomeFilter == null || it.outcome == outcomeFilter }
+
+        noiseChip.text = if (hideNoise) "show noise" else "hide noise"
 
         val unreadable = store.unreadableCount()
         summaryLine.text = buildString {

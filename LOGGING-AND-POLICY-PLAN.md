@@ -391,10 +391,11 @@ List (`LogActivity`, RecyclerView):
 11:03:12  ⏱ TIMEOUT    gmail.read     Read a Gmail message            60.0s
 ```
 
-- Filter chips: outcome, plugin, today/7d, **`hide noise`** (on by default). No text search in R1
-  (R4).
+- Filter chips: outcome, plugin, today/7d, **noise toggle** (noise hidden by default). The chip label
+  names the action, so it reads `show noise` while noise is hidden and `hide noise` once shown. No
+  text search in R1 (R4).
 - Noise is one tap away, never deleted: a record's `noise` flag is a lens, not a filter at write
-  time. Flipping `hide noise` off shows every probe and typo in place, in time order.
+  time. Showing noise reveals every probe and typo in place, in time order.
 - Long-press a record → **`mark as noise` / `mark as signal`** writes `noise_override` on that
   record only (see §5.12) — the classifier will be wrong about something, and the answer must not
   be "edit the code and rebuild".
