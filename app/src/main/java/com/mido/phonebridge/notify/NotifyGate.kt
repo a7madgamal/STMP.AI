@@ -17,9 +17,10 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Deliberately NOT the modal gate with a shorter clock. Three differences matter:
  *
- *  - **No FIFO.** Every request gets its own item and its own window. Serialising
- *    would start a later request's clock after it arrived, so "silence means approve"
- *    would approve something the human never had a fair chance to see.
+ *  - **FIFO, in order.** One card on screen at a time; the rest wait invisibly. This
+ *    was reversed after a device run: showing every prompt at once produced ONE visible
+ *    card with ONE countdown, so a queued request's window must not start until it is
+ *    actually on screen. Order lives in [NotifyQueue].
  *  - **No biometric.** A 5s silence-approve that demands a fingerprint is a
  *    contradiction, and there is no Activity to host one.
  *  - **A short window.** 5s flat (Q8, decided by Mido 2026-10-17). Predictable beats
@@ -29,18 +30,23 @@ object NotifyGate {
 
     private const val TAG = "NotifyGate"
 
-    /** How long the item stays up. Visual bar and decision clock are the same value. */
+    /** How long a card stays up. Visual drain and decision clock are the same value. */
     const val WINDOW_MS = 5_000L
 
     /**
-     * Extra time the server waits beyond [WINDOW_MS] before giving up on the overlay.
+     * Extra time the server waits beyond a full line's worth of windows before giving
+     * up on the overlay.
      *
-     * Not a second window — a deadlock escape hatch. If the main thread never runs the
-     * callback (process wedged, window service dead), the request must still resolve
-     * rather than pin a server thread forever. Hitting this is a DEFECT and is
-     * recorded as such: it denies, and it says so in the log.
+     * Not a second window — a deadlock escape hatch. A request can legitimately wait
+     * behind the whole queue, so the bound is derived from the queue's own capacity
+     * ([NotifyOverlay.MAX_IN_FLIGHT]) rather than guessed: too small and a request
+     * that is merely waiting its turn gets denied as "never arrived", which would look
+     * exactly like a wedged main thread. If the main thread genuinely never runs the
+     * callback (process dead, window service gone), the request must still resolve
+     * rather than pin a server thread forever. Hitting this IS a defect and is recorded
+     * as such: it denies, and it says so in the log.
      */
-    private const val ESCAPE_MS = 3_000L
+    private val ESCAPE_MS = NotifyOverlay.MAX_IN_FLIGHT * WINDOW_MS + 5_000L
 
     private val seq = AtomicLong(5000)
 
@@ -51,8 +57,11 @@ object NotifyGate {
         /** The ✕ was tapped. */
         class Rejected(val shownAt: Long?, val decidedAt: Long) : Result()
 
-        /** Nobody could have seen it: screen off, locked, evicted, or no permission. */
-        class Unavailable(val shownAt: Long?, val decidedAt: Long, val detail: String) : Result()
+    /**
+     * Nobody could have seen it: screen off, locked, refused when the line was full, or
+     * no permission to draw.
+     */
+    class Unavailable(val shownAt: Long?, val decidedAt: Long, val detail: String) : Result()
     }
 
     /**
@@ -107,8 +116,8 @@ object NotifyGate {
             Reason.TAPPED -> Result.Rejected(shownAt, outcome.decidedAt)
             Reason.UNATTENDED ->
                 Result.Unavailable(shownAt, outcome.decidedAt, "screen off or device locked")
-            Reason.EVICTED ->
-                Result.Unavailable(shownAt, outcome.decidedAt, "too many prompts; oldest dismissed")
+            Reason.REFUSED ->
+                Result.Unavailable(shownAt, outcome.decidedAt, outcome.detail)
             Reason.UNAVAILABLE ->
                 Result.Unavailable(shownAt, outcome.decidedAt, outcome.detail)
         }

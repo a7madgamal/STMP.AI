@@ -151,7 +151,7 @@ different facts, and the second one is how a mis-scoped `NOTIFY` rule announces 
 |---|---|---|---|---|
 | **R1** | 0.4.0 | `verb` metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
 | **R2** | 0.5.0 | Global gate switch (`secure`/`off`) + `OFF` mode + settings/home switch + confirmation + red banner. **Rules and settings screen cut to R3** — with only `secure` to express, a rule table has no observable effect. | Gating can be *disabled* — the first release that can hurt | Medium-High |
-| **R3** | 0.6.0 | `NOTIFY` mode as a **stacked overlay toast** (draw-over-apps, 5s draining bar, tiny `✕`) + exact `plugin × verb` rules + `AUTOMATIC` switch value + rules screen — together, because `NOTIFY` is what makes a rule express a decision | New gating mode + stored decisions now change behaviour | Medium-High |
+| **R3** | 0.6.0 | `NOTIFY` mode as a **queued overlay card** (draw-over-apps, one at a time, draining background bar, tiny `✕`) + exact `plugin × verb` rules + `AUTOMATIC` switch value + rules screen — together, because `NOTIFY` is what makes a rule express a decision | New gating mode + stored decisions now change behaviour | Medium-High |
 | **R4** | 0.7.0 | Log UX: filters, search, export, counters, decision trace, retention controls | None | Low |
 
 Each release is independently shippable and independently revertable. R1 changes nothing the
@@ -627,8 +627,8 @@ the first release where a policy bug is a security bug rather than a display bug
 
 **Scope.** Two things, shipped together because one is useless without the other:
 
-1. **`NOTIFY`** — a third gate mode: a small stacked overlay toast, 5s silence = approve,
-   `✕` = reject, unattended = deny.
+1. **`NOTIFY`** — a third gate mode: a small overlay card, one at a time in arrival order,
+   5s silence = approve, `✕` = reject, unattended = deny.
 2. **Exact rules** — `plugin × verb → mode`, readable only when the global switch is `AUTOMATIC`.
 
 Why together: in R2 a rule could only say `secure`, which is exactly what "no rule" already says.
@@ -661,11 +661,11 @@ its confirmation dialog and permanent red banner from R2 (§6.1). `AUTOMATIC` an
 neutral. The rule is: *the home screen must never show a switch position without showing what it
 implies.* A user who cannot tell at a glance whether they are gated has an unusable gate.
 
-### 7.2 `NOTIFY` mechanics — **REWRITTEN 2026-10-17 (Mido): overlay, not a notification**
+### 7.2 `NOTIFY` mechanics — **REWRITTEN TWICE 2026-10-17: overlay, then QUEUE**
 
 **This is not a notification.** An earlier draft of this section specified a separate
 `approval_notify` channel at `IMPORTANCE_HIGH`. That was wrong and is replaced: the prompt is a
-**small overlay toast drawn with `SYSTEM_ALERT_WINDOW`**, a permission this app already holds and
+**small overlay card drawn with `SYSTEM_ALERT_WINDOW`**, a permission this app already holds and
 already checks on the home screen.
 
 Why the change is right and not cosmetic: a heads-up notification is a system-owned surface. It
@@ -674,37 +674,61 @@ while the phone is in active use — which is exactly when a request is most lik
 overlay we own appears above whatever the human is looking at, needs no channel, and cannot be
 silently disabled by a system notification setting the human never touched.
 
-**The item** (see `notify/NotifyOverlay.kt`):
+**One card at a time, in arrival order — NOT a stack.**
 
-- A small dark pill, ~240dp wide, 2 lines of monospace text, muted colours. It is a glance, not a
-dialog — nothing about it should read as an alarm.
-- **Stackable, not queued.** Each in-flight request gets its own item. Up to 4 at once; beyond
-  that the oldest is evicted and denied (never approved). Serialising them would start a later
-  request's clock after it arrived, so "silence means approve" would approve something the human
-  never had a fair chance to read.
-- **The countdown is the background progress bar.** A 2dp line under the text drains left-to-right
-  over the window, driven by the same duration as the timer. One value, so the visual and the
-  decision cannot disagree.
-- **A tiny `✕`** on the right rejects immediately — a 28dp touch box, because a real target matters
-  more than the visual weight.
-- **Fade in / fade out.** 180ms alpha + small upward rise on entry, 200ms fade on exit. Short
-  enough not to eat a meaningful part of a 5s window.
-- **`FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL`**, so the overlay never takes input or the keyboard,
-  and every tap that is not the `✕` falls through to the app underneath. Without these it would be
-  a 5-second input trap, which is worse than the modal it replaces.
+0.6.0 drew every in-flight prompt at once at one screen region. Mido's report was exact: *"3 at
+once I saw only one timer"*. Three windows and three bars were on screen, but overlapping, so one
+thing was legible and the other two expired behind a single visible countdown. The stack was wrong
+twice over: it hid requests, and it burned their windows while unreadable. It is replaced by a
+queue.
+
+Ordering and capacity live in `notify/NotifyQueue.kt`, which is **pure** — no Android, no views, no
+clocks — so the property that was broken is testable without a device (`NotifyQueueTest`, 12 tests).
+Forcing that bug to be visible to a unit test, not an eyeball, is the point of the split.
+
+**The card** (see `notify/NotifyOverlay.kt`):
+
+- A small dark card, 232dp wide, **14dp rounded corners**, two lines of monospace, muted colours.
+  A glance, not a dialog — nothing about it should read as an alarm.
+- **The countdown is the card's background.** A low-alpha accent (~24%) drains left-to-right
+  behind the text, conformed to the rounded corners by an outline provider. It is the same value as
+  the timer, so the visual and the decision cannot disagree. Linear interpolation, deliberately: an
+  eased countdown is a countdown that lies about the time left.
+- **A tiny `✕`** on the right rejects immediately — a real 30dp touch box, because the target
+  matters more than the visual weight.
+- **Bottom-left and draggable.** The position persists across cards, so shoving it out of the way
+  is a one-time act. Drag uses an 8dp slop so a stray tap cannot nudge it.
+- **Fade in / fade out.** 180ms alpha + small rise on entry, 200ms fade on exit. Short enough not to
+  eat a meaningful part of a 5s window.
+- **`FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL`**, so the card never takes focus or the keyboard,
+  and touches outside it reach the app underneath.
 - Silence → **approve**. `✕` → **reject**. It disappears either way.
 
-**The clock** starts when the item is actually shown, not at enqueue — a queued request must not
-burn its window while invisible.
+**The clock starts when a card reaches the screen**, never at enqueue. A request waiting its turn is
+invisible and has no countdown, so "silence means approve" always refers to a full window the human
+could actually see.
+
+**A waiting request gets a bounded wait, and being too far back is a deny.** One card on screen
+plus three waiting bounds the line at four. Past that the **newcomer** is refused immediately and
+recorded `DENIED_UNATTENDED` — the stacking version discarded the *oldest* item, denying a request
+the human had been shown and might have been about to answer. No item that reached the screen is
+ever silently dropped: it is answered or refused.
+
+**Caveat, stated rather than buried:** `FLAG_NOT_FOCUSABLE` does not lift the touchable region on
+API 26–30, and a `TYPE_APPLICATION_OVERLAY` window is touchable by default. A `setOnTouchListener`
+on the card (which drag requires) means the card consumes touches **inside its own rectangle** for
+its lifetime. That is the price of "allow dragging", taken knowingly: outside the card every tap
+falls through, focus and keyboard stay away, and the card is small. If it ever proves to be in the
+way, the fallback is to drop the touch listener and keep the fixed corner.
 
 **The caller-visible contract does not change.** A `✕` rejection answers `403
 {"ok":false,"error":"denied"}` — the *same* body as a modal DENY. Clients do not need a new
 branch; the distinction lives in the log (`NOTIFY_REJECTED` vs `DENIED`) and in the record.
 Introducing a new error code for a new UI would make every client care about our internals.
 
-**Failure to draw is a deny.** If the overlay cannot be shown (permission revoked, window service
-refusal, eviction), the request is `DENIED_UNATTENDED` — never approved. "We failed to ask" and
-"nobody objected" are not the same fact, and only one of them is consent.
+**Failure to draw is a deny.** If the card cannot be shown (permission revoked, window service
+refusal, refusal because the line was full), the request is `DENIED_UNATTENDED` — never approved.
+"We failed to ask" and "nobody objected" are not the same fact, and only one of them is consent.
 
 **Q8 — 5s flat. DECIDED 2026-10-17 by Mido ("continue").** No grace period. A countdown you can
 learn beats a window that varies.
@@ -977,12 +1001,12 @@ it.
 
 ### 7.13 Device acceptance (must all be observed, not assumed)
 
-1. `SECURE` + rule `gmail · read → NOTIFY` → fire a Gmail read → **toast appears, no modal**.
+1. `SECURE` + rule `gmail · read → NOTIFY` → fire a Gmail read → **card appears, no modal**.
 2. Leave it → `200`, log `NOTIFY_APPROVED`, `source=RULE`, `rule=gmail/READ`.
 3. Fire again and tap `✕` → `403 denied`, log `NOTIFY_REJECTED`.
 4. Fire again and **lock the phone inside the window** → `403 denied`, log `DENIED_UNATTENDED`,
-   notification gone.
-5. Set global `NOTIFY` → every request shows a toast, the rule table greys out with its one-line
+   card gone.
+5. Set global `NOTIFY` → every request shows a card, the rule table greys out with its one-line
    reason, `POLICY_CHANGED` recorded.
 6. Set global `OFF` → identical to R2 (§6.9) — no popup, `OFF_APPROVED`.
 7. Change a rule from the **modal** and from the **log detail** → `POLICY_CHANGED` with
