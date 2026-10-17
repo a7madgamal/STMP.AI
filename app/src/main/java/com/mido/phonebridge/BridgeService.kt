@@ -27,6 +27,11 @@ import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.plugins.calendar.CalendarPlugin
 import com.mido.phonebridge.plugins.gmail.GmailPlugin
 import com.mido.phonebridge.plugins.notifications.NotificationsPlugin
+import com.mido.phonebridge.policy.GlobalMode
+import com.mido.phonebridge.policy.Mode
+import com.mido.phonebridge.policy.Policy
+import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.policy.resolveMode
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -111,6 +116,20 @@ class BridgeService : Service() {
         // SECRET is never embedded.
         PlayAuth.configure(serverClientId = GOOGLE_SERVER_CLIENT_ID, offline = true)
         registerPlugins()
+
+        // POLICY, before any listener exists. An unreadable policy means the server
+        // will not come up at all — no default, no fallback to SECURE. A gate running
+        // on a switch nobody could read is exactly the failure R1's fail-hard rule
+        // exists to prevent, and "assume secure" is still an assumption.
+        try {
+            val p = PolicyStore.from(applicationContext).get()
+            Debug.log("policy loaded: ${p.global}")
+        } catch (e: Exception) {
+            lastError = "policy unreadable: ${e.message}"
+            Debug.log("REFUSING TO START: $lastError")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         if (server == null) {
             val bind = tailnetAddress()
@@ -227,6 +246,16 @@ class HttpServer(
 
     private val auditStore: AuditStore get() = AuditLog.from(ctx)
 
+    /**
+     * The switch, read once per request.
+     *
+     * Deliberately NOT cached in a field here: `PolicyStore` caches the parsed file,
+     * so this is a map lookup, and going through the store every request means a
+     * change made on the home screen takes effect on the very next request with no
+     * cache-invalidation path to get wrong.
+     */
+    private val policy: Policy get() = PolicyStore.from(ctx).get()
+
     override fun serve(session: IHTTPSession): Response {
         val startedAt = System.currentTimeMillis()
         val rawUri = session.uri
@@ -323,16 +352,45 @@ class HttpServer(
             val account = am.accountEmail
                 ?: if (am.isLoggedIn(ctx)) "(signed in)" else "—"
 
+            // POLICY. Resolved after validation (bad input still costs nothing) and
+            // before the gate. Guarded rather than assumed: startup already refuses on
+            // an unreadable policy, so this is the belt to that braces, and a request
+            // must never run on a mode nobody could read.
+            val globalMode = try {
+                policy.global
+            } catch (e: Exception) {
+                draft.outcome(AuditOutcome.HANDLER_FAILED)
+                draft.error("policy_unavailable")
+                val obj = err("policy_unavailable", e.message ?: "policy unreadable")
+                draft.response(503, obj.toString())
+                return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)
+            }
+            val mode = resolveMode(globalMode)
+
+            if (mode == Mode.OFF) {
+                // The gate is off on purpose. No popup, no fingerprint, no FIFO — and
+                // the record says OFF_APPROVED so the log can never mistake this for
+                // a human decision.
+                draft.decision(
+                    Decision(
+                        mode.name, DecisionSource.GLOBAL, globalMode.name, null,
+                        null, null, null, 0
+                    )
+                )
+                draft.outcome(AuditOutcome.OFF_APPROVED)
+                val offResp = runBlocking { resolved.route.handler(req) }
+                draft.response(offResp.status, offResp.body.toString())
+                return Dispatched(statusOf(offResp.status), offResp.body)
+            }
+
             // Central gate: describe the concrete call, then wait for the human.
-            // R1 has no policy yet, so every request is SECURE and `source` is
-            // DEFAULT — the fields exist so R2 does not have to reshape the log.
             val gate = ApprovalGate.await(
                 ctx, remote, "$method $path", summary,
                 detail = detailFor(resolved.route.path, path, body),
                 account = account,
                 view = approvalView(remote, account, resolved.route, path, body, query)
             )
-            draft.decision(gateDecision(gate))
+            draft.decision(gateDecision(gate, globalMode))
 
             when (gate) {
                 is ApprovalGate.GateResult.Denied -> {
@@ -380,18 +438,21 @@ class HttpServer(
         }
     }
 
-    /** Map a gate outcome onto the audit's decision block. R1: always SECURE. */
-    private fun gateDecision(g: ApprovalGate.GateResult): Decision {
-        val mode = "SECURE"
+    /** Map a gate outcome onto the audit's decision block. */
+    private fun gateDecision(g: ApprovalGate.GateResult, globalMode: GlobalMode): Decision {
+        val mode = Mode.SECURE.name
         return when (g) {
             is ApprovalGate.GateResult.Approved -> Decision(
-                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
             is ApprovalGate.GateResult.Denied -> Decision(
-                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
             is ApprovalGate.GateResult.TimedOut -> Decision(
-                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.expiredAt, g.queueDepth
+                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                g.enqueuedAt, g.shownAt, g.expiredAt, g.queueDepth
             )
         }
     }
@@ -651,6 +712,7 @@ class HttpServer(
         "not_found" -> Response.Status.NOT_FOUND
         "not_clearable", "google_error" -> Response.Status.CONFLICT
         "listener_unavailable" -> Response.Status.SERVICE_UNAVAILABLE
+        "policy_unavailable" -> Response.Status.SERVICE_UNAVAILABLE
         "auth_required", "auth_expired" -> Response.Status.UNAUTHORIZED
         "auth_not_configured" -> Response.Status.SERVICE_UNAVAILABLE
         "auth_error", "secure_storage_error" -> Response.Status.INTERNAL_ERROR

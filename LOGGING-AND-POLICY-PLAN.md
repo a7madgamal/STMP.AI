@@ -123,12 +123,13 @@ Origin is a separate field, never folded into the label string.
 
 ### Mode
 
-`SECURE` | `NOTIFY` | `OFF`. Produced by the policy (§6). Default in every ambiguous case:
-**`SECURE`**.
+`SECURE` | `OFF` in R2; `NOTIFY` joins in R3 (§7). Produced by the policy (§6). Default in every
+ambiguous case: **`SECURE`**.
 
 ### Global gate mode
 
-`AUTOMATIC` | `SECURE` | `NOTIFY` | `OFF` — the one switch on the home screen. Default: **`SECURE`**.
+`AUTOMATIC` | `SECURE` | `OFF` in R2 — the one switch on the home screen. Default: **`SECURE`**.
+`NOTIFY` is added to the switch in R3, in the same release that makes the mode real (§6.0).
 `AUTOMATIC` consults the rule table; every other value ignores it and forces that mode on every
 request (§6.1).
 
@@ -148,8 +149,8 @@ different facts, and the second one is how a mis-scoped `NOTIFY` rule announces 
 | Release | Version | Content | Behaviour change | Risk |
 |---|---|---|---|---|
 | **R1** | 0.4.0 | `verb` metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
-| **R2** | 0.5.0 | Global gate switch + exact rule table + settings screen + `OFF` mode + rule control inside the modal | Gating can be *disabled or narrowed* — the first release that can hurt | Medium-High |
-| **R3** | 0.6.0 | `NOTIFY` mode: heads-up, 5s silence=approve, `✕`=reject, unattended deny | New gating mode | Medium-High |
+| **R2** | 0.5.0 | Global gate switch (`automatic`/`secure`/`off`) + exact rule table + settings screen + `OFF` mode + rule control inside the modal | Gating can be *disabled or narrowed* — the first release that can hurt | Medium-High |
+| **R3** | 0.6.0 | `NOTIFY` mode: heads-up, 5s silence=approve, `✕`=reject, unattended deny — **and** `NOTIFY` appears in the switch and the per-pair picker in this same release | New gating mode | Medium-High |
 | **R4** | 0.7.0 | Log UX: filters, search, export, counters, decision trace, retention controls | None | Low |
 
 Each release is independently shippable and independently revertable. R1 changes nothing the
@@ -496,137 +497,125 @@ commit**, before the audit spine lands:
 
 ---
 
-## 6. R2 — Gate switch + exact rules (architecture)
+## 6. R2 — Gate switch + `OFF` (FULL DETAIL)
 
-**The whole model:** one global switch on the home screen, plus an exact per-pair table.
-No wildcards, no cascade, no precedence, no conflict resolution. Everything the old cascade design
-carried — specificity tuples, tie-breaks, `*` matching, the effective-mode matrix, Q11 — is
-**deleted**, not renamed.
+**Scope cut — Mido, 2026-10-17.** `NOTIFY` is not in this release. That cut has one consequence
+worth stating plainly: with only `secure` and `off` available, a per-pair rule can only say
+`secure` — which is exactly what "no rule" already means. The rule table would be machinery with no
+observable effect, and a settings screen that cannot change anything. So **the rules move to R3**,
+in the same release that gives them a second outcome to express.
 
-### 6.1 The global gate switch — **LOCKED (Mido 2026-10-17)**
+R2 ships one thing: **the global switch, and the `OFF` mode it can select.**
+
+### 6.1 The switch — **LOCKED (Mido 2026-10-17)**
 
 ```
-AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
+SECURE | OFF          default: SECURE
 ```
 
-- **`AUTOMATIC`** — the only value that consults the rule table. A pair with no rule → `SECURE`.
-- **`SECURE` / `NOTIFY` / `OFF`** — the table is ignored **entirely**. Every request gets that
-  mode. Nothing can outrank it, which is what makes `OFF` a real panic switch rather than "log only
-  for the pairs you did not configure".
-- Sticky across restart. Changing it writes a `POLICY_CHANGED` audit record (before/after).
-- Selecting `NOTIFY` or `OFF` requires a confirmation dialog.
+- Sticky across restart.
+- **`SECURE`** — every request goes through `ApprovalGate.await()`, exactly as in R1.
+- **`OFF`** — no gate at all: no popup, no fingerprint, no FIFO. The handler runs and the record
+  says `OFF_APPROVED`.
+- Changing it writes a `POLICY_CHANGED` audit record with `{before, after, source}`. The switch
+  change is a fact in the log, stamped in time, sitting next to the traffic it changed.
+- Selecting `OFF` requires a confirmation dialog.
 
-Security UX — an unsecure selection must be obvious at a glance:
-
-| Value | Home screen treatment |
+| Value | Home screen |
 |---|---|
-| `SECURE` | neutral; the resting state |
-| `AUTOMATIC` | neutral + a one-line summary, never a bare word: `rules: 3 · gmail write → notify` |
-| `NOTIFY` | amber banner: `NOTIFY — requests approve themselves after 5s unless you reject` |
+| `SECURE` | neutral — the resting state |
 | `OFF` | red banner, persistent while selected: `OFF — every request is approved and executed. The gate is disabled.` |
 
-The `OFF` banner is not a toast. It stays on the home screen for as long as the mode is selected.
+The banner is not a toast. It stays up for as long as `OFF` is selected.
 
-### 6.2 Exact rules
+### 6.2 What R3 adds
 
-```kotlin
-data class Rule(
-    val plugin: String,   // exact: "gmail" | "calendar" | "notifications". Never "*".
-    val verb: Verb,       // exact: READ | WRITE | EDIT | DELETE | EXECUTE. Never null.
-    val mode: Mode        // SECURE | NOTIFY.  OFF is NOT a rule value.
-)
+`AUTOMATIC` and `NOTIFY` join the switch, the exact per-pair table arrives, the settings screen and
+the modal rule control are built (§7.5–§7.8). R2's job is to make the switch real, audited and
+loud, so that R3 only has to add values to something already proven.
 
-data class Policy(
-    val global: GlobalMode,
-    val rules: List<Rule>
-)
-```
+The store is written **forward-compatible**: a `rules` array exists from R2 and is always empty.
+R3 fills it. No file-format migration.
 
-- **The picker offers `default | notify | secure`** (your words). `default` removes the rule;
-  `notify` and `secure` store one, so the settings list reads back as a list of *decisions* rather
-  than a list of exceptions.
-- Stored `SECURE` and no rule are **behaviourally identical** and the resolver treats them the
-  same (`rule?.mode ?: SECURE`). Say it out loud in the UI so nobody hunts for a difference that
-  does not exist: a saved `secure` row renders as `gmail · delete — secure (default)`.
-- **`OFF` cannot be set per pair — LOCKED (Q12, Mido 2026-10-17).** It exists only as a global
-  switch value (§6.1). The per-pair picker is exactly `default | notify | secure`, three options,
-  so there is no way to auto-approve one pair in isolation; getting log-only for `gmail · delete`
-  means turning the gate off for the entire app. Accepted trade: `OFF` is the one value meaning "no
-  human, no fingerprint", and one switch is easier to remember to turn back than twelve rows.
-  Do not add a 4th picker option without a fresh decision — see Q12.
-- **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a startup error,
-  never last-wins.
-- **Q11 is void.** With exact keys two rules cannot both match one request, so there is nothing to
-  rank and nothing to refuse. The question only existed because of wildcards.
-- **No `scope`.** `(plugin, verb)` is the whole key and the whole screen.
-
-### 6.3 Resolution — 12 lines, no engine
+### 6.3 Resolution — one lookup, no engine
 
 ```kotlin
-fun resolveMode(global: GlobalMode, rules: List<Rule>, plugin: String, verb: Verb): Mode =
-    when (global) {
-        AUTOMATIC -> rules.find { it.plugin == plugin && it.verb == verb }?.mode ?: SECURE
-        SECURE    -> SECURE
-        NOTIFY    -> NOTIFY
-        OFF       -> OFF
-    }
+fun resolveMode(global: GlobalMode): Mode = when (global) {
+    GlobalMode.SECURE -> Mode.SECURE
+    GlobalMode.OFF    -> Mode.OFF
+}
 ```
 
-That is the entire policy system. It is `find` on a list. The audit records
-`Decision(mode, source, rule?)` with `source ∈ {GLOBAL, RULE, DEFAULT}` — `DEFAULT` is precisely
-"`AUTOMATIC` and no rule set". There is no `considered` list, no specificity, and nothing to explain
-beyond one lookup, because there is nothing else that could have won.
+Total, exhaustive, no default branch. Adding `AUTOMATIC`/`NOTIFY` in R3 is a compile error at this
+`when`, which is the point: the compiler asks where the new value goes instead of a `else -> SECURE`
+quietly absorbing it.
 
-Fail-hard stays: a malformed store, or two rules on the same pair, **refuses to start the server**
-(`lastError` + red banner) rather than quietly running on something else. A policy you cannot read
-is not a policy.
+### 6.4 Fail-hard on a bad store
 
-### 6.4 Where it plugs in
+A malformed `policy.json` (unknown value, wrong type, unreadable file) **refuses to start the
+server**: `lastError` is set, the home screen shows a red banner, and no HTTP listener comes up. A
+policy you cannot read is not a policy. No default, no fallback to `SECURE`, no "repair and
+continue" — the same rule R1 applies to the audit log.
 
-`serve()` calls `resolveMode()` immediately after `pluginRows()` — after all fail-fast validation,
-before any gate. Then:
+### 6.5 Files
+
+- `policy/GlobalMode.kt` — `SECURE`, `OFF`. R3 adds two values here.
+- `policy/Mode.kt` — `SECURE`, `OFF` (the *effective* mode, distinct from the switch because R3's
+  `AUTOMATIC` is a switch value that is not a mode).
+- `policy/Policy.kt` — `{global, rules: []}` + strict parse.
+- `policy/PolicyStore.kt` — atomic read/write of `filesDir/policy.json`, cached after first load.
+- `BridgeService` — resolves the mode after validation, before the gate.
+- `MainActivity` — the switch, the banner, the confirmation dialog.
+- `audit/` — `POLICY_CHANGED` outcome + append helper.
+
+### 6.6 Where it plugs in
+
+`serve()` resolves the mode **after** `validate` (so bad input still costs nothing) and **before**
+the gate:
 
 - `SECURE` → `ApprovalGate.await()` (unchanged).
-- `NOTIFY` → R3.
-- `OFF` → no gate; `ctx.outcome = OFF_APPROVED`; handler runs.
+- `OFF` → no gate; `outcome = OFF_APPROVED`; handler runs. Never enters the FIFO, so an ungated
+  request can never wait behind a human thinking about a modal.
 
-An `OFF`/`NOTIFY` request never enters the modal FIFO, so an ungated request can never wait behind
-a human thinking about a modal.
+`requiresBiometric` stays `true` in R2 — and that is not laziness. An `ApprovalView` only exists on
+the `SECURE` path, so inside the gate the mode is always `SECURE`. R3 computes it from the mode
+because R3 is the first release where a view can exist under a non-`SECURE` mode.
 
-`requiresBiometric = (mode == SECURE)` is computed here and rendered by the Activity (§7.3).
+### 6.7 `POLICY_CHANGED` records
 
-### 6.5 Screens
+Policy history lands in the same JSONL day-file as traffic — that is the whole reason R1 shipped
+before R2. A policy record is not a request, so it is shaped as one deliberately:
 
-**Settings screen** — the only place rules are authored:
+| Field | Value |
+|---|---|
+| `plugin` | `policy` |
+| `verb` | `EXECUTE` |
+| `label` | `policy.changed` |
+| `outcome` | `POLICY_CHANGED` |
+| `summary` | `switch: SECURE → OFF (settings)` |
+| `decision.mode` | the mode **after** the change |
+| `decision.source` | `GLOBAL` |
 
-- Global switch (4 radio options) with the security treatment from §6.1.
-- When global ≠ `AUTOMATIC`, the rule table renders **greyed out** under one line:
-  `Rules are ignored while the switch is SECURE / NOTIFY / OFF.` Greyed, not hidden — you must be
-  able to see what you configured while you cannot use it, or the switch becomes a memory test.
-- When global = `AUTOMATIC`: one row per configured pair (`gmail · delete → NOTIFY`) plus an
-  `add rule` picker (plugin → verb → mode).
+It is **never noise** (`AuditNoise` must return false): turning the gate off is the single most
+important line in the log.
 
-**Modal rule control** — decide from the prompt you are already looking at:
+### 6.8 Tests (JVM)
 
-- One compact row: `This request: gmail · delete` + a 3-way control `default | secure | notify`.
-- `default` deletes the rule for that pair. `secure` also stores nothing (SECURE is absence) but is
-  offered anyway, because a human picking from a list expects to see their current choice; the row
-  renders `default` and `secure` identically afterwards, which is honest.
-- Applying it takes effect **from the next request** and **never decides the request on screen**.
-  A control that silently resolves the prompt you are looking at would be a second, invisible
-  decision — the exact thing this whole design is trying to avoid. Tapping it shows
-  `saved — applies from the next gmail · delete request`, then leaves the countdown alone.
-- Always present, including when global ≠ `AUTOMATIC`, with `ignored while global = SECURE` in the
-  same row. One line of text beats making the user hunt for why it did nothing.
+- `resolveMode` is total over the enum and never returns a value outside `Mode`.
+- A malformed store throws; it never falls back to `SECURE`.
+- `{"global":"OFF","rules":[]}` round-trips through write → read.
+- An unknown `global` string (e.g. `"AUTOMATIC"` written by a future build) is a **parse error**,
+  not a silent `SECURE`. Downgrading to R2 must fail loudly, not quietly re-enable the gate.
+- `POLICY_CHANGED` is classified as signal, not noise.
 
-**Log screen** — the same control on a record's detail view (§5.8), pre-filled with that record's
-`(plugin, verb)`. The log is where you notice a decision you dislike, so the fix belongs one tap
-from it.
+### 6.9 Device acceptance
 
-### 6.6 Rule changes are audited
-
-Every change writes `POLICY_CHANGED` with `{before, after, source: SETTINGS|MODAL|LOG}`. Policy
-history lands in the same file as traffic — which is the whole reason R1 ships before R2.
+1. Switch to `OFF` → confirmation dialog → red banner on home.
+2. Fire a gated read → **no popup**, 200, log line `OFF_APPROVED`.
+3. `POLICY_CHANGED` appears in the log with before/after.
+4. Kill and relaunch the app → still `OFF`, banner still there.
+5. Switch back to `SECURE` → popup returns; `POLICY_CHANGED` again.
+6. Corrupt `policy.json` (via adb) → server refuses to start, red banner, no listener.
 
 ---
 
@@ -720,6 +709,91 @@ Notify requests do not enter the `SECURE` FIFO. Two independent serializers:
 `ApprovalQueue` (modal) and `NotifyQueue` (max 1 visible). A request classified `SECURE` while a
 notify is on screen must still be queued for the modal — that is fine, they are different
 paths. The only shared state is the audit log.
+
+---
+
+### 7.5 Exact rules — **LOCKED (Mido 2026-10-17)**
+
+This is the half that `NOTIFY` unlocks. In R2 a rule could only say `secure`, which is what
+"no rule" already says; with `notify` available a rule finally expresses something.
+
+```kotlin
+data class Rule(
+    val plugin: String,   // exact: "gmail" | "calendar" | "notifications". Never "*".
+    val verb: Verb,       // exact: READ | WRITE | EDIT | DELETE | EXECUTE. Never null.
+    val mode: Mode        // SECURE | NOTIFY.  OFF is NOT a rule value.
+)
+
+data class Policy(
+    val global: GlobalMode,      // AUTOMATIC | SECURE | NOTIFY | OFF
+    val rules: List<Rule>
+)
+```
+
+- **The picker offers `default | notify | secure`.** `default` removes the rule; `notify` and
+  `secure` store one, so the settings list reads back as a list of *decisions* rather than a list of
+  exceptions.
+- Stored `SECURE` and no rule are **behaviourally identical** (`rule?.mode ?: SECURE`). Say it out
+  loud in the UI so nobody hunts for a difference that does not exist: a saved `secure` row renders
+  as `gmail · delete — secure (default)`.
+- **`OFF` cannot be set per pair — LOCKED (Q12).** It exists only as a global switch value. The
+  per-pair picker is exactly three options, so there is no way to auto-approve one pair in
+  isolation; log-only for `gmail · delete` means turning the gate off for the entire app. Accepted
+  trade: `OFF` is the one value meaning "no human, no fingerprint", and one switch is easier to
+  remember to turn back than twelve rows. Do not add a 4th picker option without a fresh decision.
+- **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a startup error,
+  never last-wins.
+- **Q11 is void.** With exact keys two rules cannot both match one request.
+- **No `scope`.** `(plugin, verb)` is the whole key and the whole screen.
+
+### 7.6 Resolution — 12 lines, no engine
+
+```kotlin
+fun resolveMode(global: GlobalMode, rules: List<Rule>, plugin: String, verb: Verb): Mode =
+    when (global) {
+        AUTOMATIC -> rules.find { it.plugin == plugin && it.verb == verb }?.mode ?: SECURE
+        SECURE    -> SECURE
+        NOTIFY    -> NOTIFY
+        OFF       -> OFF
+    }
+```
+
+That is the entire policy system. It is `find` on a list. The audit records
+`Decision(mode, source, rule?)` with `source ∈ {GLOBAL, RULE, DEFAULT}` — `DEFAULT` is precisely
+"`AUTOMATIC` and no rule set". There is no `considered` list, no specificity, and nothing to explain
+beyond one lookup, because there is nothing else that could have won.
+
+### 7.7 Screens
+
+**Settings screen** — the only place rules are authored:
+
+- Global switch (4 radio options) with the security treatment from §6.1.
+- When global ≠ `AUTOMATIC`, the rule table renders **greyed out** under one line:
+  `Rules are ignored while the switch is SECURE / NOTIFY / OFF.` Greyed, not hidden — you must be
+  able to see what you configured while you cannot use it, or the switch becomes a memory test.
+- When global = `AUTOMATIC`: one row per configured pair (`gmail · delete → NOTIFY`) plus an
+  `add rule` picker (plugin → verb → mode).
+
+**Modal rule control** — decide from the prompt you are already looking at:
+
+- One compact row: `This request: gmail · delete` + a 3-way control `default | secure | notify`.
+- `default` deletes the rule for that pair. `secure` also stores nothing (SECURE is absence) but is
+  offered anyway, because a human picking from a list expects to see their current choice.
+- Applying it takes effect **from the next request** and **never decides the request on screen**.
+  A control that silently resolves the prompt you are looking at would be a second, invisible
+  decision — the exact thing this whole design is trying to avoid. Tapping it shows
+  `saved — applies from the next gmail · delete request`, then leaves the countdown alone.
+- Always present, including when global ≠ `AUTOMATIC`, with `ignored while global = SECURE` in the
+  same row. One line of text beats making the user hunt for why it did nothing.
+
+**Log screen** — the same control on a record's detail view (§5.8), pre-filled with that record's
+`(plugin, verb)`. The log is where you notice a decision you dislike, so the fix belongs one tap
+from it.
+
+### 7.8 Rule changes are audited
+
+Every change writes `POLICY_CHANGED` with `{before, after, source: SETTINGS|MODAL|LOG}`, the same
+record shape R2 introduced (§6.7). Policy history lands in the same file as traffic.
 
 ---
 

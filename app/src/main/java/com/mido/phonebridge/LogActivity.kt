@@ -193,6 +193,7 @@ class LogActivity : Activity() {
         AuditOutcome.NOTIFY_APPROVED -> "🔔"
         AuditOutcome.NOTIFY_REJECTED -> "🔕"
         AuditOutcome.OFF_APPROVED -> "⚠️"
+        AuditOutcome.POLICY_CHANGED -> "⚙️"
         AuditOutcome.REJECTED_INVALID -> "🚫"
         AuditOutcome.UNROUTED -> "❔"
         AuditOutcome.HANDLER_FAILED -> "🔥"
@@ -204,6 +205,10 @@ class LogActivity : Activity() {
         AuditOutcome.DENIED, AuditOutcome.NOTIFY_REJECTED, AuditOutcome.DENIED_UNATTENDED -> 0xFFEF9A9A.toInt()
         AuditOutcome.HANDLER_FAILED -> 0xFFFF7043.toInt()
         AuditOutcome.OFF_APPROVED -> 0xFFFFD54F.toInt()
+        // A policy change is not a request and not a failure: it is the reason the
+        // records around it look the way they do. Give it its own colour so a scan
+        // down the log finds the moment the gate moved.
+        AuditOutcome.POLICY_CHANGED -> 0xFF4FC3F7.toInt()
         else -> UiKit.TEXT_MUTED
     }
 

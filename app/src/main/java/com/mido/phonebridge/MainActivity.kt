@@ -2,6 +2,7 @@ package com.mido.phonebridge
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,10 +15,16 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
+import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.PluginRegistry
+import com.mido.phonebridge.policy.GlobalMode
+import com.mido.phonebridge.policy.Policy
+import com.mido.phonebridge.policy.PolicyException
+import com.mido.phonebridge.policy.PolicyStore
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -32,6 +39,10 @@ class MainActivity : Activity() {
     private lateinit var statusContainer: LinearLayout
     private lateinit var serverButton: Button
     private lateinit var auditBanner: TextView
+    private lateinit var gateCard: LinearLayout
+    private lateinit var gateTitle: TextView
+    private lateinit var gateSub: TextView
+    private lateinit var gateButtons: LinearLayout
     private var logExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,6 +131,34 @@ class MainActivity : Activity() {
             ).apply { topMargin = UiKit.dp(this@MainActivity, 8) }
         }
         content.addView(loginButton)
+
+        // --- 3b. GATE SWITCH: the one control that decides whether anything is
+        // asked of a human at all. Above the plugins, below Setup, because it is
+        // the second question after "is it running?" — "is it still asking me?".
+        content.addView(header("Approval gate"))
+        gateCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(UiKit.dp(this@MainActivity, 14), UiKit.dp(this@MainActivity, 12),
+                UiKit.dp(this@MainActivity, 14), UiKit.dp(this@MainActivity, 12))
+        }
+        gateTitle = TextView(this).apply {
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(UiKit.TEXT_ON_DARK)
+        }
+        gateSub = TextView(this).apply {
+            textSize = 13f
+            setTextColor(UiKit.TEXT_ON_DARK)
+            setPadding(0, UiKit.dp(this@MainActivity, 4), 0, 0)
+        }
+        gateButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, UiKit.dp(this@MainActivity, 10), 0, 0)
+        }
+        gateCard.addView(gateTitle)
+        gateCard.addView(gateSub)
+        gateCard.addView(gateButtons)
+        content.addView(gateCard)
 
         content.addView(header("Plugins"))
         val pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -291,6 +330,8 @@ class MainActivity : Activity() {
         loginButton.background = UiKit.pill(if (AuthManager.isLoggedIn(this)) UiKit.NEUTRAL_BG else UiKit.GREEN_BG)
         loginButton.setTextColor(UiKit.TEXT_ON_DARK)
 
+        renderGate()
+
         pluginContainer.removeAllViews()
         val plugins = PluginRegistry.all()
         if (plugins.isEmpty()) {
@@ -321,6 +362,107 @@ class MainActivity : Activity() {
         logView.text = Debug.dump()
         logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
         (logView.parent as? ScrollView)?.post { (logView.parent as? ScrollView)?.fullScroll(ScrollView.FOCUS_DOWN) }
+    }
+
+    /**
+     * The gate switch, and the one thing that must never be quiet: `OFF`.
+     *
+     * `SECURE` is the resting state. `OFF` gets a red card that stays there for as
+     * long as it is selected — not a toast, which would be gone by the time you look.
+     */
+    private fun renderGate() {
+        val current = try {
+            PolicyStore.from(applicationContext).get().global
+        } catch (e: PolicyException) {
+            // An unreadable policy is not a quiet fallback to SECURE: say it here, and
+            // BridgeService refuses to serve on the same condition. This screen must
+            // never show a switch position the engine is not actually honouring.
+            gateCard.background = UiKit.pill(UiKit.RED_BG)
+            gateTitle.text = "⚠ POLICY UNREADABLE"
+            gateSub.text = e.message ?: "policy could not be read"
+            gateTitle.setTextColor(UiKit.TEXT_ON_DARK)
+            gateSub.setTextColor(UiKit.TEXT_ON_DARK)
+            gateButtons.removeAllViews()
+            return
+        }
+
+        when (current) {
+            GlobalMode.SECURE -> {
+                gateCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
+                gateTitle.text = "SECURE"
+                gateSub.text = "Every request asks you first. Biometric required."
+            }
+            GlobalMode.OFF -> {
+                gateCard.background = UiKit.pill(UiKit.RED_BG)
+                gateTitle.text = "⚠ OFF"
+                gateSub.text = "Every request is approved and executed. The gate is disabled."
+            }
+        }
+        gateTitle.setTextColor(UiKit.TEXT_ON_DARK)
+        gateSub.setTextColor(UiKit.TEXT_ON_DARK)
+
+        gateButtons.removeAllViews()
+        for (m in GlobalMode.values()) {
+            val on = m == current
+            val b = Button(this).apply {
+                text = m.name
+                textSize = 12f
+                background = UiKit.pill(if (on) UiKit.GREEN_BG else UiKit.NEUTRAL_BG)
+                setTextColor(UiKit.TEXT_ON_DARK)
+                setOnClickListener { requestGate(m) }
+            }
+            gateButtons.addView(b, LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { marginEnd = UiKit.dp(this@MainActivity, 6) })
+        }
+    }
+
+    /**
+     * Apply a switch change, with a confirmation before the one that disarms the gate.
+     *
+     * The confirmation exists because `OFF` is one tap from "no human sees anything
+     * again", and that tap sits in the same place as the harmless one.
+     */
+    private fun requestGate(next: GlobalMode) {
+        val store = PolicyStore.from(applicationContext)
+        val current = try {
+            store.get().global
+        } catch (e: PolicyException) {
+            Toast.makeText(this, "policy unreadable: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (next == current) return
+
+        if (next == GlobalMode.OFF) {
+            AlertDialog.Builder(this)
+                .setTitle("Turn the gate OFF?")
+                .setMessage(
+                    "Every request will be approved and executed with no popup and no " +
+                        "fingerprint — deletes included.\n\nThis stays on until you turn it back."
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Turn it OFF") { _, _ -> applyGate(store, current, next) }
+                .show()
+        } else {
+            applyGate(store, current, next)
+        }
+    }
+
+    private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {
+        try {
+            store.set(Policy(after))
+        } catch (e: Exception) {
+            Toast.makeText(this, "could not save policy: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        // Audit the change. A policy record that cannot be written is a failure the
+        // home screen must show, not a change that quietly took effect unrecorded.
+        try {
+            AuditLog.from(applicationContext).append(PolicyAudit.record(before, after, "settings"))
+        } catch (e: Exception) {
+            AuditHealth.markDegraded("policy change not recorded: ${e.message}")
+        }
+        render()
     }
 
     private fun coloredButton(label: String, onClick: () -> Unit): Button =
