@@ -19,6 +19,7 @@ import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditStore
 import com.mido.phonebridge.audit.Decision
 import com.mido.phonebridge.audit.DecisionSource
+import com.mido.phonebridge.audit.recordResponse
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
@@ -385,51 +386,47 @@ class HttpServer(
                     )
                 )
                 draft.outcome(AuditOutcome.OFF_APPROVED)
-                val offResp = runBlocking { resolved.route.handler(req) }
-                draft.response(offResp.status, offResp.body.toString())
-                return Dispatched(statusOf(offResp.status), offResp.body)
-            }
-
-            // Central gate: describe the concrete call, then wait for the human.
-            val gate = ApprovalGate.await(
-                ctx, remote, "$method $path", summary,
-                detail = detailFor(resolved.route.path, path, body),
-                account = account,
-                view = approvalView(remote, account, resolved.route, path, body, query)
-            )
-            draft.decision(gateDecision(gate, globalMode))
-
-            when (gate) {
-                is ApprovalGate.GateResult.Denied -> {
-                    draft.outcome(AuditOutcome.DENIED)
-                    draft.error("denied")
-                    draft.response(403, null)
-                    return Dispatched(
-                        Response.Status.FORBIDDEN,
-                        err("denied", "request denied by user")
-                    )
-                }
-                is ApprovalGate.GateResult.TimedOut -> {
-                    draft.outcome(AuditOutcome.TIMEOUT)
-                    draft.error("approval_timeout")
-                    draft.response(408, null)
-                    return Dispatched(
-                        Response.Status.REQUEST_TIMEOUT,
-                        err("approval_timeout", "approval timed out")
-                    )
-                }
-                is ApprovalGate.GateResult.Approved -> draft.outcome(AuditOutcome.APPROVED)
-            }
-
-            val resp = runBlocking { resolved.route.handler(req) }
-            // A route may opt out of storing its response (see Route.auditResponseBody):
-            // /debug returns the log itself, and copying that into the log on every
-            // call is both self-referential and a quiet drain on the 20 MB budget.
-            if (resolved.route.auditResponseBody) {
-                draft.response(resp.status, resp.body.toString())
             } else {
-                draft.responseNotStored(resp.status)
+                // Central gate: describe the concrete call, then wait for the human.
+                val gate = ApprovalGate.await(
+                    ctx, remote, "$method $path", summary,
+                    detail = detailFor(resolved.route.path, path, body),
+                    account = account,
+                    view = approvalView(remote, account, resolved.route, path, body, query)
+                )
+                draft.decision(gateDecision(gate, globalMode))
+
+                when (gate) {
+                    is ApprovalGate.GateResult.Denied -> {
+                        draft.outcome(AuditOutcome.DENIED)
+                        draft.error("denied")
+                        draft.response(403, null)
+                        return Dispatched(
+                            Response.Status.FORBIDDEN,
+                            err("denied", "request denied by user")
+                        )
+                    }
+                    is ApprovalGate.GateResult.TimedOut -> {
+                        draft.outcome(AuditOutcome.TIMEOUT)
+                        draft.error("approval_timeout")
+                        draft.response(408, null)
+                        return Dispatched(
+                            Response.Status.REQUEST_TIMEOUT,
+                            err("approval_timeout", "approval timed out")
+                        )
+                    }
+                    is ApprovalGate.GateResult.Approved -> draft.outcome(AuditOutcome.APPROVED)
+                }
             }
+
+            // ONE handler call and ONE response-recording site, shared by the OFF path
+            // and the gated path. They used to be two, and the OFF branch returned
+            // EARLY — so `Route.auditResponseBody` was honoured on one path and ignored
+            // on the other, and /debug stored its entire body whenever the gate was off
+            // (measured on device: ~13.7 KB per record, against ~1 KB under SECURE).
+            // The handler call cannot be duplicated again without deleting this comment.
+            val resp = runBlocking { resolved.route.handler(req) }
+            recordResponse(draft, resolved.route.auditResponseBody, resp.status, resp.body)
             Dispatched(statusOf(resp.status), resp.body)
         } catch (e: PluginError) {
             // Two very different failures share this type. BEFORE the gate it is the
