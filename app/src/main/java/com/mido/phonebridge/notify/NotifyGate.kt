@@ -2,6 +2,7 @@ package com.mido.phonebridge.notify
 
 import android.content.Context
 import android.util.Log
+import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyOverlay.Reason
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -72,7 +73,7 @@ object NotifyGate {
      * happened. It re-checks attendance at expiry, because that is the moment consent
      * is being inferred.
      */
-    fun await(ctx: Context, summary: String, label: String): Result {
+    fun await(ctx: Context, summary: String, label: String, verb: Verb): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
         val decided = java.util.concurrent.atomic.AtomicReference<NotifyOverlay.Outcome?>(null)
@@ -82,6 +83,7 @@ object NotifyGate {
             id = id,
             summary = summary,
             label = label,
+            verb = verb,
             windowMs = WINDOW_MS
         ) { outcome ->
             decided.set(outcome)

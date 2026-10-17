@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyQueue.Admission
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -98,6 +99,8 @@ object NotifyOverlay {
         val id: Long,
         val summary: String,
         val label: String,
+        /** What the request would DO. Drives the coloured badge, nothing else. */
+        val verb: Verb,
         val windowMs: Long,
         val onOutcome: (Outcome) -> Unit
     ) {
@@ -134,11 +137,12 @@ object NotifyOverlay {
         id: Long,
         summary: String,
         label: String,
+        verb: Verb,
         windowMs: Long,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
-            val entry = Entry(ctx.applicationContext, id, summary, label, windowMs, onOutcome)
+            val entry = Entry(ctx.applicationContext, id, summary, label, verb, windowMs, onOutcome)
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
                 // Invisible until its turn. Its clock does NOT run yet; that is the
@@ -199,8 +203,32 @@ object NotifyOverlay {
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(8), dp(6), dp(8))
+            setPadding(dp(8), dp(6), dp(4), dp(6))
         }
+
+        // The verb badge, first so the eye reads WHAT this is before reading the text.
+        // Coloured by consequence, not by name: reads are green because nothing changes,
+        // deletes are red because something does, and writes sit between. Deliberately
+        // WRAP_CONTENT so it hugs its own text — a stretched badge would look like a
+        // header bar and pull weight away from the summary.
+        val badge = TextView(ctx).apply {
+            text = verbShort(entry.verb)
+            textSize = 9f
+            setTextColor(BADGE_TEXT)
+            setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD))
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(verbColor(entry.verb))
+                cornerRadius = dp(4).toFloat()
+            }
+            setPadding(dp(5), dp(1), dp(5), dp(1))
+        }
+        row.addView(
+            badge,
+            LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+                marginEnd = dp(6)
+            }
+        )
 
         // Named `summaryView`, not `text`: a local called `text` shadows the TextView
         // `text` property inside the `apply` blocks below and the assignment silently
@@ -483,6 +511,30 @@ object NotifyOverlay {
         ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     /**
+     * The badge's word. Short on purpose: the card is ~216dp wide and the badge must not
+     * compete with the summary for room.
+     */
+    private fun verbShort(v: Verb): String = when (v) {
+        Verb.READ -> "read"
+        Verb.WRITE -> "write"
+        Verb.EDIT -> "edit"
+        Verb.DELETE -> "del"
+        Verb.EXECUTE -> "exec"
+    }
+
+    /**
+     * The badge's colour, chosen by CONSEQUENCE rather than by verb name: green means
+     * nothing changes, red means something is destroyed, amber is the middle. `EXECUTE`
+     * takes amber because it covers both "send a message" and "act on a notification" —
+     * guessing red would cry wolf, guessing green would understate it.
+     */
+    private fun verbColor(v: Verb): Int = when (v) {
+        Verb.READ -> VERB_READ
+        Verb.DELETE -> VERB_DEL
+        else -> VERB_WRITE
+    }
+
+    /**
      * Real screen size, for clamping drags. `currentWindowMetrics` needs API 30; below
      * that the deprecated display call is the only route, and minSdk is 26.
      */
@@ -506,7 +558,14 @@ object NotifyOverlay {
     private const val TEXT = 0xFFECEDEE.toInt()
     private const val MUTED = 0xFF9AA0A6.toInt()
 
-    private const val CARD_WIDTH_DP = 232
+    // Badge palette. Light fills with near-black text, because the card is dark: a dark
+    // badge on a dark card is unreadable, which defeats the point of colour-coding.
+    private const val VERB_READ = 0xFF81C784.toInt()
+    private const val VERB_WRITE = 0xFFFFD54F.toInt()
+    private const val VERB_DEL = 0xFFE57373.toInt()
+    private const val BADGE_TEXT = 0xFF1A1A1A.toInt()
+
+    private const val CARD_WIDTH_DP = 216
     private const val CORNER_DP = 14
     private const val EDGE_DP = 14
     private const val DRAG_SLOP_DP = 8

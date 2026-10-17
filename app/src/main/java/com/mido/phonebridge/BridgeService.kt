@@ -434,7 +434,8 @@ class HttpServer(
                     val decision = NotifyGate.await(
                         ctx,
                         summary,
-                        labelOf(resolved.plugin.id, resolved.route.verb)
+                        labelOf(resolved.plugin.id, resolved.route.verb),
+                        resolved.route.verb
                     )
                     when (decision) {
                         is NotifyGate.Result.Approved -> {
