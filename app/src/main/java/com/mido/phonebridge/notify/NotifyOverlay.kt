@@ -2,7 +2,6 @@ package com.mido.phonebridge.notify
 
 import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Typeface
@@ -16,7 +15,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
@@ -176,20 +174,20 @@ object NotifyOverlay {
             cornerRadius = radius
         }
         val card = FrameLayout(ctx).apply {
+            // Rounded corners come from the LAYERS themselves — both have `cornerRadius`
+            // — so `clipToOutline` is not needed, and here it was actively dangerous. Its
+            // outline provider reads `view.width`/`view.height`, which are 0 before the
+            // first layout, so an outline computed too early is an empty round-rect and
+            // the whole card clips to NOTHING. A card that is invisible for its whole
+            // window is not cosmetic: silence means APPROVE in this mode, so a prompt
+            // nobody can see approves the very request it was meant to ask about.
+            // Removed rather than patched — the layers already draw the corners.
             background = LayerDrawable(
                 arrayOf(
                     GradientDrawable().apply { setColor(BG); cornerRadius = radius },
                     drain
                 )
             )
-            // Rounded clipping so the fill follows the card's corners instead of
-            // squaring them off.
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, radius)
-                }
-            }
-            clipToOutline = true
             isClickable = true
         }
 
@@ -323,25 +321,51 @@ object NotifyOverlay {
         entry.shownAt = System.currentTimeMillis()
 
         // Lifecycle logging, deliberately permanent: this prompt has been reported as a
-        // "1ms flash" on a real screen twice, and each time the in-memory ring could not
-        // say why. A UI the caller cannot see has to be able to describe itself.
+        // "1ms flash" on a real screen three times now, and each time the evidence was
+        // thin. A UI the caller cannot see has to be able to describe itself.
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
         )
-        // Measured size arrives after layout. If this reports a full-screen height, the
-        // layout is wrong; if it never fires, the card never laid out at all.
-        card.post {
-            com.mido.phonebridge.Debug.log(
-                "notify[${entry.id}] laid out w=${card.width} h=${card.height} " +
-                    "alpha=${card.alpha} vis=${card.visibility}"
-            )
-        }
+        // Two candidates remain for "window present for 5s, content invisible": the
+        // fade never runs (alpha stays 0), or the card is clipped away. Both are
+        // sampled, so the log names the culprit instead of me guessing a fourth time.
+        //
+        // `clipToOutline` has been REMOVED in this build, and that is the likely fix:
+        // its outline provider reads `view.width`/`view.height`, which are 0 before the
+        // first layout, and an empty outline clips the card to nothing. The layers
+        // already carry `cornerRadius`, so the clip was redundant as well as dangerous.
+        probe(entry, card, 0)
+        probe(entry, card, 100)
+        probe(entry, card, 400)
+        probe(entry, card, 2000)
 
         // Fade in with a small rise from below. Long enough to register as "something
         // appeared", short enough not to eat a meaningful part of the window.
         card.alpha = 0f
         card.translationY = dp(8).toFloat()
-        card.animate().alpha(1f).translationY(0f).setDuration(FADE_IN_MS).start()
+        card.animate().alpha(1f).translationY(0f).setDuration(FADE_IN_MS)
+            .withEndAction {
+                com.mido.phonebridge.Debug.log(
+                    "notify[${entry.id}] fadeIn done alpha=${card.alpha} " +
+                        "transY=${card.translationY}"
+                )
+            }
+            .start()
+
+        // Safety net, and not paranoia: silence means APPROVE in this mode, so a card
+        // that never becomes visible silently approves the request it was supposed to
+        // ask about. If the fade-in has not finished shortly after it should have,
+        // force the card visible and record that it had to be forced.
+        card.postDelayed({
+            if (card.alpha < 1f) {
+                com.mido.phonebridge.Debug.log(
+                    "notify[${entry.id}] fade-in STALLED alpha=${card.alpha} — forcing visible"
+                )
+                card.animate().cancel()
+                card.alpha = 1f
+                card.translationY = 0f
+            }
+        }, FADE_IN_MS + 150)
 
         // The drain and the clock end at the same instant, so what the human sees and
         // what the gate decides cannot disagree. Linear on purpose: a countdown that
@@ -376,6 +400,27 @@ object NotifyOverlay {
     }
 
     /**
+     * Sample one card at [atMs] and write what it looks like to the debug ring.
+     *
+     * Exists because the prompt was reported as a "1ms flash" on a real screen and two
+     * consecutive fixes for it were wrong. Every field here is chosen to separate one
+     * hypothesis from another: `alpha` says whether the fade-in ever runs, `onScreen`
+     * and `rect` say whether it is being clipped or drawn off-screen, and the outline
+     * says whether `clipToOutline` has a usable shape to clip to.
+     */
+    private fun probe(entry: Entry, card: View, atMs: Long) {
+        card.postDelayed({
+            val rect = android.graphics.Rect()
+            val onScreen = card.getGlobalVisibleRect(rect)
+            com.mido.phonebridge.Debug.log(
+                "notify[${entry.id}] t${atMs} alpha=${card.alpha} isShown=${card.isShown} " +
+                    "vis=${card.visibility} w=${card.width} h=${card.height} " +
+                    "onScreen=$onScreen rect=$rect"
+            )
+        }, atMs)
+    }
+
+    /**
      * End a card silently's counterpart: report an outcome for something that was never
      * on screen. Used for refusals and for a card that could not be attached.
      */
@@ -396,7 +441,8 @@ object NotifyOverlay {
         entry.timeout?.let(main::removeCallbacks)
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] settle reason=$reason " +
-                "shownMs=${if (entry.shownAt > 0) System.currentTimeMillis() - entry.shownAt else 0}"
+                "shownMs=${if (entry.shownAt > 0) System.currentTimeMillis() - entry.shownAt else 0} " +
+                "alpha=${entry.root?.alpha} shown=${entry.root?.isShown}"
         )
         entry.onOutcome(Outcome(reason, entry.shownAt, System.currentTimeMillis(), detail))
 
