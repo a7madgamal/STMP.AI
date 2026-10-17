@@ -1,10 +1,10 @@
 package com.mido.phonebridge.notify
 
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Typeface
+import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Build
@@ -16,7 +16,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -33,25 +32,22 @@ import kotlin.math.roundToInt
  *
  * **One card at a time, in arrival order.** The first version drew every in-flight
  * prompt at once at one screen region, and Mido's report was exact: "3 at once I saw
- * only one timer". Three windows, three bars, one thing a human could actually read.
- * So the panel now dequeues: the card on screen owns the only countdown, and the next
- * appears when it goes. Ordering and capacity live in [NotifyQueue], which is pure and
- * tested; this file owns pixels only.
+ * only one timer". So the panel dequeues: the card on screen owns the only countdown,
+ * and the next appears when it goes. Ordering and capacity live in [NotifyQueue], which
+ * is pure and tested; this file owns pixels only.
  *
- * Two consequences that are the point of the change:
+ * **No animators.** Three separate defects here — an invisible card, a stalled fade-in,
+ * and a countdown that never moved — all traced to the same root: the visual depended on
+ * `ValueAnimator`/`ViewPropertyAnimator` actually running. They did not run reliably on
+ * the target device, and the failures were silent. The card's whole appearance is now
+ * driven by ONE main-thread tick that reads the real clock ([System.currentTimeMillis])
+ * and sets alpha and the countdown level directly. If the tick stops, the card stops —
+ * which is honest, visible, and logged, instead of a bar that quietly freezes at full
+ * while the request gets approved underneath it.
  *
- *  - **A waiting request has no clock.** Its window starts when it reaches the screen,
- *    so "silence means approve" always refers to a full window the human could see.
- *  - **Nothing is silently dropped.** If the line is full the NEWCOMER is refused
- *    immediately and denied — the stacking version discarded the oldest item, denying a
- *    request the human had been shown and might have been about to answer.
+ * The card sits **bottom-left**, is **draggable**, and remembers where it was put.
  *
- * The card sits **bottom-left**, is **draggable**, and remembers where it was put, so
- * the human can shove it out of the way of whatever they are doing.
- *
- * Every outcome is reported exactly once, on the main thread. The reasons stay distinct
- * because the audit distinguishes them: a tap is a decision, an expiry is the absence
- * of one, and a card that could not be drawn is neither.
+ * Every outcome is reported exactly once, on the main thread.
  */
 object NotifyOverlay {
 
@@ -111,11 +107,14 @@ object NotifyOverlay {
         /** Stamped when the card is attached, never when [show] was called. */
         var shownAt = 0L
 
+        /** Set by [settle]; the tick reads it to know when to start fading out. */
+        var settledAt = 0L
+
         var root: View? = null
         var timeout: Runnable? = null
 
-        /** Cancelled when the card ends, so the drain never outlives its own card. */
-        var drainAnim: ValueAnimator? = null
+        /** The single visual tick. Cancelled only on teardown. */
+        var tick: Runnable? = null
     }
 
     /**
@@ -162,26 +161,32 @@ object NotifyOverlay {
 
         val radius = dp(CORNER_DP).toFloat()
 
-        // The countdown fill lives UNDER the text as a layer of the card's own
-        // background, NOT as a MATCH_PARENT child. A MATCH_PARENT child inside a
-        // WRAP_CONTENT FrameLayout forces the parent to match ITS parent — i.e. the
-        // full window — which is why 0.6.1 drew a full-screen-height card. The
-        // layered background can never stretch the card: the card's size is decided
-        // by the text row alone, and the drain is clipped to whatever that turns out
-        // to be. One view does layout; the other only follows it.
-        val drain = GradientDrawable().apply {
+        // The countdown is a BACKGROUND LAYER, never a child view. A MATCH_PARENT child
+        // inside a WRAP_CONTENT FrameLayout forces the parent to match ITS parent — the
+        // full window — which is why 0.6.1 drew a full-screen-height card. A background
+        // cannot participate in layout, so the card's size is decided by the text row
+        // alone and the drain is simply clipped to whatever that turns out to be.
+        //
+        // The drain is a ClipDrawable, not a layer inset. `setLayerInsetRight` mutated
+        // the layer bounds without reliably repainting, so the bar sat frozen — the
+        // "we lost the progress" report. `ClipDrawable.setLevel` invalidates itself on
+        // every change, which is what a per-frame countdown needs.
+        val drainFill = GradientDrawable().apply {
             setColor(ACCENT_FILL)
             cornerRadius = radius
         }
+        val drain = ClipDrawable(drainFill, Gravity.START, ClipDrawable.HORIZONTAL).apply {
+            level = LEVEL_FULL
+        }
+
         val card = FrameLayout(ctx).apply {
-            // Rounded corners come from the LAYERS themselves — both have `cornerRadius`
-            // — so `clipToOutline` is not needed, and here it was actively dangerous. Its
+            // Rounded corners come from the LAYERS themselves (both carry `cornerRadius`),
+            // so `clipToOutline` is not needed — and here it was actively dangerous. Its
             // outline provider reads `view.width`/`view.height`, which are 0 before the
-            // first layout, so an outline computed too early is an empty round-rect and
-            // the whole card clips to NOTHING. A card that is invisible for its whole
-            // window is not cosmetic: silence means APPROVE in this mode, so a prompt
-            // nobody can see approves the very request it was meant to ask about.
-            // Removed rather than patched — the layers already draw the corners.
+            // first layout, so an early outline is an empty round-rect and the whole card
+            // clips to NOTHING. A card that is invisible for its whole window is not
+            // cosmetic: silence means APPROVE in this mode, so a prompt nobody can see
+            // approves the very request it was meant to ask about.
             background = LayerDrawable(
                 arrayOf(
                     GradientDrawable().apply { setColor(BG); cornerRadius = radius },
@@ -317,72 +322,72 @@ object NotifyOverlay {
         entry.root = card
         // Stamped on attach, not on entry into show(): `main.post` may run late behind
         // other UI work, and a `shownAt` taken earlier would inflate every recorded
-        // duration by exactly that delay.
+        // duration by exactly that delay. It is also the tick's zero point.
         entry.shownAt = System.currentTimeMillis()
+        val deadline = entry.shownAt + entry.windowMs
+        val fadeInEnd = entry.shownAt + FADE_IN_MS
 
-        // Lifecycle logging, deliberately permanent: this prompt has been reported as a
-        // "1ms flash" on a real screen three times now, and each time the evidence was
-        // thin. A UI the caller cannot see has to be able to describe itself.
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
         )
-        // Two candidates remain for "window present for 5s, content invisible": the
-        // fade never runs (alpha stays 0), or the card is clipped away. Both are
-        // sampled, so the log names the culprit instead of me guessing a fourth time.
-        //
-        // `clipToOutline` has been REMOVED in this build, and that is the likely fix:
-        // its outline provider reads `view.width`/`view.height`, which are 0 before the
-        // first layout, and an empty outline clips the card to nothing. The layers
-        // already carry `cornerRadius`, so the clip was redundant as well as dangerous.
-        probe(entry, card, 0)
-        probe(entry, card, 100)
-        probe(entry, card, 400)
-        probe(entry, card, 2000)
 
-        // Fade in with a small rise from below. Long enough to register as "something
-        // appeared", short enough not to eat a meaningful part of the window.
+        // Start invisible and let the tick bring it in. The card is NEVER left at alpha 0
+        // with no mechanism to raise it: that is the defect that made it invisible for a
+        // whole window while silence approved the request underneath.
         card.alpha = 0f
         card.translationY = dp(8).toFloat()
-        card.animate().alpha(1f).translationY(0f).setDuration(FADE_IN_MS)
-            .withEndAction {
-                com.mido.phonebridge.Debug.log(
-                    "notify[${entry.id}] fadeIn done alpha=${card.alpha} " +
-                        "transY=${card.translationY}"
-                )
-            }
-            .start()
 
-        // Safety net, and not paranoia: silence means APPROVE in this mode, so a card
-        // that never becomes visible silently approves the request it was supposed to
-        // ask about. If the fade-in has not finished shortly after it should have,
-        // force the card visible and record that it had to be forced.
-        card.postDelayed({
-            if (card.alpha < 1f) {
-                com.mido.phonebridge.Debug.log(
-                    "notify[${entry.id}] fade-in STALLED alpha=${card.alpha} — forcing visible"
-                )
-                card.animate().cancel()
-                card.alpha = 1f
-                card.translationY = 0f
-            }
-        }, FADE_IN_MS + 150)
+        // --- the one tick -------------------------------------------------------
+        // Drives fade-in, the countdown, and fade-out, all from the real clock. One
+        // mechanism, so the three cannot disagree, and none of it depends on an animator
+        // choosing to run.
+        var loggedMidpoint = false
+        val tick = object : Runnable {
+            override fun run() {
+                val now = System.currentTimeMillis()
+                if (!entry.settled) {
+                    // fade in
+                    val elapsed = now - entry.shownAt
+                    card.alpha = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
+                    card.translationY = dp(8) * (1f - card.alpha)
 
-        // The drain and the clock end at the same instant, so what the human sees and
-        // what the gate decides cannot disagree. Linear on purpose: a countdown that
-        // eases is a countdown that lies about the time left. The fill is a background
-        // LAYER, not a child view, so the drain animates its right inset from 0 to the
-        // full card width — the visible fill shrinks left-to-right as the window runs.
-        val layer = card.background as LayerDrawable
-        val drainAnim = ValueAnimator.ofInt(0, dp(CARD_WIDTH_DP)).apply {
-            duration = entry.windowMs
-            interpolator = LinearInterpolator()
-            addUpdateListener { va ->
-                val rightInset = va.animatedValue as Int
-                layer.setLayerInsetRight(1, rightInset)
+                    // countdown: level 10000 = full, 0 = empty, so the bar drains
+                    // left-to-right. Computed from the REMAINING time, not accumulated
+                    // from frames, so a missed tick cannot make it drift.
+                    val remaining = (deadline - now).coerceAtLeast(0L)
+                    drain.level = (remaining * LEVEL_FULL / entry.windowMs).toInt()
+                    card.invalidate()
+
+                    // One midpoint sample, so the log proves the countdown actually moved
+                    // rather than freezing at full — the exact failure being fixed.
+                    if (!loggedMidpoint && elapsed >= entry.windowMs / 2) {
+                        loggedMidpoint = true
+                        com.mido.phonebridge.Debug.log(
+                            "notify[${entry.id}] midpoint level=${drain.level} alpha=${card.alpha}"
+                        )
+                    }
+                    main.postDelayed(this, TICK_MS)
+                } else {
+                    // fade out, then remove. Removal lives HERE and nowhere else, so it
+                    // happens exactly once and cannot be skipped by an animator that
+                    // never fires (which would strand the card on screen forever).
+                    val since = now - entry.settledAt
+                    if (since >= FADE_OUT_MS) {
+                        card.alpha = 0f
+                        runCatching { wm(entry.ctx).removeView(card) }
+                        promoteNext()
+                    } else {
+                        val p = since.toFloat() / FADE_OUT_MS
+                        card.alpha = 1f - p
+                        card.translationY = dp(10) * p
+                        card.invalidate()
+                        main.postDelayed(this, TICK_MS)
+                    }
+                }
             }
-            start()
         }
-        entry.drainAnim = drainAnim
+        entry.tick = tick
+        main.post(tick)
 
         val timeout = Runnable {
             if (!entry.settled) {
@@ -400,85 +405,48 @@ object NotifyOverlay {
     }
 
     /**
-     * Sample one card at [atMs] and write what it looks like to the debug ring.
-     *
-     * Exists because the prompt was reported as a "1ms flash" on a real screen and two
-     * consecutive fixes for it were wrong. Every field here is chosen to separate one
-     * hypothesis from another: `alpha` says whether the fade-in ever runs, `onScreen`
-     * and `rect` say whether it is being clipped or drawn off-screen, and the outline
-     * says whether `clipToOutline` has a usable shape to clip to.
-     */
-    private fun probe(entry: Entry, card: View, atMs: Long) {
-        card.postDelayed({
-            val rect = android.graphics.Rect()
-            val onScreen = card.getGlobalVisibleRect(rect)
-            com.mido.phonebridge.Debug.log(
-                "notify[${entry.id}] t${atMs} alpha=${card.alpha} isShown=${card.isShown} " +
-                    "vis=${card.visibility} w=${card.width} h=${card.height} " +
-                    "onScreen=$onScreen rect=$rect"
-            )
-        }, atMs)
-    }
-
-    /**
-     * End a card silently's counterpart: report an outcome for something that was never
-     * on screen. Used for refusals and for a card that could not be attached.
+     * End a card that never reached the screen: report an outcome with no `shownAt`.
+     * Used for refusals and for a card that could not be attached.
      */
     private fun reply(entry: Entry, reason: Reason, detail: String) {
         if (entry.settled) return
         entry.settled = true
+        entry.settledAt = System.currentTimeMillis()
         entry.timeout?.let(main::removeCallbacks)
         entry.onOutcome(Outcome(reason, 0L, System.currentTimeMillis(), detail))
     }
 
     /**
-     * End a card that WAS on screen: report the outcome, retire it from the queue, fade
-     * it out, then give the next in line the screen and a fresh clock.
+     * Report a card's outcome. Deliberately does NOT remove the view: the tick owns
+     * removal, so it happens once, after the fade-out, and cannot be skipped.
      */
     private fun settle(entry: Entry, reason: Reason, detail: String = "") {
         if (entry.settled) return
         entry.settled = true
+        entry.settledAt = System.currentTimeMillis()
         entry.timeout?.let(main::removeCallbacks)
+
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] settle reason=$reason " +
-                "shownMs=${if (entry.shownAt > 0) System.currentTimeMillis() - entry.shownAt else 0} " +
+                "shownMs=${if (entry.shownAt > 0) entry.settledAt - entry.shownAt else 0} " +
                 "alpha=${entry.root?.alpha} shown=${entry.root?.isShown}"
         )
-        entry.onOutcome(Outcome(reason, entry.shownAt, System.currentTimeMillis(), detail))
+        entry.onOutcome(Outcome(reason, entry.shownAt, entry.settledAt, detail))
 
-        // Retired now, so ordering is correct even while the fade below is running.
+        // Retired now, so ordering is correct even while the fade-out is running.
         queue.retire(entry.id)
 
-        val card = entry.root
-        if (card == null) {
+        // A card that was never attached has no tick to remove it.
+        if (entry.root == null) {
+            entry.tick?.let(main::removeCallbacks)
             promoteNext()
-            return
         }
-        card.animate().cancel()
-        // The background drain has its own animator. Left running it would keep
-        // shrinking the fill through the fade-out; harmless, but it is the kind of
-        // thing that becomes a real bug the moment the fade is removed.
-        entry.drainAnim?.cancel()
-        // Fixed distance, not `card.height / 4`: the card may not have been laid out
-        // yet when a prompt ends (height 0), and a zero-distance translate is exactly
-        // the "appears for 1ms then vanishes" flash. A fixed dip value is the same
-        // travel for every card and never collapses to nothing.
-        val density = entry.ctx.resources.displayMetrics.density
-        card.animate()
-            .alpha(0f)
-            .translationY((10 * density))
-            .setDuration(FADE_OUT_MS)
-            .withEndAction {
-                runCatching { wm(entry.ctx).removeView(card) }
-                promoteNext()
-            }
-            .start()
     }
 
     /**
      * Give the screen to whoever is now at the head of the line, starting their clock
-     * only now. Recurses safely: if presenting the next card fails it retires itself and
-     * calls back here.
+     * only now. Safe to call once per removal; presenting the next card may itself fail
+     * and retire, which recurses back here.
      */
     private fun promoteNext() {
         queue.currentItem()?.let { present(it) }
@@ -492,18 +460,20 @@ object NotifyOverlay {
     fun dismissAll() {
         main.post {
             for (entry in queue.clear()) {
-                if (entry.settled) continue
-                entry.settled = true
+                entry.tick?.let(main::removeCallbacks)
                 entry.timeout?.let(main::removeCallbacks)
-                entry.onOutcome(
-                    Outcome(
-                        Reason.UNAVAILABLE,
-                        entry.shownAt,
-                        System.currentTimeMillis(),
-                        "overlay torn down with the service"
+                if (!entry.settled) {
+                    entry.settled = true
+                    entry.settledAt = System.currentTimeMillis()
+                    entry.onOutcome(
+                        Outcome(
+                            Reason.UNAVAILABLE,
+                            entry.shownAt,
+                            entry.settledAt,
+                            "overlay torn down with the service"
+                        )
                     )
-                )
-                entry.drainAnim?.cancel()
+                }
                 entry.root?.let { runCatching { wm(entry.ctx).removeView(it) } }
             }
         }
@@ -531,8 +501,8 @@ object NotifyOverlay {
     // background carry the interaction; the text carries the fact.
     private const val BG = 0xF0222427.toInt()
 
-    /** ~24% alpha: visible as motion, invisible as a colour. */
-    private const val ACCENT_FILL = 0x3D8AB4F8.toInt()
+    /** ~30% alpha: clearly visible as motion, still quiet as a colour. */
+    private const val ACCENT_FILL = 0x4D8AB4F8.toInt()
     private const val TEXT = 0xFFECEDEE.toInt()
     private const val MUTED = 0xFF9AA0A6.toInt()
 
@@ -542,6 +512,12 @@ object NotifyOverlay {
     private const val DRAG_SLOP_DP = 8
     private const val FADE_IN_MS = 180L
     private const val FADE_OUT_MS = 200L
+
+    /** ~30fps. A 5s countdown does not need more, and this is one small view. */
+    private const val TICK_MS = 33L
+
+    /** `ClipDrawable` level scale: 10000 is fully visible. */
+    private const val LEVEL_FULL = 10000
 
     private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
     private const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
