@@ -19,7 +19,7 @@ Two features, shipped as four isolated releases:
    request came from. A rule set maps label patterns → one of three modes:
    - `SECURE` — today's behaviour: full-screen modal + biometric.
    - `NOTIFY` — heads-up notification, 5s silence = approve, tap `✕` = reject.
-   - `AUTO` — no UI, log only.
+   - `OFF` — no UI, log only.
 
 ### Non-goals (explicitly out of scope for now)
 
@@ -67,25 +67,25 @@ Three seams, added in this order. Each one is useless alone, which is why the or
                       ┌─────────────────────────────┐
   HTTP request ──────▶│  RequestPipeline (serve)    │
                       └──────────────┬──────────────┘
-                                     │ Route.action + Route.scope + origin
+                                     │ Route.verb + plugin.id + origin
                                      ▼
                       ┌─────────────────────────────┐
                       │  Label(origin, plugin, verb)│  ← R1 (metadata, no behaviour)
                       └──────────────┬──────────────┘
                                      ▼
                       ┌─────────────────────────────┐
-                      │  PolicyEngine.evaluate()    │  ← R2 (SECURE | AUTO), R3 (+NOTIFY)
-                      └──────┬───────────────┬──────┘
-                     SECURE  │               │ AUTO / NOTIFY
-                             ▼               ▼
-                  ApprovalGate (queue)   DecisionRouter (no queue)
-                             └───────┬───────┘
-                                     ▼
+                      │  Policy.resolveMode()       │  ← R2 (global switch + exact rules)
+                      └──────┬───────────┬──────────┘
+                   SECURE    │           │  NOTIFY / OFF
+                             ▼           ▼
+                  ApprovalGate (queue)  DecisionRouter (no queue)
+                             └─────┬─────┘
+                                   ▼
                       ┌─────────────────────────────┐
                       │  AuditLog.append(record)    │  ← R1, written at EVERY terminal state
                       └─────────────────────────────┘
-                                     ▼
-                              LogActivity (R1) + filters/export (R4)
+                                   ▼
+                            LogActivity (R1) + filters/export (R4)
 ```
 
 **The invariant that must survive every release:** a request reaches a handler only if it has a
@@ -123,12 +123,19 @@ Origin is a separate field, never folded into the label string.
 
 ### Mode
 
-`SECURE` | `NOTIFY` | `AUTO`. Default when nothing matches: **`SECURE`**.
+`SECURE` | `NOTIFY` | `OFF`. Produced by the policy (§6). Default in every ambiguous case:
+**`SECURE`**.
+
+### Global gate mode
+
+`AUTOMATIC` | `SECURE` | `NOTIFY` | `OFF` — the one switch on the home screen. Default: **`SECURE`**.
+`AUTOMATIC` consults the rule table; every other value ignores it and forces that mode on every
+request (§6.1).
 
 ### Outcome (one per record)
 
 `APPROVED`, `DENIED`, `DENIED_UNATTENDED` (R3; screen off/locked, §7.2), `TIMEOUT`,
-`NOTIFY_APPROVED`, `NOTIFY_REJECTED`, `AUTO_APPROVED`, `REJECTED_INVALID` (4xx before the gate),
+`NOTIFY_APPROVED`, `NOTIFY_REJECTED`, `OFF_APPROVED`, `REJECTED_INVALID` (4xx before the gate),
 `UNROUTED` (404), `HANDLER_FAILED` (5xx), `CLIENT_GONE` (R2+; see §11 C4).
 
 `DENIED` and `DENIED_UNATTENDED` are never merged: "he tapped no" and "nobody was there" are
@@ -140,9 +147,9 @@ different facts, and the second one is how a mis-scoped `NOTIFY` rule announces 
 
 | Release | Version | Content | Behaviour change | Risk |
 |---|---|---|---|---|
-| **R1** | 0.4.0 | Verb/scope metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
-| **R2** | 0.5.0 | Policy store, rule engine, settings UI, effective-mode matrix, `AUTO` mode, panic switch | Gating can be *reduced* for chosen labels | Medium |
-| **R3** | 0.6.0 | `NOTIFY` mode: heads-up, 5s silence=approve, `✕`=reject, fallbacks | New gating mode | Medium-High |
+| **R1** | 0.4.0 | `verb` metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
+| **R2** | 0.5.0 | Global gate switch + exact rule table + settings screen + `OFF` mode + rule control inside the modal | Gating can be *disabled or narrowed* — the first release that can hurt | Medium-High |
+| **R3** | 0.6.0 | `NOTIFY` mode: heads-up, 5s silence=approve, `✕`=reject, unattended deny | New gating mode | Medium-High |
 | **R4** | 0.7.0 | Log UX: filters, search, export, counters, decision trace, retention controls | None | Low |
 
 Each release is independently shippable and independently revertable. R1 changes nothing the
@@ -175,8 +182,8 @@ res/layout/item_audit_row.xml
 Modified:
 
 ```
-core/Plugin.kt              Route gains role/verb+scope (required), see 5.2
-plugins/*/*.kt              ~15 Route(…) call sites get the two new arguments
+core/Plugin.kt              Route gains required `verb`, see 5.2
+plugins/*/*.kt              ~15 Route(…) call sites get the new required `verb` argument
 ApprovalGate.kt             await() returns GateResult instead of throwing (5.3)
 BridgeService.kt            serve() → RequestPipeline; capture audit at every terminal state
 MainActivity.kt             "LOG" button → LogActivity; kill nothing else
@@ -196,16 +203,14 @@ data class Route(
     val path: String,
     val describe: String,
     val verb: Verb,           // NEW, required, no default
-    val scope: String,        // NEW, required: "gmail.messages", "calendar.events",
-                              //      "notifications.live" — the resource family
     val handler: suspend (Req) -> Resp
 )
 ```
 
-`scope` exists because the first cascade level people actually want is "all of Gmail" and the
-second is "all deletes anywhere". With `plugin.id` + `verb` alone, "gmail write" works but
-"gmail messages write" vs "gmail drafts write" (a future surface) does not. Cost today: one
-string per route. Cost later if omitted: a taxonomy migration.
+`verb` alone is the whole taxonomy: rules key on `(plugin.id, verb)` exactly (§6.2), so anything
+finer would be a dimension no screen can set. An earlier draft carried a `scope` string
+(`"gmail.messages"`) to support a wildcard cascade — **removed with the cascade.** Do not
+reintroduce it until a screen exists that can set it.
 
 Rationale for keeping `describe` untouched: it is the modal's sentence and is already
 human-approved. Do not overload it with machine meaning — that is how the old gate-side `when`
@@ -228,7 +233,7 @@ fun await(ctx, remote, endpoint, summary, detail, account, view): GateResult
   `postApprovalNotification`; `decidedAt` in `resolve()`.
 - Queue depth at enqueue is recorded too (`queueDepth`), because "how long did it sit behind
   another popup" is the first question anyone asks about a slow approval.
-- Why now and not later: R2's router needs to bypass the gate entirely for `AUTO`, and R3 needs
+- Why now and not later: R2's router needs to bypass the gate entirely for `OFF`, and R3 needs
   to interleave a 5s path with a 60s path. A gate that only returns by throwing makes both
   awkward. It is a contained refactor with exactly **one** call site today.
 
@@ -242,7 +247,6 @@ fun await(ctx, remote, endpoint, summary, detail, account, view): GateResult
   "label": "gmail.write",
   "plugin": "gmail",
   "verb": "WRITE",
-  "scope": "gmail.messages",
   "origin": "OPENCLAW",
   "remote": "100.64.0.10",
   "requester": "OpenClaw (this box)",
@@ -258,7 +262,9 @@ fun await(ctx, remote, endpoint, summary, detail, account, view): GateResult
   "error": null,
   "decision": {
     "mode": "SECURE",
-    "ruleId": null,
+    "source": "GLOBAL",
+    "globalMode": "SECURE",
+    "rule": null,
     "enqueuedAt": 1760699102001,
     "shownAt": 1760699102140,
     "decidedAt": 1760699103400,
@@ -328,7 +334,7 @@ fun serve(session): Response {
     val ctx = AuditContext(t0, remote, method, path, query, headers)   // mutable outcome holder
     try {
         val resolved = resolve(...) ?: { ctx.outcome = UNROUTED; return 404 }
-        ctx.bindRoute(resolved)                       // label, plugin, verb, scope
+        ctx.bindRoute(resolved)                       // label, plugin, verb
         val body = readBody(session)                   // may throw → REJECTED_INVALID
         ctx.body = body
         val summary = describe(...); ctx.summary = summary
@@ -408,12 +414,12 @@ List (`LogActivity`, RecyclerView):
    and a 40 KiB body (asserts the 32 KiB cap **and** the `truncated` original size).
 3. `AuditLogTest` — temp dir: append 3 records, re-open, read 3 headers; retention deletes a
    day-file older than 7 days; a hand-written corrupt line is skipped and counted.
-4. `RouteMetadataTest` — every registered plugin's routes have non-blank `scope` and a `verb`
-   (compile-time for presence, this test guards the *values*, e.g. no empty scope).
+4. `PolicyResolveTest` — `resolveMode()` truth table: `AUTOMATIC` + no rule → `SECURE`;
+   `AUTOMATIC` + `gmail/DELETE → NOTIFY` → `NOTIFY`; any explicit global value → that value for
+   every pair regardless of the rule table (the property that makes `OFF` a panic switch).
 
-Note: test #4 needs plugins constructible without `Context` — they already are for
-`routes()`; keep it that way (the reference doc's rule). If a plugin needs `ctx` for route
-declaration, that is a defect to fix in R1, not a test to skip.
+Note: #4 is pure data — `resolveMode` takes no `Context` and no plugin instance, which is the
+point of an exact-key table. Nothing here needs a device, and nothing here needs a `Context`.
 
 ### 5.10 Device acceptance (must all be observed, not assumed)
 
@@ -447,7 +453,7 @@ true, and the log never develops a blind spot where the misbehaving thing lives.
 | `UNROUTED` | **yes** (probes, `/status` liveness checks, wrong URLs) |
 | `REJECTED_INVALID` | **yes** (typos, missing fields — the caller's mistake, not a decision) |
 | `HANDLER_FAILED` | no |
-| everything else (`APPROVED`, `DENIED`, `TIMEOUT`, `DENIED_UNATTENDED`, `AUTO_APPROVED`, `NOTIFY_*`) | no |
+| everything else (`APPROVED`, `DENIED`, `TIMEOUT`, `DENIED_UNATTENDED`, `OFF_APPROVED`, `NOTIFY_*`) | no |
 
 Two exceptions to the table:
 
@@ -486,122 +492,134 @@ commit**, before the audit spine lands:
 
 ---
 
-## 6. R2 — Policy engine + `AUTO` (architecture)
+## 6. R2 — Gate switch + exact rules (architecture)
 
-### 6.1 Data
+**The whole model:** one global switch on the home screen, plus an exact per-pair table.
+No wildcards, no cascade, no precedence, no conflict resolution. Everything the old cascade design
+carried — specificity tuples, tie-breaks, `*` matching, the effective-mode matrix, Q11 — is
+**deleted**, not renamed.
+
+### 6.1 The global gate switch — **LOCKED (Mido 2026-10-17)**
+
+```
+AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
+```
+
+- **`AUTOMATIC`** — the only value that consults the rule table. A pair with no rule → `SECURE`.
+- **`SECURE` / `NOTIFY` / `OFF`** — the table is ignored **entirely**. Every request gets that
+  mode. Nothing can outrank it, which is what makes `OFF` a real panic switch rather than "log only
+  for the pairs you did not configure".
+- Sticky across restart. Changing it writes a `POLICY_CHANGED` audit record (before/after).
+- Selecting `NOTIFY` or `OFF` requires a confirmation dialog.
+
+Security UX — an unsecure selection must be obvious at a glance:
+
+| Value | Home screen treatment |
+|---|---|
+| `SECURE` | neutral; the resting state |
+| `AUTOMATIC` | neutral + a one-line summary, never a bare word: `rules: 3 · gmail write → notify` |
+| `NOTIFY` | amber banner: `NOTIFY — requests approve themselves after 5s unless you reject` |
+| `OFF` | red banner, persistent while selected: `OFF — every request is approved and executed. The gate is disabled.` |
+
+The `OFF` banner is not a toast. It stays on the home screen for as long as the mode is selected.
+
+### 6.2 Exact rules
 
 ```kotlin
 data class Rule(
-    val id: String,          // stable uuid, never re-derived
-    val enabled: Boolean,
-    val plugin: String,      // "*" | "gmail" | "calendar" | "notifications"
-    val verb: Verb?,         // null = any verb ("*")
-    val mode: Mode
+    val plugin: String,   // exact: "gmail" | "calendar" | "notifications". Never "*".
+    val verb: Verb,       // exact: READ | WRITE | EDIT | DELETE | EXECUTE. Never null.
+    val mode: Mode        // SECURE | NOTIFY.  OFF is NOT a rule value.
+)
+
+data class Policy(
+    val global: GlobalMode,
+    val rules: List<Rule>
 )
 ```
 
-MVP rule dimensions: **plugin × verb × enabled**. No origin, no scope-string, no time windows.
-`scope` is stored on the record (useful) but not yet a matcher (YAGNI; add when a real need
-appears — that is the smallest step that cannot be wrong).
+- **The picker offers `default | notify | secure`** (your words). `default` removes the rule;
+  `notify` and `secure` store one, so the settings list reads back as a list of *decisions* rather
+  than a list of exceptions.
+- Stored `SECURE` and no rule are **behaviourally identical** and the resolver treats them the
+  same (`rule?.mode ?: SECURE`). Say it out loud in the UI so nobody hunts for a difference that
+  does not exist: a saved `secure` row renders as `gmail · delete — secure (default)`.
+- **`OFF` cannot be set per pair.** It exists only as a global switch value (§6.1). To get
+  log-only for one pair you would have to turn the gate off for everything — worth knowing now;
+  see Q12.
+- **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a startup error,
+  never last-wins.
+- **Q11 is void.** With exact keys two rules cannot both match one request, so there is nothing to
+  rank and nothing to refuse. The question only existed because of wildcards.
+- **No `scope`.** `(plugin, verb)` is the whole key and the whole screen.
 
-### 6.2 Resolution — lexicographic specificity, no tie-breaks
+### 6.3 Resolution — 12 lines, no engine
 
-A rule matches a request when `plugin` is `"*"` or equal, and `verb` is `null` or equal. Among
-matching rules, the winner is decided by a **specificity tuple compared lexicographically**:
-
+```kotlin
+fun resolveMode(global: GlobalMode, rules: List<Rule>, plugin: String, verb: Verb): Mode =
+    when (global) {
+        AUTOMATIC -> rules.find { it.plugin == plugin && it.verb == verb }?.mode ?: SECURE
+        SECURE    -> SECURE
+        NOTIFY    -> NOTIFY
+        OFF       -> OFF
+    }
 ```
-specificity = (pluginIsSpecific ? 1 : 0, scopeIsSpecific ? 1 : 0, verbIsSpecific ? 1 : 0)
-```
 
-Highest tuple wins. Comparison is left-to-right, first differing element decides.
+That is the entire policy system. It is `find` on a list. The audit records
+`Decision(mode, source, rule?)` with `source ∈ {GLOBAL, RULE, DEFAULT}` — `DEFAULT` is precisely
+"`AUTOMATIC` and no rule set". There is no `considered` list, no specificity, and nothing to explain
+beyond one lookup, because there is nothing else that could have won.
 
-Why this and not a numeric score: **a numeric score can tie, and every tie needs a tie-break rule.**
-I originally wrote "tie → the rule with the later `updatedAt` wins", which is wrong — it makes the
-same rule set resolve differently depending on the order you happened to edit it. A policy engine
-whose answer depends on edit history cannot be debugged from the log. Lexicographic comparison
-over independent dimensions can never tie, so no tie-break exists to get wrong.
+Fail-hard stays: a malformed store, or two rules on the same pair, **refuses to start the server**
+(`lastError` + red banner) rather than quietly running on something else. A policy you cannot read
+is not a policy.
 
-Why plugin outranks verb: `gmail/*` beats `*/write`. When you narrow to one plugin you have said
-something specific about that plugin; "all writes" is the broader statement about everything
-else. Stated once here so it is never re-litigated.
+### 6.4 Where it plugs in
 
-Adding a dimension later (origin, scope, time window) means appending one element to the tuple —
-it slots in behind plugin and verb without renumbering anything. That is the whole extension
-story, and the reason the tuple is not collapsed into an int.
-
-Worked example — rules: `*/* → SECURE` (implicit default), `gmail/* → AUTO`, `*/delete → SECURE`,
-`calendar/delete → NOTIFY`:
-
-| Request | Candidates | Specificity | Winner |
-|---|---|---|---|
-| `gmail.read` | gmail/*, */* | (1,0,0) vs (0,0,0) | `gmail/*` → AUTO |
-| `gmail.delete` | gmail/*, */delete, */* | (1,0,0) vs (0,0,1) | `gmail/*` → AUTO |
-| `calendar.delete` | calendar/delete, */delete, */* | (1,0,1) vs (0,0,1) | `calendar/delete` → NOTIFY |
-| `notifications.execute` | */* | (0,0,0) | default → SECURE |
-
-Note row 2: `gmail/*` wins over `*/delete`. If you want one gmail verb pulled back to SECURE, you
-must write `gmail/delete` explicitly — a cell being AUTO is never overridden by a broader rule.
-That is the direct consequence of "no hidden rules": broadening a rule can never silently claw
-back a narrower one, and narrowing always costs an explicit rule.
-
-The engine returns `Decision(mode, ruleId, considered: List<RuleId>)` — `considered` is the ordered
-list it walked, so the UI can show *"why: `gmail/*` (specificity 1,0,0) beat `*/delete` (0,0,1)"*
-from the same data the server used. `ruleId == null` means nothing matched → `SECURE`.
-
-Fail-hard: rules are parsed on load into `List<Rule>`; a malformed store throws and the server
-**refuses to start** (`lastError` + red banner) rather than silently running on defaults. A
-policy you cannot read is not a policy.
-
-The matrix is computed by calling this same `evaluate()` once per `(plugin, verb)` cell. There is
-no second implementation of the cascade — the screen that explains the policy *is* the policy.
-
-### 6.3 Where it plugs in
-
-`serve()` calls `PolicyEngine.evaluate(label)` immediately after `pluginRows()` (i.e. after all
-fail-fast validation, before any gate). Then:
+`serve()` calls `resolveMode()` immediately after `pluginRows()` — after all fail-fast validation,
+before any gate. Then:
 
 - `SECURE` → `ApprovalGate.await()` (unchanged).
-- `AUTO` → no gate; `ctx.outcome = AUTO_APPROVED`; handler runs.
 - `NOTIFY` → R3.
+- `OFF` → no gate; `ctx.outcome = OFF_APPROVED`; handler runs.
 
-The gate's FIFO stays the single serializer for `SECURE` only. This is the important structural
-decision: an auto-approved request must never wait behind a human thinking about a modal.
+An `OFF`/`NOTIFY` request never enters the modal FIFO, so an ungated request can never wait behind
+a human thinking about a modal.
 
-### 6.3 No hidden rules — **LOCKED (Q7, Mido 2026-10-17)**
+`requiresBiometric = (mode == SECURE)` is computed here and rendered by the Activity (§7.3).
 
-The engine has **no special cases**. It does not know that `delete` is scarier than `read`; it
-knows plugin, verb, enabled, and mode. Anything a human would recognise as "the tool protected me
-here" must instead appear as a rule they can see, or it does not exist.
+### 6.5 Screens
 
-This is a deliberate trade and it pushes three obligations onto the UI:
+**Settings screen** — the only place rules are authored:
 
-1. **The matrix is not optional.** Every `plugin × verb` cell shows its resolved mode and the rule
-   that won. A cell whose mode came from `*/*` must look different from one set explicitly, so
-   "I thought I only whitelisted reads" is visible in one glance instead of a surprise at 3 a.m.
-2. **`AUTO` cells must be visually loud.** Not a colour that reads as "fine" — this is the one
-   place the app is allowed to be ugly.
-3. **Rule changes are audited** (`POLICY_CHANGED`, before/after JSON) and the panic switch is one
-   tap from the main screen.
+- Global switch (4 radio options) with the security treatment from §6.1.
+- When global ≠ `AUTOMATIC`, the rule table renders **greyed out** under one line:
+  `Rules are ignored while the switch is SECURE / NOTIFY / OFF.` Greyed, not hidden — you must be
+  able to see what you configured while you cannot use it, or the switch becomes a memory test.
+- When global = `AUTOMATIC`: one row per configured pair (`gmail · delete → NOTIFY`) plus an
+  `add rule` picker (plugin → verb → mode).
 
-What is still forbidden in the engine, even under "flexible": a mode with no matching rule
-(`SECURE` is the default, so that cannot happen), and a rule that cannot be displayed (a stored
-rule that does not parse refuses to start the server — §6.1).
+**Modal rule control** — decide from the prompt you are already looking at:
 
-### 6.4 UI
+- One compact row: `This request: gmail · delete` + a 3-way control `default | secure | notify`.
+- `default` deletes the rule for that pair. `secure` also stores nothing (SECURE is absence) but is
+  offered anyway, because a human picking from a list expects to see their current choice; the row
+  renders `default` and `secure` identically afterwards, which is honest.
+- Applying it takes effect **from the next request** and **never decides the request on screen**.
+  A control that silently resolves the prompt you are looking at would be a second, invisible
+  decision — the exact thing this whole design is trying to avoid. Tapping it shows
+  `saved — applies from the next gmail · delete request`, then leaves the countdown alone.
+- Always present, including when global ≠ `AUTOMATIC`, with `ignored while global = SECURE` in the
+  same row. One line of text beats making the user hunt for why it did nothing.
 
-- Rules list (add/edit/delete/enable).
-- **Effective-mode matrix** — a grid of `plugin × verb` showing the resolved mode and the winning
-  rule for each cell, computed by the same engine the server uses. This is the anti-footgun: you
-  cannot believe `gmail.write` is AUTO when it is actually `gmail/*` doing it.
-- **Panic switch**: one toggle that forces SECURE for everything, sticky across restart, visible
-  on the main screen. Toggling it writes an audit record (`POLICY_CHANGED`).
-- Every rule change writes an audit record: before/after JSON. Policy history in the same log as
-  traffic is the whole point of building R1 first.
+**Log screen** — the same control on a record's detail view (§5.8), pre-filled with that record's
+`(plugin, verb)`. The log is where you notice a decision you dislike, so the fix belongs one tap
+from it.
 
-### 6.4 New outcome + record field
+### 6.6 Rule changes are audited
 
-`AUTO_APPROVED`, and `decision.mode/ruleId` already exist in the schema (R1 reserved them).
-No schema version bump needed — that is why they were reserved.
+Every change writes `POLICY_CHANGED` with `{before, after, source: SETTINGS|MODAL|LOG}`. Policy
+history lands in the same file as traffic — which is the whole reason R1 ships before R2.
 
 ---
 
@@ -620,6 +638,8 @@ No schema version bump needed — that is why they were reserved.
   distinction lives in the log (`NOTIFY_REJECTED`) and in the record. Caller-visible contract
   stays stable.
 - `setTimeoutAfter(5000)` removes the notification when the window closes.
+- If the screen goes off inside the window the request is denied, not approved (§7.2) and the
+  notification is cancelled — a notification whose answer is already `denied` must not linger.
 
 ### 7.2 Gate availability — **LOCKED (Q2, Mido 2026-10-17)**
 
@@ -631,12 +651,12 @@ isAttended() = PowerManager.isInteractive() && !KeyguardManager.isKeyguardLocked
 
 | Mode | Attended | Not attended (screen off or locked) |
 |---|---|---|
-| `AUTO` | approve | **approve** — the rule whitelisted it, no human needed |
+| `OFF` | approve | **approve** — the gate is deliberately off, no human expected |
 | `NOTIFY` | heads-up, 5s silence = approve | **deny** |
 | `SECURE` | modal + biometric | **deny** |
 
-The rule is one line, which is the point: *if a human cannot see it, nobody approves it — except a
-rule that explicitly says nobody needs to.*
+The rule is one line, which is the point: *if a human cannot see it, nobody approves it — unless you
+have explicitly turned the gate off for that class of request.*
 
 Implementation rules this decision forces:
 
@@ -651,6 +671,9 @@ Implementation rules this decision forces:
   `detail` and the log.
 - `NOTIFY`'s other escalations (channel disabled, notification permission blocked, DND) all
   collapse into the same answer: **deny**. There is no fallback path that approves invisibly.
+- Only `OFF` approves unattended, and `OFF` is reachable only through the global switch — a single
+  explicit choice with a confirmation dialog and a persistent red banner (§6.1). A per-pair rule
+  can never produce that behaviour, because `OFF` is not a rule value.
 - Consequence: `ApprovalGate.await()` is only ever called when `isAttended()` is true, so the
   full-screen intent path no longer fires onto a locked screen.
 - Mid-modal lock: a request already on screen keeps its original 60s clock (§4 `createdAtMs`); if
@@ -659,11 +682,11 @@ Implementation rules this decision forces:
 
 ### 7.3 Biometric — **LOCKED (Q3, Mido 2026-10-17)**
 
-**`BiometricPrompt` exists only in `SECURE`. `NOTIFY` and `AUTO` never prompt.**
+**`BiometricPrompt` exists only in `SECURE`. `NOTIFY` and `OFF` never prompt.**
 
 This supersedes the v0.3.1 rule ("APPROVE on every request, reads included"). That rule now reads:
 *every `SECURE` request, reads included.* A 5s silence-approve that demands a fingerprint is a
-contradiction, and `AUTO` has no human at all.
+contradiction, and `OFF` has no human at all.
 
 Implementation rules this decision forces:
 
@@ -679,9 +702,10 @@ Implementation rules this decision forces:
   release that ships R2 — an API doc claiming "every request needs a fingerprint" is wrong from
   0.5.0 onward.
 - Degraded case to keep honest: if no biometric is enrolled, `SECURE` still cannot approve
-  (unchanged v0.3.1 behaviour). `NOTIFY`/`AUTO` are unaffected — they never needed one. So a
-  phone with no fingerprint enrolled can still use `NOTIFY` and `AUTO`, which is a real
-  behaviour change worth one line in the R2 acceptance list.
+  (unchanged v0.3.1 behaviour). `NOTIFY`/`OFF` are unaffected — they never needed one. So a phone
+  with no fingerprint enrolled can now still use `NOTIFY` and `OFF`, which is a real behaviour
+  change worth one line in the R3 acceptance list. It is harmless: `NOTIFY` still requires an
+  attended screen, and `OFF` is the switch you turned off on purpose.
 
 ### 7.4 Interaction with the queue
 
@@ -696,8 +720,9 @@ paths. The only shared state is the audit log.
 
 - Text search over summary/body (index in memory, 7 days of data is small).
 - Filters: origin, label multi-select, outcome, duration range.
-- Counters per label: `gmail.write 142 total, 3 denied, 1 timeout, 96% auto`.
-- "Why this decision": for each record, show the exact rule + specificity that matched.
+- Counters per pair: `gmail · write — 142 total, 3 denied, 1 timeout, 96% ungated`.
+- "Why this decision": for each record, show `source` (GLOBAL / RULE / DEFAULT) and, when `RULE`,
+  the exact pair — `gmail · delete → NOTIFY`.
 - Export: share the selected day-file(s) as JSONL via `ACTION_SEND` (no server).
 - Retention settings screen (days, MB) replacing the R1 constants.
 - Optional: Room migration behind `AuditStore` **only if** search proves too slow. Not before.
@@ -709,62 +734,56 @@ paths. The only shared state is the audit log.
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | Audit record written twice on retry paths | One `finally`, one record object, a `written` guard |
-| R2 | Rule ambiguity confuses the human | Effective matrix + win explanation + panic switch |
-| R2 | `AUTO` silently widens a label | Matrix is computed by the server engine; rule changes are audited |
-| R3 | Silent auto-approve when phone is pocketed | Screen/lock check denies unless the rule is `AUTO` (§7.2) |
-| R3 | Notification permission silently off | Escalate; never approve invisibly |
+| R2 | `OFF` selected and forgotten | Confirmation dialog + persistent red home banner + `POLICY_CHANGED` record (§6.1) |
+| R2 | A rule is set while the global switch ignores rules, and appears broken | Greyed table + `ignored while global = …` on the modal row itself (§6.5) |
+| R2 | Fat-fingering the rule control mid-approval | Applies from the *next* request; never decides the request on screen (§6.5) |
+| R2 | Rules silently widen because a pair was already set | Only 12 pairs exist and every one is an explicit row; `rules.size` is on the home screen |
+| R3 | Silent auto-approve when phone is pocketed | Screen/lock check denies unless mode is `OFF` (§7.2) |
+| R3 | Notification permission silently off | Deny; never approve invisibly |
 | R4 | JSONL scan gets slow | 7d / 20MB cap; `AuditStore` interface for a Room swap |
 | All | Log becomes a de-facto secret store (email bodies) | Deferred by request; `redacted` flag + export control land with it |
 | R1 | Full disk takes the whole bridge offline (Q1 consequence) | Accepted by design; red banner + `audit_unavailable` makes cause obvious in one look |
 
 ---
 
-## 10. Open decisions (need Mido)
+## 10. Open decisions
 
-**Q1 — Audit write fails (disk full).** ✅ **DECIDED 2026-10-17: deny** (`500 audit_unavailable`).
-A gate you cannot audit is a gate you cannot trust. See §5.7 for the forced implementation rules.
+Closed on 2026-10-17, with where each one landed.
 
-**Q2 — NOTIFY, screen off or device locked.** ✅ **DECIDED 2026-10-17: deny, no escalation.**
-`AUTO` still approves, because a rule already whitelisted it. See §7.2 for the full matrix.
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Audit append fails | **Deny** — `500 audit_unavailable` (§5.7) |
+| Q2 | Unattended (screen off / locked) | `SECURE` and `NOTIFY` **deny**; `OFF` approves (§7.2) |
+| Q3 | Biometric scope | **`SECURE` only** — supersedes v0.3.1 (§7.3) |
+| Q5 | Storage | JSONL day-files behind `AuditStore`; no Room (§5.5, §5.13) |
+| Q6 | `✕` affordance | Notification action `✕ Reject`; no overlay (§5.13) |
+| Q7 | Auto-approve ceiling | **No hidden rules, no ceilings** (§6.3 — now moot, see Q11) |
+| Q9 | Log scope | **Log everything**; `noise` is a derived, stored, overridable flag (§5.12) |
+| Q10 | Retention | 7 days / 20 MB (§5.13) |
+| Q11 | Equal-specificity conflict between `gmail/*` and `*/delete` | **Void.** Exact rules removed wildcards, so two rules can never match one request. Nothing to rank, nothing to refuse (§6.2) |
+| — | `not_found` mapper (500 → 404) | Fixed in R1, own commit `61c23c5` (§5.14) |
 
-**Q3 — NOTIFY and biometric.** ✅ **DECIDED 2026-10-17: biometric is `SECURE`-only.**
-`NOTIFY` and `AUTO` never prompt. See §7.3 — this supersedes v0.3.1's "every request".
+Still open, both non-blocking for R1 (decide before R2/R3 ships):
 
-**Q4 — Origin in rules.** R2 rules are plugin × verb only; origin is recorded but not a matcher.
-OK, or do you want `origin` in rules now even though it is just an IP?
+**Q8 — `NOTIFY` window.** Genuinely 5s, or 5s plus a short grace (8s) so a mistaken `✕` is
+recoverable? *Recommend: 5s exactly. Predictable beats forgiving here — a 5s countdown you can
+learn is better than a window that varies.*
 
-**Q5 — Storage:** ✅ default accepted 2026-10-17: JSONL day-files, `AuditStore` interface for a
-later Room swap. No Room in R1.
+**Q12 — per-pair `OFF`.** The picker is `default | notify | secure`, so `OFF` exists only globally.
+That means "log this one pair, gate everything else" is currently impossible — you would have to
+switch the whole app to `OFF`. Deliberate, or should the picker gain a 4th option?
+*Recommend: leave it out of R2. `OFF` is the one value that means "no human, no fingerprint"; making
+it settable 12 times over invites setting it absent-mindedly. Add it later if you actually want it.*
 
-**Q6 — `✕` affordance.** ✅ default accepted 2026-10-17: one notification action labelled
-`✕ Reject`. An overlay is a separate release only if it still feels too loud in practice.
-
-**Q7 — Auto-approve cap.** ✅ **DECIDED 2026-10-17: no ceilings. No hidden rules — the system is
-flexible.** Any rule may set any mode for any plugin/verb. The only guarantees are structural:
-`SECURE` is the default, and the matrix must show the winning rule for every cell (§6.3).
-Explicitly rejected: a hardcoded "delete can never be AUTO" guard, per-verb safety tiers, and any
-special case that lives in the engine but not in the rule list.
-
-Consequence to be honest about: `AUTO` on `delete` is one tap away from destroying data with no
-human in the loop. That is the accepted design — the defence is visibility (matrix + audited rule
-changes + panic switch), not a prohibition.
-
-**Q8 — Timeout semantics.** Today 60s means "no tap". In NOTIFY that becomes 5s to *reject*. Do
-you want NOTIFY timeouts to be genuinely 5s, or 5s plus a short grace (e.g. 8s total) so a
-mistaken X is recoverable? *Recommend: 5s exactly, no grace. Simple, predictable.*
-
-**Q9 — Log scope.** ✅ **DECIDED 2026-10-17: log everything, noise is a filter.** A derived
-`noise` flag (stored per record) hides `UNROUTED` + `REJECTED_INVALID` by default, one tap to
-reveal, long-press to override. See §5.12. Never drop at write time.
-
-**Q10 — Retention.** ✅ default accepted 2026-10-17: 7 days / 20 MB.
-
----
+**Q4 — origin as a rule dimension.** Origin is recorded on every record but is not part of a rule
+key. Adding it means a 3-tuple key and a screen to set it. *Recommend: not yet — there is no
+identity behind the IP, so the rule would encode a guess.*
 
 ## 11. Concerns worth stating out loud
 
-**C1 — `AUTO` mode is a bigger security change than the log.** R1 is safe; R2 is the release that
-can hurt. It should not ship until R1 has a week of real records proving the labels are right.
+**C1 — R2 is a bigger security change than the log.** R1 is safe; R2 can turn the gate off. It
+should not ship until R1 has produced real records proving the verbs are classified correctly —
+`OFF` on a mis-classified read is one thing, on a mis-classified `delete` it is not.
 
 **C2 — Labels must be authored by the plugin, never inferred from the HTTP method.** `POST
 /notifications/{id}/action` is `execute`, not `write`; `POST /gmail/messages/{id}/trash` is
@@ -781,11 +800,14 @@ NanoHTTPD does not surface a mid-handler socket close, so detecting it needs a h
 socket probe — **not MVP**, but it belongs in R4, and until then `TIMEOUT` means "no decision",
 not "no client".
 
-**C5 — `httpStatusFor` has no `not_found` entry**, so a bad-id pre-fetch answers 500
-(documented in the API skill). R1 will make this visible on every such log entry. Fix it in R1
-as a separate one-line commit (body code unchanged, status becomes 404) — or leave it and tag
-those records `status_mismatch: true`. *Recommend: fix it, it is one line and the log is about
-to make it embarrassing.*
+**C5 — ✅ FIXED.** `httpStatusFor` had no `not_found` entry, so a bad-id pre-fetch answered 500.
+Fixed and shipped in 0.3.3 (commit `61c23c5`): 500 → 404, body identical. The `phonebridge-api`
+skill still carries the "reported as 500" caveat and must be corrected when R1 lands.
+
+**C7 — A per-pair rule can be set while the global switch silently ignores it.** The mitigation is
+the greyed table plus a literal `ignored while global = SECURE` on the modal row (§6.5), but it is
+still the most likely way to lose ten minutes wondering why nothing changed. Watch for it in real
+use; if it bites, the fix is to disable the control rather than annotate it.
 
 **C6 — Logging full bodies is a privacy decision made today that is hard to walk back.** Day
 files are deleted after 7 days, but they will contain email bodies and calendar descriptions.
@@ -797,11 +819,12 @@ before sharing.
 ## 12. Invariants (apply to every release)
 
 1. Every request produces exactly one audit record, written before the response is returned.
-2. A route without a `verb` and `scope` does not compile.
+2. A route without a `verb` does not compile.
 3. No silent fallback: unreadable policy → server refuses to start; unreadable log line → counted
    and shown, never hidden.
-4. Any auto-approving path is still recorded with its rule id and mode.
-5. `SECURE` remains the default and the panic-switch target. Nothing can outrank it.
+4. Any ungated path is still recorded, with `mode` and `source` (`GLOBAL` / `RULE` / `DEFAULT`).
+5. `SECURE` is the default in every ambiguous case: unset pair, unreadable policy, fresh install,
+   and the global switch's resting value.
 6. No side effect is ever reported as succeeded without an audit record. Append failure → 500,
    never a silent success (Q1, locked).
 6. Gate decisions remain central. A plugin still cannot gate itself, and a plugin cannot opt out
@@ -817,12 +840,11 @@ Every decision below is closed. Anything not listed is still open and named in �
 | # | Decision | Date | Where |
 |---|---|---|---|
 | Q1 | Audit append fails → deny with `500 audit_unavailable` | 2026-10-17 | §5.7 |
-| Q2 | Unattended (screen off/locked): `SECURE`/`NOTIFY` deny, `AUTO` approves. No escalation. | 2026-10-17 | §7.2 |
+| Q2 | Unattended (screen off/locked): `SECURE`/`NOTIFY` deny; `OFF` approves. No escalation. | 2026-10-17 | §7.2 |
 | Q3 | Biometric is `SECURE`-only; supersedes v0.3.1 "every request" | 2026-10-17 | §7.3 |
-| Q7 | No hidden rules, no ceilings; engine is plugin × verb × mode only | 2026-10-17 | §6.3 |
+| Q7 | No hidden rules, no ceilings | 2026-10-17 | §6.2 |
 | Q9 | Log everything; `noise` is a derived, stored, overridable flag | 2026-10-17 | §5.12 |
 | — | `not_found` mapper fix (500 → 404), own commit in R1 | 2026-10-17 | §5.14 |
 | Q5/Q6/Q10 | JSONL day-files · `✕ Reject` action · 7d / 20 MB | 2026-10-17 | §5.13 |
 
-Still open, both R3-scoped and non-blocking for R1: **Q8** (NOTIFY window: 5s exactly vs 5s + grace
-— recommended 5s exactly) and **Q4** (origin as a rule dimension — currently recorded, not matched).
+**Q8**, **Q12** and **Q4** are the only ones still open; all three are non-blocking for R1. See §10.
