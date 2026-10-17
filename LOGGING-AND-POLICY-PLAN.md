@@ -544,9 +544,12 @@ data class Policy(
 - Stored `SECURE` and no rule are **behaviourally identical** and the resolver treats them the
   same (`rule?.mode ?: SECURE`). Say it out loud in the UI so nobody hunts for a difference that
   does not exist: a saved `secure` row renders as `gmail · delete — secure (default)`.
-- **`OFF` cannot be set per pair.** It exists only as a global switch value (§6.1). To get
-  log-only for one pair you would have to turn the gate off for everything — worth knowing now;
-  see Q12.
+- **`OFF` cannot be set per pair — LOCKED (Q12, Mido 2026-10-17).** It exists only as a global
+  switch value (§6.1). The per-pair picker is exactly `default | notify | secure`, three options,
+  so there is no way to auto-approve one pair in isolation; getting log-only for `gmail · delete`
+  means turning the gate off for the entire app. Accepted trade: `OFF` is the one value meaning "no
+  human, no fingerprint", and one switch is easier to remember to turn back than twelve rows.
+  Do not add a 4th picker option without a fresh decision — see Q12.
 - **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a startup error,
   never last-wins.
 - **Q11 is void.** With exact keys two rules cannot both match one request, so there is nothing to
@@ -761,6 +764,7 @@ Closed on 2026-10-17, with where each one landed.
 | Q9 | Log scope | **Log everything**; `noise` is a derived, stored, overridable flag (§5.12) |
 | Q10 | Retention | 7 days / 20 MB (§5.13) |
 | Q11 | Equal-specificity conflict between `gmail/*` and `*/delete` | **Void.** Exact rules removed wildcards, so two rules can never match one request. Nothing to rank, nothing to refuse (§6.2) |
+| Q12 | Per-pair `OFF` | **Global only.** Picker stays `default \| notify \| secure`; auto-approve is always app-wide (§6.2) |
 | — | `not_found` mapper (500 → 404) | Fixed in R1, own commit `61c23c5` (§5.14) |
 
 Still open, both non-blocking for R1 (decide before R2/R3 ships):
@@ -769,11 +773,12 @@ Still open, both non-blocking for R1 (decide before R2/R3 ships):
 recoverable? *Recommend: 5s exactly. Predictable beats forgiving here — a 5s countdown you can
 learn is better than a window that varies.*
 
-**Q12 — per-pair `OFF`.** The picker is `default | notify | secure`, so `OFF` exists only globally.
-That means "log this one pair, gate everything else" is currently impossible — you would have to
-switch the whole app to `OFF`. Deliberate, or should the picker gain a 4th option?
-*Recommend: leave it out of R2. `OFF` is the one value that means "no human, no fingerprint"; making
-it settable 12 times over invites setting it absent-mindedly. Add it later if you actually want it.*
+**Q12 — per-pair `OFF`.** ✅ **DECIDED 2026-10-17: global only.** The picker stays
+`default | notify | secure`. `OFF` is reachable only through the switch, so auto-approve is always
+an app-wide, deliberate act. Consequence accepted: "log only for one pair" is not expressible —
+the gate is all-or-nothing. Re-litigating this later means adding a 4th picker option, and doing so
+reopens the question of whether an accidentally-set `OFF` row can silently bypass the gate; it
+would need the same confirmation + banner treatment the global switch has.
 
 **Q4 — origin as a rule dimension.** Origin is recorded on every record but is not part of a rule
 key. Adding it means a 3-tuple key and a screen to set it. *Recommend: not yet — there is no
@@ -847,4 +852,4 @@ Every decision below is closed. Anything not listed is still open and named in �
 | — | `not_found` mapper fix (500 → 404), own commit in R1 | 2026-10-17 | §5.14 |
 | Q5/Q6/Q10 | JSONL day-files · `✕ Reject` action · 7d / 20 MB | 2026-10-17 | §5.13 |
 
-**Q8**, **Q12** and **Q4** are the only ones still open; all three are non-blocking for R1. See §10.
+**Q8** and **Q4** are the only ones still open; both are non-blocking for R1. See §10.
