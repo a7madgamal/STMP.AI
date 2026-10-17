@@ -181,6 +181,9 @@ class BridgeService : Service() {
         if (PluginRegistry.get("calendar") == null) {
             PluginRegistry.register(CalendarPlugin(applicationContext))
         }
+        if (PluginRegistry.get("debug") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.debug.DebugPlugin(applicationContext))
+        }
     }
 
     /** First IPv4 in the Tailscale CGNAT range 100.64.0.0/10, else null. */
@@ -326,8 +329,12 @@ class HttpServer(
             // a plugin and a verb, and the log is far more useful with them.
             draft.bindRoute(resolved.plugin.id, resolved.route.verb, resolved.route.path)
 
-            val body = if (method == "POST") readBody(session) else JSONObject()
-            draft.requestBody(body)
+            val rawBody = if (method == "POST") readRawBody(session) else ""
+            // Verbatim, and BEFORE the parse that can throw. A malformed body still
+            // has to leave a record: without this the log says "invalid JSON" and
+            // keeps not one byte of what was actually sent.
+            draft.requestBody(rawBody)
+            val body = if (method == "POST") parseBody(rawBody) else JSONObject()
 
             val req = Req(
                 method = method,
@@ -415,8 +422,14 @@ class HttpServer(
             }
 
             val resp = runBlocking { resolved.route.handler(req) }
-            val bodyText = resp.body.toString()
-            draft.response(resp.status, bodyText)
+            // A route may opt out of storing its response (see Route.auditResponseBody):
+            // /debug returns the log itself, and copying that into the log on every
+            // call is both self-referential and a quiet drain on the 20 MB budget.
+            if (resolved.route.auditResponseBody) {
+                draft.response(resp.status, resp.body.toString())
+            } else {
+                draft.responseNotStored(resp.status)
+            }
             Dispatched(statusOf(resp.status), resp.body)
         } catch (e: PluginError) {
             // Two very different failures share this type. BEFORE the gate it is the
@@ -682,15 +695,21 @@ class HttpServer(
             .put("actual_path", actualPath)
             .put("body", body)
 
-    private fun readBody(session: IHTTPSession): JSONObject {
+    /**
+     * The body as the caller sent it. Never throws on bad content — only on a socket
+     * failure, which the caller records as a transport fault rather than a client one.
+     */
+    private fun readRawBody(session: IHTTPSession): String {
         val map = HashMap<String, String>()
         session.parseBody(map)
-        val raw = map["postData"] ?: "{}"
-        return try {
-            if (raw.isBlank()) JSONObject() else JSONObject(raw)
-        } catch (e: Exception) {
-            throw PluginError("bad_request", "invalid JSON body: ${e.message}")
-        }
+        return map["postData"] ?: ""
+    }
+
+    /** Parse, failing hard and coded. The raw text is already on the draft by now. */
+    private fun parseBody(raw: String): JSONObject = try {
+        if (raw.isBlank()) JSONObject() else JSONObject(raw)
+    } catch (e: Exception) {
+        throw PluginError("bad_request", "invalid JSON body: ${e.message}")
     }
 
     private fun statusOf(code: Int): Response.Status =

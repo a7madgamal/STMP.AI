@@ -158,6 +158,39 @@ class AuditLogTest {
     }
 
     @Test
+    fun `a body that cannot be parsed is still stored verbatim`() {
+        // The dead end this exists to prevent: answering 400 "invalid JSON body"
+        // while keeping not one byte of what the caller actually sent.
+        val d = com.mido.phonebridge.audit.AuditDraft(
+            1L, "1.1.1.1", "POST", "/notifications/abc/action", emptyMap(), emptyMap(), "0.5.0", 69
+        )
+        d.bindRoute("notifications", Verb.EXECUTE, "/notifications/{id}/action")
+        d.requestBody("{\"action\": broken")
+        d.outcome(AuditOutcome.REJECTED_INVALID)
+        d.error("bad_request")
+        d.response(400, null)
+        val rec = d.toRecord(2L)
+        assertEquals("{\"action\": broken", rec.requestBody)
+        // Survives the codec, so the detail screen can show it back.
+        assertEquals("{\"action\": broken", JSONObject(rec.toJson().toString()).getString("requestBody"))
+    }
+
+    @Test
+    fun `an unrecorded response body is marked absent, never silently empty`() {
+        // /debug returns the log itself and opts out of storing its response. An empty
+        // responseBody must not read as "the handler returned nothing".
+        val d = com.mido.phonebridge.audit.AuditDraft(
+            1L, "1.1.1.1", "GET", "/debug", emptyMap(), emptyMap(), "0.5.0", 69
+        )
+        d.bindRoute("debug", Verb.READ, "/debug")
+        d.outcome(AuditOutcome.APPROVED)
+        d.responseNotStored(200)
+        val json = d.toRecord(2L).toJson()
+        assertEquals("", json.getString("responseBody"))
+        assertTrue(json.getJSONObject("truncated").getBoolean("responseBodyAbsent"))
+    }
+
+    @Test
     fun `clear removes every record`() {
         val dir = tmp.newFolder()
         val a = log(dir)

@@ -30,6 +30,16 @@ data class Route(
     /** What this route does: the audit label, and (R2) the policy key. */
     val verb: Verb,
     /**
+     * Whether the audit records the RESPONSE body for this route.
+     *
+     * True for everything except `/debug`, which returns the log itself. Recording
+     * that would copy the log into the log on every call — self-referential, and at
+     * the 32 KiB blob cap it quietly eats a third of the 20 MB retention budget in
+     * under a hundred calls. The record still keeps the outcome, status and summary;
+     * its `responseBody` is simply empty, and `storedResponseBody` says so.
+     */
+    val auditResponseBody: Boolean = true,
+    /**
      * Pre-gate validation, run BEFORE the approval modal can open.
      *
      * Input that can never succeed must never cost the human a tap: `count=-1`

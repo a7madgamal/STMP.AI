@@ -39,7 +39,7 @@ class AuditCodecTest {
         val d = draft()
         d.bindRoute("gmail", Verb.EDIT, "/gmail/messages/{id}/modify")
         d.summary("MODIFY EMAIL  add=[STARRED]")
-        d.requestBody(JSONObject("""{"addLabels":["STARRED"],"note":"café 🦀 \"quoted\"\nline2"}"""))
+        d.requestBody("""{"addLabels":["STARRED"],"note":"café 🦀 \"quoted\"\nline2"}""")
         d.decision(
             Decision(
                 mode = "SECURE", source = DecisionSource.DEFAULT, globalMode = null, rule = null,
