@@ -18,6 +18,8 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     override val displayName = "Gmail"
 
     override val scopes = listOf(
+        "openid",
+        "email",
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.send"
@@ -26,24 +28,105 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     private val base = "https://gmail.googleapis.com/gmail/v1/users/me"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/gmail/profile") { profile() },
-        Route("GET", "/gmail/messages") { list(it) },
-        Route("GET", "/gmail/messages/{id}") { get(it) },
-        Route("POST", "/gmail/messages/{id}/modify") { modify(it) },
-        Route("POST", "/gmail/messages/{id}/trash") { trash(it) },
-        Route("POST", "/gmail/messages/send") { send(it) }
+        Route("GET", "/gmail/profile", "Show your Gmail profile") { profile() },
+        Route("GET", "/gmail/messages", "List your Gmail messages") { list(it) },
+        Route("GET", "/gmail/messages/{id}", "Read a Gmail message") { get(it) },
+        Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels") { modify(it) },
+        Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL") { trash(it) },
+        Route("POST", "/gmail/messages/send", "SEND EMAIL") { send(it) }
     )
+
+    /**
+     * The rows the approval modal shows. Owned here, not in the gate: only Gmail
+     * knows its request shapes, and only Gmail can fetch the message to NAME the
+     * target (a bare id is not something a human can approve).
+     *
+     * FAIL HARD: every mutating route's required input is validated here, so a
+     * miss throws a coded error that the gate turns into a status BEFORE the modal.
+     */
+    override fun describeRows(req: Req): List<ApprovalRow> = rowsFor(
+        req,
+        reads = setOf("/gmail/profile", "/gmail/messages", "/gmail/messages/{id}"),
+        writes = mapOf(
+            "POST /gmail/messages/send" to { r ->
+                val to = r.body.optJSONArray("to")?.toStringList()
+                    ?: throw PluginError("bad_request", "missing required 'to[]'")
+                if (to.isEmpty()) throw PluginError("bad_request", "'to[]' must not be empty")
+                val subject = requireBodyString(r, "subject")
+                val body = requireBodyString(r, "body")
+                buildList {
+                    add(ApprovalRow("TO", to.joinToString(", "), ApprovalRow.Style.WARN))
+                    r.body.optJSONArray("cc")?.toStringList()?.takeIf { it.isNotEmpty() }
+                        ?.let { add(ApprovalRow("CC", it.joinToString(", "), ApprovalRow.Style.WARN)) }
+                    r.body.optJSONArray("bcc")?.toStringList()?.takeIf { it.isNotEmpty() }
+                        ?.let { add(ApprovalRow("BCC", it.joinToString(", "), ApprovalRow.Style.WARN)) }
+                    add(ApprovalRow("SUBJECT", subject, ApprovalRow.Style.WARN))
+                    add(ApprovalRow("BODY", body, ApprovalRow.Style.LONG))
+                }
+            },
+            "POST /gmail/messages/{id}/trash" to { r ->
+                val id = requirePathId(r.pathParams["id"])
+                // Fetch the message so the modal NAMES what is being trashed, not just
+                // its id. A bad id fails hard (no modal) — we will not offer to trash
+                // something we cannot describe.
+                val msg = try {
+                    GoogleApi.get(ctx, "$base/messages/$id?format=metadata" +
+                        "&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date")
+                } catch (e: PluginError) {
+                    throw PluginError("not_found", "no message for id '$id': ${e.message}")
+                }
+                val s = summarize(msg)
+                buildList {
+                    if (s.optString("subject").isNotBlank()) add(ApprovalRow("SUBJECT", s.optString("subject")))
+                    if (s.optString("from").isNotBlank()) add(ApprovalRow("FROM", s.optString("from")))
+                    if (s.optString("snippet").isNotBlank()) add(ApprovalRow("SNIPPET", s.optString("snippet"), ApprovalRow.Style.LONG))
+                    add(ApprovalRow("MESSAGE ID", id, ApprovalRow.Style.MONO))
+                }
+            },
+            "POST /gmail/messages/{id}/modify" to { r ->
+                val add = r.body.optJSONArray("addLabels")?.toStringList() ?: emptyList()
+                val remove = r.body.optJSONArray("removeLabels")?.toStringList() ?: emptyList()
+                if (add.isEmpty() && remove.isEmpty()) {
+                    throw PluginError("bad_request", "addLabels or removeLabels required")
+                }
+                val addText = add.joinToString(", ")
+                val removeText = remove.joinToString(", ")
+                buildList {
+                    if (add.isNotEmpty()) add(ApprovalRow("ADD LABELS", addText))
+                    if (remove.isNotEmpty()) add(ApprovalRow("REMOVE LABELS", removeText))
+                }
+            }
+        )
+    )
+
+    private fun requireBodyString(req: Req, key: String): String {
+        val v = req.body.optString(key).trim()
+        if (v.isBlank()) throw PluginError("bad_request", "missing required '$key'")
+        return v
+    }
+
+    private fun requirePathId(id: String?): String {
+        val v = id?.trim().orEmpty()
+        if (v.isBlank()) throw PluginError("bad_request", "missing message id in path")
+        return v
+    }
 
     override fun status(): PluginStatus {
         if (AuthManager.clientId.isBlank()) {
             return PluginStatus("Gmail", PluginStatus.State.OFF, "no OAuth client id configured")
         }
-        return if (AuthManager.isLoggedIn(ctx)) {
-            val email = AuthManager.accountEmail ?: "(account unknown)"
-            PluginStatus("Gmail", PluginStatus.State.OK, email)
-        } else {
-            PluginStatus("Gmail", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
+        if (!AuthManager.isLoggedIn(ctx)) {
+            return PluginStatus("Gmail", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
         }
+        val email = AuthManager.accountEmail ?: "(account unknown)"
+        val left = AuthManager.tokenRemainingMs()
+        val detail = if (left > 0) {
+            val mins = left / 60_000
+            "$email · token ${mins}m"
+        } else {
+            "$email · refresh token"
+        }
+        return PluginStatus("Gmail", PluginStatus.State.OK, detail)
     }
 
     // --- routes ---
@@ -122,9 +205,9 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         val threadId = req.body.optString("threadId").ifBlank { null }
 
         val raw = buildMime(
-            to = to.toList(),
-            cc = req.body.optJSONArray("cc").toList(),
-            bcc = req.body.optJSONArray("bcc").toList(),
+            to = to.toStringList(),
+            cc = req.body.optJSONArray("cc").toStringList(),
+            bcc = req.body.optJSONArray("bcc").toStringList(),
             subject = subject,
             body = bodyText
         )
@@ -206,10 +289,10 @@ class GmailPlugin(private val ctx: Context) : Plugin {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private fun JSONArray?.toList(): List<String> {
+    private fun JSONArray?.toStringList(): List<String> {
         if (this == null) return emptyList()
         val out = ArrayList<String>(length())
         for (i in 0 until length()) out.add(optString(i))
-        return out
+        return out.filter { it.isNotBlank() }
     }
 }

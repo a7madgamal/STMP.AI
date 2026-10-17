@@ -69,6 +69,39 @@ object TokenStore {
         cached = null
     }
 
+    // --- plain (non-secret) persisted values: survive updates, no re-config ---
+
+    private const val F_EMAIL = "account_email"
+    private const val F_CLIENT_ID = "oauth_client_id"
+    private const val F_SERVER_CLIENT_ID = "oauth_server_client_id"
+    private const val F_CLIENT_SECRET = "oauth_client_secret"
+
+    private fun put(ctx: Context, key: String, v: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(key, v).apply()
+    }
+    private fun get(ctx: Context, key: String): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(key, null)
+
+    fun saveEmail(ctx: Context, email: String) = put(ctx, F_EMAIL, email)
+    fun email(ctx: Context): String? = get(ctx, F_EMAIL)
+
+    /** Wipe persisted identity (email) on a real logout. Config is kept. */
+    fun clearIdentity(ctx: Context) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(F_EMAIL).apply()
+    }
+
+    fun saveConfig(ctx: Context, clientId: String, serverClientId: String, clientSecret: String) {
+        put(ctx, F_CLIENT_ID, clientId)
+        put(ctx, F_SERVER_CLIENT_ID, serverClientId)
+        put(ctx, F_CLIENT_SECRET, clientSecret)
+    }
+    fun config(ctx: Context): Triple<String, String, String>? {
+        val a = get(ctx, F_CLIENT_ID) ?: return null
+        val b = get(ctx, F_SERVER_CLIENT_ID) ?: return null
+        val c = get(ctx, F_CLIENT_SECRET) ?: return null
+        return Triple(a, b, c)
+    }
+
     fun load(ctx: Context) { /* no-op; decrypt happens lazily on read */ }
 
     private fun secretKey(): SecretKey {

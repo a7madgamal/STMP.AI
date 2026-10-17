@@ -34,6 +34,17 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Load the OAuth config + account email from disk BEFORE anything else.
+        // This is what makes an update-without-wipe keep working: the config and
+        // identity no longer depend on BridgeService having run since boot.
+        com.mido.phonebridge.core.AuthManager.init(
+            applicationContext,
+            BridgeService.GOOGLE_CLIENT_ID,
+            BridgeService.GOOGLE_SERVER_CLIENT_ID,
+            BridgeService.GOOGLE_CLIENT_SECRET
+        )
+        Debug.log("config loaded; clientId len=${com.mido.phonebridge.core.AuthManager.clientId.length}")
+
         val pad = UiKit.dp(this, 20)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -46,28 +57,34 @@ class MainActivity : Activity() {
         scroll.addView(content)
 
         fun header(t: String) = TextView(this).apply {
-            text = t
+            text = t.uppercase()
+            textSize = 11f
+            letterSpacing = 0.15f
+            setTextColor(0xFF78909C.toInt())
+            setPadding(0, UiKit.dp(this@MainActivity, 20), 0, UiKit.dp(this@MainActivity, 6))
+        }
+
+        // --- 1. HERO: the one thing you need to know ---
+        heroCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(UiKit.dp(this@MainActivity, 16), UiKit.dp(this@MainActivity, 14),
+                UiKit.dp(this@MainActivity, 16), UiKit.dp(this@MainActivity, 14))
+        }
+        heroTitle = TextView(this).apply {
             textSize = 20f
-            setTextColor(UiKit.TEXT_ON_DARK)
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, UiKit.dp(this@MainActivity, 12), 0, UiKit.dp(this@MainActivity, 4))
-        }
-        fun body(t: String) = TextView(this).apply {
-            text = t
-            textSize = 13f
-            setTextColor(UiKit.TEXT_MUTED)
-            setPadding(0, 0, 0, UiKit.dp(this@MainActivity, 8))
-        }
-
-        content.addView(TextView(this).apply {
-            text = "PhoneBridge"
-            textSize = 26f
             setTextColor(UiKit.TEXT_ON_DARK)
-            typeface = Typeface.DEFAULT_BOLD
-        })
+        }
+        heroSub = TextView(this).apply {
+            textSize = 14f
+            setTextColor(UiKit.TEXT_ON_DARK)
+            setPadding(0, UiKit.dp(this@MainActivity, 4), 0, 0)
+        }
+        heroCard.addView(heroTitle)
+        heroCard.addView(heroSub)
+        content.addView(heroCard)
 
-        // --- server control ---
-        content.addView(header("Server"))
+        // --- 2. CONTROLS: the primary action ---
         serverButton = Button(this).apply {
             setOnClickListener {
                 if (BridgeService.serverUp) {
@@ -78,52 +95,37 @@ class MainActivity : Activity() {
                 }
                 statusContainer.postDelayed({ render() }, 600)
             }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = UiKit.dp(this@MainActivity, 16) }
         }
         content.addView(serverButton)
 
-        // --- status ---
-        content.addView(header("Status"))
+        // --- 3. CHECKLIST: compact status rows, each actionable ---
+        content.addView(header("Setup"))
         statusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(statusContainer)
 
-        // --- permissions / actions ---
-        content.addView(header("Permissions"))
-        content.addView(coloredButton("GRANT NOTIFICATION PERMISSION") {
-            requestNotifPermission()
-        }, UiKit.NEUTRAL_BG)
-        content.addView(coloredButton("GRANT FULL-SCREEN POPUP") {
-            openFullScreenIntentSettings()
-        }, UiKit.NEUTRAL_BG)
-        content.addView(coloredButton("GRANT DRAW-OVER-APPS") {
-            try {
-                startActivity(
-                    Intent(
-                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        android.net.Uri.parse("package:$packageName")
-                    )
-                )
-                Debug.log("opened draw-over-apps settings")
-            } catch (e: Exception) {
-                Debug.log("cannot open overlay settings: ${e.message}")
-            }
-        }, UiKit.NEUTRAL_BG)
-        content.addView(coloredButton("OPEN NOTIFICATION ACCESS SETTINGS") {
-            try {
-                startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-            } catch (e: Exception) {
-                Debug.log("cannot open notif settings: ${e.message}")
-            }
-        }, UiKit.NEUTRAL_BG)
+        // --- accounts / plugins ---
+        content.addView(header("Account"))
+        accountBanner = TextView(this).apply { textSize = 15f }
+        content.addView(accountBanner)
+        loginButton = Button(this).apply {
+            setOnClickListener { startGoogleLogin() }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = UiKit.dp(this@MainActivity, 8) }
+        }
+        content.addView(loginButton)
 
-        // --- plugins ---
         content.addView(header("Plugins"))
-        content.addView(coloredButton("LOGIN WITH GOOGLE") { startGoogleLogin() }, UiKit.NEUTRAL_BG)
         val pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(pluginContainer)
         this.pluginContainer = pluginContainer
 
-        // --- debug log (collapsed by default) ---
-        content.addView(coloredButton("SHOW DEBUG LOG") {
+        // --- 4. LOG: collapsed by default, out of the main flow ---
+        content.addView(header("Debug"))
+        content.addView(coloredButton("▸ SHOW LOG") {
             logExpanded = !logExpanded
             logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
             render()
@@ -142,29 +144,67 @@ class MainActivity : Activity() {
         setContentView(root)
 
         Debug.init(applicationContext)
+        Debug.log("=== PhoneBridge ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}) ===")
         Debug.log("app launched")
         render()
     }
 
     private lateinit var pluginContainer: LinearLayout
+    private lateinit var loginButton: Button
+    private lateinit var accountBanner: TextView
+    private lateinit var heroCard: LinearLayout
+    private lateinit var heroTitle: TextView
+    private lateinit var heroSub: TextView
 
     override fun onResume() {
         super.onResume()
         render()
+        // If a request is still waiting, put its modal back on screen. The approval
+        // lives in its OWN recents-hidden task, so returning to the app (launcher
+        // icon, recents) lands on MainActivity — which knows nothing about the
+        // pending request. Without this the modal stays stranded off-screen until
+        // the window expires. No-op when nothing is pending (the common case).
+        ApprovalGate.relaunchCurrent(this)
     }
 
     // --- rendering ---
 
     private fun render() {
-        if (BridgeService.serverUp) {
-            serverButton.text = "STOP SERVER"
-            serverButton.background = UiKit.pill(UiKit.RED_BG)
+        // --- 1. HERO: one line that answers "is it working?" ---
+        val listenerOk = BridgeService.listenerRef != null
+        val notifOk = hasNotifPermission()
+        val healthy = BridgeService.serverUp && listenerOk && notifOk
+        if (BridgeService.serverUp && healthy) {
+            heroCard.background = UiKit.pill(UiKit.GREEN_BG)
+            heroTitle.text = "● Running"
+        } else if (BridgeService.serverUp) {
+            heroCard.background = UiKit.pill(UiKit.AMBER_BG)
+            heroTitle.text = "● Running — needs attention"
         } else {
-            serverButton.text = "START SERVER"
-            serverButton.background = UiKit.pill(UiKit.GREEN_BG)
+            heroCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
+            heroTitle.text = "● Stopped"
         }
-        serverButton.setTextColor(UiKit.TEXT_ON_DARK)
+        heroCard.background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(UiKit.NEUTRAL_BG)
+            cornerRadius = UiKit.dp(this@MainActivity, 12).toFloat()
+        }
+        heroTitle.setTextColor(UiKit.TEXT_ON_DARK)
+        heroSub.text = when {
+            !BridgeService.serverUp -> "Tap START SERVER to begin"
+            BridgeService.lastError.isNotBlank() -> BridgeService.lastError
+            AuthManager.isLoggedIn(this) -> (AuthManager.accountEmail ?: "signed in") +
+                " · " + BridgeService.bindAddress.ifBlank { "?" } + ":" + BridgeService.PORT
+            else -> "Not signed in to Google"
+        }
+        heroSub.setTextColor(UiKit.TEXT_ON_DARK)
 
+        // --- 3. CHECKLIST: compact, each row says what to do when broken ---
+        // Start/Stop colour rule (user's standing rule): grey = idle/stopped,
+        // green = running, and NEVER red for a normal stopped state. The button
+        // is not green just because it is tappable — green means the server is up.
+        serverButton.text = if (BridgeService.serverUp) "STOP SERVER" else "START SERVER"
+        serverButton.background = UiKit.pill(if (BridgeService.serverUp) UiKit.RED_BG else UiKit.NEUTRAL_BG)
+        serverButton.setTextColor(UiKit.TEXT_ON_DARK)
         statusContainer.removeAllViews()
         statusContainer.addView(
             UiKit.statusRow(
@@ -174,39 +214,54 @@ class MainActivity : Activity() {
                 if (BridgeService.serverUp) UiKit.State.OK else UiKit.State.OFF
             )
         )
-        if (BridgeService.lastError.isNotBlank()) {
-            statusContainer.addView(UiKit.statusRow(this, "Error", BridgeService.lastError, UiKit.State.ERROR))
-        }
         statusContainer.addView(
             UiKit.statusRow(
-                this, "Notification listener",
-                if (BridgeService.listenerRef != null) "connected" else "not connected",
-                if (BridgeService.listenerRef != null) UiKit.State.OK else UiKit.State.WARN
+                this, "Notification access",
+                if (listenerOk) "connected" else "tap to grant",
+                if (listenerOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { openNotifAccessSettings() }
             )
         )
         statusContainer.addView(
             UiKit.statusRow(
                 this, "Notifications permission",
-                if (hasNotifPermission()) "granted" else "missing",
-                if (hasNotifPermission()) UiKit.State.OK else UiKit.State.WARN
+                if (notifOk) "granted" else "tap to grant",
+                if (notifOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { requestNotifPermission() }
             )
         )
+        val fsiOk = ApprovalGate.canUseFullScreenIntent(this)
         statusContainer.addView(
             UiKit.statusRow(
                 this, "Full-screen popup",
-                if (ApprovalGate.canUseFullScreenIntent(this)) "granted" else "not granted",
-                if (ApprovalGate.canUseFullScreenIntent(this)) UiKit.State.OK else UiKit.State.WARN
+                if (fsiOk) "granted" else "tap to grant",
+                if (fsiOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { openFullScreenIntentSettings() }
             )
         )
+        val overlayOk = android.provider.Settings.canDrawOverlays(this)
         statusContainer.addView(
             UiKit.statusRow(
                 this, "Draw over apps",
-                if (android.provider.Settings.canDrawOverlays(this)) "granted" else "not granted",
-                if (android.provider.Settings.canDrawOverlays(this)) UiKit.State.OK else UiKit.State.WARN
+                if (overlayOk) "granted" else "tap to grant",
+                if (overlayOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { openOverlaySettings() }
             )
         )
 
-        // plugin cards
+        // --- account ---
+        if (AuthManager.isLoggedIn(this)) {
+            val email = AuthManager.accountEmail ?: "(email unknown)"
+            accountBanner.text = "👤 $email"
+        } else {
+            accountBanner.text = "👤 Not signed in"
+        }
+        accountBanner.setTextColor(if (AuthManager.isLoggedIn(this)) 0xFF81C784.toInt() else UiKit.TEXT_MUTED)
+
+        loginButton.text = if (AuthManager.isLoggedIn(this)) "RE-LOGIN" else "LOGIN WITH GOOGLE"
+        loginButton.background = UiKit.pill(if (AuthManager.isLoggedIn(this)) UiKit.NEUTRAL_BG else UiKit.GREEN_BG)
+        loginButton.setTextColor(UiKit.TEXT_ON_DARK)
+
         pluginContainer.removeAllViews()
         val plugins = PluginRegistry.all()
         if (plugins.isEmpty()) {
@@ -225,6 +280,7 @@ class MainActivity : Activity() {
         }
 
         logView.text = Debug.dump()
+        logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
         (logView.parent as? ScrollView)?.post { (logView.parent as? ScrollView)?.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
@@ -245,6 +301,29 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun openOverlaySettings() {
+        try {
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:$packageName")
+                )
+            )
+            Debug.log("opened draw-over-apps settings")
+        } catch (e: Exception) {
+            Debug.log("cannot open overlay settings: ${e.message}")
+        }
+    }
+
+    private fun openNotifAccessSettings() {
+        try {
+            startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+            Debug.log("opened notification-access settings")
+        } catch (e: Exception) {
+            Debug.log("cannot open notif settings: ${e.message}")
+        }
     }
 
     private fun requestNotifPermission() {
@@ -330,16 +409,46 @@ object Debug {
     private val lines = ArrayDeque<String>()
     private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
 
+    /**
+     * Redaction kill-switch, for debugging only. When false, raw values reach
+     * the on-screen log and logcat. Flip back to true before any real use.
+     */
+    @Volatile
+    var redactEnabled: Boolean = true
+
     fun init(ctx: Context) { /* no-op placeholder for future file logging */ }
 
     @Synchronized
     fun log(msg: String) {
-        val line = "${fmt.format(Date())}  $msg"
+        val safe = if (redactEnabled) redact(msg) else msg
+        val line = "${fmt.format(Date())}  $safe"
         lines.addLast(line)
         while (lines.size > MAX) lines.removeFirst()
-        android.util.Log.i("PhoneBridge", msg)
+        android.util.Log.i("PhoneBridge", safe)
     }
 
     @Synchronized
     fun dump(): String = lines.joinToString("\n").ifBlank { "(no log yet)" }
+
+    /**
+     * S13: scrub anything token/secret-shaped before it reaches logcat or the
+     * on-screen buffer. Deliberately blunt — a false positive costs a little
+     * readability, a false negative leaks a credential.
+     */
+    private fun redact(s: String): String {
+        var out = s
+        out = out.replace(Regex("ya29\\.[A-Za-z0-9._\\-]+"), "ya29.[REDACTED]")
+        out = out.replace(Regex("1//[A-Za-z0-9._\\-]{10,}"), "1//[REDACTED]")
+        out = out.replace(Regex("GOCSPX-[A-Za-z0-9._\\-]+"), "GOCSPX-[REDACTED]")
+        out = out.replace(Regex("4/0[A-Za-z0-9._\\-]{10,}"), "4/0[REDACTED]")
+        out = out.replace(
+            Regex("(?i)(refresh_token|access_token|client_secret|server_auth_code|code)\\s*[=:]\\s*[A-Za-z0-9._/\\-]{8,}"),
+            "$1=[REDACTED]"
+        )
+        out = out.replace(
+            Regex("(?i)bearer\\s+[A-Za-z0-9._\\-]{10,}"),
+            "Bearer [REDACTED]"
+        )
+        return out
+    }
 }

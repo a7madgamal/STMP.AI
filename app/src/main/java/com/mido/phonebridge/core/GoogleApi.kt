@@ -41,6 +41,31 @@ object GoogleApi {
         return readJson(conn)
     }
 
+    fun patch(ctx: Context, url: String, body: String): JSONObject {
+        val token = AuthManager.accessToken(ctx)
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "PATCH"
+            doOutput = true
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+        }
+        conn.outputStream.use { it.write(body.toByteArray()) }
+        return readJson(conn)
+    }
+
+    fun delete(ctx: Context, url: String): JSONObject {
+        val token = AuthManager.accessToken(ctx)
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "DELETE"
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        return readJson(conn)
+    }
+
     private fun readJson(conn: HttpURLConnection): JSONObject {
         val code = conn.responseCode
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream

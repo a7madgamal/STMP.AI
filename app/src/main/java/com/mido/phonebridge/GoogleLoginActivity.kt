@@ -1,31 +1,24 @@
 package com.mido.phonebridge
 
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.mido.phonebridge.core.AuthManager
-import com.mido.phonebridge.core.OAuthLoopback
 import com.mido.phonebridge.core.PluginError
 import kotlin.concurrent.thread
 
 /**
- * Loopback-redirect login screen (the ONLY supported flow for Gmail scopes).
- *
- * Binds a fixed loopback port, opens the browser for consent, and exchanges the
- * returned code for tokens. No fallback path exists; every failure surfaces loudly.
+ * Google sign-in screen. Uses Play Services (AuthorizationClient): package name
+ * + signing SHA-1 identify the app, so there is no embedded secret and no local
+ * listener. On success it returns to the home screen.
  */
 class GoogleLoginActivity : Activity() {
 
     private lateinit var status: TextView
-    private lateinit var codeView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,29 +43,9 @@ class GoogleLoginActivity : Activity() {
         }
         root.addView(status)
 
-        codeView = TextView(this).apply {
-            textSize = 30f
-            setTextColor(0xFFFFD54F.toInt())
-            gravity = Gravity.CENTER
-            setPadding(0, pad, 0, pad)
-        }
-        root.addView(codeView)
-
-        val copyBtn = Button(this).apply {
-            text = "COPY CODE"
-            background = UiKit.pill(UiKit.NEUTRAL_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setOnClickListener {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("code", codeView.text))
-                Debug.log("user code copied")
-            }
-        }
-        root.addView(copyBtn)
-
         val cancel = Button(this).apply {
             text = "CANCEL"
-            background = UiKit.pill(UiKit.RED_BG)
+            background = UiKit.pill(UiKit.NEUTRAL_BG)
             setTextColor(UiKit.TEXT_ON_DARK)
             setOnClickListener { finish() }
         }
@@ -113,40 +86,32 @@ class GoogleLoginActivity : Activity() {
                 }
 
                 runOnUiThread {
-                    Debug.log("binding loopback :${OAuthLoopback.LOOPBACK_PORT}")
-                    status.text = "Opening browser for Google consent\u2026"
+                    Debug.log("requesting authorization code (Android client)")
+                    status.text = "Opening Google account picker\u2026"
                 }
 
-                val session = OAuthLoopback.start(AuthManager.clientId, scopes)
-
-                runOnUiThread {
-                    codeView.text = ":${session.port}"
-                    status.text = "Approve access in the browser, then return here.\nWaiting\u2026"
-                    Debug.log("auth URL: ${session.authUrl}")
-                    try {
-                        startActivity(
-                            android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse(session.authUrl)
+                when (val start = PlayAuth.authorize(this@GoogleLoginActivity, scopes)) {
+                    is PlayAuth.Start.NeedsConsent -> {
+                        Debug.log("launching Google consent intent")
+                        runOnUiThread {
+                            @Suppress("DEPRECATION")
+                            startIntentSenderForResult(
+                                start.pendingIntent.intentSender,
+                                PlayAuth.REQ_CONSENT, null, 0, 0, 0
                             )
-                        )
-                    } catch (e: Exception) {
-                        Debug.log("could not open browser: ${e.message} \u2014 open the URL from the log")
+                        }
                     }
-                }
-
-                OAuthLoopback.waitForCode(
-                    applicationContext,
-                    AuthManager.clientId,
-                    AuthManager.clientSecret,
-                    session,
-                    scopes
-                )
-                val email = AuthManager.fetchEmail(applicationContext)
-                runOnUiThread {
-                    status.text = "Logged in as ${email ?: "(email unknown)"}"
-                    Debug.log("LOGIN OK: ${email ?: "?"}")
-                    render()
+                    is PlayAuth.Start.AlreadyGranted -> {
+                        // Grant already held: token is live, no UI needed.
+                        val email = AuthManager.fetchEmail(
+                            applicationContext, start.accessToken
+                        )
+                        runOnUiThread {
+                            status.text = "Logged in as ${email ?: "(email unknown)"}"
+                            Debug.log("LOGIN OK (cached grant): ${email ?: "?"}")
+                            finish()
+                        }
+                    }
                 }
             } catch (e: PluginError) {
                 runOnUiThread {
@@ -160,6 +125,28 @@ class GoogleLoginActivity : Activity() {
                     Debug.log("LOGIN ERROR: ${e.message}")
                     render()
                 }
+            }
+        }
+    }
+
+    /** Receives the authorization result from the launched Google intent. */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        PlayAuth.handleConsentResult(this, data) { outcome ->
+            runOnUiThread {
+                when (outcome) {
+                    is PlayAuth.Outcome.SignedIn -> {
+                        status.text = "Logged in as ${outcome.email}"
+                        Debug.log("LOGIN OK: ${outcome.email}")
+                        // Return to the home screen on success.
+                        finish()
+                    }
+                    is PlayAuth.Outcome.Failed -> {
+                        status.text = "Login failed: ${outcome.code} \u2014 ${outcome.message}"
+                        Debug.log("LOGIN FAILED: ${outcome.code}: ${outcome.message}")
+                    }
+                }
+                render()
             }
         }
     }

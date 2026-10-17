@@ -18,28 +18,34 @@ object ActionExecutor {
     private const val TAG = "ActionExecutor"
 
     /**
-     * Fire an action on the notification identified by [key].
-     * @param actionRef either the numeric index (as string or int) or the exact label.
-     * @param replyText for RemoteInput actions.
+     * Resolve the action to fire, WITHOUT firing it. Used both to render the
+     * approval modal (so it shows the *real* resolved action) and to execute.
+     *
+     * FAIL LOUD: a missing notification or an unknown action throws a coded
+     * BridgeError; there is no silent fallback.
      */
     @Throws(BridgeError::class)
-    fun performAction(ctx: Context, key: String, actionRef: Any, replyText: String?) {
+    fun resolve(ctx: Context, key: String, actionRef: Any): Notification.Action {
         val sbn = NotifStore.get(key)
             ?: throw BridgeError("notification_gone", "no live notification with id=$key")
-
-        val n = sbn.notification
-        val actions = n.actions ?: emptyArray()
+        val actions = sbn.notification.actions ?: emptyArray()
         if (actions.isEmpty()) {
             throw BridgeError("unsupported_action", "notification has no actions")
         }
-
-        val action: Notification.Action = resolveAction(actions, actionRef)
+        return resolveAction(actions, actionRef)
             ?: throw BridgeError(
                 "unsupported_action",
                 "no action matching '$actionRef' (available: ${
                     actions.mapIndexed { i, a -> "$i:'${a.title}'" }
                 })"
             )
+    }
+
+    @Throws(BridgeError::class)
+    fun performAction(ctx: Context, key: String, actionRef: Any, replyText: String?) {
+        val sbn = NotifStore.get(key)
+            ?: throw BridgeError("notification_gone", "no live notification with id=$key")
+        val action = resolve(ctx, key, actionRef)
 
         val remoteInputs = action.remoteInputs
         if (remoteInputs != null && remoteInputs.isNotEmpty()) {

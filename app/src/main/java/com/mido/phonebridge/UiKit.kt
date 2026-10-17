@@ -36,11 +36,22 @@ object UiKit {
         }
 
     /** A status row: coloured dot + label + value. */
-    fun statusRow(ctx: Context, label: String, value: String, state: State): LinearLayout {
+    fun statusRow(
+        ctx: Context,
+        label: String,
+        value: String,
+        state: State,
+        onClick: (() -> Unit)? = null
+    ): LinearLayout {
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(ctx, 6), 0, dp(ctx, 6))
+            setPadding(0, dp(ctx, 8), 0, dp(ctx, 8))
             gravity = android.view.Gravity.CENTER_VERTICAL
+            if (onClick != null) {
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onClick() }
+            }
         }
         val dot = View(ctx).apply {
             background = GradientDrawable().apply {
@@ -48,14 +59,16 @@ object UiKit {
                 setColor(state.color())
             }
             layoutParams = LinearLayout.LayoutParams(dp(ctx, 12), dp(ctx, 12)).apply {
-                marginEnd = dp(ctx, 10)
+                marginEnd = dp(ctx, 12)
             }
         }
         val text = TextView(ctx).apply {
-            this.text = "$label: $value"
+            this.text = "$label\n$value"
             textSize = 15f
             setTextColor(TEXT_ON_DARK)
+            setLineSpacing(0f, 1.15f)
         }
+        text.alpha = if (onClick != null) 1f else 1f
         row.addView(dot)
         row.addView(text)
         return row

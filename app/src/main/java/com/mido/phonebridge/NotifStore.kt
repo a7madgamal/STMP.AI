@@ -48,12 +48,52 @@ object NotifStore {
     @Synchronized
     fun list(): List<StatusBarNotification> = items.values.toList()
 
-    /** Serialize all live notifications to the documented JSON shape. */
+    /**
+     * Effective group key: the OS may override the app's group key when it
+     * auto-bundles, so the value the user actually sees is override ?: group.
+     * Docs: StatusBarNotification.getOverrideGroupKey()/getGroupKey().
+     */
+    private fun effectiveGroupKey(sbn: StatusBarNotification): String? =
+        sbn.overrideGroupKey?.takeIf { it.isNotBlank() }
+            ?: sbn.groupKey?.takeIf { it.isNotBlank() }
+
+    /**
+     * The group-summary (child-collapse) entry, if any, for a group key.
+     * Docs: FLAG_GROUP_SUMMARY => StatusBarNotification.isGroup().
+     */
+    private fun isSummary(sbn: StatusBarNotification): Boolean =
+        (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0
+
+    /**
+     * Serialize all live notifications to the documented JSON shape.
+     *
+     * Group summaries (synthetic "N messages" bundles) are de-duplicated:
+     * when a real sibling exists in the same effective group key, the summary
+     * is omitted; when the summary is all that exists it is emitted with
+     * {"bundle":true,"actionable":false} so callers never act on a blob.
+     */
     @Synchronized
     fun listJson(ctx: Context): JSONArray {
+        // group key -> true when a non-summary sibling lives in that group
+        val hasRealSibling = HashMap<String, Boolean>()
+        for (sbn in items.values) {
+            val gk = effectiveGroupKey(sbn) ?: continue
+            if (!isSummary(sbn)) hasRealSibling[gk] = true
+        }
+
         val arr = JSONArray()
         for (sbn in items.values) {
-            arr.put(toJson(ctx, sbn))
+            val gk = effectiveGroupKey(sbn)
+            val summary = isSummary(sbn)
+            if (summary && gk != null && hasRealSibling[gk] == true) {
+                // A real sibling exists: the summary is redundant noise. Drop it.
+                continue
+            }
+            val obj = toJson(ctx, sbn)
+            // A summary with no real sibling is a bundle: visible but not actionable.
+            obj.put("bundle", summary && (gk == null || hasRealSibling[gk] != true))
+            obj.put("actionable", !(summary && (gk == null || hasRealSibling[gk] != true)))
+            arr.put(obj)
         }
         return arr
     }
@@ -138,26 +178,24 @@ object NotifStore {
             put("conversationTitle", conversationTitle)
             put("isGroupConversation", isGroup)
             put("subText", extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: "")
-            put("summaryText", extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString() ?: "")
-            put("infoText", extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString() ?: "")
             put("category", n.category ?: "")
             put("channelId", n.channelId ?: "")
             put("groupKey", sbn.groupKey ?: "")
+            put("overrideGroupKey", sbn.overrideGroupKey ?: "")
+            // isGroup(): "is part of a group" (any member). isAppGroup(): the app
+            // itself asked to group. Both come straight from StatusBarNotification.
+            put("isGroup", sbn.isGroup)
+            put("isAppGroup", sbn.isAppGroup)
             put("isOngoing", (n.flags and Notification.FLAG_ONGOING_EVENT) != 0)
             put("isGroupSummary", (n.flags and Notification.FLAG_GROUP_SUMMARY) != 0)
             @Suppress("DEPRECATION")
             put("priority", n.priority)
             put("visibility", n.visibility)
             put("number", n.number)
-            put("tickerText", n.tickerText?.toString() ?: "")
-            put("color", n.color)
-            put("isColorized", extras.getBoolean(Notification.EXTRA_COLORIZED, false))
             put("occupant", sbn.isOngoing)
             put("messages", messaging?.messages ?: JSONArray())
             put("peopleCount", messaging?.people?.length() ?: 0)
             put("people", messaging?.people ?: JSONArray())
-            // raw debug: every extra key the app supplied (values stringified)
-            put("extras", rawExtras(extras))
             put("postedAt", sbn.postTime)
             put("isClearable", sbn.isClearable)
             put("actions", actions)
@@ -224,22 +262,5 @@ object NotifStore {
         return MessagingExtract(title, groupish, messages, people)
     }
 
-    /** Dump every extra the app supplied, stringified, so nothing is hidden. */
-    @Suppress("DEPRECATION")
-    private fun rawExtras(extras: android.os.Bundle): JSONObject {
-        val out = JSONObject()
-        for (key in extras.keySet()) {
-            if (key == Notification.EXTRA_MESSAGES || key == Notification.EXTRA_PEOPLE_LIST) continue
-            val v = extras.get(key) ?: continue
-            val s = when (v) {
-                is CharSequence -> v.toString()
-                is Number, is Boolean -> v.toString()
-                is Array<*> -> v.joinToString(",") { it.toString() }
-                is android.os.Bundle -> v.toString()
-                else -> v.toString()
-            }
-            out.put(key, s)
-        }
-        return out
-    }
+
 }
