@@ -1,6 +1,7 @@
 # PhoneBridge — Audit Log + Request Labels/Policy: Release Plan
 
-Status: **plan only, nothing implemented.** Target: `com.mido.phonebridge`, current `0.3.2` (build 64).
+Status: **R1 + R2 shipped** (`0.5.2`, build 71). R3 (`0.6.0`) specced in full below, not started.
+R4 is architecture only.
 Author's constraint: MVP, fail fast and loud, small isolated releases, architecture-first beyond R1.
 
 ---
@@ -128,10 +129,10 @@ ambiguous case: **`SECURE`**.
 
 ### Global gate mode
 
-`AUTOMATIC` | `SECURE` | `OFF` in R2 — the one switch on the home screen. Default: **`SECURE`**.
-`NOTIFY` is added to the switch in R3, in the same release that makes the mode real (§6.0).
-`AUTOMATIC` consults the rule table; every other value ignores it and forces that mode on every
-request (§6.1).
+`SECURE` | `OFF` in R2; `AUTOMATIC` and `NOTIFY` join in R3 (§7.1) — the one switch on the home
+screen. Default: **`SECURE`**.
+`AUTOMATIC` is the only value that consults the rule table; every other value ignores it and forces
+that mode on every request (§7.1, §7.6).
 
 ### Outcome (one per record)
 
@@ -149,8 +150,8 @@ different facts, and the second one is how a mis-scoped `NOTIFY` rule announces 
 | Release | Version | Content | Behaviour change | Risk |
 |---|---|---|---|---|
 | **R1** | 0.4.0 | `verb` metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
-| **R2** | 0.5.0 | Global gate switch (`automatic`/`secure`/`off`) + exact rule table + settings screen + `OFF` mode + rule control inside the modal | Gating can be *disabled or narrowed* — the first release that can hurt | Medium-High |
-| **R3** | 0.6.0 | `NOTIFY` mode: heads-up, 5s silence=approve, `✕`=reject, unattended deny — **and** `NOTIFY` appears in the switch and the per-pair picker in this same release | New gating mode | Medium-High |
+| **R2** | 0.5.0 | Global gate switch (`secure`/`off`) + `OFF` mode + settings/home switch + confirmation + red banner. **Rules and settings screen cut to R3** — with only `secure` to express, a rule table has no observable effect. | Gating can be *disabled* — the first release that can hurt | Medium-High |
+| **R3** | 0.6.0 | `NOTIFY` mode (heads-up, 5s silence=approve, `✕`=reject, unattended deny) **and** the exact `plugin × verb` rules + `AUTOMATIC` switch value + settings screen + modal/log rule control — together, because `NOTIFY` is what makes a rule express a decision | New gating mode + stored decisions now change behaviour | Medium-High |
 | **R4** | 0.7.0 | Log UX: filters, search, export, counters, decision trace, retention controls | None | Low |
 
 Each release is independently shippable and independently revertable. R1 changes nothing the
@@ -175,9 +176,6 @@ audit/AuditLog.kt           append-only writer + in-memory ring + retention (tak
 audit/AuditOutcome.kt       enum (see §3)
 LogActivity.kt              list + filters (outcome / plugin / day)
 LogDetailActivity.kt        one record, verbatim, expandable blobs
-res/layout/activity_log.xml
-res/layout/activity_log_detail.xml
-res/layout/item_audit_row.xml
 ```
 
 Modified:
@@ -208,7 +206,7 @@ data class Route(
 )
 ```
 
-`verb` alone is the whole taxonomy: rules key on `(plugin.id, verb)` exactly (§6.2), so anything
+`verb` alone is the whole taxonomy: rules key on `(plugin.id, verb)` exactly (§7.5), so anything
 finer would be a dimension no screen can set. An earlier draft carried a `scope` string
 (`"gmail.messages"`) to support a wildcard cascade — **removed with the cascade.** Do not
 reintroduce it until a screen exists that can set it.
@@ -531,11 +529,13 @@ The banner is not a toast. It stays up for as long as `OFF` is selected.
 ### 6.2 What R3 adds
 
 `AUTOMATIC` and `NOTIFY` join the switch, the exact per-pair table arrives, the settings screen and
-the modal rule control are built (§7.5–§7.8). R2's job is to make the switch real, audited and
+the modal rule control are built (§7.8, §7.5). R2's job is to make the switch real, audited and
 loud, so that R3 only has to add values to something already proven.
 
-The store is written **forward-compatible**: a `rules` array exists from R2 and is always empty.
-R3 fills it. No file-format migration.
+R2 shipped `SECURE | OFF` only — `AUTOMATIC`/`NOTIFY` were cut from R2 precisely because a rule
+table whose only legal value is `secure` has no observable effect (§7). The store is written
+**forward-compatible**: a `rules` array exists from R2 and is always empty. R3 fills it. No
+file-format migration.
 
 ### 6.3 Resolution — one lookup, no engine
 
@@ -619,134 +619,183 @@ important line in the log.
 
 ---
 
-## 7. R3 — `NOTIFY` mode (architecture)
+## 7. R3 — `NOTIFY` mode + exact rules (FULL DETAIL)
 
-### 7.1 Mechanics
+**Theme: the first release where the log decides behaviour.** R1 observed, R2 gave one blunt
+switch. R3 is the first time a *stored decision* changes how a request is treated — and therefore
+the first release where a policy bug is a security bug rather than a display bug.
 
-- Separate channel `approval_notify`, `IMPORTANCE_HIGH`, silent-ish (no sound/vibration beyond
-  heads-up — the point is "subtle").
-- Notification content: `🔔 <summary>`, subtext `<label> · <duration>`, one action `✕` =
-  `PendingIntent` broadcast → reject.
-- 5s timer starts **when the notification is actually posted**, not at enqueue (same rule as the
-  modal's clock).
-- Silence → approve. `✕` → reject → the client gets `403 denied` with a distinct
-  `error: "notify_rejected"`? **No** — keep `denied` so clients do not need a new branch; the
-  distinction lives in the log (`NOTIFY_REJECTED`) and in the record. Caller-visible contract
-  stays stable.
-- `setTimeoutAfter(5000)` removes the notification when the window closes.
-- If the screen goes off inside the window the request is denied, not approved (§7.2) and the
-  notification is cancelled — a notification whose answer is already `denied` must not linger.
+**Scope.** Two things, shipped together because one is useless without the other:
 
-### 7.2 Gate availability — **LOCKED (Q2, Mido 2026-10-17)**
+1. **`NOTIFY`** — a third gate mode: heads-up notification, 5s silence = approve, `✕` = reject,
+   unattended = deny.
+2. **Exact rules** — `plugin × verb → mode`, readable only when the global switch is `AUTOMATIC`.
+
+Why together: in R2 a rule could only say `secure`, which is exactly what "no rule" already says.
+A rule table with one legal value is machinery with no observable effect — a screen that cannot
+change anything. `NOTIFY` is what makes a rule express a *decision*, so the picker, the settings
+screen and the modal control all arrive with the second outcome they need.
+
+### 7.1 The switch gains two values — **LOCKED (Mido 2026-10-17)**
+
+```
+AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
+```
+
+| Value | Meaning | Rules |
+|---|---|---|
+| `AUTOMATIC` | The per-pair table decides. No rule for a pair → `SECURE`. | **read** |
+| `SECURE` | Every request: modal + biometric. | ignored |
+| `NOTIFY` | Every request: heads-up, 5s silence = approve. | ignored |
+| `OFF` | No gate at all. Log only. | ignored |
+
+- Only `AUTOMATIC` consults the rules. The other three force one mode on every request, which is
+  what makes `OFF` a **true panic switch** rather than "log-only for unconfigured pairs".
+- No rule for a pair under `AUTOMATIC` resolves to `SECURE`. Silence means *ask me*; nothing
+  auto-approves by accident. This is the §12 invariant applied to the rule table.
+- `AUTOMATIC` needs the rules screen to be useful at all, so the two ship in one release even
+  though the switch value is one line.
+
+**UX: unsecure must be loud.** `NOTIFY` gets an amber banner on home while selected; `OFF` keeps
+its confirmation dialog and permanent red banner from R2 (§6.1). `AUTOMATIC` and `SECURE` are
+neutral. The rule is: *the home screen must never show a switch position without showing what it
+implies.* A user who cannot tell at a glance whether they are gated has an unusable gate.
+
+### 7.2 `NOTIFY` mechanics
+
+- Separate channel `approval_notify`, `IMPORTANCE_HIGH`, `setSound(null)`, no vibration beyond the
+  heads-up. The point of the mode is *subtle*; a sound would defeat it.
+- Content: `🔔 <summary>`, subtext `<label> · <duration>`, one action `✕` =
+  `PendingIntent.getBroadcast` → reject. No full-screen intent, no Activity, no overlay.
+- 5s timer starts **when the notification is actually posted**, not at enqueue — the same rule the
+  modal's clock follows (`shownAtMs`). A request queued behind another must not burn its window
+  while invisible.
+- Silence → **approve**. `✕` → **reject**.
+- `setTimeoutAfter(windowMs)` removes the notification when the window closes, so an approved
+  notification does not linger on the shade.
+- **The caller-visible contract does not change.** A `✕` rejection answers `403
+  {"ok":false,"error":"denied"}` — the *same* body as a modal DENY. Clients do not need a new
+  branch; the distinction lives in the log (`NOTIFY_REJECTED` vs `DENIED`) and in the record.
+  Introducing a new error code for a new UI would make every client care about our internals.
+- If the screen goes off inside the window the request is **denied, not approved** (§7.3), and the
+  notification is cancelled. A notification whose answer is already `denied` must not linger.
+
+**Q8 (still open, blocks this release):** is the window a flat 5s, or 5s plus a short grace (8s) so
+a mistaken `✕` is recoverable? *Recommendation unchanged: 5s flat. A countdown you can learn beats
+a window that varies.* This must be decided before `NotifyGate` is written, because the value is
+baked into the timer, the audit duration and the acceptance test.
+
+### 7.3 Gate availability — **LOCKED (Q2, Mido 2026-10-17)**
 
 There is **no escalation**. A request that cannot be shown to an attending human is **denied**.
 
-```
-isAttended() = PowerManager.isInteractive() && !KeyguardManager.isKeyguardLocked()
+```kotlin
+fun isAttended(ctx: Context): Boolean
+    = powerManager.isInteractive && !keyguardManager.isKeyguardLocked
 ```
 
 | Mode | Attended | Not attended (screen off or locked) |
 |---|---|---|
 | `OFF` | approve | **approve** — the gate is deliberately off, no human expected |
-| `NOTIFY` | heads-up, 5s silence = approve | **deny** |
+| `NOTIFY` | heads-up, silence = approve | **deny** |
 | `SECURE` | modal + biometric | **deny** |
 
-The rule is one line, which is the point: *if a human cannot see it, nobody approves it — unless you
-have explicitly turned the gate off for that class of request.*
+One line, and that is the point: *if a human cannot see it, nobody approves it — unless you have
+explicitly turned the gate off for that class of request.*
 
-Implementation rules this decision forces:
+Rules this forces:
 
-- Checked at decision time, **after** all fail-fast validation, so a malformed request still gets
-  its honest 400 and never a misleading `denied`.
-- Also checked once more at **approve time** in `NOTIFY`: if the screen turns off during the 5s
-  window, the request is denied, not approved. Silence is only consent while someone could have
-  seen it.
-- New audit outcome `DENIED_UNATTENDED` so the log never confuses "he said no" with "nobody was
-  there". Caller sees `403 {"ok":false,"error":"denied","detail":"gate unavailable: screen off
-  or device locked"}` — the HTTP contract stays stable (no new client branch), the reason lives in
-  `detail` and the log.
-- `NOTIFY`'s other escalations (channel disabled, notification permission blocked, DND) all
-  collapse into the same answer: **deny**. There is no fallback path that approves invisibly.
-- Only `OFF` approves unattended, and `OFF` is reachable only through the global switch — a single
-  explicit choice with a confirmation dialog and a persistent red banner (§6.1). A per-pair rule
-  can never produce that behaviour, because `OFF` is not a rule value.
-- Consequence: `ApprovalGate.await()` is only ever called when `isAttended()` is true, so the
-  full-screen intent path no longer fires onto a locked screen.
-- Mid-modal lock: a request already on screen keeps its original 60s clock (§4 `createdAtMs`); if
-  the human locks the phone it expires as `TIMEOUT`. Do not cancel early — the clock rule is
-  already load-bearing, and a cancel-on-lock would make the modal's countdown lie.
+- Checked at decision time, **after** all fail-fast validation (`Route.validate` and
+  `describeRows`), so a malformed request still gets its honest 400 and never a misleading
+  `denied`.
+- Checked a **second time at approve time** in `NOTIFY`: if the screen turns off during the
+  window, the request is denied. Silence is only consent while someone could have seen it.
+- New outcome `DENIED_UNATTENDED` (already declared in `AuditOutcome`, and already classified
+  non-noise in `AuditNoise`). The log must never confuse "he tapped no" with "nobody was there" —
+  the second is how a mis-scoped `NOTIFY` rule announces itself.
+- Caller still receives `403 denied`; the reason lives in `detail` and the record. HTTP contract
+  stable.
+- `NOTIFY`'s other failure escalations — channel disabled, notification permission blocked, DND —
+  all collapse into the same answer: **deny**. There is no fallback path that approves invisibly.
+- Only `OFF` approves unattended, and `OFF` is reachable only through the global switch: a single
+  explicit act with a confirmation dialog, a persistent red banner, and a `POLICY_CHANGED` record.
+  A per-pair rule can never produce that behaviour, because `OFF` is not a rule value (§7.5).
+- **Consequence for R2's code:** `ApprovalGate.await()` is now only ever called when
+  `isAttended()` is true, so the full-screen intent can no longer fire onto a locked screen. That
+  was always the intent; R3 is where it becomes guaranteed rather than assumed.
+- Mid-modal lock: a request already on screen keeps its original 60s clock (`createdAtMs`); if the
+  human locks the phone it expires as `TIMEOUT`. **Do not cancel on lock.** The clock rule is
+  already load-bearing and a cancel-on-lock would make the modal's countdown lie.
 
-### 7.3 Biometric — **LOCKED (Q3, Mido 2026-10-17)**
+### 7.4 Biometric — **LOCKED (Q3, Mido 2026-10-17)**
 
 **`BiometricPrompt` exists only in `SECURE`. `NOTIFY` and `OFF` never prompt.**
 
-This supersedes the v0.3.1 rule ("APPROVE on every request, reads included"). That rule now reads:
-*every `SECURE` request, reads included.* A 5s silence-approve that demands a fingerprint is a
+This supersedes the v0.3.1 rule ("APPROVE on every request, reads included"), which now reads
+*every `SECURE` request, reads included*. A 5s silence-approve that demands a fingerprint is a
 contradiction, and `OFF` has no human at all.
 
-Implementation rules this decision forces:
+Implementation rules:
 
-- `ApprovalView.requiresBiometric` stops being a constant `true`. It is computed by the **policy
-  engine**, not the Activity, and passed into the view the gate builds:
-  `requiresBiometric = (mode == SECURE)`. The Activity still only renders the flag — it never
-  decides. Same principle as the rows.
-- `NOTIFY` has no activity at all, so the biometric code path is unreachable there by
-  construction, not by an `if`. Do not add a guard that pretends it could happen.
-- The main-screen status must state the effective biometric rule per mode, because the docs and
-  the app now disagree with the old skill text. Update
-  `android-phone-bridge/references/approval-modal.md` and the `phonebridge-api` skill in the same
-  release that ships R2 — an API doc claiming "every request needs a fingerprint" is wrong from
-  0.5.0 onward.
-- Degraded case to keep honest: if no biometric is enrolled, `SECURE` still cannot approve
-  (unchanged v0.3.1 behaviour). `NOTIFY`/`OFF` are unaffected — they never needed one. So a phone
-  with no fingerprint enrolled can now still use `NOTIFY` and `OFF`, which is a real behaviour
-  change worth one line in the R3 acceptance list. It is harmless: `NOTIFY` still requires an
-  attended screen, and `OFF` is the switch you turned off on purpose.
-
-### 7.4 Interaction with the queue
-
-Notify requests do not enter the `SECURE` FIFO. Two independent serializers:
-`ApprovalQueue` (modal) and `NotifyQueue` (max 1 visible). A request classified `SECURE` while a
-notify is on screen must still be queued for the modal — that is fine, they are different
-paths. The only shared state is the audit log.
-
----
+- `ApprovalView.requiresBiometric` stops being a hardcoded `true`. It is computed from the
+  resolved mode (`mode == SECURE`) and passed into the view the gate builds. The Activity still
+  only renders the flag — it never decides. Same principle as the rows.
+- **Honest note on observable effect:** in R3 this computes to `true` at every site that builds a
+  view, because a view only exists on the `SECURE` path — `NOTIFY` has no Activity and `OFF` never
+  builds one. So this is *correctness plumbing*, not a behaviour change: it stops a future mode
+  that reuses the modal from silently inheriting a fingerprint. Do not claim a behaviour change
+  here in the release notes. The three `requiresBiometric = true` sites in `BridgeService` become
+  `requiresBiometric = (mode == SECURE)`.
+- Do **not** add a guard in `NOTIFY` that pretends a biometric could happen. It is unreachable by
+  construction; a guard would be a lie about the design.
+- Degraded case to keep honest: with no biometric enrolled, `SECURE` still cannot approve
+  (unchanged v0.3.1). `NOTIFY`/`OFF` are unaffected — they never needed one. So a phone with no
+  fingerprint enrolled can now use `NOTIFY` and `OFF`, which is impossible today. Harmless:
+  `NOTIFY` still requires an attended screen and `OFF` is the switch you turned off on purpose.
+  Worth one line in the acceptance list.
+- **Docs must change in this release.** `android-phone-bridge/references/approval-modal.md` and
+  the `phonebridge-api` skill both state that every request needs a fingerprint. That is false
+  from 0.5.0 for `OFF` and from 0.6.0 for `NOTIFY`. A doc that teaches the wrong model is how the
+  next debugging session goes wrong.
 
 ### 7.5 Exact rules — **LOCKED (Mido 2026-10-17)**
 
-This is the half that `NOTIFY` unlocks. In R2 a rule could only say `secure`, which is what
-"no rule" already says; with `notify` available a rule finally expresses something.
-
 ```kotlin
 data class Rule(
-    val plugin: String,   // exact: "gmail" | "calendar" | "notifications". Never "*".
+    val plugin: String,   // exact: "gmail" | "calendar" | "notifications" | "debug". Never "*".
     val verb: Verb,       // exact: READ | WRITE | EDIT | DELETE | EXECUTE. Never null.
     val mode: Mode        // SECURE | NOTIFY.  OFF is NOT a rule value.
 )
 
 data class Policy(
-    val global: GlobalMode,      // AUTOMATIC | SECURE | NOTIFY | OFF
+    val global: GlobalMode,   // AUTOMATIC | SECURE | NOTIFY | OFF
     val rules: List<Rule>
 )
 ```
 
-- **The picker offers `default | notify | secure`.** `default` removes the rule; `notify` and
-  `secure` store one, so the settings list reads back as a list of *decisions* rather than a list of
-  exceptions.
+- **The picker offers `default | notify | secure`.** `default` *deletes* the rule; `notify` and
+  `secure` store one. The settings list therefore reads back as a list of decisions rather than a
+  list of exceptions.
 - Stored `SECURE` and no rule are **behaviourally identical** (`rule?.mode ?: SECURE`). Say it out
   loud in the UI so nobody hunts for a difference that does not exist: a saved `secure` row renders
   as `gmail · delete — secure (default)`.
 - **`OFF` cannot be set per pair — LOCKED (Q12).** It exists only as a global switch value. The
   per-pair picker is exactly three options, so there is no way to auto-approve one pair in
-  isolation; log-only for `gmail · delete` means turning the gate off for the entire app. Accepted
-  trade: `OFF` is the one value meaning "no human, no fingerprint", and one switch is easier to
-  remember to turn back than twelve rows. Do not add a 4th picker option without a fresh decision.
-- **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a startup error,
-  never last-wins.
-- **Q11 is void.** With exact keys two rules cannot both match one request.
-- **No `scope`.** `(plugin, verb)` is the whole key and the whole screen.
+  isolation; "log only for `gmail · delete`" means turning the gate off for the entire app.
+  Accepted trade: `OFF` is the one value meaning "no human, no fingerprint", and one switch is
+  easier to remember to turn back than twelve rows. Do not add a 4th picker option without a fresh
+  decision — doing so reopens whether an accidentally-set `OFF` row can silently bypass the gate,
+  and it would need the same confirmation + banner treatment the global switch has.
+- **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a **startup
+  error**, never last-wins: the same file must not resolve differently depending on write order.
+- **No `scope`, no wildcards.** `(plugin, verb)` is the whole key and the whole screen. An earlier
+  draft carried a `scope` string and a `*` cascade; both were removed with the cascade (§7.6).
+  Q11 (equal-specificity conflict) is **void** — with exact keys two rules can never both match.
+- **Unknown values are parse errors.** An unrecognised `plugin`, an unrecognised verb, or a mode
+  that is not `SECURE`/`NOTIFY` refuses to load (§6.4 applies unchanged: unreadable policy = no
+  server).
 
-### 7.6 Resolution — 12 lines, no engine
+### 7.6 Resolution — the whole policy system
 
 ```kotlin
 fun resolveMode(global: GlobalMode, rules: List<Rule>, plugin: String, verb: Verb): Mode =
@@ -758,16 +807,40 @@ fun resolveMode(global: GlobalMode, rules: List<Rule>, plugin: String, verb: Ver
     }
 ```
 
-That is the entire policy system. It is `find` on a list. The audit records
-`Decision(mode, source, rule?)` with `source ∈ {GLOBAL, RULE, DEFAULT}` — `DEFAULT` is precisely
-"`AUTOMATIC` and no rule set". There is no `considered` list, no specificity, and nothing to explain
-beyond one lookup, because there is nothing else that could have won.
+That is the entire policy engine. It is `find` on a list.
 
-### 7.7 Screens
+- Total and exhaustive over the enum, **no `else` branch**. R2 deliberately wrote this `when` with
+  two arms so adding `AUTOMATIC`/`NOTIFY` would be a **compile error right here** — that is exactly
+  what happens now, and it is why the new values cannot be absorbed silently.
+- The audit records `Decision(mode, source, rule?)` with `source ∈ {GLOBAL, RULE, DEFAULT}`.
+  `DEFAULT` is precisely "`AUTOMATIC` and no rule matched". There is no `considered` list, no
+  specificity, nothing to explain beyond one lookup — because nothing else could have won.
+- **`resolveMode` gains three parameters, and that is a signature change, not an overload.** The
+  one call site in `BridgeService` passes the resolved route's plugin and verb. Keeping a
+  two-arg version around for the tests would be a second code path deciding a security question.
+  Delete the old signature.
+
+### 7.7 Queue interaction
+
+`NOTIFY` requests **do not enter the `SECURE` FIFO**. Two independent serializers:
+
+- `ApprovalQueue` (modal) — unchanged, 60s, FIFO, one visible.
+- `NotifyQueue` — at most one visible notify at a time, 5s each, drained in arrival order.
+
+They share **only** the audit log. A request classified `SECURE` while a notify is on screen still
+queues for the modal — different paths, no interaction. This is deliberate: making them share one
+queue would mean a 5s notification could block behind a 60s modal, which is a worse failure than
+either mode alone.
+
+If a mode mix makes two requests wait, the *notify* one must not silently expire while queued — its
+window starts when it is posted (§7.2), so a queued notify simply takes longer to be posted, never
+loses its window invisibly.
+
+### 7.8 Screens
 
 **Settings screen** — the only place rules are authored:
 
-- Global switch (4 radio options) with the security treatment from §6.1.
+- Global switch (4 radio options) with the security treatment from §6.1/§7.1.
 - When global ≠ `AUTOMATIC`, the rule table renders **greyed out** under one line:
   `Rules are ignored while the switch is SECURE / NOTIFY / OFF.` Greyed, not hidden — you must be
   able to see what you configured while you cannot use it, or the switch becomes a memory test.
@@ -779,21 +852,129 @@ beyond one lookup, because there is nothing else that could have won.
 - One compact row: `This request: gmail · delete` + a 3-way control `default | secure | notify`.
 - `default` deletes the rule for that pair. `secure` also stores nothing (SECURE is absence) but is
   offered anyway, because a human picking from a list expects to see their current choice.
-- Applying it takes effect **from the next request** and **never decides the request on screen**.
-  A control that silently resolves the prompt you are looking at would be a second, invisible
-  decision — the exact thing this whole design is trying to avoid. Tapping it shows
+- Applying it takes effect **from the next request** and **never decides the request on screen**. A
+  control that silently resolved the prompt you are looking at would be a second, invisible
+  decision — the exact thing this whole design exists to avoid. Tapping it shows
   `saved — applies from the next gmail · delete request`, then leaves the countdown alone.
 - Always present, including when global ≠ `AUTOMATIC`, with `ignored while global = SECURE` in the
-  same row. One line of text beats making the user hunt for why it did nothing.
+  same row. One line of text beats making the user hunt for why it did nothing. **C7 is the risk
+  here:** if this still reads as broken in real use, the fix is to *disable* the control, not to
+  annotate it harder.
 
 **Log screen** — the same control on a record's detail view (§5.8), pre-filled with that record's
 `(plugin, verb)`. The log is where you notice a decision you dislike, so the fix belongs one tap
 from it.
 
-### 7.8 Rule changes are audited
+### 7.9 Files
+
+New:
+
+```
+policy/Rule.kt            Rule(plugin, verb, mode) + strict parse
+policy/Attendance.kt      isAttended(ctx) — the one-line gate-availability check
+notify/NotifyGate.kt      post / wait / resolve the 5s path + NotifyQueue
+SettingsActivity.kt       the rules screen (programmatic views, no res/layout — see §5.1)
+```
+
+Modified:
+
+```
+policy/PolicyMode.kt      GlobalMode += AUTOMATIC, NOTIFY ; Mode += NOTIFY ; resolveMode(global, rules, plugin, verb)
+policy/Policy.kt          parse/emit NON-EMPTY rules (VERSION stays 1 — see below) ; duplicate-pair = error
+policy/PolicyStore.kt     unchanged storage; may gain rule upsert helpers
+BridgeService.kt          resolve with plugin+verb ; branch NOTIFY before the gate ; isAttended guard ;
+                          requiresBiometric = (mode == SECURE) at the three view sites
+MainActivity.kt           switch becomes 4 values + amber/red banners
+ApprovalGate.kt           unchanged behaviour; the OFF/NOTIFY branching stays in BridgeService
+ApprovalActivity.kt       NO change — it already renders `requiresBiometric` from the view (§7.4)
+app/build.gradle.kts      version 0.6.0 / 72
+docs                      approval-modal.md + phonebridge-api skill: fingerprint is SECURE-only
+```
+
+**`VERSION` stays 1 — no migration.** R2 wrote `version: 1` with an empty `rules` array *on
+purpose* so R3 could fill it without a format change (§6.2). Two consequences to keep honest:
+
+- An R3 file with rules read by an R2 build is already a **parse error** ("this build has no rule
+  support"), so a downgrade refuses to start rather than silently ignoring saved decisions. That
+  behaviour was designed in R2 and must not be weakened now.
+- An R2 file with an empty array read by R3 is valid and simply has no rules. Nothing to migrate.
+
+Also update: the R2 test *"an unknown `global` string (e.g. `AUTOMATIC` written by a future build)
+is a parse error"* — `AUTOMATIC` is a known value from R3, so this test **must** switch to a
+genuinely unknown literal (e.g. `"PANIC"`) or it stops testing forward-compatibility and starts
+testing nothing. Flagged because a test that silently changes meaning is how the §5.9 lesson
+repeats.
+
+### 7.10 Where it plugs in
+
+`serve()` gains one step, in this order — the ordering is the security property:
+
+1. `resolve(method, path)` → `bindRoute` → read raw body → parse → `validate` (pre-gate, §5.2).
+2. `describe` + `describeRows` (pre-gate; a missing row set still throws before any UI).
+3. **Resolve policy:** `global = policy.global`; `mode = resolveMode(global, rules, plugin, verb)`.
+4. **Attendance check** (§7.3): if `!isAttended()` and mode ≠ `OFF` → `DENIED_UNATTENDED`, 403,
+   done. No notification is posted at all.
+5. Branch on `mode`:
+   - `SECURE` → `ApprovalGate.await()` (unchanged) → `APPROVED` / `DENIED` / `TIMEOUT`.
+   - `NOTIFY` → `NotifyGate.await()` → `NOTIFY_APPROVED` / `NOTIFY_REJECTED` / `DENIED_UNATTENDED`
+     (screen-off mid-window).
+   - `OFF` → no gate; `OFF_APPROVED`.
+6. Handler runs, `recordResponse(...)` (§7.10 / `audit/AuditResponse.kt`), one record written.
+
+A policy read that throws mid-request still yields `HANDLER_FAILED` + `policy_unavailable` → 503,
+exactly as R2 wired it. R3 does not change that path.
+
+### 7.11 `POLICY_CHANGED` for rule changes
 
 Every change writes `POLICY_CHANGED` with `{before, after, source: SETTINGS|MODAL|LOG}`, the same
-record shape R2 introduced (§6.7). Policy history lands in the same file as traffic.
+record shape R2 introduced (§6.7) — `plugin=policy`, `verb=EXECUTE`, never noise. Policy history
+lands in the same file as traffic, so "why did this run unapproved?" is answered by the line above
+it.
+
+### 7.12 Tests (JVM)
+
+- `resolveMode` is **total over all four** globals and never returns a value outside `Mode`.
+- `AUTOMATIC` + a matching rule → that rule's mode; `AUTOMATIC` + no rule → `SECURE` (**the
+  invariant, tested explicitly**).
+- `SECURE`/`NOTIFY`/`OFF` **ignore the rules** even when a matching rule exists.
+- `Policy` with a non-empty `rules` array round-trips through write → read; rule order is preserved.
+- A **duplicate `(plugin, verb)` pair** is a parse error, not last-wins.
+- An unknown **verb** or an unknown **mode** inside a rule is a parse error.
+- The R2 forward-compat test is updated to a genuinely unknown `global` (see §7.9).
+- `isAttended` is false when the keyguard is locked or the screen is off (pure wrapper, injected
+  state — do not call the real PowerManager in a JVM test).
+- `NOTIFY` classification: silence → `NOTIFY_APPROVED`, `✕` → `NOTIFY_REJECTED`, screen-off
+  mid-window → `DENIED_UNATTENDED`; **all three non-noise** in `AuditNoise` (already declared, now
+  asserted).
+- `AuditClassify` still maps a pre-gate 4xx to `REJECTED_INVALID` and a post-gate failure to
+  `HANDLER_FAILED` — R3 must not disturb this.
+- Golden record: a `NOTIFY` record carries the right `mode`, `source` (`RULE` vs `DEFAULT`) and
+  `rule` string, so a future reader can explain the decision from the file alone.
+
+### 7.13 Device acceptance (must all be observed, not assumed)
+
+1. `SECURE` + rule `gmail · read → NOTIFY` → fire a Gmail read → **heads-up, no modal**.
+2. Leave it → `200`, log `NOTIFY_APPROVED`, `source=RULE`, `rule=gmail/READ`.
+3. Fire again and tap `✕` → `403 denied`, log `NOTIFY_REJECTED`.
+4. Fire again and **lock the phone inside the window** → `403 denied`, log `DENIED_UNATTENDED`,
+   notification gone.
+5. Set global `NOTIFY` → every request is heads-up, the rule table greys out with its one-line
+   reason, `POLICY_CHANGED` recorded.
+6. Set global `OFF` → identical to R2 (§6.9) — no popup, `OFF_APPROVED`.
+7. Change a rule from the **modal** and from the **log detail** → `POLICY_CHANGED` with
+   `source=MODAL` / `LOG`, and the *request on screen is unaffected*.
+8. Hand-edit a duplicate pair into `policy.json` → server refuses to start, red banner.
+9. Fire two requests at once under `NOTIFY` → both get their own 5s window, neither expires
+   invisibly.
+
+### 7.14 R3 done criteria
+
+- Every item in §7.13 observed on device, not inferred.
+- Every §7.12 test green, and **no test whose meaning silently changed** (§7.9).
+- All four outcomes R3 introduces appear in a real log: `NOTIFY_APPROVED`, `NOTIFY_REJECTED`,
+  `DENIED_UNATTENDED`, `POLICY_CHANGED` (rule source).
+- The skill docs and `approval-modal.md` state the SECURE-only fingerprint rule.
+- The R2 file format loads unchanged; an R3 file with rules refuses to load on R2.
 
 ---
 
@@ -838,18 +1019,19 @@ Closed on 2026-10-17, with where each one landed.
 | Q3 | Biometric scope | **`SECURE` only** — supersedes v0.3.1 (§7.3) |
 | Q5 | Storage | JSONL day-files behind `AuditStore`; no Room (§5.5, §5.13) |
 | Q6 | `✕` affordance | Notification action `✕ Reject`; no overlay (§5.13) |
-| Q7 | Auto-approve ceiling | **No hidden rules, no ceilings** (§6.3 — now moot, see Q11) |
+| Q7 | Auto-approve ceiling | **No hidden rules, no ceilings** (§7.6 — now moot, see Q11) |
 | Q9 | Log scope | **Log everything**; `noise` is a derived, stored, overridable flag (§5.12) |
 | Q10 | Retention | 7 days / 20 MB (§5.13) |
-| Q11 | Equal-specificity conflict between `gmail/*` and `*/delete` | **Void.** Exact rules removed wildcards, so two rules can never match one request. Nothing to rank, nothing to refuse (§6.2) |
-| Q12 | Per-pair `OFF` | **Global only.** Picker stays `default \| notify \| secure`; auto-approve is always app-wide (§6.2) |
+| Q11 | Equal-specificity conflict between `gmail/*` and `*/delete` | **Void.** Exact rules removed wildcards, so two rules can never match one request. Nothing to rank, nothing to refuse (§7.5, §7.6) |
+| Q12 | Per-pair `OFF` | **Global only.** Picker stays `default \| notify \| secure`; auto-approve is always app-wide (§7.5) |
 | — | `not_found` mapper (500 → 404) | Fixed in R1, own commit `61c23c5` (§5.14) |
 
 Still open, both non-blocking for R1 (decide before R2/R3 ships):
 
-**Q8 — `NOTIFY` window.** Genuinely 5s, or 5s plus a short grace (8s) so a mistaken `✕` is
-recoverable? *Recommend: 5s exactly. Predictable beats forgiving here — a 5s countdown you can
-learn is better than a window that varies.*
+**Q8 — `NOTIFY` window.** **STILL OPEN — blocks R3.** Flat 5s, or 5s plus a short grace (8s) so a
+mistaken `✕` is recoverable? *Recommendation: 5s flat. A countdown you can learn beats a window
+that varies.* Must be settled before `NotifyGate` is written (§7.2), because the value is baked
+into the timer, the audit duration and the acceptance test.
 
 **Q12 — per-pair `OFF`.** ✅ **DECIDED 2026-10-17: global only.** The picker stays
 `default | notify | secure`. `OFF` is reachable only through the switch, so auto-approve is always
@@ -910,9 +1092,9 @@ before sharing.
    and the global switch's resting value.
 6. No side effect is ever reported as succeeded without an audit record. Append failure → 500,
    never a silent success (Q1, locked).
-6. Gate decisions remain central. A plugin still cannot gate itself, and a plugin cannot opt out
+7. Gate decisions remain central. A plugin still cannot gate itself, and a plugin cannot opt out
    of the label either.
-7. Every new error code lands in `httpStatusFor` in the same change.
+8. Every new error code lands in `httpStatusFor` in the same change.
 
 ---
 
@@ -925,7 +1107,7 @@ Every decision below is closed. Anything not listed is still open and named in �
 | Q1 | Audit append fails → deny with `500 audit_unavailable` | 2026-10-17 | §5.7 |
 | Q2 | Unattended (screen off/locked): `SECURE`/`NOTIFY` deny; `OFF` approves. No escalation. | 2026-10-17 | §7.2 |
 | Q3 | Biometric is `SECURE`-only; supersedes v0.3.1 "every request" | 2026-10-17 | §7.3 |
-| Q7 | No hidden rules, no ceilings | 2026-10-17 | §6.2 |
+| Q7 | No hidden rules, no ceilings | 2026-10-17 | §7.6 |
 | Q9 | Log everything; `noise` is a derived, stored, overridable flag | 2026-10-17 | §5.12 |
 | — | `not_found` mapper fix (500 → 404), own commit in R1 | 2026-10-17 | §5.14 |
 | Q5/Q6/Q10 | JSONL day-files · `✕ Reject` action · 7d / 20 MB | 2026-10-17 | §5.13 |
