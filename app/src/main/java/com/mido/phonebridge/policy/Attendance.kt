@@ -7,9 +7,9 @@ import android.os.PowerManager
 /**
  * Can a human actually see a prompt right now?
  *
- * The rule this serves (locked): a request that cannot be shown to an attending human
- * is DENIED. Only `OFF` approves unattended, because `OFF` is the one mode where no
- * human was ever expected.
+ * The rule this serves: a request that cannot be shown to an attending human is
+ * DENIED. There is no exception any more — 0.12.0 removed the `OFF` auto-approve
+ * mode, so "nobody is looking" can only ever mean deny, never approve.
  *
  * Screen off or locked both count as unattended. The distinction between them does
  * not matter here: in both cases nobody is looking.

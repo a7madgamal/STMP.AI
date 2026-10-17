@@ -11,10 +11,10 @@ import com.mido.phonebridge.core.Verb
  * there is nothing to rank, no specificity to compute and no tie to break. The
  * whole rule engine is `List.find` (see [resolveMode]).
  *
- * [mode] is never [Mode.OFF]: auto-approve is app-wide only, reachable only through
- * the global switch with its confirmation and its red banner. A per-pair `OFF` would
- * make "no human, no fingerprint" settable twelve times, and setting it by accident
- * once is enough.
+ * [mode] is never an auto-approve value, because no such mode exists in this build.
+ * `NOTIFY` is the floor: the quietest a request can be is a 5-second overlay, and
+ * 0.12.0 removed every path that skipped a human. A rule can therefore only choose
+ * *how* the question is asked — never whether it is asked at all.
  */
 data class Rule(
     val plugin: String,
@@ -26,8 +26,10 @@ data class Rule(
 
     companion object {
         /**
-         * Modes a rule may carry. `OFF` is excluded on purpose — see the class doc.
-         * Kept as a list so the parser, the picker and the tests agree on one source.
+         * Modes a rule may carry. Since 0.12.0 this is every value [Mode] has — there
+         * is no auto-approve mode to exclude. Kept as a list so the parser, the picker
+         * and the tests agree on one source, and so a future mode has to be added here
+         * deliberately rather than becoming rule-settable by default.
          */
         val ALLOWED_MODES: List<Mode> = listOf(Mode.NOTIFY, Mode.SECURE)
     }

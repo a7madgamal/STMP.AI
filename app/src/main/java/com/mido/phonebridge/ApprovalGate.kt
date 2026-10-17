@@ -28,8 +28,8 @@ object ApprovalGate {
     /**
      * How a request left the gate. Returned, never thrown: the caller has to write
      * an audit record for every outcome, and an exception path is a place a record
-     * gets forgotten. One call site today, and R2 (`OFF` bypasses the gate) and R3
-     * (`NOTIFY` has a different clock) both need a gate that just hands back an
+     * gets forgotten. One call site today, and R2 (the `OFF` switch, removed in 0.12.0)
+     * and R3 (`NOTIFY` has a different clock) both needed a gate that just hands back an
      * answer.
      */
     sealed class GateResult {

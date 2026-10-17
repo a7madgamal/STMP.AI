@@ -399,11 +399,11 @@ class HttpServer(
             val globalMode = policy.global
 
             // ATTENDANCE. A request that cannot be shown to an attending human is
-            // DENIED — unless the gate is deliberately OFF, which is the one mode
-            // where no human was ever expected. Checked here, after validation, so a
-            // malformed request still gets its honest 400 and never a misleading
-            // `denied`. NOTIFY re-checks at approve time as well (NotifyGate).
-            if (mode != Mode.OFF && !isAttended(ctx)) {
+            // DENIED. There is no exempt mode any more: 0.12.0 removed the `OFF` switch,
+            // so no request can run without a human present, in any mode. Checked here,
+            // after validation, so a malformed request still gets its honest 400 and
+            // never a misleading `denied`. NOTIFY re-checks at approve time (NotifyGate).
+            if (!isAttended(ctx)) {
                 draft.decision(
                     Decision(
                         mode.name, decisionSource(resolvedPolicy.source),
@@ -419,20 +419,6 @@ class HttpServer(
             }
 
             when (mode) {
-                Mode.OFF -> {
-                    // The gate is off on purpose. No popup, no fingerprint, no FIFO —
-                    // and the record says OFF_APPROVED so the log can never mistake
-                    // this for a human decision.
-                    draft.decision(
-                        Decision(
-                            mode.name, decisionSource(resolvedPolicy.source),
-                            globalMode.name, resolvedPolicy.ruleKey,
-                            null, null, null, 0
-                        )
-                    )
-                    draft.outcome(AuditOutcome.OFF_APPROVED)
-                }
-
                 Mode.NOTIFY -> {
                     // A small overlay toast, not a notification: the draw permission
                     // this app already holds makes the prompt ours, so it appears
@@ -530,10 +516,10 @@ class HttpServer(
                 }
             }
 
-            // ONE handler call and ONE response-recording site, shared by the OFF path
-            // and the gated path. They used to be two, and the OFF branch returned
-            // EARLY — so `Route.auditResponseBody` was honoured on one path and ignored
-            // on the other, and /debug stored its entire body whenever the gate was off
+            // ONE handler call and ONE response-recording site, for every mode. They used
+            // to be two — an ungated branch (the `OFF` switch, removed in 0.12.0) returned
+            // EARLY, so `Route.auditResponseBody` was honoured on one path and ignored on
+            // the other, and /debug stored its entire body whenever the gate was off
             // (measured on device: ~13.7 KB per record, against ~1 KB under SECURE).
             // The handler call cannot be duplicated again without deleting this comment.
             val resp = runBlocking { resolved.route.handler(req) }

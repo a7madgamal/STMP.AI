@@ -1,8 +1,11 @@
 # PhoneBridge — Audit Log + Request Labels/Policy: Release Plan
 
-Status: **R1 + R2 shipped** (`0.5.2`, build 71). R3 (`0.6.0`) specced in full below, not started.
-R4 is architecture only.
+Status: **R1–R3 shipped, `OFF` removed** (`0.12.0`, build 80). R4 is architecture only.
 Author's constraint: MVP, fail fast and loud, small isolated releases, architecture-first beyond R1.
+
+**0.12.0 amendment (Mido 2026-10-17): `NOTIFY` is the floor.** Every auto-approve path is
+gone — the `OFF` global switch, `Mode.OFF`, and the unattended-approve branch. There is no
+mode in which a request runs without a human. See §7.15.
 
 ---
 
@@ -20,7 +23,9 @@ Two features, shipped as four isolated releases:
    request came from. A rule set maps label patterns → one of three modes:
    - `SECURE` — today's behaviour: full-screen modal + biometric.
    - `NOTIFY` — small overlay toast (draw-over-apps), 5s silence = approve, tap `✕` = reject.
-   - `OFF` — no UI, log only.
+
+   These two are the complete set. `NOTIFY` is the floor (0.12.0, §7.15): the quietest a
+   request can be is a 5-second overlay. There is no auto-approve mode.
 
 ### Non-goals (explicitly out of scope for now)
 
@@ -497,6 +502,10 @@ commit**, before the audit spine lands:
 
 ## 6. R2 — Gate switch + `OFF` (FULL DETAIL)
 
+> **Superseded by 0.12.0 (§7.15).** R2 shipped `SECURE | OFF`; the `OFF` value was removed
+> entirely in 0.12.0, so the sections below are the historical record of that release, not the
+> current model. The current switch is `AUTOMATIC | SECURE | NOTIFY` (§7.1).
+
 **Scope cut — Mido, 2026-10-17.** `NOTIFY` is not in this release. That cut has one consequence
 worth stating plainly: with only `secure` and `off` available, a per-pair rule can only say
 `secure` — which is exactly what "no rule" already means. The rule table would be machinery with no
@@ -636,10 +645,10 @@ A rule table with one legal value is machinery with no observable effect — a s
 change anything. `NOTIFY` is what makes a rule express a *decision*, so the picker, the settings
 screen and the modal control all arrive with the second outcome they need.
 
-### 7.1 The switch gains two values — **LOCKED (Mido 2026-10-17)**
+### 7.1 The switch — **0.12.0: `OFF` removed, `NOTIFY` is the floor**
 
 ```
-AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
+AUTOMATIC | SECURE | NOTIFY          default: SECURE
 ```
 
 | Value | Meaning | Rules |
@@ -647,17 +656,15 @@ AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
 | `AUTOMATIC` | The per-pair table decides. No rule for a pair → `SECURE`. | **read** |
 | `SECURE` | Every request: modal + biometric. | ignored |
 | `NOTIFY` | Every request: overlay toast, 5s silence = approve. | ignored |
-| `OFF` | No gate at all. Log only. | ignored |
 
-- Only `AUTOMATIC` consults the rules. The other three force one mode on every request, which is
-  what makes `OFF` a **true panic switch** rather than "log-only for unconfigured pairs".
+- Only `AUTOMATIC` consults the rules. The other two force one mode on every request.
 - No rule for a pair under `AUTOMATIC` resolves to `SECURE`. Silence means *ask me*; nothing
   auto-approves by accident. This is the §12 invariant applied to the rule table.
 - `AUTOMATIC` needs the rules screen to be useful at all, so the two ship in one release even
   though the switch value is one line.
 
-**UX: unsecure must be loud.** `NOTIFY` gets an amber banner on home while selected; `OFF` keeps
-its confirmation dialog and permanent red banner from R2 (§6.1). `AUTOMATIC` and `SECURE` are
+**UX: the quiet mode must be loud.** `NOTIFY` gets an amber banner on home while selected,
+because it is the one value where doing nothing approves a request. `AUTOMATIC` and `SECURE` are
 neutral. The rule is: *the home screen must never show a switch position without showing what it
 implies.* A user who cannot tell at a glance whether they are gated has an unusable gate.
 
@@ -812,11 +819,11 @@ Implementation rules:
 data class Rule(
     val plugin: String,   // exact: "gmail" | "calendar" | "notifications" | "debug". Never "*".
     val verb: Verb,       // exact: READ | WRITE | EDIT | DELETE | EXECUTE. Never null.
-    val mode: Mode        // SECURE | NOTIFY.  OFF is NOT a rule value.
+    val mode: Mode        // SECURE | NOTIFY. These are the only two modes (0.12.0).
 )
 
 data class Policy(
-    val global: GlobalMode,   // AUTOMATIC | SECURE | NOTIFY | OFF
+    val global: GlobalMode,   // AUTOMATIC | SECURE | NOTIFY
     val rules: List<Rule>
 )
 ```
@@ -827,13 +834,10 @@ data class Policy(
 - Stored `SECURE` and no rule are **behaviourally identical** (`rule?.mode ?: SECURE`). Say it out
   loud in the UI so nobody hunts for a difference that does not exist: a saved `secure` row renders
   as `gmail · delete — secure (default)`.
-- **`OFF` cannot be set per pair — LOCKED (Q12).** It exists only as a global switch value. The
-  per-pair picker is exactly three options, so there is no way to auto-approve one pair in
-  isolation; "log only for `gmail · delete`" means turning the gate off for the entire app.
-  Accepted trade: `OFF` is the one value meaning "no human, no fingerprint", and one switch is
-  easier to remember to turn back than twelve rows. Do not add a 4th picker option without a fresh
-  decision — doing so reopens whether an accidentally-set `OFF` row can silently bypass the gate,
-  and it would need the same confirmation + banner treatment the global switch has.
+- **A rule chooses *how* a request asks, never *whether* it asks.** `NOTIFY` is the floor
+  (0.12.0, §7.15). The picker is exactly `default | notify | secure`, so there is no per-pair
+  auto-approve and no way to bypass the gate from this screen at all. There is nothing left to
+  guard against here: the mode that made a 4th option dangerous no longer exists.
 - **One rule per `(plugin, verb)` pair**, enforced on load. A duplicate pair is a **startup
   error**, never last-wins: the same file must not resolve differently depending on write order.
 - **No `scope`, no wildcards.** `(plugin, verb)` is the whole key and the whole screen. An earlier
@@ -1006,9 +1010,8 @@ it.
 3. Fire again and tap `✕` → `403 denied`, log `NOTIFY_REJECTED`.
 4. Fire again and **lock the phone inside the window** → `403 denied`, log `DENIED_UNATTENDED`,
    card gone.
-5. Set global `NOTIFY` → every request shows a card, the rule table greys out with its one-line
+6. Set global `NOTIFY` → every request shows a card, the rule table greys out with its one-line
    reason, `POLICY_CHANGED` recorded.
-6. Set global `OFF` → identical to R2 (§6.9) — no popup, `OFF_APPROVED`.
 7. Change a rule from the **modal** and from the **log detail** → `POLICY_CHANGED` with
    `source=MODAL` / `LOG`, and the *request on screen is unaffected*.
 8. Hand-edit a duplicate pair into `policy.json` → server refuses to start, red banner.
@@ -1023,6 +1026,40 @@ it.
   `DENIED_UNATTENDED`, `POLICY_CHANGED` (rule source).
 - The skill docs and `approval-modal.md` state the SECURE-only fingerprint rule.
 - The R2 file format loads unchanged; an R3 file with rules refuses to load on R2.
+
+### 7.15 0.12.0 — `OFF` removed, `NOTIFY` is the floor — **LOCKED (Mido 2026-10-17)**
+
+**Mido: "let's remove silent from the whole app everywhere, notify is the minimum."**
+
+Every path that could run a request without a human is gone:
+
+- `GlobalMode.OFF` — deleted. The switch is `AUTOMATIC | SECURE | NOTIFY`.
+- `Mode.OFF` — deleted. The effective mode is `SECURE | NOTIFY`.
+- The unattended-approve branch — deleted. `isAttended` is now unconditional: screen off or
+  locked means `DENIED_UNATTENDED`, in every mode. There is no exempt mode.
+- The `OFF` confirmation dialog and red banner on home — deleted with the value.
+
+What stays, and why:
+
+- **`AuditOutcome.OFF_APPROVED` is kept, read-only.** `AuditRecord` decodes an unknown outcome
+  name to `null` and the reader counts those as *unreadable lines*. Deleting the enum value would
+  turn honest history into apparent corruption, so it survives as a legacy value nothing can
+  write again. This is the same rule as everywhere else: never rewrite the log.
+- **A legacy `"OFF"` in `policy.json` loads as `NOTIFY`.** A file written by ≤0.11.0 must not
+  brick the app, and there is exactly one safe direction: `OFF` meant *no gate*, so it maps to the
+  floor that still asks a human. The migration is one exact string — every other unknown value is
+  still a parse error, so the exemption cannot quietly widen.
+- **`SECURE` is still the default** in every ambiguous case, and `AUTOMATIC` with no rule still
+  resolves to `SECURE`. Nothing about the default changed.
+
+The invariant this buys, and it is the reason to do it: **the switch can only ever move toward
+asking more.** `SECURE` asks loudly, `NOTIFY` asks quietly, and nothing asks *nothing*. A single
+value could previously turn the whole app into an auto-approver; now no value can, and no
+configuration can be reached by accident that skips a human.
+
+Test that encodes it: `no switch value can weaken a request below NOTIFY` (PolicyTest). It loops
+`GlobalMode.values()` and fails if any resolves below `NOTIFY` — so reintroducing an auto-approve
+value fails the build until someone reopens this question on purpose.
 
 ---
 

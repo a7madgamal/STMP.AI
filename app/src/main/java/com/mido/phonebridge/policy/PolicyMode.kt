@@ -3,19 +3,24 @@ package com.mido.phonebridge.policy
 import com.mido.phonebridge.core.Verb
 
 /**
- * The one switch on the home screen. Four values from R3.
+ * The one switch on the home screen.
  *
- * `AUTOMATIC` is the only value that reads the rule table. The other three force a
- * single mode on every request, which is what makes `OFF` a true panic switch
- * rather than "log-only for pairs nobody configured".
+ * `AUTOMATIC` is the only value that reads the rule table. The other two force a
+ * single mode on every request.
+ *
+ * There is deliberately no `OFF` (auto-approve) value. It existed from R2 and was
+ * removed in 0.12.0: `NOTIFY` is the floor. The quietest thing a request can do is
+ * show a 5-second overlay, and nothing in this app can run a request without asking
+ * a human first. `SECURE` is stricter than `NOTIFY`, so the switch can only move
+ * *toward* asking more — never away from it.
  */
-enum class GlobalMode { AUTOMATIC, SECURE, NOTIFY, OFF }
+enum class GlobalMode { AUTOMATIC, SECURE, NOTIFY }
 
 /**
  * The mode a request is actually gated with. Distinct from [GlobalMode] because
  * `AUTOMATIC` is a switch value that is not a mode: it resolves to one.
  */
-enum class Mode { SECURE, NOTIFY, OFF }
+enum class Mode { SECURE, NOTIFY }
 
 /**
  * Why a mode was chosen. Deliberately a policy-local enum rather than the audit's
@@ -64,7 +69,6 @@ fun resolve(
     }
     GlobalMode.SECURE -> ModeResolution(Mode.SECURE, ModeSource.GLOBAL, null)
     GlobalMode.NOTIFY -> ModeResolution(Mode.NOTIFY, ModeSource.GLOBAL, null)
-    GlobalMode.OFF -> ModeResolution(Mode.OFF, ModeSource.GLOBAL, null)
 }
 
 /** Thin wrapper for callers that only need the mode. One decision path, not two. */

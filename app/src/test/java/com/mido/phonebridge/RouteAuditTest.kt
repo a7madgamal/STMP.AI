@@ -13,11 +13,11 @@ import org.junit.Test
  * The decision to keep a handler's reply in the audit — and the bug that proved it
  * had to be shared.
  *
- * It used to live twice, once per dispatch path. The `OFF` path's copy always stored
- * the body, so `Route.auditResponseBody` was honoured under `SECURE` and silently
- * ignored under `OFF`: `/debug` wrote its whole report into the log on every call
- * whenever the gate was off. Measured on the device — one `debug.read` record costs
- * ~1 KB under `SECURE` and ~13.7 KB under `OFF`.
+ * It used to live twice, once per dispatch path. The ungated path's copy (the `OFF`
+ * switch, removed in 0.12.0) always stored the body, so `Route.auditResponseBody` was
+ * honoured under `SECURE` and silently ignored whenever the gate was off: `/debug`
+ * wrote its whole report into the log on every call. Measured on the device — one
+ * `debug.read` record cost ~1 KB under `SECURE` and ~13.7 KB under `OFF`.
  *
  * These call the same function the dispatcher calls, which is the point. The previous
  * version of this file constructed a `Route` and asserted on the flag, so it passed
@@ -78,17 +78,17 @@ class RouteAuditTest {
     }
 
     @Test
-    fun `the OFF path and the gated path cannot disagree`() {
+    fun `both dispatch paths cannot disagree`() {
         // The regression itself. Under the old code these two callers had their own
-        // copy of the decision, and the OFF one stored the body while the gated one
+        // copy of the decision, and the ungated one stored the body while the gated one
         // did not. Compared field-by-field, not record-by-record: record ids and
         // timestamps increment by design, so a whole-object comparison would differ
         // for a reason that has nothing to do with this decision.
-        val off = draft()
+        val ungated = draft()
         val gated = draft()
-        recordResponse(off, storesResponseBody = false, status = 200, body = JSONObject("""{"x":1}"""))
+        recordResponse(ungated, storesResponseBody = false, status = 200, body = JSONObject("""{"x":1}"""))
         recordResponse(gated, storesResponseBody = false, status = 200, body = JSONObject("""{"x":1}"""))
-        val a = off.toRecord(2L).toJson()
+        val a = ungated.toRecord(2L).toJson()
         val b = gated.toRecord(2L).toJson()
         assertEquals(a.getString("responseBody"), b.getString("responseBody"))
         assertEquals(

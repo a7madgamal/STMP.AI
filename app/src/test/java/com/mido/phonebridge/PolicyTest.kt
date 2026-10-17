@@ -14,6 +14,7 @@ import com.mido.phonebridge.policy.resolveMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -25,7 +26,7 @@ import java.io.File
  *
  * Every test here exists because the alternative is a silent behaviour change: a
  * policy that fails to load must never quietly become `SECURE` (reattaching a gate
- * the user turned off) nor quietly become `OFF` (detaching one they rely on).
+ * the user turned off) nor quietly become anything weaker (detaching one they rely on).
  */
 class PolicyTest {
 
@@ -37,17 +38,31 @@ class PolicyTest {
     // --- resolveMode: the whole engine ---
 
     @Test
-    fun `secure and off resolve globally, ignoring rules entirely`() {
-        // A rule that would say NOTIFY, and a switch that overrides it. This is the
-        // property that makes `off` a real panic switch: no stored decision can
-        // survive it.
+    fun `secure resolves globally, ignoring rules entirely`() {
+        // A rule that would say NOTIFY, and a switch that overrides it. SECURE is the
+        // strictest value, so it wins over any stored decision.
         val rules = listOf(gmailDelete)
         assertEquals(Mode.SECURE, resolveMode(GlobalMode.SECURE, rules, "gmail", Verb.DELETE))
-        assertEquals(Mode.OFF, resolveMode(GlobalMode.OFF, rules, "gmail", Verb.DELETE))
         assertEquals(
             ModeSource.GLOBAL,
             resolve(GlobalMode.SECURE, rules, "gmail", Verb.DELETE).source
         )
+    }
+
+    @Test
+    fun `no switch value can weaken a request below NOTIFY`() {
+        // The 0.12.0 invariant. `OFF` used to resolve to an ungated Mode.OFF; it is gone,
+        // and NOTIFY is the floor. So whatever the switch says, a request still reaches a
+        // human. This is the test that would fail if an auto-approve value were ever
+        // reintroduced without someone deciding to reopen this question.
+        val rules = listOf(gmailDelete)
+        for (g in GlobalMode.values()) {
+            val mode = resolveMode(g, rules, "gmail", Verb.DELETE)
+            assertTrue(
+                "switch $g resolved to $mode, which is below the NOTIFY floor",
+                mode == Mode.NOTIFY || mode == Mode.SECURE
+            )
+        }
     }
 
     @Test
@@ -107,9 +122,9 @@ class PolicyTest {
     @Test
     fun `a valid policy round-trips through write and read`() {
         val dir = tmp.newFolder()
-        PolicyStore(dir).set(Policy(GlobalMode.OFF))
+        PolicyStore(dir).set(Policy(GlobalMode.NOTIFY))
         // A fresh store on the same dir proves it came off disk, not the cache.
-        assertEquals(GlobalMode.OFF, PolicyStore(dir).get().global)
+        assertEquals(GlobalMode.NOTIFY, PolicyStore(dir).get().global)
     }
 
     @Test
@@ -156,15 +171,34 @@ class PolicyTest {
     }
 
     @Test
-    fun `OFF is refused as a rule mode, because auto-approve is global only`() {
-        // Q12, locked. If this were accepted, "no human, no fingerprint" would be
-        // settable twelve times and one accidental row would bypass the gate.
-        val e = assertThrows(PolicyException::class.java) {
+    fun `an auto-approve mode is refused as a rule mode`() {
+        // Q12, and now stronger: there is no auto-approve mode at all in 0.12.0, so a
+        // rule carrying one is refused as an unknown mode. If this were ever accepted,
+        // "no human, no fingerprint" would be settable twelve times and one accidental
+        // row would bypass the gate.
+        assertThrows(PolicyException::class.java) {
             Policy.parse(
                 """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","verb":"DELETE","mode":"OFF"}]}"""
             )
         }
-        assertEquals(true, e.message!!.contains("app-wide"))
+    }
+
+    @Test
+    fun `a legacy OFF global loads as NOTIFY, never as an ungated state`() {
+        // A file written by <=0.11.0 has global "OFF", which no longer exists. It must
+        // not brick the app, and it must not load as anything weaker than the floor:
+        // OFF meant "no gate", so NOTIFY (still asks a human) is the only safe direction.
+        val p = Policy.parse("""{"version":1,"global":"OFF","rules":[]}""")
+        assertEquals(GlobalMode.NOTIFY, p.global)
+    }
+
+    @Test
+    fun `an unknown global that is not the legacy OFF is still refused`() {
+        // The migration above is one exact string, not a lenient parser. Anything else
+        // unrecognised still fails, so the exemption cannot quietly widen.
+        assertThrows(PolicyException::class.java) {
+            Policy.parse("""{"version":1,"global":"off","rules":[]}""")
+        }
     }
 
     @Test
@@ -253,8 +287,8 @@ class PolicyTest {
         val dir = tmp.newFolder()
         val store = PolicyStore(dir)
         store.set(Policy(GlobalMode.SECURE))
-        store.set(Policy(GlobalMode.OFF))
-        assertEquals(GlobalMode.OFF, PolicyStore(dir).get().global)
+        store.set(Policy(GlobalMode.NOTIFY))
+        assertEquals(GlobalMode.NOTIFY, PolicyStore(dir).get().global)
         assertEquals(false, File(dir, "policy.json.tmp").exists())
     }
 }

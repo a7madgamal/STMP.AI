@@ -109,8 +109,9 @@ class SettingsActivity : Activity() {
             text(
                 "NOTIFY shows a small overlay for 5 seconds. Doing nothing approves it; " +
                     "tap ✕ to reject. SECURE opens the full-screen prompt with a fingerprint.\n\n" +
-                    "OFF is not available per pair — it is a global switch, so auto-approve " +
-                    "is always one deliberate app-wide act.",
+                    "There is no auto-approve option — not here and not on the switch. The " +
+                    "quietest a request can be is the 5s overlay, so every request reaches " +
+                    "a human first.",
                 UiKit.TEXT_MUTED
             )
         )

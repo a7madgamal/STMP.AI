@@ -368,10 +368,11 @@ class MainActivity : Activity() {
     }
 
     /**
-     * The gate switch, and the one thing that must never be quiet: `OFF`.
+     * The gate switch. `SECURE` is the resting state; `NOTIFY` is the quiet one.
      *
-     * `SECURE` is the resting state. `OFF` gets a red card that stays there for as
-     * long as it is selected — not a toast, which would be gone by the time you look.
+     * There is no auto-approve position (removed in 0.12.0), so this screen cannot
+     * show a state where requests run without a human. The switch only chooses how
+     * loudly they ask — never whether they ask at all.
      */
     private fun renderGate() {
         val current = try {
@@ -390,7 +391,7 @@ class MainActivity : Activity() {
         }
 
         when (current) {
-            // Only AUTOMATIC reads the rules. The other three force one mode on every
+            // Only AUTOMATIC reads the rules. The other two force one mode on every
             // request, and the card says which so the home screen never shows a switch
             // position without showing what it implies.
             GlobalMode.AUTOMATIC -> {
@@ -410,11 +411,6 @@ class MainActivity : Activity() {
                 gateCard.background = UiKit.pill(UiKit.AMBER_BG)
                 gateTitle.text = "⚠ NOTIFY"
                 gateSub.text = "Small overlay toast. Silent 5s = approved. Tap ✕ to reject."
-            }
-            GlobalMode.OFF -> {
-                gateCard.background = UiKit.pill(UiKit.RED_BG)
-                gateTitle.text = "⚠ OFF"
-                gateSub.text = "Every request is approved and executed. The gate is disabled."
             }
         }
         gateTitle.setTextColor(UiKit.TEXT_ON_DARK)
@@ -437,10 +433,9 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Apply a switch change, with a confirmation before the one that disarms the gate.
-     *
-     * The confirmation exists because `OFF` is one tap from "no human sees anything
-     * again", and that tap sits in the same place as the harmless one.
+     * Apply a switch change. `NOTIFY` gets one confirmation, because it is the only
+     * value where doing nothing approves a request — the single place in the app where
+     * silence means YES, so it gets one sentence saying so.
      */
     private fun requestGate(next: GlobalMode) {
         val store = PolicyStore.from(applicationContext)
@@ -452,19 +447,9 @@ class MainActivity : Activity() {
         }
         if (next == current) return
 
-        if (next == GlobalMode.OFF) {
-            AlertDialog.Builder(this)
-                .setTitle("Turn the gate OFF?")
-                .setMessage(
-                    "Every request will be approved and executed with no popup and no " +
-                        "fingerprint — deletes included.\n\nThis stays on until you turn it back."
-                )
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Turn it OFF") { _, _ -> applyGate(store, current, next) }
-                .show()
-        } else if (next == GlobalMode.NOTIFY) {
+        if (next == GlobalMode.NOTIFY) {
             // Not a red-alert confirmation: NOTIFY still asks, just quietly. But it is
-            // the first value where silence means YES, so it gets one sentence saying so.
+            // the value where silence means YES, so it gets one sentence saying so.
             AlertDialog.Builder(this)
                 .setTitle("Use overlay prompts?")
                 .setMessage(

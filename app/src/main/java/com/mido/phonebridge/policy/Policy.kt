@@ -60,7 +60,7 @@ class Policy(
          *  - an unknown `global` value is a parse error, NOT a silent `SECURE`.
          *    Quietly re-enabling a gate the user turned off is a behaviour change
          *    they never asked for.
-         *  - a rule this build cannot honour (bad plugin, bad verb, `OFF` as a mode)
+         *  - a rule this build cannot honour (bad plugin, bad verb, an unknown mode)
          *    is a parse error, not a dropped rule: running while ignoring a decision
          *    that sits in the file is the same lie in a different shape.
          *  - a duplicate `(plugin, verb)` pair is an error, never last-wins. The same
@@ -77,8 +77,14 @@ class Policy(
                 throw PolicyException("policy version $version is not $VERSION")
             }
             val rawGlobal = o.optString("global", "")
+            // `OFF` is a legacy switch value from <=0.11.0, removed in 0.12.0 along with
+            // every other auto-approve path. A file written by an older build must not
+            // brick the app, and there is only one safe direction: `OFF` meant "no gate",
+            // so it loads as `NOTIFY`, which still asks a human. One-way and named here
+            // rather than guessed — anything else is still a parse error below.
             val global = GlobalMode.values().firstOrNull { it.name == rawGlobal }
-                ?: throw PolicyException(
+                ?: if (rawGlobal == "OFF") GlobalMode.NOTIFY
+                else throw PolicyException(
                     "unknown global '$rawGlobal'; this build understands " +
                         GlobalMode.values().joinToString(", ")
                 )
@@ -118,10 +124,11 @@ class Policy(
                         Rule.ALLOWED_MODES.joinToString(", ")
                 )
             if (mode !in Rule.ALLOWED_MODES) {
+                // Unreachable while ALLOWED_MODES covers every Mode value, and kept as
+                // the guard for the day one is added without being classified here.
                 throw PolicyException(
                     "$where sets mode '$rawMode'; a rule may carry " +
-                        Rule.ALLOWED_MODES.joinToString(", ") +
-                        " — OFF is app-wide only (the global switch)"
+                        Rule.ALLOWED_MODES.joinToString(", ")
                 )
             }
             return Rule(plugin, verb, mode)
