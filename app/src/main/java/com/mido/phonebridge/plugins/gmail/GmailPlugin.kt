@@ -28,12 +28,12 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     private val base = "https://gmail.googleapis.com/gmail/v1/users/me"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/gmail/profile", "Show your Gmail profile") { profile() },
-        Route("GET", "/gmail/messages", "List your Gmail messages") { list(it) },
-        Route("GET", "/gmail/messages/{id}", "Read a Gmail message") { get(it) },
-        Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels") { modify(it) },
-        Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL") { trash(it) },
-        Route("POST", "/gmail/messages/send", "SEND EMAIL") { send(it) }
+        Route("GET", "/gmail/profile", "Show your Gmail profile", Verb.READ) { profile() },
+        Route("GET", "/gmail/messages", "List your Gmail messages", Verb.READ) { list(it) },
+        Route("GET", "/gmail/messages/{id}", "Read a Gmail message", Verb.READ) { get(it) },
+        Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels", Verb.EDIT) { modify(it) },
+        Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL", Verb.DELETE) { trash(it) },
+        Route("POST", "/gmail/messages/send", "SEND EMAIL", Verb.WRITE) { send(it) }
     )
 
     /**

@@ -414,12 +414,15 @@ List (`LogActivity`, RecyclerView):
    and a 40 KiB body (asserts the 32 KiB cap **and** the `truncated` original size).
 3. `AuditLogTest` — temp dir: append 3 records, re-open, read 3 headers; retention deletes a
    day-file older than 7 days; a hand-written corrupt line is skipped and counted.
-4. `PolicyResolveTest` — `resolveMode()` truth table: `AUTOMATIC` + no rule → `SECURE`;
-   `AUTOMATIC` + `gmail/DELETE → NOTIFY` → `NOTIFY`; any explicit global value → that value for
-   every pair regardless of the rule table (the property that makes `OFF` a panic switch).
+4. `AuditNoiseTest` — the noise table is exhaustively asserted, so adding an outcome without
+   deciding its noise status fails the build rather than defaulting into the hidden view.
 
-Note: #4 is pure data — `resolveMode` takes no `Context` and no plugin instance, which is the
-point of an exact-key table. Nothing here needs a device, and nothing here needs a `Context`.
+(`PolicyResolveTest` arrives with R2, where `resolveMode()` exists. It is NOT an R1 test — an
+earlier draft listed it here, which would have meant either a skipped test or a stub engine.)
+
+All four run on a plain JVM. The store takes a `File` rather than a `Context` for exactly this
+reason: retention and corruption handling are the two paths that decide whether the log can be
+trusted, and neither should be verifiable only by hand on a device.
 
 ### 5.10 Device acceptance (must all be observed, not assumed)
 

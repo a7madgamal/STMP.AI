@@ -24,12 +24,12 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
     private val base = "https://www.googleapis.com/calendar/v3"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/calendar/events", "List your calendar events") { list(it) },
-        Route("POST", "/calendar/events", "CREATE CALENDAR EVENT") { create(it) },
-        Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT") { update(it) },
-        Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT") { delete(it) },
-        Route("POST", "/calendar/events/{id}/move", "MOVE CALENDAR EVENT") { move(it) },
-        Route("POST", "/calendar/quickadd", "QUICK-ADD CALENDAR EVENT") { quickAdd(it) }
+        Route("GET", "/calendar/events", "List your calendar events", Verb.READ) { list(it) },
+        Route("POST", "/calendar/events", "CREATE CALENDAR EVENT", Verb.WRITE) { create(it) },
+        Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT", Verb.EDIT) { update(it) },
+        Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT", Verb.DELETE) { delete(it) },
+        Route("POST", "/calendar/events/{id}/move", "MOVE CALENDAR EVENT", Verb.EDIT) { move(it) },
+        Route("POST", "/calendar/quickadd", "QUICK-ADD CALENDAR EVENT", Verb.WRITE) { quickAdd(it) }
     )
 
     /**

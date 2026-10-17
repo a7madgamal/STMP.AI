@@ -40,6 +40,14 @@
             android:exported="false"
             android:launchMode="singleTop" />
 
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".LogDetailActivity"
+            android:exported="false" />
+
  <!-- exported=false: plugins are addressed via the in-app registry, not by intent -->
         <service
             android:name=".BridgeService"

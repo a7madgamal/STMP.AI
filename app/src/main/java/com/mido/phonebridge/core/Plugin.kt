@@ -14,12 +14,21 @@ import org.json.JSONObject
  * into a compile error instead of a runtime `undescribed_route` 500 (that is
  * exactly how `/calendar/events` shipped — the route existed, the description
  * did not, and the gate refused it only when a request arrived).
+ *
+ * [verb] classifies what the route DOES. REQUIRED and for the same reason: a
+ * route nobody classified cannot be labelled, cannot be audited, and cannot be
+ * governed. Deliberately NOT derived from the HTTP method — `POST
+ * /notifications/{id}/action` is EXECUTE, not write, and `POST
+ * /gmail/messages/{id}/trash` is DELETE, not write. Inferring was the bug class
+ * the old gate-side table already cost this project.
  */
 data class Route(
-    val method: String,          // "GET" | "POST"
+    val method: String,          // "GET" | "POST" | "DELETE"
     val path: String,            // e.g. "/notifications", "/gmail/messages/{id}"
     /** Human label for the approval modal, e.g. "List your calendar events". */
     val describe: String,
+    /** What this route does: the audit label, and (R2) the policy key. */
+    val verb: Verb,
     val handler: suspend (Req) -> Resp
 )
 

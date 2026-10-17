@@ -25,8 +25,38 @@ object ApprovalGate {
     const val CHANNEL_ID = "approval"
     const val TIMEOUT_SECONDS = 60L
 
-    class DeniedException : Exception("denied")
-    class TimeoutException : Exception("timeout")
+    /**
+     * How a request left the gate. Returned, never thrown: the caller has to write
+     * an audit record for every outcome, and an exception path is a place a record
+     * gets forgotten. One call site today, and R2 (`OFF` bypasses the gate) and R3
+     * (`NOTIFY` has a different clock) both need a gate that just hands back an
+     * answer.
+     */
+    sealed class GateResult {
+        /** The human approved (biometric included, when required). */
+        data class Approved(
+            val enqueuedAt: Long,
+            val shownAt: Long,
+            val decidedAt: Long,
+            val queueDepth: Int
+        ) : GateResult()
+
+        /** The human tapped DENY. */
+        data class Denied(
+            val enqueuedAt: Long,
+            val shownAt: Long,
+            val decidedAt: Long,
+            val queueDepth: Int
+        ) : GateResult()
+
+        /** Nobody decided inside the window. Automatically denied. */
+        data class TimedOut(
+            val enqueuedAt: Long,
+            val shownAt: Long,
+            val expiredAt: Long,
+            val queueDepth: Int
+        ) : GateResult()
+    }
 
     /**
      * One labelled row in the modal: a short label and its value, plus an optional
@@ -126,6 +156,11 @@ object ApprovalGate {
          *  per-intent) so a re-show on return to the app reuses the ORIGINAL
          *  deadline rather than restarting a fresh window. */
         val createdAtMs: Long = System.currentTimeMillis(),
+        /** When the popup actually appeared (the clock the human saw). */
+        @Volatile var shownAtMs: Long = 0L,
+        /** Requests already waiting behind this one when it enqueued. */
+        val queueDepthAtEnqueue: Int = 0,
+        @Volatile var decidedAtMs: Long = 0L,
         @Volatile var approved: Boolean? = null
     )
 
@@ -186,6 +221,7 @@ object ApprovalGate {
         val p = current ?: return false
         if (p.requestId != requestId) return false
         p.approved = approved
+        p.decidedAtMs = System.currentTimeMillis()
         p.latch.countDown()
         return true
     }
@@ -193,7 +229,6 @@ object ApprovalGate {
     /**
      * Block until the human approves/denies. Throws on deny/timeout.
      */
-    @Throws(DeniedException::class, TimeoutException::class)
     fun await(
         ctx: Context,
         remote: String,
@@ -202,9 +237,20 @@ object ApprovalGate {
         detail: org.json.JSONObject?,
         account: String = "—",
         view: ApprovalView? = null
-    ) {
+    ): GateResult {
         val id = seq.incrementAndGet()
-        val pending = Pending(id, CountDownLatch(1), detail, view, remote, endpoint, summary, account)
+        val behind = synchronized(this) { (queue.size).coerceAtLeast(0) }
+        val pending = Pending(
+            requestId = id,
+            latch = CountDownLatch(1),
+            detail = detail,
+            view = view,
+            remote = remote,
+            endpoint = endpoint,
+            summary = summary,
+            account = account,
+            queueDepthAtEnqueue = behind
+        )
 
         // Enqueue, then wait for OUR turn. A second concurrent request no longer
         // dies with a fake 408 (the old one-slot behaviour threw TimeoutException,
@@ -225,11 +271,26 @@ object ApprovalGate {
                 postApprovalNotification(ctx, pending)
             }
             val ok = pending.latch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            if (!ok) throw TimeoutException()
-            when (pending.approved) {
-                true -> return
-                false -> throw DeniedException()
-                null -> throw TimeoutException()
+            val decidedAt = if (pending.decidedAtMs > 0) pending.decidedAtMs else System.currentTimeMillis()
+            return when {
+                !ok || pending.approved == null -> GateResult.TimedOut(
+                    enqueuedAt = pending.createdAtMs,
+                    shownAt = pending.shownAtMs,
+                    expiredAt = decidedAt,
+                    queueDepth = pending.queueDepthAtEnqueue
+                )
+                pending.approved == true -> GateResult.Approved(
+                    enqueuedAt = pending.createdAtMs,
+                    shownAt = pending.shownAtMs,
+                    decidedAt = decidedAt,
+                    queueDepth = pending.queueDepthAtEnqueue
+                )
+                else -> GateResult.Denied(
+                    enqueuedAt = pending.createdAtMs,
+                    shownAt = pending.shownAtMs,
+                    decidedAt = decidedAt,
+                    queueDepth = pending.queueDepthAtEnqueue
+                )
             }
         } finally {
             // Remove ourselves, promote the next waiter, and post ITS popup.
@@ -251,6 +312,10 @@ object ApprovalGate {
         ctx: Context,
         p: Pending
     ) {
+        // The 60s clock and the audit's `shownAt` are the same instant: when the
+        // human could first see this request. Stamped here, once, for the modal and
+        // for the record.
+        p.shownAtMs = p.createdAtMs
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // minSdk is 26, so NotificationChannel is always available.
         val ch = NotificationChannel(

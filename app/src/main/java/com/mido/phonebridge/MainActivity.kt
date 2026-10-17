@@ -14,6 +14,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.mido.phonebridge.audit.AuditHealth
+import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.PluginRegistry
 import java.text.SimpleDateFormat
@@ -29,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var logView: TextView
     private lateinit var statusContainer: LinearLayout
     private lateinit var serverButton: Button
+    private lateinit var auditBanner: TextView
     private var logExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,7 +126,22 @@ class MainActivity : Activity() {
         content.addView(pluginContainer)
         this.pluginContainer = pluginContainer
 
-        // --- 4. LOG: collapsed by default, out of the main flow ---
+        // --- 4. AUDIT LOG: one entry point, and the degraded banner above it ---
+        content.addView(header("Request log"))
+        auditBanner = TextView(this).apply {
+            textSize = 14f
+            setTextColor(UiKit.TEXT_ON_DARK)
+            background = UiKit.pill(UiKit.RED_BG)
+            setPadding(UiKit.dp(this@MainActivity, 12), UiKit.dp(this@MainActivity, 10),
+                UiKit.dp(this@MainActivity, 12), UiKit.dp(this@MainActivity, 10))
+            visibility = TextView.GONE
+        }
+        content.addView(auditBanner)
+        content.addView(coloredButton("OPEN REQUEST LOG") {
+            startActivity(Intent(this, LogActivity::class.java))
+        }, UiKit.NEUTRAL_BG)
+
+        // --- 5. Debug: collapsed by default, out of the main flow ---
         content.addView(header("Debug"))
         content.addView(coloredButton("▸ SHOW LOG") {
             logExpanded = !logExpanded
@@ -146,6 +164,17 @@ class MainActivity : Activity() {
         Debug.init(applicationContext)
         Debug.log("=== PhoneBridge ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}) ===")
         Debug.log("app launched")
+
+        // Open the audit log now, not on first request: a store that cannot be
+        // created is a problem worth surfacing before any request needs recording
+        // it. Idempotent, so the service opening it later is a no-op.
+        try {
+            val store = AuditLog.from(applicationContext)
+            Debug.log("audit log ready; ${store.headers().size} record(s) indexed")
+        } catch (e: Exception) {
+            AuditHealth.markDegraded("audit store unavailable: ${e.message}")
+            Debug.log("AUDIT STORE FAILED: ${e.message}")
+        }
         render()
     }
 
@@ -277,6 +306,16 @@ class MainActivity : Activity() {
                 }
                 pluginContainer.addView(UiKit.statusRow(this, st.title, st.detail.ifBlank { st.state.name }, state))
             }
+        }
+
+        // A gate you cannot audit must be visible without opening the log: this
+        // banner is the only surface that says so on the home screen.
+        val degraded = AuditHealth.reason
+        if (degraded != null) {
+            auditBanner.visibility = TextView.VISIBLE
+            auditBanner.text = "⚠ AUDIT DEGRADED — requests are being refused\n$degraded"
+        } else {
+            auditBanner.visibility = TextView.GONE
         }
 
         logView.text = Debug.dump()

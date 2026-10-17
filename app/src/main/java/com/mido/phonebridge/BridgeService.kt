@@ -12,6 +12,12 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.mido.phonebridge.audit.AuditDraft
+import com.mido.phonebridge.audit.AuditOutcome
+import com.mido.phonebridge.audit.AuditLog
+import com.mido.phonebridge.audit.AuditStore
+import com.mido.phonebridge.audit.Decision
+import com.mido.phonebridge.audit.DecisionSource
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
@@ -218,30 +224,120 @@ class HttpServer(
     port: Int
 ) : NanoHTTPD(bindHost, port) {
 
+    private val auditStore: AuditStore get() = AuditLog.from(ctx)
+
     override fun serve(session: IHTTPSession): Response {
+        val startedAt = System.currentTimeMillis()
         val rawUri = session.uri
         val path = rawUri.substringBefore('?').trimEnd('/')
         val method = session.method.name
         val remote = session.remoteIpAddress ?: "unknown"
+        val query = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
 
+        val draft = AuditDraft(
+            startedAtMs = startedAt,
+            remote = remote,
+            method = method,
+            path = path,
+            query = query,
+            requestHeaders = session.headers.filterKeys { it !in HOP_BY_HOP },
+            appVersionName = BuildConfig.VERSION_NAME,
+            appVersionCode = BuildConfig.VERSION_CODE
+        )
+
+        // The whole request runs here and NEVER throws: every failure path sets a
+        // terminal outcome on the draft, so the epilogue below always has one fact
+        // to record and there is no path into the handler without a decision.
+        val result = dispatch(session, draft, method, path, remote, query)
+
+        // Audit epilogue, inside the request: the client gets its answer only after
+        // the record is on disk. A failed append is a request failure (locked Q1) —
+        // the side effect may already have happened, so say exactly that rather than
+        // reporting a success we cannot prove.
+        return try {
+            if (draft.written) throw IllegalStateException("audit record already written for this request")
+            draft.markWritten()
+            auditStore.append(draft.toRecord(System.currentTimeMillis()))
+            json(result.status, result.body)
+        } catch (e: Exception) {
+            Log.e(TAG, "audit append failed", e)
+            json(
+                Response.Status.INTERNAL_ERROR,
+                err("audit_unavailable", "action may have executed, no record: ${e.message}")
+            )
+        }
+    }
+
+    /** One HTTP response plus the status the audit should record for it. */
+    private class Dispatched(val status: Response.Status, val body: JSONObject)
+
+    /**
+     * Resolve, describe, gate, execute — setting exactly one terminal [AuditOutcome]
+     * on [draft] no matter how it ends.
+     */
+    private fun dispatch(
+        session: IHTTPSession,
+        draft: AuditDraft,
+        method: String,
+        path: String,
+        remote: String,
+        query: Map<String, String>
+    ): Dispatched {
         return try {
             val resolved = PluginRegistry.resolve(method, path)
-                ?: return json(Response.Status.NOT_FOUND, err("not_found", "unknown route $method $path"))
+            if (resolved == null) {
+                draft.outcome(AuditOutcome.UNROUTED)
+                return Dispatched(
+                    Response.Status.NOT_FOUND,
+                    err("not_found", "unknown route $method $path")
+                )
+            }
+            // Fill the label BEFORE anything can fail: a rejected request still has
+            // a plugin and a verb, and the log is far more useful with them.
+            draft.bindRoute(resolved.plugin.id, resolved.route.verb, resolved.route.path)
 
             val body = if (method == "POST") readBody(session) else JSONObject()
-            val query = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
+            draft.requestBody(body)
 
-            // Central gate: describe the concrete call, then wait for the human.
             val summary = describe(resolved.plugin.id, resolved.route.path, body)
+            draft.summary(summary)
+
             val am = com.mido.phonebridge.core.AuthManager
             val account = am.accountEmail
                 ?: if (am.isLoggedIn(ctx)) "(signed in)" else "—"
-            ApprovalGate.await(
+
+            // Central gate: describe the concrete call, then wait for the human.
+            // R1 has no policy yet, so every request is SECURE and `source` is
+            // DEFAULT — the fields exist so R2 does not have to reshape the log.
+            val gate = ApprovalGate.await(
                 ctx, remote, "$method $path", summary,
                 detail = detailFor(resolved.route.path, path, body),
                 account = account,
                 view = approvalView(remote, account, resolved.route, path, body, query)
             )
+            draft.decision(gateDecision(gate))
+
+            when (gate) {
+                is ApprovalGate.GateResult.Denied -> {
+                    draft.outcome(AuditOutcome.DENIED)
+                    draft.error("denied")
+                    draft.response(403, null)
+                    return Dispatched(
+                        Response.Status.FORBIDDEN,
+                        err("denied", "request denied by user")
+                    )
+                }
+                is ApprovalGate.GateResult.TimedOut -> {
+                    draft.outcome(AuditOutcome.TIMEOUT)
+                    draft.error("approval_timeout")
+                    draft.response(408, null)
+                    return Dispatched(
+                        Response.Status.REQUEST_TIMEOUT,
+                        err("approval_timeout", "approval timed out")
+                    )
+                }
+                is ApprovalGate.GateResult.Approved -> draft.outcome(AuditOutcome.APPROVED)
+            }
 
             val req = Req(
                 method = method,
@@ -252,17 +348,54 @@ class HttpServer(
                 remote = remote
             )
             val resp = runBlocking { resolved.route.handler(req) }
-            json(statusOf(resp.status), resp.body)
+            val bodyText = resp.body.toString()
+            draft.response(resp.status, bodyText)
+            Dispatched(statusOf(resp.status), resp.body)
         } catch (e: PluginError) {
-            json(httpStatusFor(e.code), err(e.code, e.message ?: e.code))
-        } catch (e: ApprovalGate.DeniedException) {
-            json(Response.Status.FORBIDDEN, err("denied", "request denied by user"))
-        } catch (e: ApprovalGate.TimeoutException) {
-            json(Response.Status.REQUEST_TIMEOUT, err("approval_timeout", "approval timed out"))
+            // Two very different failures share this type. BEFORE the gate it is the
+            // caller's fault (bad input, unknown id) → 4xx, noise. AFTER the gate the
+            // human already approved and the server still failed → a real fault.
+            val st = httpStatusFor(e.code)
+            val preGate = !draft.gated()
+            draft.outcome(
+                if (preGate && st.requestStatus < 500) AuditOutcome.REJECTED_INVALID
+                else AuditOutcome.HANDLER_FAILED
+            )
+            draft.error(e.code)
+            val bodyObj = err(e.code, e.message ?: e.code)
+            draft.response(st.requestStatus, bodyObj.toString())
+            Dispatched(st, bodyObj)
         } catch (e: Exception) {
-            Log.e("HttpServer", "unhandled", e)
-            json(Response.Status.INTERNAL_ERROR, err("internal_error", e.message ?: "error"))
+            Log.e(TAG, "unhandled", e)
+            draft.outcome(AuditOutcome.HANDLER_FAILED)
+            draft.error("internal_error")
+            val bodyObj = err("internal_error", e.message ?: "error")
+            draft.response(500, bodyObj.toString())
+            Dispatched(Response.Status.INTERNAL_ERROR, bodyObj)
         }
+    }
+
+    /** Map a gate outcome onto the audit's decision block. R1: always SECURE. */
+    private fun gateDecision(g: ApprovalGate.GateResult): Decision {
+        val mode = "SECURE"
+        return when (g) {
+            is ApprovalGate.GateResult.Approved -> Decision(
+                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+            )
+            is ApprovalGate.GateResult.Denied -> Decision(
+                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+            )
+            is ApprovalGate.GateResult.TimedOut -> Decision(
+                mode, DecisionSource.DEFAULT, null, null, g.enqueuedAt, g.shownAt, g.expiredAt, g.queueDepth
+            )
+        }
+    }
+
+    private companion object {
+        const val TAG = "HttpServer"
+
+        /** Headers that say nothing about the caller and everything about TCP. */
+        val HOP_BY_HOP = setOf("host", "content-length", "connection", "accept-encoding")
     }
 
     /**

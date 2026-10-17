@@ -18,9 +18,9 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
     override val displayName = "Notifications"
 
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/notifications", "List your notifications") { list(it) },
-        Route("POST", "/notifications/{id}/action", "Fire a notification action") { action(it) },
-        Route("POST", "/notifications/{id}/dismiss", "Dismiss a notification") { dismiss(it) }
+        Route("GET", "/notifications", "List your notifications", Verb.READ) { list(it) },
+        Route("POST", "/notifications/{id}/action", "Fire a notification action", Verb.EXECUTE) { action(it) },
+        Route("POST", "/notifications/{id}/dismiss", "Dismiss a notification", Verb.EXECUTE) { dismiss(it) }
     )
 
     /**
