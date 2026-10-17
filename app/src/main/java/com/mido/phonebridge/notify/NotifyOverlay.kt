@@ -322,6 +322,21 @@ object NotifyOverlay {
         // duration by exactly that delay.
         entry.shownAt = System.currentTimeMillis()
 
+        // Lifecycle logging, deliberately permanent: this prompt has been reported as a
+        // "1ms flash" on a real screen twice, and each time the in-memory ring could not
+        // say why. A UI the caller cannot see has to be able to describe itself.
+        com.mido.phonebridge.Debug.log(
+            "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
+        )
+        // Measured size arrives after layout. If this reports a full-screen height, the
+        // layout is wrong; if it never fires, the card never laid out at all.
+        card.post {
+            com.mido.phonebridge.Debug.log(
+                "notify[${entry.id}] laid out w=${card.width} h=${card.height} " +
+                    "alpha=${card.alpha} vis=${card.visibility}"
+            )
+        }
+
         // Fade in with a small rise from below. Long enough to register as "something
         // appeared", short enough not to eat a meaningful part of the window.
         card.alpha = 0f
@@ -379,6 +394,10 @@ object NotifyOverlay {
         if (entry.settled) return
         entry.settled = true
         entry.timeout?.let(main::removeCallbacks)
+        com.mido.phonebridge.Debug.log(
+            "notify[${entry.id}] settle reason=$reason " +
+                "shownMs=${if (entry.shownAt > 0) System.currentTimeMillis() - entry.shownAt else 0}"
+        )
         entry.onOutcome(Outcome(reason, entry.shownAt, System.currentTimeMillis(), detail))
 
         // Retired now, so ordering is correct even while the fade below is running.

@@ -196,6 +196,9 @@ class BridgeService : Service() {
         if (PluginRegistry.get("debug") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.debug.DebugPlugin(applicationContext))
         }
+        if (PluginRegistry.get("logs") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.logs.LogcatPlugin(applicationContext))
+        }
     }
 
     /** First IPv4 in the Tailscale CGNAT range 100.64.0.0/10, else null. */
