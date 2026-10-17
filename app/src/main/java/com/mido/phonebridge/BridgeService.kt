@@ -506,6 +506,11 @@ class HttpServer(
     private fun httpStatusFor(code: String): Response.Status = when (code) {
         "bad_request", "bad_count", "bad_package", "bad_time_min", "bad_time_max", "bad_max", "unsupported_action", "missing_reply_text", "decode_error" -> Response.Status.BAD_REQUEST
         "notification_gone" -> Response.Status.GONE
+        // A bad id pre-fetch throws not_found BEFORE the modal (gmail trash,
+        // calendar delete/update/move). Without this entry it fell to the `else`
+        // branch and answered 500 with a correct not_found body — the mapper lie
+        // the phonebridge-api skill carried as a known build defect.
+        "not_found" -> Response.Status.NOT_FOUND
         "not_clearable", "google_error" -> Response.Status.CONFLICT
         "listener_unavailable" -> Response.Status.SERVICE_UNAVAILABLE
         "auth_required", "auth_expired" -> Response.Status.UNAUTHORIZED
