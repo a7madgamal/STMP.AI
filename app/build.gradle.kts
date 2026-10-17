@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 71
-        versionName = "0.5.2"
+        versionCode = 72
+        versionName = "0.6.0"
     }
 
     buildTypes {

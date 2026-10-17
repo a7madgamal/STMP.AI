@@ -25,14 +25,19 @@ import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.Route
+import com.mido.phonebridge.core.labelOf
+import com.mido.phonebridge.notify.NotifyGate
 import com.mido.phonebridge.plugins.calendar.CalendarPlugin
 import com.mido.phonebridge.plugins.gmail.GmailPlugin
 import com.mido.phonebridge.plugins.notifications.NotificationsPlugin
 import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Mode
+import com.mido.phonebridge.policy.ModeResolution
+import com.mido.phonebridge.policy.ModeSource
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyStore
-import com.mido.phonebridge.policy.resolveMode
+import com.mido.phonebridge.policy.isAttended
+import com.mido.phonebridge.policy.resolve
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -164,6 +169,12 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // Kill any overlay still on screen. These are windows owned by the process:
+        // if the service dies without removing them they are exactly the kind of
+        // orphaned view that survives a stop and looks like a ghost prompt nobody can
+        // dismiss. Their requests resolve through the gate's own shutdown path, so
+        // clearing the views here costs no audit records.
+        com.mido.phonebridge.notify.NotifyOverlay.dismissAll()
         server?.stop()
         server = null
         markRunning(false)
@@ -364,8 +375,9 @@ class HttpServer(
             // before the gate. Guarded rather than assumed: startup already refuses on
             // an unreadable policy, so this is the belt to that braces, and a request
             // must never run on a mode nobody could read.
-            val globalMode = try {
-                policy.global
+            val resolvedPolicy = try {
+                val p = policy
+                resolve(p.global, p.rules, resolved.plugin.id, resolved.route.verb)
             } catch (e: Exception) {
                 draft.outcome(AuditOutcome.HANDLER_FAILED)
                 draft.error("policy_unavailable")
@@ -373,49 +385,137 @@ class HttpServer(
                 draft.response(503, obj.toString())
                 return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)
             }
-            val mode = resolveMode(globalMode)
+            val mode = resolvedPolicy.mode
+            val globalMode = policy.global
 
-            if (mode == Mode.OFF) {
-                // The gate is off on purpose. No popup, no fingerprint, no FIFO — and
-                // the record says OFF_APPROVED so the log can never mistake this for
-                // a human decision.
+            // ATTENDANCE. A request that cannot be shown to an attending human is
+            // DENIED — unless the gate is deliberately OFF, which is the one mode
+            // where no human was ever expected. Checked here, after validation, so a
+            // malformed request still gets its honest 400 and never a misleading
+            // `denied`. NOTIFY re-checks at approve time as well (NotifyGate).
+            if (mode != Mode.OFF && !isAttended(ctx)) {
                 draft.decision(
                     Decision(
-                        mode.name, DecisionSource.GLOBAL, globalMode.name, null,
+                        mode.name, decisionSource(resolvedPolicy.source),
+                        globalMode.name, resolvedPolicy.ruleKey,
                         null, null, null, 0
                     )
                 )
-                draft.outcome(AuditOutcome.OFF_APPROVED)
-            } else {
-                // Central gate: describe the concrete call, then wait for the human.
-                val gate = ApprovalGate.await(
-                    ctx, remote, "$method $path", summary,
-                    detail = detailFor(resolved.route.path, path, body),
-                    account = account,
-                    view = approvalView(remote, account, resolved.route, path, body, query)
-                )
-                draft.decision(gateDecision(gate, globalMode))
+                draft.outcome(AuditOutcome.DENIED_UNATTENDED)
+                draft.error("denied")
+                val obj = err("denied", "gate unavailable: screen off or device locked")
+                draft.response(403, obj.toString())
+                return Dispatched(Response.Status.FORBIDDEN, obj)
+            }
 
-                when (gate) {
-                    is ApprovalGate.GateResult.Denied -> {
-                        draft.outcome(AuditOutcome.DENIED)
-                        draft.error("denied")
-                        draft.response(403, null)
-                        return Dispatched(
-                            Response.Status.FORBIDDEN,
-                            err("denied", "request denied by user")
+            when (mode) {
+                Mode.OFF -> {
+                    // The gate is off on purpose. No popup, no fingerprint, no FIFO —
+                    // and the record says OFF_APPROVED so the log can never mistake
+                    // this for a human decision.
+                    draft.decision(
+                        Decision(
+                            mode.name, decisionSource(resolvedPolicy.source),
+                            globalMode.name, resolvedPolicy.ruleKey,
+                            null, null, null, 0
                         )
+                    )
+                    draft.outcome(AuditOutcome.OFF_APPROVED)
+                }
+
+                Mode.NOTIFY -> {
+                    // A small overlay toast, not a notification: the draw permission
+                    // this app already holds makes the prompt ours, so it appears
+                    // above whatever the human is looking at instead of fighting the
+                    // shade. Silence for 5s approves; the tiny x rejects.
+                    val decision = NotifyGate.await(
+                        ctx,
+                        summary,
+                        labelOf(resolved.plugin.id, resolved.route.verb)
+                    )
+                    when (decision) {
+                        is NotifyGate.Result.Approved -> {
+                            draft.decision(
+                                Decision(
+                                    mode.name, decisionSource(resolvedPolicy.source),
+                                    globalMode.name, resolvedPolicy.ruleKey,
+                                    null, decision.shownAt, decision.decidedAt, 0
+                                )
+                            )
+                            draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                        }
+                        is NotifyGate.Result.Rejected -> {
+                            draft.decision(
+                                Decision(
+                                    mode.name, decisionSource(resolvedPolicy.source),
+                                    globalMode.name, resolvedPolicy.ruleKey,
+                                    null, decision.shownAt, decision.decidedAt, 0
+                                )
+                            )
+                            draft.outcome(AuditOutcome.NOTIFY_REJECTED)
+                            draft.error("denied")
+                            draft.response(403, null)
+                            return Dispatched(
+                                Response.Status.FORBIDDEN,
+                                err("denied", "request denied by user")
+                            )
+                        }
+                        is NotifyGate.Result.Unavailable -> {
+                            // Could not be shown: no permission, evicted, or the screen
+                            // went away mid-window. Deny, and say which. Approving
+                            // because we failed to draw something would be the one
+                            // failure mode this whole mode must never have.
+                            draft.decision(
+                                Decision(
+                                    mode.name, decisionSource(resolvedPolicy.source),
+                                    globalMode.name, resolvedPolicy.ruleKey,
+                                    null, decision.shownAt, decision.decidedAt, 0
+                                )
+                            )
+                            draft.outcome(AuditOutcome.DENIED_UNATTENDED)
+                            draft.error("denied")
+                            val obj = err("denied", "gate unavailable: ${decision.detail}")
+                            draft.response(403, obj.toString())
+                            return Dispatched(Response.Status.FORBIDDEN, obj)
+                        }
                     }
-                    is ApprovalGate.GateResult.TimedOut -> {
-                        draft.outcome(AuditOutcome.TIMEOUT)
-                        draft.error("approval_timeout")
-                        draft.response(408, null)
-                        return Dispatched(
-                            Response.Status.REQUEST_TIMEOUT,
-                            err("approval_timeout", "approval timed out")
+                }
+
+                Mode.SECURE -> {
+                    // Central gate: describe the concrete call, then wait for the human.
+                    val gate = ApprovalGate.await(
+                        ctx, remote, "$method $path", summary,
+                        detail = detailFor(resolved.route.path, path, body),
+                        account = account,
+                        view = approvalView(
+                            remote, account, resolved.route, path, body, query,
+                            requiresBiometric = mode == Mode.SECURE
                         )
+                    )
+                    draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
+
+                    when (gate) {
+                        is ApprovalGate.GateResult.Denied -> {
+                            draft.outcome(AuditOutcome.DENIED)
+                            draft.error("denied")
+                            draft.response(403, null)
+                            return Dispatched(
+                                Response.Status.FORBIDDEN,
+                                err("denied", "request denied by user")
+                            )
+                        }
+                        is ApprovalGate.GateResult.TimedOut -> {
+                            draft.outcome(AuditOutcome.TIMEOUT)
+                            draft.error("approval_timeout")
+                            draft.response(408, null)
+                            return Dispatched(
+                                Response.Status.REQUEST_TIMEOUT,
+                                err("approval_timeout", "approval timed out")
+                            )
+                        }
+                        is ApprovalGate.GateResult.Approved ->
+                            draft.outcome(AuditOutcome.APPROVED)
                     }
-                    is ApprovalGate.GateResult.Approved -> draft.outcome(AuditOutcome.APPROVED)
                 }
             }
 
@@ -449,22 +549,40 @@ class HttpServer(
     }
 
     /** Map a gate outcome onto the audit's decision block. */
-    private fun gateDecision(g: ApprovalGate.GateResult, globalMode: GlobalMode): Decision {
+    private fun gateDecision(
+        g: ApprovalGate.GateResult,
+        globalMode: GlobalMode,
+        resolved: ModeResolution
+    ): Decision {
         val mode = Mode.SECURE.name
+        val source = decisionSource(resolved.source)
+        val ruleKey = resolved.ruleKey
         return when (g) {
             is ApprovalGate.GateResult.Approved -> Decision(
-                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
             is ApprovalGate.GateResult.Denied -> Decision(
-                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
             is ApprovalGate.GateResult.TimedOut -> Decision(
-                mode, DecisionSource.GLOBAL, globalMode.name, null,
+                mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.expiredAt, g.queueDepth
             )
         }
+    }
+
+    /**
+     * Map the policy's own source enum onto the audit's. Two enums rather than one
+     * because `PolicyAudit` (in the audit package) already imports `GlobalMode` from
+     * the policy package, so sharing an enum would make the dependency circular.
+     * This function is the single seam, so the mapping exists once.
+     */
+    private fun decisionSource(source: ModeSource): DecisionSource = when (source) {
+        ModeSource.GLOBAL -> DecisionSource.GLOBAL
+        ModeSource.RULE -> DecisionSource.RULE
+        ModeSource.DEFAULT -> DecisionSource.DEFAULT
     }
 
     private companion object {
@@ -488,7 +606,8 @@ class HttpServer(
         route: Route,
         actualPath: String,
         body: JSONObject,
-        query: Map<String, String>
+        query: Map<String, String>,
+        requiresBiometric: Boolean
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
         // /notifications/{id}/action -> resolve the action against live data.
@@ -537,7 +656,7 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = pluginRows(route, actualPath, body, query, remote),
-                requiresBiometric = true
+                requiresBiometric = requiresBiometric
             )
         }
 
@@ -562,7 +681,7 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = pluginRows(route, actualPath, body, query, remote),
-                requiresBiometric = true
+                requiresBiometric = requiresBiometric
             )
         }
 
@@ -590,10 +709,12 @@ class HttpServer(
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
             destructive = pluginRows(route, actualPath, body, query, remote),
-            // Biometric gates APPROVE on EVERY request, no exception — the modal always
-            // asks for a fingerprint. The gate states it; the Activity renders it and
-            // never recomputes the rule itself.
-            requiresBiometric = true
+            // Biometric is a SECURE-only rule, computed by the policy and passed in.
+            // The gate states it; the Activity renders it and never recomputes it.
+            // In R3 this always evaluates true, because a view only exists on the
+            // SECURE path — it is correctness plumbing so a future mode reusing the
+            // modal cannot silently inherit a fingerprint.
+            requiresBiometric = requiresBiometric
         )
     }
 

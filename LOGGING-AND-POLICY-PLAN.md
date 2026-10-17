@@ -19,7 +19,7 @@ Two features, shipped as four isolated releases:
    (`read` / `write` / `edit` / `delete` / `execute`), which plugin owns it, and where the
    request came from. A rule set maps label patterns → one of three modes:
    - `SECURE` — today's behaviour: full-screen modal + biometric.
-   - `NOTIFY` — heads-up notification, 5s silence = approve, tap `✕` = reject.
+   - `NOTIFY` — small overlay toast (draw-over-apps), 5s silence = approve, tap `✕` = reject.
    - `OFF` — no UI, log only.
 
 ### Non-goals (explicitly out of scope for now)
@@ -151,7 +151,7 @@ different facts, and the second one is how a mis-scoped `NOTIFY` rule announces 
 |---|---|---|---|---|
 | **R1** | 0.4.0 | `verb` metadata on every route + audit spine + log screen + retention | **None.** Gating identical. | Low |
 | **R2** | 0.5.0 | Global gate switch (`secure`/`off`) + `OFF` mode + settings/home switch + confirmation + red banner. **Rules and settings screen cut to R3** — with only `secure` to express, a rule table has no observable effect. | Gating can be *disabled* — the first release that can hurt | Medium-High |
-| **R3** | 0.6.0 | `NOTIFY` mode (heads-up, 5s silence=approve, `✕`=reject, unattended deny) **and** the exact `plugin × verb` rules + `AUTOMATIC` switch value + settings screen + modal/log rule control — together, because `NOTIFY` is what makes a rule express a decision | New gating mode + stored decisions now change behaviour | Medium-High |
+| **R3** | 0.6.0 | `NOTIFY` mode as a **stacked overlay toast** (draw-over-apps, 5s draining bar, tiny `✕`) + exact `plugin × verb` rules + `AUTOMATIC` switch value + rules screen — together, because `NOTIFY` is what makes a rule express a decision | New gating mode + stored decisions now change behaviour | Medium-High |
 | **R4** | 0.7.0 | Log UX: filters, search, export, counters, decision trace, retention controls | None | Low |
 
 Each release is independently shippable and independently revertable. R1 changes nothing the
@@ -627,8 +627,8 @@ the first release where a policy bug is a security bug rather than a display bug
 
 **Scope.** Two things, shipped together because one is useless without the other:
 
-1. **`NOTIFY`** — a third gate mode: heads-up notification, 5s silence = approve, `✕` = reject,
-   unattended = deny.
+1. **`NOTIFY`** — a third gate mode: a small stacked overlay toast, 5s silence = approve,
+   `✕` = reject, unattended = deny.
 2. **Exact rules** — `plugin × verb → mode`, readable only when the global switch is `AUTOMATIC`.
 
 Why together: in R2 a rule could only say `secure`, which is exactly what "no rule" already says.
@@ -646,7 +646,7 @@ AUTOMATIC | SECURE | NOTIFY | OFF          default: SECURE
 |---|---|---|
 | `AUTOMATIC` | The per-pair table decides. No rule for a pair → `SECURE`. | **read** |
 | `SECURE` | Every request: modal + biometric. | ignored |
-| `NOTIFY` | Every request: heads-up, 5s silence = approve. | ignored |
+| `NOTIFY` | Every request: overlay toast, 5s silence = approve. | ignored |
 | `OFF` | No gate at all. Log only. | ignored |
 
 - Only `AUTOMATIC` consults the rules. The other three force one mode on every request, which is
@@ -661,29 +661,53 @@ its confirmation dialog and permanent red banner from R2 (§6.1). `AUTOMATIC` an
 neutral. The rule is: *the home screen must never show a switch position without showing what it
 implies.* A user who cannot tell at a glance whether they are gated has an unusable gate.
 
-### 7.2 `NOTIFY` mechanics
+### 7.2 `NOTIFY` mechanics — **REWRITTEN 2026-10-17 (Mido): overlay, not a notification**
 
-- Separate channel `approval_notify`, `IMPORTANCE_HIGH`, `setSound(null)`, no vibration beyond the
-  heads-up. The point of the mode is *subtle*; a sound would defeat it.
-- Content: `🔔 <summary>`, subtext `<label> · <duration>`, one action `✕` =
-  `PendingIntent.getBroadcast` → reject. No full-screen intent, no Activity, no overlay.
-- 5s timer starts **when the notification is actually posted**, not at enqueue — the same rule the
-  modal's clock follows (`shownAtMs`). A request queued behind another must not burn its window
-  while invisible.
-- Silence → **approve**. `✕` → **reject**.
-- `setTimeoutAfter(windowMs)` removes the notification when the window closes, so an approved
-  notification does not linger on the shade.
-- **The caller-visible contract does not change.** A `✕` rejection answers `403
-  {"ok":false,"error":"denied"}` — the *same* body as a modal DENY. Clients do not need a new
-  branch; the distinction lives in the log (`NOTIFY_REJECTED` vs `DENIED`) and in the record.
-  Introducing a new error code for a new UI would make every client care about our internals.
-- If the screen goes off inside the window the request is **denied, not approved** (§7.3), and the
-  notification is cancelled. A notification whose answer is already `denied` must not linger.
+**This is not a notification.** An earlier draft of this section specified a separate
+`approval_notify` channel at `IMPORTANCE_HIGH`. That was wrong and is replaced: the prompt is a
+**small overlay toast drawn with `SYSTEM_ALERT_WINDOW`**, a permission this app already holds and
+already checks on the home screen.
 
-**Q8 (still open, blocks this release):** is the window a flat 5s, or 5s plus a short grace (8s) so
-a mistaken `✕` is recoverable? *Recommendation unchanged: 5s flat. A countdown you can learn beats
-a window that varies.* This must be decided before `NotifyGate` is written, because the value is
-baked into the timer, the audit duration and the acceptance test.
+Why the change is right and not cosmetic: a heads-up notification is a system-owned surface. It
+hijacks the shade, fights DND, collides with every other app's notifications, and is suppressed
+while the phone is in active use — which is exactly when a request is most likely to arrive. An
+overlay we own appears above whatever the human is looking at, needs no channel, and cannot be
+silently disabled by a system notification setting the human never touched.
+
+**The item** (see `notify/NotifyOverlay.kt`):
+
+- A small dark pill, ~240dp wide, 2 lines of monospace text, muted colours. It is a glance, not a
+dialog — nothing about it should read as an alarm.
+- **Stackable, not queued.** Each in-flight request gets its own item. Up to 4 at once; beyond
+  that the oldest is evicted and denied (never approved). Serialising them would start a later
+  request's clock after it arrived, so "silence means approve" would approve something the human
+  never had a fair chance to read.
+- **The countdown is the background progress bar.** A 2dp line under the text drains left-to-right
+  over the window, driven by the same duration as the timer. One value, so the visual and the
+  decision cannot disagree.
+- **A tiny `✕`** on the right rejects immediately — a 28dp touch box, because a real target matters
+  more than the visual weight.
+- **Fade in / fade out.** 180ms alpha + small upward rise on entry, 200ms fade on exit. Short
+  enough not to eat a meaningful part of a 5s window.
+- **`FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL`**, so the overlay never takes input or the keyboard,
+  and every tap that is not the `✕` falls through to the app underneath. Without these it would be
+  a 5-second input trap, which is worse than the modal it replaces.
+- Silence → **approve**. `✕` → **reject**. It disappears either way.
+
+**The clock** starts when the item is actually shown, not at enqueue — a queued request must not
+burn its window while invisible.
+
+**The caller-visible contract does not change.** A `✕` rejection answers `403
+{"ok":false,"error":"denied"}` — the *same* body as a modal DENY. Clients do not need a new
+branch; the distinction lives in the log (`NOTIFY_REJECTED` vs `DENIED`) and in the record.
+Introducing a new error code for a new UI would make every client care about our internals.
+
+**Failure to draw is a deny.** If the overlay cannot be shown (permission revoked, window service
+refusal, eviction), the request is `DENIED_UNATTENDED` — never approved. "We failed to ask" and
+"nobody objected" are not the same fact, and only one of them is consent.
+
+**Q8 — 5s flat. DECIDED 2026-10-17 by Mido ("continue").** No grace period. A countdown you can
+learn beats a window that varies.
 
 ### 7.3 Gate availability — **LOCKED (Q2, Mido 2026-10-17)**
 
@@ -697,7 +721,7 @@ fun isAttended(ctx: Context): Boolean
 | Mode | Attended | Not attended (screen off or locked) |
 |---|---|---|
 | `OFF` | approve | **approve** — the gate is deliberately off, no human expected |
-| `NOTIFY` | heads-up, silence = approve | **deny** |
+| `NOTIFY` | overlay toast, silence = approve | **deny** |
 | `SECURE` | modal + biometric | **deny** |
 
 One line, and that is the point: *if a human cannot see it, nobody approves it — unless you have
@@ -953,12 +977,12 @@ it.
 
 ### 7.13 Device acceptance (must all be observed, not assumed)
 
-1. `SECURE` + rule `gmail · read → NOTIFY` → fire a Gmail read → **heads-up, no modal**.
+1. `SECURE` + rule `gmail · read → NOTIFY` → fire a Gmail read → **toast appears, no modal**.
 2. Leave it → `200`, log `NOTIFY_APPROVED`, `source=RULE`, `rule=gmail/READ`.
 3. Fire again and tap `✕` → `403 denied`, log `NOTIFY_REJECTED`.
 4. Fire again and **lock the phone inside the window** → `403 denied`, log `DENIED_UNATTENDED`,
    notification gone.
-5. Set global `NOTIFY` → every request is heads-up, the rule table greys out with its one-line
+5. Set global `NOTIFY` → every request shows a toast, the rule table greys out with its one-line
    reason, `POLICY_CHANGED` recorded.
 6. Set global `OFF` → identical to R2 (§6.9) — no popup, `OFF_APPROVED`.
 7. Change a rule from the **modal** and from the **log detail** → `POLICY_CHANGED` with

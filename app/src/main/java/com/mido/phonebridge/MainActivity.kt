@@ -179,6 +179,9 @@ class MainActivity : Activity() {
         content.addView(coloredButton("OPEN REQUEST LOG") {
             startActivity(Intent(this, LogActivity::class.java))
         }, UiKit.NEUTRAL_BG)
+        content.addView(coloredButton("PER-PAIR RULES") {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }, UiKit.NEUTRAL_BG)
 
         // --- 5. Debug: collapsed by default, out of the main flow ---
         content.addView(header("Debug"))
@@ -387,10 +390,26 @@ class MainActivity : Activity() {
         }
 
         when (current) {
+            // Only AUTOMATIC reads the rules. The other three force one mode on every
+            // request, and the card says which so the home screen never shows a switch
+            // position without showing what it implies.
+            GlobalMode.AUTOMATIC -> {
+                gateCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
+                gateTitle.text = "AUTOMATIC"
+                gateSub.text = rulesSummary()
+            }
             GlobalMode.SECURE -> {
                 gateCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
                 gateTitle.text = "SECURE"
                 gateSub.text = "Every request asks you first. Biometric required."
+            }
+            GlobalMode.NOTIFY -> {
+                // Amber, not red: the gate still exists, it is just quiet and fast.
+                // Calling it red would make the real panic switch less loud by
+                // comparison, which is the failure that matters.
+                gateCard.background = UiKit.pill(UiKit.AMBER_BG)
+                gateTitle.text = "⚠ NOTIFY"
+                gateSub.text = "Small overlay toast. Silent 5s = approved. Tap ✕ to reject."
             }
             GlobalMode.OFF -> {
                 gateCard.background = UiKit.pill(UiKit.RED_BG)
@@ -443,14 +462,44 @@ class MainActivity : Activity() {
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Turn it OFF") { _, _ -> applyGate(store, current, next) }
                 .show()
+        } else if (next == GlobalMode.NOTIFY) {
+            // Not a red-alert confirmation: NOTIFY still asks, just quietly. But it is
+            // the first value where silence means YES, so it gets one sentence saying so.
+            AlertDialog.Builder(this)
+                .setTitle("Use overlay prompts?")
+                .setMessage(
+                    "Every request shows a small toast for 5 seconds. Doing nothing " +
+                        "approves it. Tap ✕ to reject.\n\nYour custom rules are ignored " +
+                        "while this is selected."
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Use NOTIFY") { _, _ -> applyGate(store, current, next) }
+                .show()
         } else {
             applyGate(store, current, next)
         }
     }
 
+    /** One line of truth about the rule table, for the AUTOMATIC card. */
+    private fun rulesSummary(): String = try {
+        val p = PolicyStore.from(applicationContext).get()
+        val n = p.rules.size
+        when (n) {
+            0 -> "Per-pair rules decide. No rules set, so every request asks you."
+            1 -> "Per-pair rules decide. 1 rule set."
+            else -> "Per-pair rules decide. $n rules set."
+        }
+    } catch (e: PolicyException) {
+        "rules unreadable: ${e.message}"
+    }
+
     private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {
         try {
-            store.set(Policy(after))
+            // Carry the rules across. `Policy(after)` alone would silently delete every
+            // per-pair decision on a switch flip — you would turn NOTIFY back to
+            // AUTOMATIC and find your rules gone, with nothing in the UI saying why.
+            val existing = store.get()
+            store.set(Policy(after, existing.rules))
         } catch (e: Exception) {
             Toast.makeText(this, "could not save policy: ${e.message}", Toast.LENGTH_LONG).show()
             return
