@@ -377,6 +377,11 @@ object NotifyOverlay {
             "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
         )
 
+        // The subtle alert. Enforced inside SoundAlerts: it plays only while the
+        // screen is on, which is the stated rule for this mode (a NOTIFY card can
+        // only exist when someone is attending anyway).
+        com.mido.phonebridge.alert.SoundAlerts.notifyTick(ctx)
+
         // --- the one tick -------------------------------------------------------
         // Drives fade-in, the countdown, and fade-out, all from the real clock. One
         // mechanism, so the three cannot disagree, and none of it depends on an animator

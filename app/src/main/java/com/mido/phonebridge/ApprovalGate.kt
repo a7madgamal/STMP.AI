@@ -318,13 +318,28 @@ object ApprovalGate {
         p.shownAtMs = p.createdAtMs
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // minSdk is 26, so NotificationChannel is always available.
+        //
+        // The channel carries the SECURE alert sound, and it is deliberately a
+        // NOTIFICATION-class channel: it uses the default notification sound, so it
+        // respects silent and DND (Mido's choice, option B, 2026-10-18). The
+        // consequence was stated and accepted — on silent the request is unheard and
+        // auto-denies at 60s; the full-screen prompt still turns the screen on, so
+        // the visual path survives. Enable vibration on the channel too; the app also
+        // fires an explicit haptic pattern (SoundAlerts.secureVibration) for a device
+        // whose channel vibration is off.
         val ch = NotificationChannel(
             CHANNEL_ID, "Approval requests", NotificationManager.IMPORTANCE_HIGH
         ).apply {
             lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             setShowBadge(true)
+            enableVibration(true)
         }
         nm.createNotificationChannel(ch)
+
+        // Haptic + audible nudge, both notification-class. The sound itself comes from
+        // the channel above (posting the notification plays it); this adds the short
+        // double-tap vibration the channel may not provide.
+        com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
 
         val intent = buildApprovalIntent(ctx, p)
 
