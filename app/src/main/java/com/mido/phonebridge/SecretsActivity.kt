@@ -8,14 +8,15 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.SecretVault
+import com.mido.phonebridge.ui.Theme
 
 /**
  * The secret CRUD screen (plan D1/D7, plus the hardening list).
@@ -44,11 +45,11 @@ class SecretsActivity : Activity() {
             WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        val pad = UiKit.dp(this, 20)
+        val pad = Theme.dp(this, 20)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -56,23 +57,18 @@ class SecretsActivity : Activity() {
 
         header = TextView(this).apply {
             textSize = 13f
-            setTextColor(UiKit.TEXT_MUTED)
+            setTextColor(Theme.ON_SURFACE_VARIANT)
         }
         content.addView(header)
 
-        content.addView(sectionTitle("Secrets"))
+        content.addView(Theme.sectionHeader(this, "Secrets"))
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(listContainer)
 
-        val addBtn = Button(this).apply {
-            text = "ADD SECRET"
-            background = UiKit.pill(UiKit.GREEN_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setOnClickListener { addSecretDialog() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = UiKit.dp(this@SecretsActivity, 12) }
-        }
+        val addBtn = Theme.button(this, "ADD SECRET", Theme.ButtonStyle.SUCCESS) { addSecretDialog() }
+        addBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = Theme.dp(this@SecretsActivity, 12) }
         content.addView(addBtn)
 
         root.addView(scroll)
@@ -83,14 +79,6 @@ class SecretsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         render()
-    }
-
-    private fun sectionTitle(t: String) = TextView(this).apply {
-        text = t.uppercase()
-        textSize = 11f
-        letterSpacing = 0.15f
-        setTextColor(0xFF78909C.toInt())
-        setPadding(0, UiKit.dp(this@SecretsActivity, 20), 0, UiKit.dp(this@SecretsActivity, 6))
     }
 
     private fun render() {
@@ -105,22 +93,24 @@ class SecretsActivity : Activity() {
         val names = try {
             SecretVault.names(this)
         } catch (e: Exception) {
-            listContainer.addView(row("vault unreadable", e.message ?: "", UiKit.RED_BG))
+            listContainer.addView(row("vault unreadable", e.message ?: "", Theme.DANGER_SURFACE))
             emptyList()
         }
         if (names.isEmpty()) {
-            listContainer.addView(row("no secrets yet", "tap ADD SECRET", UiKit.NEUTRAL_BG))
+            listContainer.addView(row("no secrets yet", "tap ADD SECRET", Theme.SURFACE))
         }
         for (n in names) {
             val rowView = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, UiKit.dp(this@SecretsActivity, 10), 0, UiKit.dp(this@SecretsActivity, 10))
+                setPadding(Theme.dp(this@SecretsActivity, 14), Theme.dp(this@SecretsActivity, 12),
+                    Theme.dp(this@SecretsActivity, 14), Theme.dp(this@SecretsActivity, 12))
+                background = Theme.outlined(this@SecretsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
             }
-            rowView.addView(TextView(this).apply {
-                text = n
-                textSize = 16f
-                setTextColor(UiKit.TEXT_ON_DARK)
-            })
+            rowView.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 10) }
+
+            rowView.addView(Theme.text(this, n, 16f))
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             buttons.addView(small("reveal") { revealValue(n) })
             buttons.addView(small("replace") { addSecretDialog(n) })
@@ -150,13 +140,14 @@ class SecretsActivity : Activity() {
             // only reach its own hosts. Shown per secret (not once globally) because
             // that is now the truth — the todoist key cannot be sent to a host that
             // some other secret happens to have approved.
-            rowView.addView(TextView(this).apply {
-                text = if (links.hosts.isEmpty()) "no hosts allowed — every call will be refused"
-                else "allowed: ${links.hosts.joinToString(", ")}"
-                textSize = 13f
-                setTextColor(if (links.hosts.isEmpty()) 0xFFFFB74D.toInt() else UiKit.TEXT_MUTED)
-                setPadding(0, UiKit.dp(this@SecretsActivity, 6), 0, 0)
-            })
+            rowView.addView(Theme.text(
+                this,
+                if (links.hosts.isEmpty()) "no hosts allowed — every call will be refused"
+                else "allowed: ${links.hosts.joinToString(", ")}",
+                13f,
+                if (links.hosts.isEmpty()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@SecretsActivity, 6), 0, 0) })
+
             val hostRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             hostRow.addView(small("+ host") { addHostDialog(n) })
             for (h in links.hosts) {
@@ -177,25 +168,21 @@ class SecretsActivity : Activity() {
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
         text = "$title\n$detail"
         textSize = 15f
-        setTextColor(UiKit.TEXT_ON_DARK)
-        setPadding(UiKit.dp(this@SecretsActivity, 10), UiKit.dp(this@SecretsActivity, 10),
-            UiKit.dp(this@SecretsActivity, 10), UiKit.dp(this@SecretsActivity, 10))
-        background = UiKit.pill(color)
+        setTextColor(Theme.ON_SURFACE)
+        setPadding(Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10),
+            Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10))
+        background = Theme.surface(this@SecretsActivity, color, Theme.RADIUS_CONTROL)
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = UiKit.dp(this@SecretsActivity, 6) }
+        ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 6) }
     }
 
-    private fun small(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label
-        textSize = 13f
-        background = UiKit.pill(UiKit.NEUTRAL_BG)
-        setTextColor(UiKit.TEXT_ON_DARK)
-        setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { marginEnd = UiKit.dp(this@SecretsActivity, 6) }
-    }
+    private fun small(label: String, onClick: () -> Unit): MaterialButton =
+        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true, onClick = onClick).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = Theme.dp(this@SecretsActivity, 6) }
+        }
 
     // --- actions ---
 
@@ -247,8 +234,8 @@ class SecretsActivity : Activity() {
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
-                UiKit.dp(this@SecretsActivity, 16), 0)
+            setPadding(Theme.dp(this@SecretsActivity, 16), Theme.dp(this@SecretsActivity, 8),
+                Theme.dp(this@SecretsActivity, 16), 0)
             addView(docsField)
             addView(keyField)
         }
@@ -317,8 +304,8 @@ class SecretsActivity : Activity() {
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
-                UiKit.dp(this@SecretsActivity, 16), 0)
+            setPadding(Theme.dp(this@SecretsActivity, 16), Theme.dp(this@SecretsActivity, 8),
+                Theme.dp(this@SecretsActivity, 16), 0)
             addView(nameField)
             addView(valueField)
             addView(docsField)
@@ -383,8 +370,8 @@ class SecretsActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT
         }
         val box = LinearLayout(this).apply {
-            setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
-                UiKit.dp(this@SecretsActivity, 16), 0)
+            setPadding(Theme.dp(this@SecretsActivity, 16), Theme.dp(this@SecretsActivity, 8),
+                Theme.dp(this@SecretsActivity, 16), 0)
             addView(field)
         }
         AlertDialog.Builder(this)

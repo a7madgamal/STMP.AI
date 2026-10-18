@@ -8,14 +8,13 @@ import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
+import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
@@ -26,6 +25,7 @@ import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.ui.Theme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -38,13 +38,19 @@ class MainActivity : FragmentActivity() {
 
     private lateinit var logView: TextView
     private lateinit var statusContainer: LinearLayout
-    private lateinit var serverButton: Button
+    private lateinit var serverButton: MaterialButton
     private lateinit var auditBanner: TextView
     private lateinit var gateCard: LinearLayout
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
-    private lateinit var secretsButton: Button
+    private lateinit var secretsButton: MaterialButton
+    private lateinit var pluginContainer: LinearLayout
+    private lateinit var loginButton: MaterialButton
+    private lateinit var accountBanner: TextView
+    private lateinit var heroCard: LinearLayout
+    private lateinit var heroTitle: TextView
+    private lateinit var heroSub: TextView
     private var logExpanded = false
 
     /**
@@ -70,151 +76,140 @@ class MainActivity : FragmentActivity() {
         )
         Debug.log("config loaded; clientId len=${com.mido.phonebridge.core.AuthManager.clientId.length}")
 
-        val pad = UiKit.dp(this, 20)
+        val pad = Theme.dp(this, 20)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
 
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(content)
 
-        fun header(t: String) = TextView(this).apply {
-            text = t.uppercase()
-            textSize = 11f
-            letterSpacing = 0.15f
-            setTextColor(0xFF78909C.toInt())
-            setPadding(0, UiKit.dp(this@MainActivity, 20), 0, UiKit.dp(this@MainActivity, 6))
-        }
-
         // --- 1. HERO: the one thing you need to know ---
         heroCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(UiKit.dp(this@MainActivity, 16), UiKit.dp(this@MainActivity, 14),
-                UiKit.dp(this@MainActivity, 16), UiKit.dp(this@MainActivity, 14))
+            setPadding(Theme.dp(this@MainActivity, 16), Theme.dp(this@MainActivity, 14),
+                Theme.dp(this@MainActivity, 16), Theme.dp(this@MainActivity, 14))
+            background = Theme.surface(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         heroTitle = TextView(this).apply {
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(UiKit.TEXT_ON_DARK)
+            setTextColor(Theme.ON_SURFACE)
         }
         heroSub = TextView(this).apply {
             textSize = 14f
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setPadding(0, UiKit.dp(this@MainActivity, 4), 0, 0)
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            setPadding(0, Theme.dp(this@MainActivity, 4), 0, 0)
         }
         heroCard.addView(heroTitle)
         heroCard.addView(heroSub)
         content.addView(heroCard)
 
         // --- 2. CONTROLS: the primary action ---
-        serverButton = Button(this).apply {
-            setOnClickListener {
-                if (BridgeService.serverUp) {
-                    Debug.log("stop requested")
-                    stopService(Intent(this@MainActivity, BridgeService::class.java))
-                } else {
-                    startBridge()
-                }
-                statusContainer.postDelayed({ render() }, 600)
+        serverButton = Theme.button(this, "START SERVER", Theme.ButtonStyle.SUCCESS) {
+            if (BridgeService.serverUp) {
+                Debug.log("stop requested")
+                stopService(Intent(this@MainActivity, BridgeService::class.java))
+            } else {
+                startBridge()
             }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = UiKit.dp(this@MainActivity, 16) }
+            statusContainer.postDelayed({ render() }, 600)
         }
+        serverButton.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
         content.addView(serverButton)
 
         // --- 3. CHECKLIST: compact status rows, each actionable ---
-        content.addView(header("Setup"))
+        content.addView(Theme.sectionHeader(this, "Setup"))
         statusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(statusContainer)
 
         // --- accounts / plugins ---
-        content.addView(header("Account"))
-        accountBanner = TextView(this).apply { textSize = 15f }
-        content.addView(accountBanner)
-        loginButton = Button(this).apply {
-            setOnClickListener { startGoogleLogin() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = UiKit.dp(this@MainActivity, 8) }
+        content.addView(Theme.sectionHeader(this, "Account"))
+        accountBanner = TextView(this).apply {
+            textSize = 15f
+            setTextColor(Theme.ON_SURFACE)
         }
+        content.addView(accountBanner)
+        loginButton = Theme.button(this, "LOGIN WITH GOOGLE", Theme.ButtonStyle.PRIMARY) { startGoogleLogin() }
+        loginButton.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
         content.addView(loginButton)
 
-        secretsButton = Button(this).apply {
-            text = "SECRETS & HOSTS"
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, SecretsActivity::class.java))
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = UiKit.dp(this@MainActivity, 8) }
+        secretsButton = Theme.button(this, "SECRETS & HOSTS", Theme.ButtonStyle.NEUTRAL) {
+            startActivity(Intent(this@MainActivity, SecretsActivity::class.java))
         }
+        secretsButton.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
         content.addView(secretsButton)
 
         // --- 3b. GATE SWITCH: the one control that decides whether anything is
         // asked of a human at all. Above the plugins, below Setup, because it is
         // the second question after "is it running?" — "is it still asking me?".
-        content.addView(header("Approval gate"))
+        content.addView(Theme.sectionHeader(this, "Approval gate"))
         gateCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(UiKit.dp(this@MainActivity, 14), UiKit.dp(this@MainActivity, 12),
-                UiKit.dp(this@MainActivity, 14), UiKit.dp(this@MainActivity, 12))
+            setPadding(Theme.dp(this@MainActivity, 14), Theme.dp(this@MainActivity, 12),
+                Theme.dp(this@MainActivity, 14), Theme.dp(this@MainActivity, 12))
+            background = Theme.surface(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         gateTitle = TextView(this).apply {
             textSize = 17f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(UiKit.TEXT_ON_DARK)
+            setTextColor(Theme.ON_SURFACE)
         }
         gateSub = TextView(this).apply {
             textSize = 13f
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setPadding(0, UiKit.dp(this@MainActivity, 4), 0, 0)
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            setPadding(0, Theme.dp(this@MainActivity, 4), 0, 0)
         }
         gateButtons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, UiKit.dp(this@MainActivity, 10), 0, 0)
+            setPadding(0, Theme.dp(this@MainActivity, 10), 0, 0)
         }
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
         gateCard.addView(gateButtons)
         content.addView(gateCard)
 
-        content.addView(header("Plugins"))
-        val pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(Theme.sectionHeader(this, "Plugins"))
+        pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(pluginContainer)
-        this.pluginContainer = pluginContainer
 
         // --- 4. AUDIT LOG: one entry point, and the degraded banner above it ---
-        content.addView(header("Request log"))
+        content.addView(Theme.sectionHeader(this, "Request log"))
         auditBanner = TextView(this).apply {
             textSize = 14f
-            setTextColor(UiKit.TEXT_ON_DARK)
-            background = UiKit.pill(UiKit.RED_BG)
-            setPadding(UiKit.dp(this@MainActivity, 12), UiKit.dp(this@MainActivity, 10),
-                UiKit.dp(this@MainActivity, 12), UiKit.dp(this@MainActivity, 10))
+            setTextColor(Theme.ON_COLOR)
+            background = Theme.surface(this@MainActivity, Theme.DANGER_SURFACE, Theme.RADIUS_CONTROL)
+            setPadding(Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10),
+                Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10))
             visibility = TextView.GONE
         }
         content.addView(auditBanner)
-        content.addView(coloredButton("OPEN REQUEST LOG") {
+        content.addView(fullWidthButton("OPEN REQUEST LOG", Theme.ButtonStyle.NEUTRAL) {
             startActivity(Intent(this, LogActivity::class.java))
-        }, UiKit.NEUTRAL_BG)
-        content.addView(coloredButton("PER-PAIR RULES") {
+        })
+        content.addView(fullWidthButton("PER-PAIR RULES", Theme.ButtonStyle.NEUTRAL) {
             startActivity(Intent(this, SettingsActivity::class.java))
-        }, UiKit.NEUTRAL_BG)
+        })
 
         // --- 5. Debug: collapsed by default, out of the main flow ---
-        content.addView(header("Debug"))
-        content.addView(coloredButton("▸ SHOW LOG") {
+        content.addView(Theme.sectionHeader(this, "Debug"))
+        content.addView(fullWidthButton("SHOW LOG", Theme.ButtonStyle.GHOST) {
             logExpanded = !logExpanded
             logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
             render()
-        }, UiKit.NEUTRAL_BG)
+        })
         logView = TextView(this).apply {
             textSize = 11f
-            setTextColor(UiKit.TEXT_MUTED)
+            setTextColor(Theme.ON_SURFACE_VARIANT)
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
             visibility = TextView.GONE
@@ -222,7 +217,6 @@ class MainActivity : FragmentActivity() {
         content.addView(logView)
 
         root.addView(scroll)
-
         setContentView(root)
 
         Debug.init(applicationContext)
@@ -308,13 +302,6 @@ class MainActivity : FragmentActivity() {
             .show()
     }
 
-    private lateinit var pluginContainer: LinearLayout
-    private lateinit var loginButton: Button
-    private lateinit var accountBanner: TextView
-    private lateinit var heroCard: LinearLayout
-    private lateinit var heroTitle: TextView
-    private lateinit var heroSub: TextView
-
     override fun onResume() {
         super.onResume()
         render()
@@ -333,21 +320,28 @@ class MainActivity : FragmentActivity() {
         val listenerOk = BridgeService.listenerRef != null
         val notifOk = hasNotifPermission()
         val healthy = BridgeService.serverUp && listenerOk && notifOk
-        if (BridgeService.serverUp && healthy) {
-            heroCard.background = UiKit.pill(UiKit.GREEN_BG)
-            heroTitle.text = "● Running"
-        } else if (BridgeService.serverUp) {
-            heroCard.background = UiKit.pill(UiKit.AMBER_BG)
-            heroTitle.text = "● Running — needs attention"
-        } else {
-            heroCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
-            heroTitle.text = "● Stopped"
+        // The state colour is applied ONCE, here. The old code set a background per
+        // branch and then overwrote it two lines later, so the hero card was always
+        // the neutral grey regardless of state.
+        val heroSurface: Int
+        when {
+            BridgeService.serverUp && healthy -> {
+                heroSurface = Theme.SUCCESS_SURFACE
+                heroTitle.text = "● Running"
+                heroTitle.setTextColor(Theme.SUCCESS)
+            }
+            BridgeService.serverUp -> {
+                heroSurface = Theme.WARNING_SURFACE
+                heroTitle.text = "● Running — needs attention"
+                heroTitle.setTextColor(Theme.WARNING)
+            }
+            else -> {
+                heroSurface = Theme.SURFACE
+                heroTitle.text = "● Stopped"
+                heroTitle.setTextColor(Theme.ON_SURFACE_VARIANT)
+            }
         }
-        heroCard.background = android.graphics.drawable.GradientDrawable().apply {
-            setColor(UiKit.NEUTRAL_BG)
-            cornerRadius = UiKit.dp(this@MainActivity, 12).toFloat()
-        }
-        heroTitle.setTextColor(UiKit.TEXT_ON_DARK)
+        heroCard.background = Theme.surface(this, heroSurface, Theme.RADIUS_CARD)
         heroSub.text = when {
             !BridgeService.serverUp -> "Tap START SERVER to begin"
             BridgeService.lastError.isNotBlank() -> BridgeService.lastError
@@ -355,64 +349,76 @@ class MainActivity : FragmentActivity() {
                 " · " + BridgeService.bindAddress.ifBlank { "?" } + ":" + BridgeService.PORT
             else -> "Not signed in to Google"
         }
-        heroSub.setTextColor(UiKit.TEXT_ON_DARK)
+        heroSub.setTextColor(Theme.ON_SURFACE_VARIANT)
 
         // --- 3. CHECKLIST: compact, each row says what to do when broken ---
         // Start/Stop colour rule (user's standing rule): grey = idle/stopped,
         // green = running, and NEVER red for a normal stopped state. The button
         // is not green just because it is tappable — green means the server is up.
-        serverButton.text = if (BridgeService.serverUp) "STOP SERVER" else "START SERVER"
-        serverButton.background = UiKit.pill(if (BridgeService.serverUp) UiKit.RED_BG else UiKit.NEUTRAL_BG)
-        serverButton.setTextColor(UiKit.TEXT_ON_DARK)
+        // Tint, never `setBackgroundColor`: assigning a background drawable to a
+        // MaterialButton replaces the ripple/state-list machinery. `backgroundTintList`
+        // recolours the same component and keeps the feedback.
+        if (BridgeService.serverUp) {
+            serverButton.text = "STOP SERVER"
+            serverButton.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(Theme.SURFACE_VARIANT)
+            serverButton.setTextColor(Theme.ON_SURFACE)
+        } else {
+            serverButton.text = "START SERVER"
+            serverButton.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(Theme.SUCCESS)
+            serverButton.setTextColor(Theme.ON_COLOR)
+        }
+
         statusContainer.removeAllViews()
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Server",
                 if (BridgeService.serverUp) "running on ${BridgeService.bindAddress.ifBlank { "?" }}:${BridgeService.PORT}"
                 else "stopped",
-                if (BridgeService.serverUp) UiKit.State.OK else UiKit.State.OFF
+                if (BridgeService.serverUp) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT
             )
         )
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Notification access",
                 if (listenerOk) "connected" else "tap to grant",
-                if (listenerOk) UiKit.State.OK else UiKit.State.WARN,
+                if (listenerOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { openNotifAccessSettings() }
             )
         )
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Notifications permission",
                 if (notifOk) "granted" else "tap to grant",
-                if (notifOk) UiKit.State.OK else UiKit.State.WARN,
+                if (notifOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { requestNotifPermission() }
             )
         )
         val fsiOk = ApprovalGate.canUseFullScreenIntent(this)
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Full-screen popup",
                 if (fsiOk) "granted" else "tap to grant",
-                if (fsiOk) UiKit.State.OK else UiKit.State.WARN,
+                if (fsiOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { openFullScreenIntentSettings() }
             )
         )
         val overlayOk = android.provider.Settings.canDrawOverlays(this)
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Draw over apps",
                 if (overlayOk) "granted" else "tap to grant",
-                if (overlayOk) UiKit.State.OK else UiKit.State.WARN,
+                if (overlayOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { openOverlaySettings() }
             )
         )
         val batteryOk = isIgnoringBatteryOptimizations()
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Battery optimization",
                 if (batteryOk) "exempt" else "tap to allow background",
-                if (batteryOk) UiKit.State.OK else UiKit.State.WARN,
+                if (batteryOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { requestIgnoreBatteryOptimizations() }
             )
         )
@@ -421,10 +427,10 @@ class MainActivity : FragmentActivity() {
         // answer `secret_locked`, and that must be visible before it happens.
         val vaultOk = SecretVault.isUnlocked()
         statusContainer.addView(
-            UiKit.statusRow(
+            Theme.statusRow(
                 this, "Secret vault",
                 if (vaultOk) "unlocked (this session)" else "locked — tap to unlock",
-                if (vaultOk) UiKit.State.OK else UiKit.State.WARN,
+                if (vaultOk) Theme.SUCCESS else Theme.WARNING,
                 onClick = { lockOnLoad(force = true) }
             )
         )
@@ -433,31 +439,34 @@ class MainActivity : FragmentActivity() {
         if (AuthManager.isLoggedIn(this)) {
             val email = AuthManager.accountEmail ?: "(email unknown)"
             accountBanner.text = "👤 $email"
+            accountBanner.setTextColor(Theme.SUCCESS)
         } else {
             accountBanner.text = "👤 Not signed in"
+            accountBanner.setTextColor(Theme.ON_SURFACE_VARIANT)
         }
-        accountBanner.setTextColor(if (AuthManager.isLoggedIn(this)) 0xFF81C784.toInt() else UiKit.TEXT_MUTED)
 
         loginButton.text = if (AuthManager.isLoggedIn(this)) "RE-LOGIN" else "LOGIN WITH GOOGLE"
-        loginButton.background = UiKit.pill(if (AuthManager.isLoggedIn(this)) UiKit.NEUTRAL_BG else UiKit.GREEN_BG)
-        loginButton.setTextColor(UiKit.TEXT_ON_DARK)
+        loginButton.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (AuthManager.isLoggedIn(this)) Theme.SURFACE_VARIANT else Theme.ACCENT
+        )
+        loginButton.setTextColor(if (AuthManager.isLoggedIn(this)) Theme.ON_SURFACE else Theme.ON_COLOR)
 
         renderGate()
 
         pluginContainer.removeAllViews()
         val plugins = PluginRegistry.all()
         if (plugins.isEmpty()) {
-            pluginContainer.addView(coloredButton("no plugins registered (start the server)") {}, UiKit.NEUTRAL_BG)
+            pluginContainer.addView(Theme.text(this, "no plugins registered (start the server)", 13f, Theme.ON_SURFACE_VARIANT))
         } else {
             for (p in plugins) {
                 val st = p.status()
-                val state = when (st.state) {
-                    com.mido.phonebridge.core.PluginStatus.State.OK -> UiKit.State.OK
-                    com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION -> UiKit.State.WARN
-                    com.mido.phonebridge.core.PluginStatus.State.ERROR -> UiKit.State.ERROR
-                    com.mido.phonebridge.core.PluginStatus.State.OFF -> UiKit.State.OFF
+                val color = when (st.state) {
+                    com.mido.phonebridge.core.PluginStatus.State.OK -> Theme.SUCCESS
+                    com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION -> Theme.WARNING
+                    com.mido.phonebridge.core.PluginStatus.State.ERROR -> Theme.DANGER
+                    com.mido.phonebridge.core.PluginStatus.State.OFF -> Theme.ON_SURFACE_VARIANT
                 }
-                pluginContainer.addView(UiKit.statusRow(this, st.title, st.detail.ifBlank { st.state.name }, state))
+                pluginContainer.addView(Theme.statusRow(this, st.title, st.detail.ifBlank { st.state.name }, color))
             }
         }
 
@@ -490,11 +499,11 @@ class MainActivity : FragmentActivity() {
             // An unreadable policy is not a quiet fallback to SECURE: say it here, and
             // BridgeService refuses to serve on the same condition. This screen must
             // never show a switch position the engine is not actually honouring.
-            gateCard.background = UiKit.pill(UiKit.RED_BG)
+            gateCard.background = Theme.surface(this, Theme.DANGER_SURFACE, Theme.RADIUS_CARD)
             gateTitle.text = "⚠ POLICY UNREADABLE"
             gateSub.text = e.message ?: "policy could not be read"
-            gateTitle.setTextColor(UiKit.TEXT_ON_DARK)
-            gateSub.setTextColor(UiKit.TEXT_ON_DARK)
+            gateTitle.setTextColor(Theme.DANGER)
+            gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
             gateButtons.removeAllViews()
             return
         }
@@ -504,12 +513,12 @@ class MainActivity : FragmentActivity() {
             // request, and the card says which so the home screen never shows a switch
             // position without showing what it implies.
             GlobalMode.AUTOMATIC -> {
-                gateCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
+                gateCard.background = Theme.surface(this, Theme.SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "AUTOMATIC"
                 gateSub.text = rulesSummary()
             }
             GlobalMode.SECURE -> {
-                gateCard.background = UiKit.pill(UiKit.NEUTRAL_BG)
+                gateCard.background = Theme.surface(this, Theme.SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "SECURE"
                 gateSub.text = "Every request asks you first. Biometric required."
             }
@@ -517,27 +526,23 @@ class MainActivity : FragmentActivity() {
                 // Amber, not red: the gate still exists, it is just quiet and fast.
                 // Calling it red would make the real panic switch less loud by
                 // comparison, which is the failure that matters.
-                gateCard.background = UiKit.pill(UiKit.AMBER_BG)
+                gateCard.background = Theme.surface(this, Theme.WARNING_SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "⚠ NOTIFY"
                 gateSub.text = "Small overlay toast. Silent 5s = approved. Tap ✕ to reject."
             }
         }
-        gateTitle.setTextColor(UiKit.TEXT_ON_DARK)
-        gateSub.setTextColor(UiKit.TEXT_ON_DARK)
+        gateTitle.setTextColor(Theme.ON_SURFACE)
+        gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
 
         gateButtons.removeAllViews()
         for (m in GlobalMode.values()) {
             val on = m == current
-            val b = Button(this).apply {
-                text = m.name
-                textSize = 12f
-                background = UiKit.pill(if (on) UiKit.GREEN_BG else UiKit.NEUTRAL_BG)
-                setTextColor(UiKit.TEXT_ON_DARK)
-                setOnClickListener { requestGate(m) }
+            val b = Theme.button(this, m.name, if (on) Theme.ButtonStyle.PRIMARY else Theme.ButtonStyle.NEUTRAL, small = true) {
+                requestGate(m)
             }
             gateButtons.addView(b, LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginEnd = UiKit.dp(this@MainActivity, 6) })
+            ).apply { marginEnd = Theme.dp(this@MainActivity, 6) })
         }
     }
 
@@ -608,16 +613,15 @@ class MainActivity : FragmentActivity() {
         render()
     }
 
-    private fun coloredButton(label: String, onClick: () -> Unit): Button =
-        Button(this).apply {
-            text = label
-            background = UiKit.pill(UiKit.NEUTRAL_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setOnClickListener { onClick() }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = UiKit.dp(this@MainActivity, 6) }
-        }
+    private fun fullWidthButton(
+        label: String,
+        style: Theme.ButtonStyle,
+        onClick: () -> Unit
+    ): MaterialButton = Theme.button(this, label, style, onClick = onClick).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = Theme.dp(this@MainActivity, 6) }
+    }
 
     // --- actions ---
 

@@ -7,12 +7,12 @@ import android.content.Context
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.mido.phonebridge.audit.AuditLog
+import com.mido.phonebridge.ui.Theme
 import org.json.JSONObject
 
 /**
@@ -36,11 +36,11 @@ class LogDetailActivity : Activity() {
             return
         }
 
-        val pad = UiKit.dp(this, 16)
+        val pad = Theme.dp(this, 16)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -51,11 +51,9 @@ class LogDetailActivity : Activity() {
 
         val raw = AuditLog.from(applicationContext).line(id)
         if (raw == null) {
-            content.addView(TextView(this).apply {
-                text = "This record is no longer stored (aged out, or cleared)."
-                textSize = 15f
-                setTextColor(UiKit.TEXT_MUTED)
-            })
+            content.addView(Theme.text(
+                this, "This record is no longer stored (aged out, or cleared).", 15f, Theme.ON_SURFACE_VARIANT
+            ))
             setContentView(root)
             return
         }
@@ -63,67 +61,44 @@ class LogDetailActivity : Activity() {
         val o = try {
             JSONObject(raw)
         } catch (e: org.json.JSONException) {
-            content.addView(TextView(this).apply {
-                text = "Stored line is not valid JSON:\n\n$raw"
-                textSize = 12f
-                typeface = Typeface.MONOSPACE
-                setTextColor(0xFFFF7043.toInt())
-                setTextIsSelectable(true)
-            })
+            content.addView(Theme.text(
+                this, "Stored line is not valid JSON:\n\n$raw", 12f, Theme.DANGER, mono = true
+            ).apply { setTextIsSelectable(true) })
             setContentView(root)
             return
         }
 
-        fun header(t: String): TextView = TextView(this).apply {
-            text = t.uppercase()
-            textSize = 11f
-            letterSpacing = 0.15f
-            setTextColor(0xFF78909C.toInt())
-            setPadding(0, UiKit.dp(this@LogDetailActivity, 18), 0, UiKit.dp(this@LogDetailActivity, 4))
-        }
-
-        fun labelled(label: String, value: String, mono: Boolean = false, color: Int = UiKit.TEXT_ON_DARK) {
+        fun labelled(label: String, value: String, mono: Boolean = false, color: Int = Theme.ON_SURFACE) {
             if (value.isBlank()) return
-            content.addView(TextView(this).apply {
-                text = label
-                textSize = 11f
-                setTextColor(0xFFFF7043.toInt())
-                setPadding(0, UiKit.dp(this@LogDetailActivity, 8), 0, 0)
+            content.addView(Theme.text(this, label, 11f, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(this@LogDetailActivity, 8), 0, 0)
             })
-            content.addView(TextView(this).apply {
-                text = value
-                textSize = 14f
-                setTextColor(color)
+            content.addView(Theme.text(this, value, 14f, color, mono = mono).apply {
                 setTextIsSelectable(true)
-                if (mono) typeface = Typeface.MONOSPACE
             })
         }
 
         val outcome = o.optString("outcome")
-        content.addView(TextView(this).apply {
-            text = "$outcome   ${o.optString("label").ifBlank { "—" }}"
-            textSize = 20f
+        content.addView(Theme.text(this, "$outcome   ${o.optString("label").ifBlank { "—" }}", 20f).apply {
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(UiKit.TEXT_ON_DARK)
         })
-        content.addView(TextView(this).apply {
-            text = "${o.optLong("durationMs")}ms   ·   HTTP ${o.optInt("responseStatus")}   ·   " +
-                (if (o.optBoolean("noise")) "noise" else "signal")
-            textSize = 13f
-            setTextColor(UiKit.TEXT_MUTED)
-            setPadding(0, UiKit.dp(this@LogDetailActivity, 4), 0, 0)
-        })
+        content.addView(Theme.text(
+            this,
+            "${o.optLong("durationMs")}ms   ·   HTTP ${o.optInt("responseStatus")}   ·   " +
+                (if (o.optBoolean("noise")) "noise" else "signal"),
+            13f, Theme.ON_SURFACE_VARIANT
+        ).apply { setPadding(0, Theme.dp(this@LogDetailActivity, 4), 0, 0) })
 
-        content.addView(header("who"))
+        content.addView(Theme.sectionHeader(this, "who"))
         labelled("REQUESTER", o.optString("requester"))
         labelled("REMOTE", o.optString("remote"), mono = true)
         labelled("ORIGIN", o.optString("origin"))
         labelled(
-            "UNROUTED" ,
+            "UNROUTED",
             if (o.optString("plugin").isBlank()) "yes — no route matched, so no plugin or verb" else ""
         )
 
-        content.addView(header("what"))
+        content.addView(Theme.sectionHeader(this, "what"))
         labelled("SUMMARY", o.optString("summary"))
         labelled("ROUTE", o.optString("route"), mono = true)
         labelled("LABEL", o.optString("label"), mono = true)
@@ -135,9 +110,9 @@ class LogDetailActivity : Activity() {
         }
 
         val err = o.optString("error", "")
-        if (err.isNotBlank()) labelled("ERROR", err, mono = true, color = 0xFFFF7043.toInt())
+        if (err.isNotBlank()) labelled("ERROR", err, mono = true, color = Theme.DANGER)
 
-        content.addView(header("request"))
+        content.addView(Theme.sectionHeader(this, "request"))
         val headers = o.optJSONObject("requestHeaders")
         if (headers != null && headers.length() > 0) {
             labelled("HEADERS", headers.toString(2), mono = true)
@@ -145,7 +120,7 @@ class LogDetailActivity : Activity() {
         val reqBody = o.optString("requestBody")
         labelled("BODY", if (reqBody.isBlank()) "(empty)" else reqBody, mono = true)
 
-        content.addView(header("response"))
+        content.addView(Theme.sectionHeader(this, "response"))
         val respBody = o.optString("responseBody")
         labelled("BODY", if (respBody.isBlank()) "(none — no handler ran)" else respBody, mono = true)
 
@@ -157,13 +132,13 @@ class LogDetailActivity : Activity() {
             if (trunc.has("responseBody")) parts += "response ${trunc.optInt("responseBody")} bytes original"
             labelled(
                 "TRUNCATED", "stored body capped at 32 KiB — " + parts.joinToString(", "),
-                color = 0xFFFFB74D.toInt()
+                color = Theme.WARNING
             )
         }
 
         val decision = o.optJSONObject("decision")
         if (decision != null) {
-            content.addView(header("decision"))
+            content.addView(Theme.sectionHeader(this, "decision"))
             labelled("MODE", decision.optString("mode"))
             labelled("SOURCE", decision.optString("source"))
             val rule = decision.optString("rule", "")
@@ -180,29 +155,22 @@ class LogDetailActivity : Activity() {
             labelled("QUEUE DEPTH", decision.optInt("queueDepth").toString())
         }
 
-        content.addView(header("raw"))
-        content.addView(TextView(this).apply {
-            text = raw
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setTextColor(UiKit.TEXT_MUTED)
+        content.addView(Theme.sectionHeader(this, "raw"))
+        content.addView(Theme.text(this, raw, 11f, Theme.ON_SURFACE_VARIANT, mono = true).apply {
             setTextIsSelectable(true)
-            setPadding(0, UiKit.dp(this@LogDetailActivity, 4), 0, 0)
+            setPadding(0, Theme.dp(this@LogDetailActivity, 4), 0, 0)
         })
 
-        val copy = Button(this).apply {
-            text = "COPY RAW RECORD"
-            background = UiKit.pill(UiKit.NEUTRAL_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setOnClickListener {
+        content.addView(
+            Theme.button(this, "COPY RAW RECORD", Theme.ButtonStyle.NEUTRAL) {
                 val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cb.setPrimaryClip(ClipData.newPlainText("PhoneBridge audit", raw))
                 Toast.makeText(this@LogDetailActivity, "copied", Toast.LENGTH_SHORT).show()
-            }
-        }
-        content.addView(copy, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = UiKit.dp(this@LogDetailActivity, 16) })
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@LogDetailActivity, 16) }
+        )
 
         setContentView(root)
     }

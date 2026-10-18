@@ -3,12 +3,12 @@ package com.mido.phonebridge
 import android.app.Activity
 import android.os.Bundle
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.ui.Theme
 import kotlin.concurrent.thread
 
 /**
@@ -23,45 +23,26 @@ class GoogleLoginActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val pad = UiKit.dp(this, 20)
+        val pad = Theme.dp(this, 20)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
 
-        root.addView(TextView(this).apply {
-            text = "Login with Google"
-            textSize = 22f
-            setTextColor(UiKit.TEXT_ON_DARK)
-        })
+        root.addView(Theme.text(this, "Login with Google", 22f))
 
-        status = TextView(this).apply {
-            textSize = 14f
-            setTextColor(UiKit.TEXT_MUTED)
+        status = Theme.text(this, "", 14f, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, pad / 2, 0, pad / 2)
         }
         root.addView(status)
 
-        val cancel = Button(this).apply {
-            text = "CANCEL"
-            background = UiKit.pill(UiKit.NEUTRAL_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
-            setOnClickListener { finish() }
-        }
-        root.addView(cancel)
+        root.addView(Theme.button(this, "CANCEL", Theme.ButtonStyle.NEUTRAL) { finish() })
 
-        root.addView(TextView(this).apply {
-            text = "\u2014 log \u2014"
-            textSize = 12f
-            setTextColor(UiKit.TEXT_MUTED)
+        root.addView(Theme.text(this, "\u2014 log \u2014", 12f, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, pad, 0, 0)
         })
-        val log = TextView(this).apply {
-            textSize = 11f
-            setTextColor(UiKit.TEXT_MUTED)
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
+        val log = Theme.text(this, "", 11f, Theme.ON_SURFACE_VARIANT, mono = true)
         root.addView(ScrollView(this).apply { addView(log) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
 

@@ -4,10 +4,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
@@ -20,6 +18,7 @@ import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.policy.Rule
+import com.mido.phonebridge.ui.Theme
 
 /**
  * Where per-pair rules are authored. The only place, deliberately.
@@ -35,7 +34,6 @@ import com.mido.phonebridge.policy.Rule
 class SettingsActivity : Activity() {
 
     private lateinit var container: LinearLayout
-    private lateinit var header: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,8 +41,9 @@ class SettingsActivity : Activity() {
         val scroll = ScrollView(this)
         container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(UiKit.dp(this@SettingsActivity, 16), UiKit.dp(this@SettingsActivity, 16),
-                UiKit.dp(this@SettingsActivity, 16), UiKit.dp(this@SettingsActivity, 32))
+            setPadding(Theme.dp(this@SettingsActivity, 16), Theme.dp(this@SettingsActivity, 16),
+                Theme.dp(this@SettingsActivity, 16), Theme.dp(this@SettingsActivity, 32))
+            setBackgroundColor(Theme.BG)
         }
         scroll.addView(container)
         setContentView(scroll)
@@ -55,26 +54,27 @@ class SettingsActivity : Activity() {
     private fun render() {
         container.removeAllViews()
 
-        header = TextView(this).apply {
-            text = "PER-PAIR RULES"
-            textSize = 18f
-            setTextColor(UiKit.TEXT_ON_LIGHT)
-            setTypeface(android.graphics.Typeface.DEFAULT_BOLD)
-        }
-        container.addView(header)
+        container.addView(Theme.text(this, "PER-PAIR RULES", 20f).apply {
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        })
 
         val policy = try {
             PolicyStore.from(applicationContext).get()
         } catch (e: PolicyException) {
             container.addView(
-                text("⚠ policy unreadable: ${e.message}\n\nThe server will not start until " +
-                    "this file is fixed or removed.", UiKit.RED)
+                Theme.text(
+                    this,
+                    "⚠ policy unreadable: ${e.message}\n\nThe server will not start until " +
+                        "this file is fixed or removed.",
+                    12f, Theme.DANGER
+                )
             )
             return
         }
 
         container.addView(
-            text(
+            Theme.text(
+                this,
                 when (policy.global) {
                     GlobalMode.AUTOMATIC ->
                         "The switch is AUTOMATIC, so these rules are in force. " +
@@ -83,36 +83,37 @@ class SettingsActivity : Activity() {
                         "Rules are ignored while the switch is ${policy.global.name}. " +
                             "Set the switch to AUTOMATIC to use them."
                 },
-                UiKit.TEXT_MUTED
+                12f, Theme.ON_SURFACE_VARIANT
             )
         )
-        container.addView(spacer(8))
+        container.addView(Theme.spacer(this, 8))
 
         // --- existing rules ---
         if (policy.rules.isEmpty()) {
-            container.addView(text("No rules yet. Every pair asks you first.", UiKit.TEXT_MUTED))
+            container.addView(Theme.text(this, "No rules yet. Every pair asks you first.", 12f, Theme.ON_SURFACE_VARIANT))
         } else {
             for (rule in policy.rules) container.addView(ruleRow(policy, rule))
         }
 
-        container.addView(spacer(12))
+        container.addView(Theme.spacer(this, 12))
         container.addView(
-            colored("+ ADD RULE", UiKit.GREEN_BG) { pickPlugin(policy) },
+            Theme.button(this, "+ ADD RULE", Theme.ButtonStyle.SUCCESS) { pickPlugin(policy) },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         )
 
-        container.addView(spacer(20))
+        container.addView(Theme.spacer(this, 20))
         container.addView(
-            text(
+            Theme.text(
+                this,
                 "NOTIFY shows a small overlay for 5 seconds. Doing nothing approves it; " +
                     "tap ✕ to reject. SECURE opens the full-screen prompt with a fingerprint.\n\n" +
                     "There is no auto-approve option — not here and not on the switch. The " +
                     "quietest a request can be is the 5s overlay, so every request reaches " +
                     "a human first.",
-                UiKit.TEXT_MUTED
+                12f, Theme.ON_SURFACE_VARIANT
             )
         )
     }
@@ -122,27 +123,30 @@ class SettingsActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, UiKit.dp(this@SettingsActivity, 8), 0, UiKit.dp(this@SettingsActivity, 8))
+            setPadding(Theme.dp(this@SettingsActivity, 12), Theme.dp(this@SettingsActivity, 10),
+                Theme.dp(this@SettingsActivity, 12), Theme.dp(this@SettingsActivity, 10))
+            background = Theme.outlined(this@SettingsActivity, Theme.SURFACE, Theme.RADIUS_CONTROL)
         }
-        val label = TextView(this).apply {
+        val label = Theme.text(
+            this,
             // `secure (default)` because a stored SECURE and no rule behave
             // identically. Saying so stops anyone hunting for a difference
             // that does not exist.
-            text = "${rule.plugin} · ${rule.verb.name.lowercase()} — " +
+            "${rule.plugin} · ${rule.verb.name.lowercase()} — " +
                 rule.mode.name.lowercase() +
-                if (rule.mode == Mode.SECURE) " (default)" else ""
-            textSize = 13f
-            setTextColor(UiKit.TEXT_ON_LIGHT)
-        }
+                if (rule.mode == Mode.SECURE) " (default)" else "",
+            13f
+        )
         row.addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         row.addView(
-            smallButton(if (rule.mode == Mode.NOTIFY) "→ secure" else "→ notify") {
+            Theme.button(this, if (rule.mode == Mode.NOTIFY) "→ secure" else "→ notify",
+                Theme.ButtonStyle.NEUTRAL, small = true) {
                 setRule(policy, Rule(rule.plugin, rule.verb, toggle(rule.mode)), "settings")
             }
         )
         row.addView(
-            smallButton("remove") {
+            Theme.button(this, "remove", Theme.ButtonStyle.NEUTRAL, small = true) {
                 clearRule(policy, rule.plugin, rule.verb, "settings")
             }
         )
@@ -178,7 +182,6 @@ class SettingsActivity : Activity() {
     }
 
     private fun pickMode(policy: Policy, plugin: String, verb: Verb) {
-        val existing = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }
         val labels = arrayOf(
             "default — ask me (removes any rule)",
             "notify — 5s overlay, silence approves",
@@ -190,11 +193,7 @@ class SettingsActivity : Activity() {
                 when (which) {
                     0 -> clearRule(policy, plugin, verb, "settings")
                     1 -> setRule(policy, Rule(plugin, verb, Mode.NOTIFY), "settings")
-                    else -> setRule(
-                        policy,
-                        Rule(plugin, verb, Mode.SECURE),
-                        "settings"
-                    )
+                    else -> setRule(policy, Rule(plugin, verb, Mode.SECURE), "settings")
                 }
             }
             .show()
@@ -233,34 +232,5 @@ class SettingsActivity : Activity() {
             AuditHealth.markDegraded("rule change not recorded: ${e.message}")
         }
         render()
-    }
-
-    // --- view helpers ---
-
-    private fun text(s: String, color: Int): TextView = TextView(this).apply {
-        text = s
-        textSize = 12f
-        setTextColor(color)
-        setPadding(0, UiKit.dp(this@SettingsActivity, 4), 0, UiKit.dp(this@SettingsActivity, 4))
-    }
-
-    private fun spacer(dp: Int): android.view.View = android.view.View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(1, UiKit.dp(this@SettingsActivity, dp))
-    }
-
-    private fun colored(label: String, bg: Int, onClick: () -> Unit): Button = Button(this).apply {
-        text = label
-        textSize = 12f
-        background = UiKit.pill(bg)
-        setTextColor(UiKit.TEXT_ON_DARK)
-        setOnClickListener { onClick() }
-    }
-
-    private fun smallButton(label: String, onClick: () -> Unit): Button = Button(this).apply {
-        text = label
-        textSize = 10f
-        background = UiKit.pill(UiKit.NEUTRAL_BG)
-        setTextColor(UiKit.TEXT_ON_DARK)
-        setOnClickListener { onClick() }
     }
 }

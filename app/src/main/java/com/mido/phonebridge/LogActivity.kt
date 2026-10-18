@@ -7,9 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -18,6 +16,7 @@ import android.widget.Toast
 import com.mido.phonebridge.audit.AuditHeader
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditOutcome
+import com.mido.phonebridge.ui.Theme
 
 /**
  * The audit log list: every request the bridge handled, newest first.
@@ -30,7 +29,7 @@ class LogActivity : Activity() {
 
     private lateinit var listContainer: LinearLayout
     private lateinit var summaryLine: TextView
-    private lateinit var noiseChip: Button
+    private lateinit var noiseChip: com.google.android.material.button.MaterialButton
 
     private var hideNoise = true
     private var pluginFilter: String? = null
@@ -39,31 +38,26 @@ class LogActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val pad = UiKit.dp(this, 16)
+        val pad = Theme.dp(this, 16)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
 
-        root.addView(TextView(this).apply {
-            text = "Request log"
-            textSize = 22f
+        root.addView(Theme.text(this, "Request log", 22f).apply {
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(UiKit.TEXT_ON_DARK)
         })
 
-        summaryLine = TextView(this).apply {
-            textSize = 13f
-            setTextColor(UiKit.TEXT_MUTED)
-            setPadding(0, UiKit.dp(this@LogActivity, 4), 0, UiKit.dp(this@LogActivity, 8))
+        summaryLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
+            setPadding(0, Theme.dp(this@LogActivity, 4), 0, Theme.dp(this@LogActivity, 8))
         }
         root.addView(summaryLine)
 
         // Filter chips scroll sideways so they never wrap into a wall of buttons.
         val chips = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, UiKit.dp(this@LogActivity, 8))
+            setPadding(0, 0, 0, Theme.dp(this@LogActivity, 8))
         }
         // The label names what the tap DOES, so it flips with the state.
         // A fixed label lies half the time: it reads "hide noise" even while
@@ -87,16 +81,7 @@ class LogActivity : Activity() {
         render()
     }
 
-    private fun chip(label: String, onClick: () -> Unit): Button = Button(this).apply {
-        text = label
-        textSize = 12f
-        background = UiKit.pill(UiKit.NEUTRAL_BG)
-        setTextColor(UiKit.TEXT_ON_DARK)
-        setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { marginEnd = UiKit.dp(this@LogActivity, 6) }
-    }
+    private fun chip(label: String, onClick: () -> Unit) = Theme.chip(this, label, onClick = onClick)
 
     private fun render() {
         val store = AuditLog.from(applicationContext)
@@ -118,13 +103,11 @@ class LogActivity : Activity() {
 
         listContainer.removeAllViews()
         if (shown.isEmpty()) {
-            listContainer.addView(TextView(this).apply {
-                text = if (all.isEmpty()) "No requests yet."
-                else "Nothing matches these filters."
-                textSize = 15f
-                setTextColor(UiKit.TEXT_MUTED)
-                setPadding(0, UiKit.dp(this@LogActivity, 24), 0, 0)
-            })
+            listContainer.addView(Theme.text(
+                this,
+                if (all.isEmpty()) "No requests yet." else "Nothing matches these filters.",
+                15f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@LogActivity, 24), 0, 0) })
             return
         }
 
@@ -134,19 +117,18 @@ class LogActivity : Activity() {
         val capped = shown.take(MAX_ROWS)
         for (h in capped) listContainer.addView(row(h))
         if (shown.size > capped.size) {
-            listContainer.addView(TextView(this).apply {
-                text = "… ${shown.size - capped.size} older records not shown"
-                textSize = 12f
-                setTextColor(UiKit.TEXT_MUTED)
-                setPadding(0, UiKit.dp(this@LogActivity, 12), 0, 0)
-            })
+            listContainer.addView(Theme.text(
+                this, "… ${shown.size - capped.size} older records not shown", 12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@LogActivity, 12), 0, 0) })
         }
     }
 
     private fun row(h: AuditHeader): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, UiKit.dp(this@LogActivity, 10), 0, UiKit.dp(this@LogActivity, 10))
+            setPadding(Theme.dp(this@LogActivity, 12), Theme.dp(this@LogActivity, 10),
+                Theme.dp(this@LogActivity, 12), Theme.dp(this@LogActivity, 10))
+            background = Theme.rippled(this@LogActivity, Theme.SURFACE, Theme.RADIUS_CONTROL)
             isClickable = true
             setOnClickListener {
                 startActivity(Intent(this@LogActivity, LogDetailActivity::class.java).apply {
@@ -165,18 +147,20 @@ class LogActivity : Activity() {
                 true
             }
         }
-        row.addView(TextView(this).apply {
-            text = "${timeOf(h.ts)}   ${glyph(h.outcome)} ${h.outcome.name}   ${h.label.ifBlank { "—" }}"
-            textSize = 14f
-            typeface = Typeface.MONOSPACE
-            setTextColor(colorOf(h.outcome))
-        })
-        row.addView(TextView(this).apply {
-            text = "${h.summary.ifBlank { "(no summary)" }}   ·   ${h.durationMs}ms"
-            textSize = 13f
-            setTextColor(if (h.noise) UiKit.TEXT_MUTED else UiKit.TEXT_ON_DARK)
-            setPadding(0, UiKit.dp(this@LogActivity, 2), 0, 0)
-        })
+        row.addView(Theme.text(
+            this,
+            "${timeOf(h.ts)}   ${glyph(h.outcome)} ${h.outcome.name}   ${h.label.ifBlank { "—" }}",
+            14f, colorOf(h.outcome), mono = true
+        ))
+        row.addView(Theme.text(
+            this,
+            "${h.summary.ifBlank { "(no summary)" }}   ·   ${h.durationMs}ms",
+            13f, if (h.noise) Theme.ON_SURFACE_VARIANT else Theme.ON_SURFACE
+        ).apply { setPadding(0, Theme.dp(this@LogActivity, 2), 0, 0) })
+        val lp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = Theme.dp(this@LogActivity, 6) }
+        row.layoutParams = lp
         return row
     }
 
@@ -200,14 +184,14 @@ class LogActivity : Activity() {
     }
 
     private fun colorOf(o: AuditOutcome): Int = when (o) {
-        AuditOutcome.APPROVED, AuditOutcome.NOTIFY_APPROVED -> 0xFF81C784.toInt()
-        AuditOutcome.DENIED, AuditOutcome.NOTIFY_REJECTED, AuditOutcome.DENIED_UNATTENDED -> 0xFFEF9A9A.toInt()
-        AuditOutcome.HANDLER_FAILED -> 0xFFFF7043.toInt()
+        AuditOutcome.APPROVED, AuditOutcome.NOTIFY_APPROVED -> Theme.SUCCESS
+        AuditOutcome.DENIED, AuditOutcome.NOTIFY_REJECTED, AuditOutcome.DENIED_UNATTENDED -> Theme.DANGER
+        AuditOutcome.HANDLER_FAILED -> Theme.WARNING
         // A policy change is not a request and not a failure: it is the reason the
         // records around it look the way they do. Give it its own colour so a scan
         // down the log finds the moment the gate moved.
-        AuditOutcome.POLICY_CHANGED -> 0xFF4FC3F7.toInt()
-        else -> UiKit.TEXT_MUTED
+        AuditOutcome.POLICY_CHANGED -> Theme.ACCENT
+        else -> Theme.ON_SURFACE_VARIANT
     }
 
     private companion object {

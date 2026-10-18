@@ -8,14 +8,15 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.SecretVault
+import com.mido.phonebridge.ui.Theme
 
 /**
  * Full-screen approval UI. Shows every detail of the pending request and
@@ -59,10 +60,8 @@ class ApprovalActivity : FragmentActivity() {
         val remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?"
         val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
         val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?"
-        val account = intent.getStringExtra(EXTRA_ACCOUNT)
         val timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS)
         val createdAtMs = intent.getLongExtra(EXTRA_CREATED_AT, System.currentTimeMillis())
-        val waitingBehind = intent.getIntExtra(EXTRA_WAITING_BEHIND, 0)
 
         // Two sources of truth:
         //  - view:  the RESOLVED, human-readable WHAT/ON (built by the caller
@@ -74,7 +73,7 @@ class ApprovalActivity : FragmentActivity() {
         // that decision (see ApprovalView.requiresBiometric). Read once, here.
         val requiresBiometric = view?.requiresBiometric == true
 
-        val pad = (24 * resources.displayMetrics.density).toInt()
+        val pad = Theme.dp(this, 24)
 
         // Scrollable modal body. Long notifications (a big Arabic message, a
         // multi-line task) previously pushed the buttons off the bottom edge with
@@ -83,64 +82,46 @@ class ApprovalActivity : FragmentActivity() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
 
-        fun label(t: String, size: Float, color: Int = 0xFFFFFFFF.toInt()): TextView =
-            TextView(this).apply {
-                text = t
-                textSize = size
-                setTextColor(color)
-                setPadding(0, 0, 0, (12 * resources.displayMetrics.density).toInt())
+        fun label(t: String, size: Float, color: Int = Theme.ON_SURFACE): TextView =
+            Theme.text(this, t, size, color).apply {
+                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             }
-
-        // Small all-caps section header.
-        fun section(t: String): TextView = TextView(this).apply {
-            text = t
-            textSize = 11f
-            letterSpacing = 0.15f
-            setTextColor(0xFF78909C.toInt())
-            setPadding(0, (18 * resources.displayMetrics.density).toInt(), 0, (4 * resources.displayMetrics.density).toInt())
-        }
 
         content.addView(label("🔐 APPROVE?", 22f))
 
         if (view != null) {
             // --- WHO ---
-            content.addView(section("WHO"))
-            content.addView(label(view.requester, 17f, 0xFFFFB74D.toInt()))
+            content.addView(Theme.sectionHeader(this, "WHO"))
+            content.addView(label(view.requester, 17f, Theme.WARNING))
             if (view.account.isNotBlank() && view.account != "—") {
-                content.addView(label("as ${view.account}", 15f, 0xFF81C784.toInt()))
+                content.addView(label("as ${view.account}", 15f, Theme.SUCCESS))
             }
 
             // --- WHAT (the resolved action, in words) ---
-            content.addView(section("WHAT"))
+            content.addView(Theme.sectionHeader(this, "WHAT"))
             content.addView(label("\"${view.actionLabel}\"", 20f))
 
             // Render a labelled row: label on its own quiet line, value below in the
             // style the row asked for. This is the ONE renderer; it knows nothing
             // about Gmail, Calendar, or notifications — only rows. Never print a
             // label with nothing under it (an empty row is a defect, not a state).
-            val d = resources.displayMetrics.density
             fun row(r: ApprovalGate.Row) {
-                content.addView(TextView(this).apply {
-                    text = r.label
-                    textSize = 12f
-                    letterSpacing = 0.1f
-                    setTextColor(0xFFFF7043.toInt())
-                    setPadding(0, (8 * d).toInt(), 0, 0)
+                content.addView(Theme.text(this, r.label, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                    setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
-                content.addView(TextView(this).apply {
-                    text = r.value
-                    textSize = 16f
-                    setTextColor(0xFFFFE0B2.toInt())
-                    setTextIsSelectable(true)
-                    if (r.style == ApprovalGate.Row.Style.MONO ||
+                content.addView(Theme.text(
+                    this,
+                    r.value,
+                    16f,
+                    if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
+                    mono = r.style == ApprovalGate.Row.Style.MONO ||
                         r.style == ApprovalGate.Row.Style.WARN
-                    ) {
-                        typeface = android.graphics.Typeface.MONOSPACE
-                    }
-                    setPadding(0, 0, 0, (6 * d).toInt())
+                ).apply {
+                    setTextIsSelectable(true)
+                    setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
                 })
             }
 
@@ -149,7 +130,7 @@ class ApprovalActivity : FragmentActivity() {
             for (sec in view.sections) {
                 val rows = sec.rows.filter { it.value.isNotBlank() }
                 if (rows.isEmpty()) continue
-                content.addView(section(sec.title))
+                content.addView(Theme.sectionHeader(this, sec.title))
                 rows.forEach { row(it) }
             }
 
@@ -163,15 +144,15 @@ class ApprovalActivity : FragmentActivity() {
             // "count=3, package=com.whatsapp", never a bare verb.
             if (view.filters.isNotEmpty()) {
                 val scope = view.filters.entries.joinToString(", ") { "${it.key}=${it.value}" }
-                content.addView(label("filter: $scope", 15f, 0xFFFFB74D.toInt()))
+                content.addView(label("filter: $scope", 15f, Theme.WARNING))
             }
             if (!view.replyText.isNullOrBlank()) {
-                content.addView(label("reply: ${view.replyText}", 16f, 0xFF81C784.toInt()))
+                content.addView(label("reply: ${view.replyText}", 16f, Theme.SUCCESS))
             }
             // Other buttons the same notification offers (options are a menu, the
             // resolved WHAT is the pick). Show them so the human sees the space.
             if (view.options.isNotEmpty()) {
-                content.addView(label("other actions: " + view.options.joinToString(" · "), 14f, 0xFF90A4AE.toInt()))
+                content.addView(label("other actions: " + view.options.joinToString(" · "), 14f, Theme.ON_SURFACE_VARIANT))
             }
 
             // Notification content as ordinary rows — the same renderer as every
@@ -186,36 +167,30 @@ class ApprovalActivity : FragmentActivity() {
                 if (view.messageCount > 1) add(ApprovalGate.Row("", "💬 ${view.messageCount} messages", ApprovalGate.Row.Style.WARN))
             }
             if (notifRows.isNotEmpty()) {
-                content.addView(section("ON"))
+                content.addView(Theme.sectionHeader(this, "ON"))
                 notifRows.forEach { row(it) }
             }
         } else {
             // No structured view (e.g. non-notification routes): keep the old fields.
-            content.addView(label("Source: $remote", 15f, 0xFFFFB74D.toInt()))
-            content.addView(label("Endpoint: $endpoint", 15f, 0xFFFFB74D.toInt()))
+            content.addView(label("Source: $remote", 15f, Theme.WARNING))
+            content.addView(label("Endpoint: $endpoint", 15f, Theme.WARNING))
             content.addView(label("Summary: $summary", 16f))
         }
 
         // --- Details: raw endpoint + full JSON, collapsed by default. ---
-        val detailBody = TextView(this).apply {
-            text = "endpoint: $endpoint\n\n" + (detail ?: "(no detail)")
-            textSize = 12f
-            setTextColor(0xFF90A4AE.toInt())
-            setTextIsSelectable(true)
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
+        val detailBody = Theme.text(
+            this, "endpoint: $endpoint\n\n" + (detail ?: "(no detail)"),
+            12f, Theme.ON_SURFACE_VARIANT, mono = true
+        ).apply { setTextIsSelectable(true) }
         val detailScroll = ScrollView(this).apply {
             addView(detailBody)
             visibility = ViewGroup.GONE
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this@ApprovalActivity, 220)
+                ViewGroup.LayoutParams.MATCH_PARENT, Theme.dp(this@ApprovalActivity, 220)
             )
         }
-        val detailToggle = TextView(this).apply {
-            text = "▸ details"
-            textSize = 13f
-            setTextColor(0xFF78909C.toInt())
-            setPadding(0, (14 * resources.displayMetrics.density).toInt(), 0, (8 * resources.displayMetrics.density).toInt())
+        val detailToggle = Theme.text(this, "▸ details", 13f, Theme.ON_SURFACE_VARIANT).apply {
+            setPadding(0, Theme.dp(this@ApprovalActivity, 14), 0, Theme.dp(this@ApprovalActivity, 8))
             isClickable = true
             setOnClickListener {
                 val show = detailScroll.visibility != ViewGroup.VISIBLE
@@ -225,19 +200,15 @@ class ApprovalActivity : FragmentActivity() {
         }
 
         // --- Countdown to auto-deny. Visualized, updated every 250ms. ---
-        val countdown = TextView(this).apply {
-            textSize = 13f
-            setTextColor(0xFFFFB74D.toInt())
-            setPadding(0, 0, 0, (6 * resources.displayMetrics.density).toInt())
+        val countdown = Theme.text(this, "", 13f, Theme.WARNING).apply {
+            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
         }
 
         // --- Queue position: only when others are actually waiting. The queue is
         // FIFO, so this request is the one on screen and the rest wait their turn.
         // Never render a "0 waiting" line — an empty statement is noise.
-        val queueLine = TextView(this).apply {
-            textSize = 13f
-            setTextColor(0xFF90A4AE.toInt())
-            setPadding(0, 0, 0, (6 * resources.displayMetrics.density).toInt())
+        val queueLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
+            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
             visibility = ViewGroup.GONE
         }
 
@@ -248,7 +219,7 @@ class ApprovalActivity : FragmentActivity() {
                 val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
                 val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
                 countdown.text = "⏳ auto-deny in ${left}s"
-                countdown.setTextColor(if (left <= 10) 0xFFEF5350.toInt() else 0xFFFFB74D.toInt())
+                countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
                 // A simple text bar keeps it dependency-free and unmissable.
                 countdown.contentDescription = "timeout progress ${pct}%"
                 // Refresh the queue label from live state every tick, so it appears
@@ -278,38 +249,32 @@ class ApprovalActivity : FragmentActivity() {
         val icon = android.widget.ImageView(this).apply {
             setImageResource(R.drawable.ic_launcher)
             layoutParams = LinearLayout.LayoutParams(
-                UiKit.dp(this@ApprovalActivity, 56),
-                UiKit.dp(this@ApprovalActivity, 56)
+                Theme.dp(this@ApprovalActivity, 56),
+                Theme.dp(this@ApprovalActivity, 56)
             )
         }
         iconRow.addView(icon)
 
-        val deny = Button(this).apply {
-            text = "DENY"
-            background = UiKit.pill(UiKit.NEUTRAL_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
+        val deny = Theme.button(this, "DENY", Theme.ButtonStyle.NEUTRAL) {
+            finishWith(id, approved = false)
+        }.apply {
             isEnabled = false
             alpha = 0.4f
-            setOnClickListener { finishWith(id, approved = false) }
         }
-        val allow = Button(this).apply {
-            text = "APPROVE"
-            background = UiKit.pill(UiKit.GREEN_BG)
-            setTextColor(UiKit.TEXT_ON_DARK)
+        val allow = Theme.button(this, "APPROVE", Theme.ButtonStyle.SUCCESS) {
+            // Mutating routes bind APPROVE to a live biometric: the tap opens the
+            // system prompt and the request fires only on success. A failed or
+            // dismissed prompt leaves the request PENDING with APPROVE still live,
+            // so tapping again gives another attempt — the countdown keeps running
+            // underneath and is the only limit. Reads approve on a plain tap.
+            if (requiresBiometric) {
+                promptBiometric { finishWith(id, approved = true) }
+            } else {
+                finishWith(id, approved = true)
+            }
+        }.apply {
             isEnabled = false
             alpha = 0.4f
-            setOnClickListener {
-                // Mutating routes bind APPROVE to a live biometric: the tap opens the
-                // system prompt and the request fires only on success. A failed or
-                // dismissed prompt leaves the request PENDING with APPROVE still live,
-                // so tapping again gives another attempt — the countdown keeps running
-                // underneath and is the only limit. Reads approve on a plain tap.
-                if (requiresBiometric) {
-                    promptBiometric { finishWith(id, approved = true) }
-                } else {
-                    finishWith(id, approved = true)
-                }
-            }
         }
         // Fails closed: if a mutating route needs a biometric that this device cannot
         // provide (none enrolled, none present), APPROVE must never be tappable — only
@@ -350,7 +315,7 @@ class ApprovalActivity : FragmentActivity() {
         val pinned = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, 0, pad, pad)
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
         }
         pinned.addView(detailToggle)
         pinned.addView(detailScroll)
@@ -358,7 +323,7 @@ class ApprovalActivity : FragmentActivity() {
         pinned.addView(countdown)
         if (biometricBlocked) {
             pinned.addView(
-                label("⚠ APPROVE unavailable — set up a fingerprint/PIN (strong) to approve", 14f, 0xFFFF7043.toInt())
+                label("⚠ APPROVE unavailable — set up a fingerprint/PIN (strong) to approve", 14f, Theme.DANGER)
             )
         }
         pinned.addView(iconRow)
@@ -366,7 +331,7 @@ class ApprovalActivity : FragmentActivity() {
 
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF101418.toInt())
+            setBackgroundColor(Theme.BG)
             addView(scroll, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))
@@ -520,6 +485,7 @@ class ApprovalActivity : FragmentActivity() {
         return BiometricManager.from(this).canAuthenticate(authenticators) ==
             BiometricManager.BIOMETRIC_SUCCESS
     }
+
     @Deprecated("Deprecated in the platform; kept for back-compat behavior on older devices.")
     override fun onBackPressed() {
         // Back == deny. Never leave a request dangling open by accident.
