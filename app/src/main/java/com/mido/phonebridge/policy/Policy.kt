@@ -77,14 +77,13 @@ class Policy(
                 throw PolicyException("policy version $version is not $VERSION")
             }
             val rawGlobal = o.optString("global", "")
-            // `OFF` is a legacy switch value from <=0.11.0, removed in 0.12.0 along with
-            // every other auto-approve path. A file written by an older build must not
-            // brick the app, and there is only one safe direction: `OFF` meant "no gate",
-            // so it loads as `NOTIFY`, which still asks a human. One-way and named here
-            // rather than guessed — anything else is still a parse error below.
+            // No migration, no special case: `OFF` was a <=0.11.0 switch value and is now
+            // just another unrecognised string. The one-way "OFF" -> NOTIFY load that
+            // 0.12.0 carried was itself removed once we agreed there is no backward
+            // compatibility while the app is not live. An unknown global stays a parse
+            // error, exactly like every other unreadable value in this file.
             val global = GlobalMode.values().firstOrNull { it.name == rawGlobal }
-                ?: if (rawGlobal == "OFF") GlobalMode.NOTIFY
-                else throw PolicyException(
+                ?: throw PolicyException(
                     "unknown global '$rawGlobal'; this build understands " +
                         GlobalMode.values().joinToString(", ")
                 )

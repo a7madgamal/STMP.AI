@@ -184,18 +184,20 @@ class PolicyTest {
     }
 
     @Test
-    fun `a legacy OFF global loads as NOTIFY, never as an ungated state`() {
-        // A file written by <=0.11.0 has global "OFF", which no longer exists. It must
-        // not brick the app, and it must not load as anything weaker than the floor:
-        // OFF meant "no gate", so NOTIFY (still asks a human) is the only safe direction.
-        val p = Policy.parse("""{"version":1,"global":"OFF","rules":[]}""")
-        assertEquals(GlobalMode.NOTIFY, p.global)
+    fun `a legacy OFF global is refused, not migrated`() {
+        // 0.12.0 briefly carried a one-way "OFF" -> NOTIFY load for files written by
+        // <=0.11.0. It was removed on the "no backward compatibility while we are not
+        // live" call: "OFF" is now just another unrecognised string. If this ever
+        // stops throwing, a compatibility shim has been reintroduced without a decision.
+        assertThrows(PolicyException::class.java) {
+            Policy.parse("""{"version":1,"global":"OFF","rules":[]}""")
+        }
     }
 
     @Test
-    fun `an unknown global that is not the legacy OFF is still refused`() {
-        // The migration above is one exact string, not a lenient parser. Anything else
-        // unrecognised still fails, so the exemption cannot quietly widen.
+    fun `an off-by-case global is refused too`() {
+        // No lenient matching: the refusal above is exact, not a case-insensitive shim
+        // wearing a different hat.
         assertThrows(PolicyException::class.java) {
             Policy.parse("""{"version":1,"global":"off","rules":[]}""")
         }
