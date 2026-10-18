@@ -319,6 +319,15 @@ class MainActivity : Activity() {
                 onClick = { openOverlaySettings() }
             )
         )
+        val batteryOk = isIgnoringBatteryOptimizations()
+        statusContainer.addView(
+            UiKit.statusRow(
+                this, "Battery optimization",
+                if (batteryOk) "exempt" else "tap to allow background",
+                if (batteryOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { requestIgnoreBatteryOptimizations() }
+            )
+        )
 
         // --- account ---
         if (AuthManager.isLoggedIn(this)) {
@@ -529,6 +538,41 @@ class MainActivity : Activity() {
             Debug.log("opened draw-over-apps settings")
         } catch (e: Exception) {
             Debug.log("cannot open overlay settings: ${e.message}")
+        }
+    }
+
+    /**
+     * Doze and app standby suspend background work; Samsung adds app-sleep on top. This
+     * exemption is what keeps the server reachable when the screen has been off for a
+     * while. It is not a battery-saver bypass — it just says "do not freeze this app".
+     */
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    /**
+     * The system dialog that grants the exemption. The direct request intent is the one
+     * that actually shows a prompt; the settings list is the fallback for OEM builds that
+     * do not honour it (the user then toggles the app manually).
+     */
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$packageName")
+                )
+            )
+            Debug.log("requested battery-optimization exemption")
+        } catch (e: Exception) {
+            Debug.log("cannot request exemption: ${e.message} — opening settings list")
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                Debug.log("opened battery-optimization settings list")
+            } catch (e2: Exception) {
+                Debug.log("cannot open battery settings: ${e2.message}")
+            }
         }
     }
 

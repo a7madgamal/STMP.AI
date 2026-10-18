@@ -3,7 +3,13 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse, not dataSync: this is a persistent local HTTP server, not a sync job.
+         dataSync carries a hard 6-hour/24h cap on Android 15+ (targetSdk 35), after which
+         the system throws ForegroundServiceDidNotStopInTimeException and kills the process. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Doze/app-standby would still stop the server; the user grants an exemption from the
+         in-app checklist. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -56,7 +62,11 @@
         <service
             android:name=".BridgeService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent local HTTP bridge server that must stay reachable for inbound requests; it is not a sync or media job and cannot be scheduled." />
+        </service>
 
         <service
             android:name=".NotifListenerService"

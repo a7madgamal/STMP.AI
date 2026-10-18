@@ -174,6 +174,18 @@ class BridgeService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Android 15+ only. Called when the system has decided this foreground service must
+     * stop (e.g. a time-limited type hit its cap). The service is no longer foreground at
+     * this point and has a few seconds to call [stopSelf]; if it does not, the system
+     * throws ForegroundServiceDidNotStopInTimeException and kills the process — which is
+     * exactly the crash this override exists to prevent. We stop cleanly and record why.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Debug.log("onTimeout: system requires stop (startId=$startId fgsType=$fgsType) — stopping")
+        stopSelf()
+    }
+
     override fun onDestroy() {
         Debug.log("service onDestroy")
         // Kill any overlay still on screen. These are windows owned by the process:
@@ -241,7 +253,16 @@ class BridgeService : Service() {
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            // specialUse (API 34+), not dataSync: dataSync is capped at 6h/24h on
+            // Android 15+ and the system kills the process when the cap is hit.
+            // Below 34 the type constant does not exist; the overload without a
+            // type is the only option and carries no such cap.
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+            startForeground(NOTIF_ID, notif, type)
         } else {
             startForeground(NOTIF_ID, notif)
         }
