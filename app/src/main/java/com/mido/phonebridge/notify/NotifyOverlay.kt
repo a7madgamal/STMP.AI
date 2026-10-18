@@ -396,21 +396,8 @@ object NotifyOverlay {
                     }
                     main.postDelayed(this, TICK_MS)
                 } else {
-                    // fade out, then remove. Removal lives HERE and nowhere else, so it
-                    // happens exactly once and cannot be skipped by an animator that
-                    // never fires (which would strand the card on screen forever).
-                    val since = now - entry.settledAt
-                    if (since >= FADE_OUT_MS) {
-                        card.alpha = 0f
-                        runCatching { wm(entry.ctx).removeView(card) }
-                        promoteNext()
-                    } else {
-                        val p = since.toFloat() / FADE_OUT_MS
-                        card.alpha = 1f - p
-                        card.translationY = dp(10) * p
-                        card.invalidate()
-                        main.postDelayed(this, TICK_MS)
-                    }
+                    // Settled. The fade-out now lives in settle() (a single one-shot
+                    // fade), so this tick branch is never reached after the card ends.
                 }
             }
         }
@@ -445,14 +432,18 @@ object NotifyOverlay {
     }
 
     /**
-     * Report a card's outcome. Deliberately does NOT remove the view: the tick owns
-     * removal, so it happens once, after the fade-out, and cannot be skipped.
+     * Report a card's outcome, then fade it out and remove it. The fade-out is a single
+     * one-shot here (not the per-frame tick), and [promoteNext] runs only after the fade
+     * completes — so the dying card and the next card never coexist, which is what killed
+     * the flash. Removal is guaranteed (not dependent on an animator choosing to fire)
+     * because it is the final step of this method on the main thread.
      */
     private fun settle(entry: Entry, reason: Reason, detail: String = "") {
         if (entry.settled) return
         entry.settled = true
         entry.settledAt = System.currentTimeMillis()
         entry.timeout?.let(main::removeCallbacks)
+        entry.tick?.let(main::removeCallbacks)
 
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] settle reason=$reason " +
@@ -461,14 +452,34 @@ object NotifyOverlay {
         )
         entry.onOutcome(Outcome(reason, entry.shownAt, entry.settledAt, detail))
 
-        // Retired now, so ordering is correct even while the fade-out is running.
+        // Retire now so ordering is correct even while the fade-out runs.
         queue.retire(entry.id)
 
-        // A card that was never attached has no tick to remove it.
-        if (entry.root == null) {
-            entry.tick?.let(main::removeCallbacks)
+        // A card that never attached has no view to fade or remove.
+        val card = entry.root
+        if (card == null) {
             promoteNext()
+            return
         }
+
+        // One-shot fade-out, then remove and hand the screen to the next card. All on
+        // the main thread; the removeView is unconditional so nothing can strand the card.
+        val fadeOut = object : Runnable {
+            override fun run() {
+                val p = (System.currentTimeMillis() - entry.settledAt).toFloat() / FADE_OUT_MS
+                if (p < 1f) {
+                    card.alpha = 1f - p
+                    card.translationY = (10 * entry.ctx.resources.displayMetrics.density).roundToInt() * p
+                    card.invalidate()
+                    main.postDelayed(this, TICK_MS)
+                } else {
+                    card.alpha = 0f
+                    runCatching { wm(entry.ctx).removeView(card) }
+                    promoteNext()
+                }
+            }
+        }
+        main.post(fadeOut)
     }
 
     /**
