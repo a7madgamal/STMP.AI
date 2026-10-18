@@ -2,6 +2,8 @@ package com.mido.phonebridge
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
@@ -131,6 +133,25 @@ class SecretsActivity : Activity() {
             buttons.addView(small("replace") { addSecretDialog(n) })
             buttons.addView(small("delete") { confirmDelete(n) })
             rowView.addView(buttons)
+
+            // The two links (plan: docs + key issuance). Plaintext, so they are readable
+            // while the vault is shut — which is when you actually want them, right after
+            // a call failed. Shown as their own row, above the actions, because "where do
+            // I fix this key" is the question the row exists to answer.
+            val links = try {
+                SecretVault.links(this, n)
+            } catch (e: Exception) {
+                SecretVault.SecretLinks()
+            }
+            val linkRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            linkRow.addView(small(if (links.docs.isEmpty()) "+ docs" else "docs ↗") {
+                openLink(n, "API docs", links.docs)
+            })
+            linkRow.addView(small(if (links.key.isEmpty()) "+ key link" else "key ↗") {
+                openLink(n, "key page", links.key)
+            })
+            linkRow.addView(small("edit links") { editLinksDialog(n, links) })
+            rowView.addView(linkRow)
             listContainer.addView(rowView)
         }
 
@@ -208,10 +229,69 @@ class SecretsActivity : Activity() {
             .show()
     }
 
+    /**
+     * Open a stored link. Refuses an empty link with a plain message rather than
+     * silently doing nothing, and never opens anything that is not https — the vault
+     * already enforces that on write, this is the second gate.
+     */
+    private fun openLink(secret: String, what: String, url: String) {
+        if (url.isEmpty()) {
+            toast("no $what set for '$secret' — tap edit links")
+            return
+        }
+        if (!url.startsWith("https://")) {
+            toast("refusing to open a non-https link")
+            return
+        }
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    private fun editLinksDialog(name: String, current: SecretVault.SecretLinks) {
+        val docsField = EditText(this).apply {
+            hint = "API docs (https://…)"
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setText(current.docs)
+        }
+        val keyField = EditText(this).apply {
+            hint = "where to get the key (https://…)"
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setText(current.key)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
+                UiKit.dp(this@SecretsActivity, 16), 0)
+            addView(docsField)
+            addView(keyField)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Links for '$name'")
+            .setView(box)
+            .setPositiveButton("save") { _, _ ->
+                try {
+                    SecretVault.setLinks(
+                        this, name,
+                        docsField.text.toString().trim(),
+                        keyField.text.toString().trim()
+                    )
+                    render()
+                } catch (e: PluginError) {
+                    toast("${e.code}: ${e.message}")
+                }
+            }
+            .setNegativeButton("cancel", null)
+            .show()
+    }
+
     private fun addSecretDialog(existing: String? = null) {
         if (!SecretVault.isUnlocked()) {
             toast("vault locked — unlock the app first")
             return
+        }
+        val existingLinks = try {
+            if (existing != null) SecretVault.links(this, existing) else SecretVault.SecretLinks()
+        } catch (e: Exception) {
+            SecretVault.SecretLinks()
         }
         val nameField = EditText(this).apply {
             hint = "name (lowercase, e.g. todoist)"
@@ -225,12 +305,27 @@ class SecretsActivity : Activity() {
             // The keyboard and any autofill service must never learn this.
             importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
         }
+        // The two links are NOT secret (they are pointers, not credentials), so they are
+        // ordinary text fields and they are stored in the plaintext index. Both optional:
+        // a secret with no links is legal, it just cannot point you anywhere.
+        val docsField = EditText(this).apply {
+            hint = "API docs URL (optional)"
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setText(existingLinks.docs)
+        }
+        val keyField = EditText(this).apply {
+            hint = "where to get the key (optional)"
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setText(existingLinks.key)
+        }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
                 UiKit.dp(this@SecretsActivity, 16), 0)
             addView(nameField)
             addView(valueField)
+            addView(docsField)
+            addView(keyField)
         }
         AlertDialog.Builder(this)
             .setTitle(if (existing == null) "Add secret" else "Replace '$existing'")
@@ -239,7 +334,11 @@ class SecretsActivity : Activity() {
                 val n = (existing ?: nameField.text.toString()).trim()
                 val v = valueField.text.toString()
                 try {
-                    SecretVault.put(this, n, v)
+                    SecretVault.put(
+                        this, n, v,
+                        docsField.text.toString().trim(),
+                        keyField.text.toString().trim()
+                    )
                     // Registering the plugin makes it routable without a restart.
                     BridgeService.registerSecretPlugin(applicationContext, n)
                     toast("saved '$n'")

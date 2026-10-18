@@ -65,7 +65,8 @@ object SecretVault {
     private const val VK_ALIAS = "pb_vault_key"
     private const val F_DK_WRAPPED = "vault_dk_wrapped"
     private const val F_BLOB = "vault_blob"
-    private const val F_NAMES = "vault_names"   // plaintext index: names are not secret
+    private const val F_NAMES = "vault_names"   // legacy (0.14.0): bare name array
+    private const val F_META = "vault_meta"     // plaintext: name -> {docs, key}
 
     private const val GCM_TAG_BITS = 128
     private const val DK_BYTES = 32             // AES-256
@@ -88,20 +89,57 @@ object SecretVault {
     fun exists(ctx: Context): Boolean =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(F_DK_WRAPPED, null) != null
 
-    // --- names are not secret -------------------------------------------------
+    // --- names and links are not secret ---------------------------------------
     //
     // The secret NAME is a policy unit (it is the plugin id — see D7), so it has to be
     // readable while locked: the rules screen lists `todoist × EXECUTE` with the vault
     // shut, and the broker has to answer "unknown secret" without decrypting anything.
     // Only the VALUE is secret. Keeping names in the clear is therefore not a leak, it
     // is the design: a name is a label, not a credential.
+    //
+    // The two LINKS follow the same rule for a stronger reason. They point at where the
+    // API is documented and where a key is issued — pointers, not credentials. They sit
+    // in the plaintext index precisely so they are readable while the vault is shut,
+    // which is exactly when you need them: a key just failed and you want the page that
+    // reissues it, without a fingerprint to read a URL you could type from memory.
 
-    fun names(ctx: Context): List<String> {
-        val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(F_NAMES, null)
-            ?: return emptyList()
+    /** The two links that go with a secret. Empty strings mean "not set". */
+    data class SecretLinks(val docs: String = "", val key: String = "")
+
+    /** Secret names, sorted. Readable while locked — a name is a label, not a credential. */
+    fun names(ctx: Context): List<String> = readMeta(ctx).keys.sorted()
+
+    /** Whether [name] is a registered secret, without needing the vault unlocked. */
+    fun has(ctx: Context, name: String): Boolean = readMeta(ctx).containsKey(name)
+
+    /** The links for [name]. Plaintext, so this works while the vault is locked. */
+    fun links(ctx: Context, name: String): SecretLinks =
+        readMeta(ctx)[name] ?: throw PluginError("unknown_secret", "no secret named '$name'")
+
+    /**
+     * Read the plaintext index. Handles both shapes: 0.14.0 wrote a bare name array
+     * (`F_NAMES`), 0.14.1 writes name -> links (`F_META`). A vault created before the
+     * links existed must not lose its names, so the legacy array is still read.
+     */
+    private fun readMeta(ctx: Context): Map<String, SecretLinks> {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(F_META, null)?.let { raw ->
+            return try {
+                val o = JSONObject(raw)
+                val m = mutableMapOf<String, SecretLinks>()
+                for (k in o.keys()) {
+                    val v = o.optJSONObject(k)
+                    m[k] = SecretLinks(v?.optString("docs") ?: "", v?.optString("key") ?: "")
+                }
+                m
+            } catch (e: Exception) {
+                throw PluginError("vault_corrupt", "secret index unreadable: ${e.message}")
+            }
+        }
+        val legacy = prefs.getString(F_NAMES, null) ?: return emptyMap()
         return try {
-            val arr = org.json.JSONArray(raw)
-            (0 until arr.length()).map { arr.getString(it) }
+            val arr = org.json.JSONArray(legacy)
+            (0 until arr.length()).associate { arr.getString(it) to SecretLinks() }
         } catch (e: Exception) {
             // A corrupt index is a real fault: it would silently hide secrets that
             // still exist in the blob. Fail loud rather than report an empty vault.
@@ -109,8 +147,16 @@ object SecretVault {
         }
     }
 
-    /** Whether [name] is a registered secret, without needing the vault unlocked. */
-    fun has(ctx: Context, name: String): Boolean = names(ctx).contains(name)
+    private fun writeMeta(ctx: Context, meta: Map<String, SecretLinks>) {
+        val o = JSONObject()
+        for ((k, v) in meta) {
+            o.put(k, JSONObject().put("docs", v.docs).put("key", v.key))
+        }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(F_META, o.toString())
+            .remove(F_NAMES)   // superseded; leaving it would let the two disagree
+            .apply()
+    }
 
     // --- unlock / init --------------------------------------------------------
 
@@ -153,7 +199,7 @@ object SecretVault {
         prefs.edit()
             .putString(F_DK_WRAPPED, b64(wrapped))
             .putString(F_BLOB, null)
-            .putString(F_NAMES, "[]")
+            .putString(F_META, "{}")
             .apply()
         synchronized(this) {
             dataKey = dk
@@ -228,13 +274,32 @@ object SecretVault {
      * human's finger has already been on VK this session.
      */
     @Synchronized
-    fun put(ctx: Context, name: String, value: String) {
+    fun put(ctx: Context, name: String, value: String, docs: String = "", key: String = "") {
         requireName(name)
         if (value.isEmpty()) throw PluginError("bad_request", "secret value must not be empty")
+        requireUrlOrEmpty("docs link", docs)
+        requireUrlOrEmpty("key link", key)
         val s = openSession()
         val next = s.toMutableMap().apply { this[name] = value }
+        // Read the index BEFORE writing anything: a corrupt index must fail before the
+        // blob is touched, not after, or the two would disagree.
+        val meta = readMeta(ctx).toMutableMap().apply { this[name] = SecretLinks(docs, key) }
         persist(ctx, next)
+        writeMeta(ctx, meta)
         session = next
+    }
+
+    /**
+     * Edit just the links. Deliberately does NOT require an unlocked vault: the links
+     * are plaintext, so demanding a fingerprint to fix a URL would be theatre.
+     */
+    @Synchronized
+    fun setLinks(ctx: Context, name: String, docs: String, key: String) {
+        requireUrlOrEmpty("docs link", docs)
+        requireUrlOrEmpty("key link", key)
+        val meta = readMeta(ctx)
+        if (!meta.containsKey(name)) throw PluginError("unknown_secret", "no secret named '$name'")
+        writeMeta(ctx, meta.toMutableMap().apply { this[name] = SecretLinks(docs, key) })
     }
 
     /** Delete a secret. Its ciphertext goes with the next blob write — clean revocation. */
@@ -243,7 +308,9 @@ object SecretVault {
         val s = openSession()
         if (!s.containsKey(name)) throw PluginError("unknown_secret", "no secret named '$name'")
         val next = s.toMutableMap().apply { remove(name) }
+        val meta = readMeta(ctx).toMutableMap().apply { remove(name) }
         persist(ctx, next)
+        writeMeta(ctx, meta)
         session = next
     }
 
@@ -252,10 +319,9 @@ object SecretVault {
         val o = JSONObject()
         for ((k, v) in map) o.put(k, v)
         val blob = encrypt(dk, o.toString().toByteArray())
-        val idx = org.json.JSONArray().apply { map.keys.sorted().forEach { put(it) } }
+        // The name index lives in F_META now (see writeMeta); this writes only the blob.
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(F_BLOB, blob)
-            .putString(F_NAMES, idx.toString())
             .apply()
     }
 
@@ -279,6 +345,23 @@ object SecretVault {
                 "bad_request",
                 "secret name must be lowercase [a-z0-9_-], 1-64 chars, starting alphanumeric"
             )
+        }
+    }
+
+    /**
+     * A link is either absent or an https URL. https-only because these get opened in a
+     * browser from the CRUD screen: allowing http would let a stored link be a cleartext
+     * trip, and the two links exist to be trustworthy.
+     */
+    private fun requireUrlOrEmpty(field: String, url: String) {
+        if (url.isEmpty()) return
+        val parsed = try {
+            java.net.URL(url)
+        } catch (e: Exception) {
+            throw PluginError("bad_request", "$field is not a valid URL: ${e.message}")
+        }
+        if (parsed.protocol != "https") {
+            throw PluginError("bad_request", "$field must be https, got '${parsed.protocol}'")
         }
     }
 

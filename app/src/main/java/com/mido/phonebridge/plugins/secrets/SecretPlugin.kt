@@ -69,11 +69,18 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
         return rows
     }
 
-    override fun status(): PluginStatus = PluginStatus(
-        "Secret: $secretName",
-        PluginStatus.State.OK,
-        "POST /secrets/$secretName/call"
-    )
+    override fun status(): PluginStatus {
+        // The docs link rides on the card: it is the answer to "what does this API do",
+        // and it is plaintext so showing it costs nothing.
+        val docs = try {
+            SecretVault.links(ctx, secretName).docs
+        } catch (e: Exception) {
+            ""
+        }
+        val detail = if (docs.isEmpty()) "POST /secrets/$secretName/call"
+        else "POST /secrets/$secretName/call · $docs"
+        return PluginStatus("Secret: $secretName", PluginStatus.State.OK, detail)
+    }
 
     private fun validate(req: Req) {
         val url = req.body.optString("url", "").trim()
