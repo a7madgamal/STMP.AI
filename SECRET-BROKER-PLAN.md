@@ -27,10 +27,14 @@ plugins are not the primary path.
   for MVP (that was the expensive part of the manifest idea — dropped).
 - **D7 — Plugin per secret; the secret occupies the `plugin` slot** (Mido liked this,
   2026-10-18). Each registered secret is its own `Plugin`, `id` = the secret name, so policy
-  reads `todoist × DELETE` as a normal rule — no change to `Rule`, `parse`, `resolve` or the
-  rules screen. **The verb is NOT in the path** (that was the coupling smell): the broker's own
-  HTTP method mirrors the outbound method, and the verb is derived from it by a total
-  `method → Verb` map. The consumer uses HTTP methods, never our invented verb names.
+  reads `todoist × EXECUTE` as a normal rule — no change to `Rule`, `parse`, `resolve` or the
+  rules screen.
+- **D8 — One route per secret, FIXED verb `EXECUTE`; the consumer never mentions a verb.** The
+  broker route is `POST /secrets/{secret}/call`; the outbound method rides in the body as data.
+  This is the decoupled option: no method→verb map, no verb vocabulary exposed to the caller,
+  and policy granularity is **per secret**. `EXECUTE` is the honest classification — the route
+  runs a caller-specified call, which is exactly what `EXECUTE` means here. Per-method
+  granularity is a later ADDITIVE change (register more routes), not a redesign.
 
 ## Injection — resolved by the placeholder (no taxonomy needed)
 
@@ -61,19 +65,32 @@ placed, so a placeholder cannot express it.
 
 ## Open questions
 
-- **Q6 — Verb source, finer control.** Method-only (`GET→READ`, `POST→WRITE`, `PATCH→EDIT`,
-  `DELETE→DELETE`) is simplest and closes the under-declare hole. But it is coarse: `POST
-  /tasks` (create) and `POST /tasks/123/close` (complete) both land as `WRITE`. Optional
-  refinement: the caller may **raise** the verb (never lower) for a call it knows is heavier —
-  e.g. mark a POST as `DELETE`. Raise-only keeps the no-hole property, since it can only make
-  the gate stricter.
+- **Q6 (answered) — verb granularity for MVP: (a), one rule per secret.** `todoist × EXECUTE`.
+  Loosest, zero verb coupling, and the most faithful to the app's own rule that *the verb comes
+  from the route* — here the route declares `EXECUTE`, and the outbound HTTP method is just data
+  in the body. No method-inference anywhere. Cost: policy cannot separate read from delete within
+  one secret (both are `todoist`). If that granularity is ever wanted, it is **additive**: register
+  a second route for the same secret with a different fixed verb (e.g. a read-only route), no
+  redesign. Option (b) (per-method routes, verb derived from method) is rejected for MVP — it
+  reintroduces method-inference and would need DELETE/PATCH body support in NanoHTTPD 2.3.1.
 - **Q5 (answered) — governance.** The secret is the policy unit, expressed as the plugin id
-  (see D7). Verb comes from the method.
+  (see D7/D8).
 
 ## Known edges (not yet decided)
 
+- **The card must show the URL even for GET reads.** The app's convention (`Plugin.rowsFor`) is that
+  GET renders **no rows** — "a read carries no target to approve". For this plugin the URL *is* the
+  card, so the broker must implement `describeRows` **directly** (it is an interface method, not
+  `rowsFor`) and return the URL+method row for every call including reads. Do not route the broker
+  through the read/write helper, or reads approve silently with an empty card.
 - **Binary responses** (PDF, images, attachments) are not JSON; the envelope needs a rule.
 - **OAuth refresh flows** (Google calendar/gmail) stay as real plugins — different problem.
 - **Timeout** on the outbound call, after the human tap.
 - **`EXECUTE` has no HTTP method.** POST maps to `WRITE`; if a call is really an action, the
   raise-only override (Q6) is how it gets a stricter bucket.
+
+## Superseded
+
+- The per-method route idea (`/secrets/todoist/read`, `/secrets/todoist/delete`, verb from the
+  path or the method) was dropped — it exposed our verb vocabulary to the consumer, which is the
+  coupling Mido flagged. Replaced by D8 (one route, fixed `EXECUTE`).
