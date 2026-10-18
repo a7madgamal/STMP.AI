@@ -77,6 +77,11 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    // Material 3: real MaterialButton (ripple + state list + 48dp targets) and a
+    // proper dark theme. Every control in this app is built programmatically, but
+    // the components and the theme machinery are exactly what we do not want to
+    // hand-roll (a custom GradientDrawable background is what killed the ripple).
+    implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.nanohttpd:nanohttpd:2.3.1")

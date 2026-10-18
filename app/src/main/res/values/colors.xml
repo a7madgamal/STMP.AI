@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The two colours the XML layer needs (theme window background + primary).
+  Everything else lives in `ui/Theme.kt`; these exist only because a theme style
+  cannot reference a Kotlin constant. Keep them in sync with Theme.BG / Theme.ACCENT.
+-->
+<resources>
+    <color name="pb_bg">#FF0F1115</color>
+    <color name="pb_accent">#FF5B7CFA</color>
+</resources>
