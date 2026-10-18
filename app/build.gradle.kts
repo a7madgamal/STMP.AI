@@ -82,6 +82,11 @@ dependencies {
     // the components and the theme machinery are exactly what we do not want to
     // hand-roll (a custom GradientDrawable background is what killed the ripple).
     implementation("com.google.android.material:material:1.12.0")
+    // On-device LLM inference for the request summariser (MediaPipe LLM Inference).
+    // The model FILE is not bundled — it is a separate ~550MB asset (see
+    // ai/ModelRegistry.kt). This dependency is the runtime only; if the asset is
+    // absent the app falls back to HeuristicSummarizer and nothing else changes.
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
