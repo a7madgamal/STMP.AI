@@ -499,15 +499,17 @@ class HttpServer(
 
             when (mode) {
                 Mode.NOTIFY -> {
-                    // A small overlay toast, not a notification: the draw permission
+                    // A small overlay card, not a notification: the draw permission
                     // this app already holds makes the prompt ours, so it appears
                     // above whatever the human is looking at instead of fighting the
-                    // shade. Silence for 5s approves; the tiny x rejects.
+                    // shade. The card fetches the AI summary FIRST, then starts its 5s
+                    // clock; silence approves, a tap approves-and-skips, the ✕ rejects.
                     val decision = NotifyGate.await(
                         ctx,
                         summary,
                         labelOf(resolved.plugin.id, resolved.route.verb),
-                        resolved.route.verb
+                        resolved.route.verb,
+                        aiFactsFor(resolved.route, summary, path, body, query, remote)
                     )
                     when (decision) {
                         is NotifyGate.Result.Approved -> {
@@ -519,6 +521,21 @@ class HttpServer(
                                 )
                             )
                             draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                        }
+                        is NotifyGate.Result.Tapped -> {
+                            // A deliberate tap-approve: recorded as NOTIFY_APPROVED
+                            // (the outcome set is closed) but the decision block's
+                            // decidedAt is the tap instant, and the detail carries the
+                            // distinction so the log can tell a tap from silence.
+                            draft.decision(
+                                Decision(
+                                    mode.name, decisionSource(resolvedPolicy.source),
+                                    globalMode.name, resolvedPolicy.ruleKey,
+                                    null, decision.shownAt, decision.decidedAt, 0
+                                )
+                            )
+                            draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                            draft.error("tapped")
                         }
                         is NotifyGate.Result.Rejected -> {
                             draft.decision(
@@ -841,6 +858,35 @@ class HttpServer(
         )
         return com.mido.phonebridge.ai.SummaryProvider.run(
             ctx, facts, com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
+        )
+    }
+
+    /**
+     * The facts a summariser sees, built for any mode. Row gathering is GUARDED: a
+     * route whose rows cannot be built (a pre-fetch that fails) still gets a summary
+     * from its label and summary rather than turning a display concern into a request
+     * failure. That guard matters most on the NOTIFY path, where the rows were never
+     * previously built at all.
+     */
+    private fun aiFactsFor(
+        route: Route,
+        summary: String,
+        actualPath: String,
+        body: JSONObject,
+        query: Map<String, String>,
+        remote: String
+    ): com.mido.phonebridge.ai.RequestFacts {
+        val rows = try {
+            pluginRows(route, actualPath, body, query, remote)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        return com.mido.phonebridge.ai.RequestFacts(
+            plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
+            verb = route.verb.name,
+            routeLabel = route.describe,
+            summary = summary,
+            rows = rows.filter { it.second.isNotBlank() }
         )
     }
 

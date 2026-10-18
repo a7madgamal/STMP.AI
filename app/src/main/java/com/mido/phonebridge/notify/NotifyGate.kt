@@ -2,6 +2,8 @@ package com.mido.phonebridge.notify
 
 import android.content.Context
 import android.util.Log
+import com.mido.phonebridge.ai.RequestFacts
+import com.mido.phonebridge.ai.SummaryProvider
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyOverlay.Reason
 import java.util.concurrent.CountDownLatch
@@ -26,28 +28,47 @@ import java.util.concurrent.atomic.AtomicLong
  *    contradiction, and there is no Activity to host one.
  *  - **A short window.** 5s flat (Q8, decided by Mido 2026-10-17). Predictable beats
  *    forgiving: a countdown you can learn beats a window that varies.
+ *
+ * **Since the AI summary, a card's total life is fetch + window.** The card appears
+ * instantly, the summary is fetched (capped), and only then does the 5s decision clock
+ * start (Mido, 2026-10-18: "fetch first then start counting"). So the worst legitimate
+ * time for ONE card is [FETCH_CAP_MS] + [WINDOW_MS], and every wait in this file is
+ * derived from those two constants rather than from a hardcoded total.
  */
 object NotifyGate {
 
     private const val TAG = "NotifyGate"
 
-    /** How long a card stays up. Visual drain and decision clock are the same value. */
+    /** How long a card stays up once its clock starts. Visual drain and clock are one value. */
     const val WINDOW_MS = 5_000L
 
     /**
-     * Extra time the server waits beyond a full line's worth of windows before giving
-     * up on the overlay.
+     * How long the summary fetch may take before the clock starts regardless.
+     *
+     * Mido's number (2026-10-18): 10s, because the card waits for the summary before its
+     * clock starts, so this is time the human spends looking at a card with a live
+     * "summarising…" line. A fetch that overruns is abandoned and the card shows the
+     * deterministic rows — never an error, never a longer wait.
+     */
+    const val FETCH_CAP_MS = SummaryProvider.NOTIFY_BUDGET_MS
+
+    /** The longest a single card can legitimately be on screen. */
+    private const val CARD_LIFETIME_MS = FETCH_CAP_MS + WINDOW_MS
+
+    /**
+     * Extra time the server waits beyond a full line's worth of card lifetimes before
+     * giving up on the overlay.
      *
      * Not a second window — a deadlock escape hatch. A request can legitimately wait
      * behind the whole queue, so the bound is derived from the queue's own capacity
-     * ([NotifyOverlay.MAX_IN_FLIGHT]) rather than guessed: too small and a request
-     * that is merely waiting its turn gets denied as "never arrived", which would look
-     * exactly like a wedged main thread. If the main thread genuinely never runs the
-     * callback (process dead, window service gone), the request must still resolve
-     * rather than pin a server thread forever. Hitting this IS a defect and is recorded
-     * as such: it denies, and it says so in the log.
+     * ([NotifyOverlay.MAX_IN_FLIGHT]) and each card's real lifetime, rather than
+     * guessed: too small and a request that is merely waiting its turn gets denied as
+     * "never arrived", which would look exactly like a wedged main thread. If the main
+     * thread genuinely never runs the callback (process dead, window service gone), the
+     * request must still resolve rather than pin a server thread forever. Hitting this
+     * IS a defect and is recorded as such: it denies, and it says so in the log.
      */
-    private val ESCAPE_MS = NotifyOverlay.MAX_IN_FLIGHT * WINDOW_MS + 5_000L
+    private val ESCAPE_MS = NotifyOverlay.MAX_IN_FLIGHT * CARD_LIFETIME_MS + 5_000L
 
     private val seq = AtomicLong(5000)
 
@@ -55,14 +76,24 @@ object NotifyGate {
         /** Window elapsed in silence, with a human present. */
         class Approved(val shownAt: Long?, val decidedAt: Long) : Result()
 
+        /**
+         * The card was TAPPED — a deliberate approval that skipped the wait.
+         *
+         * Separate from [Approved] because the log must distinguish "he read it and
+         * said yes" from "he never touched it": both approve, but only one is evidence
+         * the human actually looked. (Silence-approve stays the fallback; this is the
+         * stronger signal when it happens.)
+         */
+        class Tapped(val shownAt: Long?, val decidedAt: Long) : Result()
+
         /** The ✕ was tapped. */
         class Rejected(val shownAt: Long?, val decidedAt: Long) : Result()
 
-    /**
-     * Nobody could have seen it: screen off, locked, refused when the line was full, or
-     * no permission to draw.
-     */
-    class Unavailable(val shownAt: Long?, val decidedAt: Long, val detail: String) : Result()
+        /**
+         * Nobody could have seen it: screen off, locked, refused when the line was full,
+         * or no permission to draw.
+         */
+        class Unavailable(val shownAt: Long?, val decidedAt: Long, val detail: String) : Result()
     }
 
     /**
@@ -70,10 +101,19 @@ object NotifyGate {
      *
      * The caller has already checked [com.mido.phonebridge.policy.isAttended] and
      * chosen `NOTIFY` for this request; this only shows the prompt and reports what
-     * happened. It re-checks attendance at expiry, because that is the moment consent
-     * is being inferred.
+     * happened. The overlay re-checks attendance at expiry, because that is the moment
+     * consent is being inferred.
+     *
+     * [facts] drives the AI summary. Null skips inference entirely (no model configured
+     * for this path), and the card then shows exactly the pre-AI content.
      */
-    fun await(ctx: Context, summary: String, label: String, verb: Verb): Result {
+    fun await(
+        ctx: Context,
+        summary: String,
+        label: String,
+        verb: Verb,
+        facts: RequestFacts?
+    ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
         val decided = java.util.concurrent.atomic.AtomicReference<NotifyOverlay.Outcome?>(null)
@@ -84,7 +124,9 @@ object NotifyGate {
             summary = summary,
             label = label,
             verb = verb,
-            windowMs = WINDOW_MS
+            windowMs = WINDOW_MS,
+            facts = facts,
+            fetchCapMs = FETCH_CAP_MS
         ) { outcome ->
             decided.set(outcome)
             latch.countDown()
@@ -115,6 +157,7 @@ object NotifyGate {
 
         return when (outcome.reason) {
             Reason.EXPIRED -> Result.Approved(shownAt, outcome.decidedAt)
+            Reason.APPROVED -> Result.Tapped(shownAt, outcome.decidedAt)
             Reason.TAPPED -> Result.Rejected(shownAt, outcome.decidedAt)
             Reason.UNATTENDED ->
                 Result.Unavailable(shownAt, outcome.decidedAt, "screen off or device locked")

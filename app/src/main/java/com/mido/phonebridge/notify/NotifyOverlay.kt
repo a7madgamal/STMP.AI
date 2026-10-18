@@ -19,6 +19,9 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.mido.phonebridge.ai.RequestFacts
+import com.mido.phonebridge.ai.Risk
+import com.mido.phonebridge.ai.SummaryProvider
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyQueue.Admission
 import kotlin.math.abs
@@ -36,6 +39,12 @@ import kotlin.math.roundToInt
  * only one timer". So the panel dequeues: the card on screen owns the only countdown,
  * and the next appears when it goes. Ordering and capacity live in [NotifyQueue], which
  * is pure and tested; this file owns pixels only.
+ *
+ * **Fetch first, then the clock.** The card appears immediately, but the decision
+ * window does NOT start until the AI summary has been fetched (or its cap trips). So
+ * "silence means approve" always refers to a full window the human had the summary
+ * for — the clock can never be eaten by inference. A tap on the card approves at any
+ * point, including during the fetch, which is the "skip the wait" escape.
  *
  * **No animators.** Three separate defects here — an invisible card, a stalled fade-in,
  * and a countdown that never moved — all traced to the same root: the visual depended on
@@ -61,9 +70,9 @@ object NotifyOverlay {
      * Prompts that can be in the system at once: the one on screen plus the line.
      *
      * Public because the gate sizes its deadlock escape hatch from it — the worst
-     * legitimate wait is exactly this many windows. Hardcoding that number in two
-     * places is how a raised queue length silently starts denying requests that are
-     * merely waiting their turn.
+     * legitimate wait is exactly this many cards' worth of time. Hardcoding that number
+     * in two places is how a raised queue length silently starts denying requests that
+     * are merely waiting their turn.
      */
     const val MAX_IN_FLIGHT = MAX_WAITING + 1
 
@@ -73,8 +82,17 @@ object NotifyOverlay {
 
     /** Why a prompt ended. Mapped to audit outcomes by the caller, not here. */
     enum class Reason {
-        /** The ✕ was tapped. */
+        /** The ✕ was tapped: reject. */
         TAPPED,
+        /**
+         * The card BODY was tapped (not dragged, not the ✕): approve now.
+         *
+         * This is "skip the wait" — a deliberate approval, distinct from the silence
+         * of [EXPIRED]. It is recorded as its own reason so the log can tell a tap
+         * from an expiry, which is the difference between "he read it and said yes"
+         * and "he never touched it".
+         */
+        APPROVED,
         /** The window elapsed in silence with someone present. */
         EXPIRED,
         /** Nobody could have read it: screen off or locked. */
@@ -102,6 +120,10 @@ object NotifyOverlay {
         /** What the request would DO. Drives the coloured badge, nothing else. */
         val verb: Verb,
         val windowMs: Long,
+        /** Facts for the AI summary, or null to skip inference entirely. */
+        val facts: RequestFacts?,
+        /** How long the fetch may take before the clock starts regardless. */
+        val fetchCapMs: Long,
         val onOutcome: (Outcome) -> Unit
     ) {
         /** True once a result has been reported. Guards the tap-versus-timer race. */
@@ -112,6 +134,13 @@ object NotifyOverlay {
 
         /** Set by [settle]; the tick reads it to know when to start fading out. */
         var settledAt = 0L
+
+        /**
+         * When the DECISION clock started — i.e. when the fetch finished (or its cap
+         * tripped). 0 while still fetching, which is the tick's signal that the
+         * countdown has not begun.
+         */
+        var decisionStartAt = 0L
 
         var root: View? = null
         var timeout: Runnable? = null
@@ -126,6 +155,15 @@ object NotifyOverlay {
 
         /** The single visual tick. Cancelled only on teardown. */
         var tick: Runnable? = null
+
+        /** The AI description line, created up front so the fetch can fill it in. */
+        var aiLine: TextView? = null
+
+        /** The card's background layer, restroked with the risk colour on arrival. */
+        var cardBg: GradientDrawable? = null
+
+        /** The risk strip, hidden until a risk is known. */
+        var riskStrip: View? = null
     }
 
     /**
@@ -147,10 +185,14 @@ object NotifyOverlay {
         label: String,
         verb: Verb,
         windowMs: Long,
+        facts: RequestFacts?,
+        fetchCapMs: Long,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
-            val entry = Entry(ctx.applicationContext, id, summary, label, verb, windowMs, onOutcome)
+            val entry = Entry(
+                ctx.applicationContext, id, summary, label, verb, windowMs, facts, fetchCapMs, onOutcome
+            )
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
                 // Invisible until its turn. Its clock does NOT run yet; that is the
@@ -176,7 +218,7 @@ object NotifyOverlay {
         // The countdown is a BACKGROUND LAYER, never a child view. A MATCH_PARENT child
         // inside a WRAP_CONTENT FrameLayout forces the parent to match ITS parent — the
         // full window — which is why 0.6.1 drew a full-screen-height card. A background
-        // cannot participate in layout, so the card's size is decided by the text row
+        // cannot participate in layout, so the card's size is decided by the text rows
         // alone and the drain is simply clipped to whatever that turns out to be.
         //
         // The drain is a ClipDrawable, not a layer inset. `setLayerInsetRight` mutated
@@ -191,6 +233,11 @@ object NotifyOverlay {
             level = LEVEL_FULL
         }
 
+        val cardBg = GradientDrawable().apply {
+            setColor(BG)
+            cornerRadius = radius
+        }
+
         val card = FrameLayout(ctx).apply {
             // Rounded corners come from the LAYERS themselves (both carry `cornerRadius`),
             // so `clipToOutline` is not needed — and here it was actively dangerous. Its
@@ -199,19 +246,28 @@ object NotifyOverlay {
             // clips to NOTHING. A card that is invisible for its whole window is not
             // cosmetic: silence means APPROVE in this mode, so a prompt nobody can see
             // approves the very request it was meant to ask about.
-            background = LayerDrawable(
-                arrayOf(
-                    GradientDrawable().apply { setColor(BG); cornerRadius = radius },
-                    drain
-                )
-            )
+            background = LayerDrawable(arrayOf(cardBg, drain))
             isClickable = true
+        }
+        entry.cardBg = cardBg
+
+        // A thin risk strip down the left edge: the "risk tint" the card carries once
+        // the summary arrives. Its own view (not a border stroke) so it can be toggled
+        // without rebuilding the background, and so it reads as a margin marker rather
+        // than a change to the card's silhouette.
+        val riskStrip = View(ctx).apply {
+            visibility = View.GONE
+        }
+        entry.riskStrip = riskStrip
+
+        val column = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(6), dp(4), dp(6))
         }
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(6), dp(4), dp(6))
         }
 
         // The verb badge, first so the eye reads WHAT this is before reading the text.
@@ -263,7 +319,28 @@ object NotifyOverlay {
         }
         row.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
 
-        card.addView(row, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // The AI description line, present from the start so the fetch can fill it in
+        // without a relayout surprise. While the fetch runs it reads as a status, not
+        // as an empty row (never print a label with nothing under it).
+        val aiLine = TextView(ctx).apply {
+            text = if (entry.facts != null) "◌ summarising…" else ""
+            textSize = 10f
+            setTextColor(MUTED)
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(4), 0, 0)
+            visibility = if (entry.facts != null) VISIBLE else GONE
+        }
+        entry.aiLine = aiLine
+        column.addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        card.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        card.addView(
+            riskStrip,
+            FrameLayout.LayoutParams(dp(3), MATCH_PARENT).apply { gravity = Gravity.START }
+        )
 
         val size = screenSize(wm)
         if (anchorX == Int.MIN_VALUE) {
@@ -288,11 +365,17 @@ object NotifyOverlay {
         // Kept on the entry so the fade-out can lower the WINDOW alpha (see settle).
         entry.params = params
 
-        // --- drag ---------------------------------------------------------------
+        // --- drag, and the tap-to-approve -------------------------------------
         // Deliberate trade: the touch listener means the card consumes touches inside
         // its own rectangle, so it is opaque to input for its lifetime. That is the
         // price of "allow dragging"; NOT_FOCUSABLE still keeps the keyboard and focus
         // away, and outside the card every tap falls through to the app below.
+        //
+        // A tap that never moved is an APPROVAL (Mido, 2026-10-18: "clicking (not
+        // dragging) the hint should mark as ok and skip the wait"). This is why the
+        // drag slop is generous: below it a pocket brush would approve a request
+        // nobody read, so the threshold is a security-relevant number, not a
+        // comfort setting.
         val slop = dp(DRAG_SLOP_DP)
         var downX = 0f
         var downY = 0f
@@ -334,6 +417,9 @@ object NotifyOverlay {
                     if (dragging) {
                         anchorX = params.x
                         anchorY = params.y
+                    } else if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                        // Tap = approve, and skip whatever wait remains (fetch included).
+                        settle(entry, Reason.APPROVED)
                     }
                     true
                 }
@@ -370,8 +456,6 @@ object NotifyOverlay {
         // other UI work, and a `shownAt` taken earlier would inflate every recorded
         // duration by exactly that delay. It is also the tick's zero point.
         entry.shownAt = System.currentTimeMillis()
-        val deadline = entry.shownAt + entry.windowMs
-        val fadeInEnd = entry.shownAt + FADE_IN_MS
 
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
@@ -382,49 +466,63 @@ object NotifyOverlay {
         // only exist when someone is attending anyway).
         com.mido.phonebridge.alert.SoundAlerts.notifyTick(ctx)
 
+        // --- the fetch, then the clock -----------------------------------------
+        startFetch(entry)
+
         // --- the one tick -------------------------------------------------------
-        // Drives fade-in, the countdown, and fade-out, all from the real clock. One
-        // mechanism, so the three cannot disagree, and none of it depends on an animator
-        // choosing to run.
+        // Drives fade-in, the countdown, and (until the fetch lands) a "not started"
+        // bar, all from the real clock. One mechanism, so the three cannot disagree,
+        // and none of it depends on an animator choosing to run.
         var loggedMidpoint = false
         val tick = object : Runnable {
             override fun run() {
+                if (entry.settled) return
                 val now = System.currentTimeMillis()
-                if (!entry.settled) {
-                    // fade in
-                    val elapsed = now - entry.shownAt
-                    card.alpha = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
-                    card.translationY = dp(8) * (1f - card.alpha)
 
-                    // countdown: level 10000 = full, 0 = empty, so the bar drains
-                    // left-to-right. Computed from the REMAINING time, not accumulated
-                    // from frames, so a missed tick cannot make it drift.
-                    val remaining = (deadline - now).coerceAtLeast(0L)
+                // fade in
+                val elapsed = now - entry.shownAt
+                card.alpha = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
+                card.translationY = dp(8) * (1f - card.alpha)
+
+                if (entry.decisionStartAt == 0L) {
+                    // Still fetching: the bar waits at full and the clock has not begun.
+                    drain.level = LEVEL_FULL
+                } else {
+                    val deadline = entry.decisionStartAt + entry.windowMs
+                    if (now >= deadline) {
+                        // Re-checked at APPROVE time, not just at post time: a phone
+                        // that went into a pocket mid-window must deny rather than
+                        // approve.
+                        settle(
+                            entry,
+                            if (com.mido.phonebridge.policy.isAttended(entry.ctx)) Reason.EXPIRED
+                            else Reason.UNATTENDED
+                        )
+                        return
+                    }
+                    // Computed from the REMAINING time, not accumulated from frames, so
+                    // a missed tick cannot make it drift.
+                    val remaining = deadline - now
                     drain.level = (remaining * LEVEL_FULL / entry.windowMs).toInt()
-                    card.invalidate()
-
-                    // One midpoint sample, so the log proves the countdown actually moved
-                    // rather than freezing at full — the exact failure being fixed.
-                    if (!loggedMidpoint && elapsed >= entry.windowMs / 2) {
+                    if (!loggedMidpoint && now - entry.decisionStartAt >= entry.windowMs / 2) {
                         loggedMidpoint = true
                         com.mido.phonebridge.Debug.log(
                             "notify[${entry.id}] midpoint level=${drain.level} alpha=${card.alpha}"
                         )
                     }
-                    main.postDelayed(this, TICK_MS)
-                } else {
-                    // Settled. The fade-out now lives in settle() (a single one-shot
-                    // fade), so this tick branch is never reached after the card ends.
                 }
+                card.invalidate()
+                main.postDelayed(this, TICK_MS)
             }
         }
         entry.tick = tick
         main.post(tick)
 
-        val timeout = Runnable {
+        // Backstop only. The normal expiry is owned by the tick (it settles at the
+        // decision deadline); this exists so a fetch that somehow never returns cannot
+        // leave a card up forever with a clock that never started.
+        val backstop = Runnable {
             if (!entry.settled) {
-                // Re-checked at APPROVE time, not just at post time: a phone that went
-                // into a pocket mid-window must deny rather than approve.
                 settle(
                     entry,
                     if (com.mido.phonebridge.policy.isAttended(entry.ctx)) Reason.EXPIRED
@@ -432,8 +530,63 @@ object NotifyOverlay {
                 )
             }
         }
-        entry.timeout = timeout
-        main.postDelayed(timeout, entry.windowMs)
+        entry.timeout = backstop
+        main.postDelayed(backstop, entry.fetchCapMs + entry.windowMs + BACKSTOP_SLACK_MS)
+    }
+
+    /**
+     * Fetch the AI summary off the main thread, then start the decision clock.
+     *
+     * The clock start is the whole point of this method: [Entry.decisionStartAt] stays
+     * 0 until here, and the tick will not drain until it is set. A null result (no
+     * model, over budget, failure) still starts the clock — the human gets a rows-only
+     * card, which is exactly the pre-AI behaviour and never worse.
+     */
+    private fun startFetch(entry: Entry) {
+        val facts = entry.facts
+        if (facts == null) {
+            entry.decisionStartAt = System.currentTimeMillis()
+            return
+        }
+        Thread({
+            val result = try {
+                SummaryProvider.run(entry.ctx, facts, entry.fetchCapMs)
+            } catch (e: Exception) {
+                Log.w(TAG, "fetch failed for id=${entry.id}: ${e.message}")
+                null
+            }
+            main.post {
+                if (entry.settled) return@post
+                applyAi(entry, result)
+                // The clock starts now, whatever the outcome. "Fetch first, then count."
+                entry.decisionStartAt = System.currentTimeMillis()
+                com.mido.phonebridge.Debug.log(
+                    "notify[${entry.id}] fetch done in " +
+                        "${entry.decisionStartAt - entry.shownAt}ms " +
+                        "(risk=${result?.risk ?: "none"}); decision clock starts"
+                )
+            }
+        }, "notify-fetch-${entry.id}").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Render the fetch result onto the card. A null result clears the status line
+     * rather than leaving "summarising…" forever — a status that never resolves is a
+     * lie about what the card is doing.
+     */
+    private fun applyAi(entry: Entry, result: com.mido.phonebridge.ai.RequestSummary?) {
+        val line = entry.aiLine ?: return
+        if (result == null) {
+            line.visibility = View.GONE
+            return
+        }
+        line.text = result.description
+        line.visibility = View.VISIBLE
+        line.setTextColor(TEXT)
+        // The risk tint: a strip down the card's edge, coloured by consequence.
+        val color = riskColor(result.risk)
+        entry.riskStrip?.setBackgroundColor(color)
+        entry.riskStrip?.visibility = View.VISIBLE
     }
 
     /**
@@ -588,6 +741,13 @@ object NotifyOverlay {
         else -> VERB_WRITE
     }
 
+    /** The risk strip's colour. Display-only; it never changes what the card does. */
+    private fun riskColor(r: Risk): Int = when (r) {
+        Risk.LOW -> RISK_LOW
+        Risk.MEDIUM -> RISK_MEDIUM
+        Risk.HIGH -> RISK_HIGH
+    }
+
     /**
      * Real screen size, for clamping drags. `currentWindowMetrics` needs API 30; below
      * that the deprecated display call is the only route, and minSdk is 26.
@@ -619,10 +779,21 @@ object NotifyOverlay {
     private const val VERB_DEL = 0xFFE57373.toInt()
     private const val BADGE_TEXT = 0xFF1A1A1A.toInt()
 
+    // Risk strip. Same hues as the badge family, so the card reads as one palette.
+    private const val RISK_LOW = 0xFF81C784.toInt()
+    private const val RISK_MEDIUM = 0xFFFFD54F.toInt()
+    private const val RISK_HIGH = 0xFFE57373.toInt()
+
     private const val CARD_WIDTH_DP = 216
     private const val CORNER_DP = 14
     private const val EDGE_DP = 14
-    private const val DRAG_SLOP_DP = 8
+
+    /**
+     * Drag slop. Generous on purpose: a tap is now an APPROVAL, so a small slop would
+     * let a pocket brush approve a request nobody read. Below this the gesture is a
+     * click; above it, a drag.
+     */
+    private const val DRAG_SLOP_DP = 16
     private const val FADE_IN_MS = 180L
     private const val FADE_OUT_MS = 200L
 
@@ -633,6 +804,9 @@ object NotifyOverlay {
      */
     private const val COMMIT_FRAMES_MS = 48L
 
+    /** Extra time past the fetch cap before the backstop fires. Never the normal path. */
+    private const val BACKSTOP_SLACK_MS = 2_000L
+
     /** ~30fps. A 5s countdown does not need more, and this is one small view. */
     private const val TICK_MS = 33L
 
@@ -641,4 +815,6 @@ object NotifyOverlay {
 
     private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
     private const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
+    private const val VISIBLE = View.VISIBLE
+    private const val GONE = View.GONE
 }
