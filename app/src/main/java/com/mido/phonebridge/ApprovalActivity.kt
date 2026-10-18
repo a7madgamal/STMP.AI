@@ -35,7 +35,7 @@ class ApprovalActivity : FragmentActivity() {
         const val EXTRA_WAITING_BEHIND = "waitingBehind"
 
         /** How long the decision buttons stay disabled after the modal appears. */
-        private const val DECISION_DELAY_MS = 3_000L
+        private const val DECISION_DELAY_MS = 1_000L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -241,6 +241,23 @@ class ApprovalActivity : FragmentActivity() {
             gravity = Gravity.CENTER
         }
 
+        // The arming bar: fills over DECISION_DELAY_MS while the decision buttons are
+        // disabled, so the wait is visible instead of feeling like an unresponsive
+        // button. Driven by the same handler tick style as the countdown (no animator
+        // dependency), and removed from view the instant arming completes.
+        val armBar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
+            isIndeterminate = false
+            max = 100
+            setProgressCompat(0, false)
+            trackThickness = Theme.dp(this@ApprovalActivity, 3)
+            trackCornerRadius = Theme.dp(this@ApprovalActivity, 2)
+            setIndicatorColor(Theme.ACCENT)
+            setTrackColor(Theme.SURFACE_VARIANT)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = Theme.dp(this@ApprovalActivity, 10) }
+        }
+
         val iconRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -283,12 +300,26 @@ class ApprovalActivity : FragmentActivity() {
         val biometricUsable = requiresBiometric && canUseBiometric()
         val biometricBlocked = requiresBiometric && !biometricUsable
         // Reserved-space delay: the buttons render in place immediately but stay
-        // disabled for 3s, so a reflexive tap (a muscle-memory DENY) cannot kill a
-        // request the human has not actually read. They are never removed, so the
-        // layout does not jump under the thumb when they enable.
+        // disabled for DECISION_DELAY_MS, so a reflexive tap (a muscle-memory DENY)
+        // cannot kill a request the human has not actually read. They are never
+        // removed, so the layout does not jump under the thumb when they enable. The
+        // arming bar shows the wait rather than hiding it.
         val enableDelay = android.os.Handler(android.os.Looper.getMainLooper())
+        val armStart = System.currentTimeMillis()
+        val armTick = object : Runnable {
+            override fun run() {
+                val p = ((System.currentTimeMillis() - armStart).toFloat() / DECISION_DELAY_MS)
+                    .coerceIn(0f, 1f)
+                armBar.setProgressCompat((p * 100).toInt(), true)
+                if (p < 1f && !isFinishing) {
+                    enableDelay.postDelayed(this, 40L)
+                }
+            }
+        }
+        enableDelay.post(armTick)
         enableDelay.postDelayed({
             if (!isFinishing) {
+                armBar.visibility = ViewGroup.GONE
                 deny.isEnabled = true
                 deny.alpha = 1f
                 // APPROVE only enables when the route needs no biometric, or the device
@@ -327,6 +358,7 @@ class ApprovalActivity : FragmentActivity() {
             )
         }
         pinned.addView(iconRow)
+        pinned.addView(armBar)
         pinned.addView(btnRow)
 
         val outer = LinearLayout(this).apply {
