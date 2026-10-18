@@ -116,6 +116,14 @@ object NotifyOverlay {
         var root: View? = null
         var timeout: Runnable? = null
 
+        /**
+         * The window's layout params, kept so the fade-out can drive WINDOW alpha
+         * ([WindowManager.LayoutParams.alpha]) instead of only the view's. The window
+         * alpha is what SurfaceFlinger composites with, so the window is genuinely
+         * transparent when it is torn down — see [settle].
+         */
+        var params: WindowManager.LayoutParams? = null
+
         /** The single visual tick. Cancelled only on teardown. */
         var tick: Runnable? = null
     }
@@ -277,6 +285,8 @@ object NotifyOverlay {
             x = anchorX
             y = anchorY
         }
+        // Kept on the entry so the fade-out can lower the WINDOW alpha (see settle).
+        entry.params = params
 
         // --- drag ---------------------------------------------------------------
         // Deliberate trade: the touch listener means the card consumes touches inside
@@ -334,6 +344,14 @@ object NotifyOverlay {
 
         close.setOnClickListener { settle(entry, Reason.TAPPED) }
 
+        // Invisible BEFORE the view enters the window manager. Setting alpha after
+        // addView leaves one frame where the freshly attached card is drawn at full
+        // opacity — which is the bright blip seen right after the previous card's
+        // fade-out, since the next card is what appears next. Set it here, so the card's
+        // very first composited frame is already transparent.
+        card.alpha = 0f
+        card.translationY = dp(8).toFloat()
+
         try {
             wm.addView(card, params)
         } catch (e: Exception) {
@@ -358,12 +376,6 @@ object NotifyOverlay {
         com.mido.phonebridge.Debug.log(
             "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
         )
-
-        // Start invisible and let the tick bring it in. The card is NEVER left at alpha 0
-        // with no mechanism to raise it: that is the defect that made it invisible for a
-        // whole window while silence approved the request underneath.
-        card.alpha = 0f
-        card.translationY = dp(8).toFloat()
 
         // --- the one tick -------------------------------------------------------
         // Drives fade-in, the countdown, and fade-out, all from the real clock. One
@@ -462,20 +474,46 @@ object NotifyOverlay {
             return
         }
 
-        // One-shot fade-out, then remove and hand the screen to the next card. All on
-        // the main thread; the removeView is unconditional so nothing can strand the card.
+        // One-shot fade-out, then remove and hand the screen to the next card.
+        //
+        // The fade is driven by WINDOW alpha ([WindowManager.LayoutParams.alpha]), not
+        // view alpha. The card's `View.alpha` only changes what the app draws; the WINDOW
+        // carries its own alpha, and SurfaceFlinger composites the window's last buffer
+        // with THAT. Fading only the view left the window at alpha 1, so the moment
+        // `removeView` tore the surface down, one frame of the card re-composited at full
+        // opacity — exactly "fades out to 0, then a flash of full-opacity card before it
+        // disappears". Lowering the window alpha makes the surface itself transparent, so
+        // there is no opaque buffer left to flash.
+        //
+        // View alpha is left alone, so the two multiply cleanly: a card tapped mid-fade-in
+        // fades out from whatever opacity it had actually reached, with no jump to full.
         val fadeOut = object : Runnable {
             override fun run() {
                 val p = (System.currentTimeMillis() - entry.settledAt).toFloat() / FADE_OUT_MS
+                val a = (1f - p).coerceIn(0f, 1f)
+                entry.params?.let { lp ->
+                    lp.alpha = a
+                    runCatching { wm(entry.ctx).updateViewLayout(card, lp) }
+                }
+                card.translationY =
+                    (10 * entry.ctx.resources.displayMetrics.density).roundToInt() * p
                 if (p < 1f) {
-                    card.alpha = 1f - p
-                    card.translationY = (10 * entry.ctx.resources.displayMetrics.density).roundToInt() * p
-                    card.invalidate()
                     main.postDelayed(this, TICK_MS)
                 } else {
-                    card.alpha = 0f
-                    runCatching { wm(entry.ctx).removeView(card) }
-                    promoteNext()
+                    // The window is now at alpha 0. Give the compositor a few frames to
+                    // commit that transparent buffer BEFORE destroying the surface —
+                    // removing in the same frame can tear the surface down while the
+                    // opaque buffer is still what SurfaceFlinger last latched, which is
+                    // the flash. The window is invisible at this point, so the extra
+                    // ~3 frames cost nothing the eye can see.
+                    main.postDelayed({
+                        com.mido.phonebridge.Debug.log(
+                            "notify[${entry.id}] teardown windowAlpha=${entry.params?.alpha} " +
+                                "viewAlpha=${card.alpha}"
+                        )
+                        runCatching { wm(entry.ctx).removeView(card) }
+                        promoteNext()
+                    }, COMMIT_FRAMES_MS)
                 }
             }
         }
@@ -582,6 +620,13 @@ object NotifyOverlay {
     private const val DRAG_SLOP_DP = 8
     private const val FADE_IN_MS = 180L
     private const val FADE_OUT_MS = 200L
+
+    /**
+     * A few frames of grace after the window reaches alpha 0, before the surface is
+     * destroyed. ~3 frames at 60Hz: invisible time, but enough for the compositor to
+     * latch the transparent buffer so the teardown cannot flash the opaque one.
+     */
+    private const val COMMIT_FRAMES_MS = 48L
 
     /** ~30fps. A 5s countdown does not need more, and this is one small view. */
     private const val TICK_MS = 33L
