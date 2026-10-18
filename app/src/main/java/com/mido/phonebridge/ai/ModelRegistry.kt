@@ -8,14 +8,14 @@ import java.io.File
  * Chooses which summariser is live, and owns the ONE constant that names the model
  * file — the swap seam Mido asked for ("make switching later easy").
  *
- * To change model: drop a different `.task` at [MODEL_ASSET] (or change this one
+ * To change model: drop a different `.litertlm` at [MODEL_ASSET] (or change this one
  * string) and restart. Nothing else references the file, so there is no second place
  * to update and no code change to make. Swapping the *runtime* is the same move one
  * level up: implement [SummaryModel] and return it from [active].
  *
- * **Why the model is a file on disk and not an APK asset.** A 550MB asset in
+ * **Why the model is a file on disk and not an APK asset.** A ~475MB asset in
  * `assets/` is compressed into the APK and cannot be memory-mapped by the runtime —
- * MediaPipe needs a real path, and the APK would balloon to an unshippable size.
+ * LiteRT-LM needs a real path, and the APK would balloon to an unshippable size.
  * So the file lives in the app's external files dir, and the app is *absent-safe*:
  * with no model it uses [HeuristicSummarizer] and behaves exactly as before.
  */
@@ -30,7 +30,7 @@ object ModelRegistry {
      * app's own external files dir, so no storage permission is needed and an
      * uninstall removes it.
      */
-    const val MODEL_ASSET = "models/gemma3-1b-it-int4.task"
+    const val MODEL_ASSET = "models/qwen3_0_6b_mixed_int4.litertlm"
 
     /** The expected file name, derived from [MODEL_ASSET] so the two cannot drift. */
     val MODEL_FILE: String get() = MODEL_ASSET.substringAfterLast('/')
@@ -63,7 +63,7 @@ object ModelRegistry {
             val file = modelFile(ctx)
             val model = if (file.exists() && file.length() > 0) {
                 Log.i(TAG, "model present (${file.length() / 1024 / 1024} MB): ${file.absolutePath}")
-                MediaPipeGemma(file)
+                LiteRtLm(file)
             } else {
                 Log.i(TAG, "no model at ${file.absolutePath}; using heuristic summariser")
                 HeuristicSummarizer

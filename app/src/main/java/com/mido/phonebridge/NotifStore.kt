@@ -242,7 +242,7 @@ object NotifStore {
                 )
                 if (senderName.isNotBlank()) {
                     @Suppress("NewApi")
-                    val uri = person?.uri?.toString() ?: ""
+                    val uri = person?.uri ?: ""
                     people.put(JSONObject().put("name", senderName).put("uri", uri))
                 }
             }

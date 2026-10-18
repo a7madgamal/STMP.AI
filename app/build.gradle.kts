@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 93
-        versionName = "0.17.0"
+        versionCode = 94
+        versionName = "0.18.0"
     }
 
     buildTypes {
@@ -44,10 +44,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        allWarningsAsErrors = true
-        jvmTarget = "17"
     }
     buildFeatures {
         viewBinding = true
@@ -75,6 +71,18 @@ android {
     }
 }
 
+/*
+ * Kotlin compiler options. This lives outside `android {}` because the old
+ * `kotlinOptions` block inside it is an error as of Kotlin 2.4 — the DSL moved to
+ * the top-level `kotlin { compilerOptions { } }` extension.
+ */
+kotlin {
+    compilerOptions {
+        allWarningsAsErrors = true
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     // Material 3: real MaterialButton (ripple + state list + 48dp targets) and a
@@ -82,11 +90,12 @@ dependencies {
     // the components and the theme machinery are exactly what we do not want to
     // hand-roll (a custom GradientDrawable background is what killed the ripple).
     implementation("com.google.android.material:material:1.12.0")
-    // On-device LLM inference for the request summariser (MediaPipe LLM Inference).
-    // The model FILE is not bundled — it is a separate ~550MB asset (see
-    // ai/ModelRegistry.kt). This dependency is the runtime only; if the asset is
-    // absent the app falls back to HeuristicSummarizer and nothing else changes.
-    implementation("com.google.mediapipe:tasks-genai:0.10.35")
+    // On-device LLM inference for the request summariser (LiteRT-LM — Google's
+    // supported successor to the deprecated MediaPipe tasks-genai API). The model
+    // FILE is not bundled — it is a separate ~475MB asset (see ai/ModelRegistry.kt).
+    // This dependency is the runtime only; if the asset is absent the app falls back
+    // to HeuristicSummarizer and nothing else changes.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
