@@ -58,6 +58,11 @@ object ErrorCodes {
         "unsupported_action" to BAD_REQUEST,
         "missing_reply_text" to BAD_REQUEST,
         "decode_error" to BAD_REQUEST,
+        "unknown_secret" to BAD_REQUEST,
+        "host_not_allowed" to BAD_REQUEST,
+        "redirect_refused" to BAD_REQUEST,
+        "unsupported_content_type" to BAD_REQUEST,
+        "vault_exists" to CONFLICT,
 
         // --- the target is gone or not what the caller thinks it is ---
         "not_found" to NOT_FOUND,
@@ -67,10 +72,20 @@ object ErrorCodes {
         // --- credentials ---
         "auth_required" to UNAUTHORIZED,
         "auth_expired" to UNAUTHORIZED,
+        // The vault is shut. Not the caller's fault and not ours: it is a state the
+        // human clears by unlocking the app. 403 ("not allowed right now"), never 500 —
+        // a locked vault is a normal condition, not a server fault.
+        "secret_locked" to FORBIDDEN,
 
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
         "listener_unavailable" to UNAVAILABLE,
+        "vault_missing" to UNAVAILABLE,
+        "vault_corrupt" to INTERNAL,
+        "vault_unwrap_failed" to INTERNAL,
+        "allowlist_corrupt" to INTERNAL,
+        "upstream_timeout" to UNAVAILABLE,
+        "upstream_failed" to CONFLICT,
         "policy_unavailable" to UNAVAILABLE,
         "calendar_zone_unavailable" to UNAVAILABLE,
         "google_error" to CONFLICT,

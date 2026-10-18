@@ -91,6 +91,22 @@ class BridgeService : Service() {
         var bindAddress: String = ""
 
         fun markRunning(v: Boolean) { serverUp = v }
+
+        /**
+         * Register one secret plugin at runtime, so a secret added in the CRUD screen
+         * becomes routable without restarting the service. Idempotent.
+         *
+         * Static and deliberately narrow: the CRUD screen owns the secret VALUE, but the
+         * routing table is the service's, so this is the one seam between them.
+         */
+        fun registerSecretPlugin(ctx: Context, name: String) {
+            if (PluginRegistry.get(name) == null) {
+                PluginRegistry.register(
+                    com.mido.phonebridge.plugins.secrets.SecretPlugin(ctx.applicationContext, name)
+                )
+                Debug.log("secret plugin registered at runtime: '$name'")
+            }
+        }
     }
 
     private var server: HttpServer? = null
@@ -218,6 +234,40 @@ class BridgeService : Service() {
         if (PluginRegistry.get("logs") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.logs.LogcatPlugin(applicationContext))
         }
+        registerSecretPlugins()
+    }
+
+    /**
+     * Register one plugin per stored secret (plan D7/D8).
+     *
+     * Dynamic, because the secret list is data, not code: adding a service is adding a
+     * secret in the CRUD screen, not a release. The vault's name index is plaintext
+     * precisely so this works while the vault is locked — the rules screen must be able
+     * to show `todoist × EXECUTE` without a fingerprint.
+     *
+     * Idempotent (PluginRegistry.register ignores a duplicate id), so a service restart
+     * re-registering is a no-op.
+     */
+    private fun registerSecretPlugins() {
+        val names = try {
+            com.mido.phonebridge.core.SecretVault.names(applicationContext)
+        } catch (e: Exception) {
+            // A corrupt index must not silently hide secrets: refuse to start, same as
+            // an unreadable policy. Better a bridge that will not serve than one that
+            // quietly forgets a credential exists.
+            lastError = "secret index unreadable: ${e.message}"
+            Debug.log("REFUSING TO START: $lastError")
+            stopSelf()
+            return
+        }
+        for (name in names) {
+            if (PluginRegistry.get(name) == null) {
+                PluginRegistry.register(
+                    com.mido.phonebridge.plugins.secrets.SecretPlugin(applicationContext, name)
+                )
+            }
+        }
+        if (names.isNotEmpty()) Debug.log("registered ${names.size} secret plugin(s): ${names.joinToString()}")
     }
 
     /** First IPv4 in the Tailscale CGNAT range 100.64.0.0/10, else null. */

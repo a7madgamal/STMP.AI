@@ -58,6 +58,11 @@
             android:name=".SettingsActivity"
             android:exported="false" />
 
+        <!-- Secret CRUD. Sets FLAG_SECURE itself, so no screenshots of a value. -->
+        <activity
+            android:name=".SecretsActivity"
+            android:exported="false" />
+
  <!-- exported=false: plugins are addressed via the in-app registry, not by intent -->
         <service
             android:name=".BridgeService"

@@ -1,7 +1,6 @@
 package com.mido.phonebridge
 
 import android.Manifest
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -16,11 +15,13 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.fragment.app.FragmentActivity
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.PluginRegistry
+import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
@@ -29,7 +30,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : Activity() {
+class MainActivity : FragmentActivity() {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
@@ -43,7 +44,14 @@ class MainActivity : Activity() {
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
+    private lateinit var secretsButton: Button
     private var logExpanded = false
+
+    /**
+     * Guards the load prompt so returning to the app (onResume) never re-prompts on
+     * its own. One prompt per process — which is exactly the session.
+     */
+    private var promptAttempted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -132,6 +140,17 @@ class MainActivity : Activity() {
         }
         content.addView(loginButton)
 
+        secretsButton = Button(this).apply {
+            text = "SECRETS & HOSTS"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, SecretsActivity::class.java))
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = UiKit.dp(this@MainActivity, 8) }
+        }
+        content.addView(secretsButton)
+
         // --- 3b. GATE SWITCH: the one control that decides whether anything is
         // asked of a human at all. Above the plugins, below Setup, because it is
         // the second question after "is it running?" — "is it still asking me?".
@@ -218,6 +237,36 @@ class MainActivity : Activity() {
             Debug.log("AUDIT STORE FAILED: ${e.message}")
         }
         render()
+        lockOnLoad()
+    }
+
+    /**
+     * The app lock: the load prompt IS the vault unlock (plan D9). One scan does both
+     * jobs, because the prompt carries a CryptoObject bound to the vault key — so the
+     * finger that says "you're you" also unwraps the data key.
+     *
+     * Fails closed: a declined/failed prompt leaves the vault locked. The app still
+     * renders (the bridge is a separate process concern and keeps running), but every
+     * secret operation will answer `secret_locked` until the human unlocks.
+     */
+    private fun lockOnLoad(force: Boolean = false) {
+        if (SecretVault.isUnlocked()) return
+        if (promptAttempted && !force) return
+        promptAttempted = true
+        if (VaultGate.hasVault(this)) {
+            VaultGate.unlock(
+                this,
+                onUnlocked = { Debug.log("vault unlocked (session open)"); render() },
+                onFailed = { Debug.log("vault unlock not completed: $it"); render() }
+            )
+        } else {
+            // First run: the same prompt authorises creating the vault.
+            VaultGate.initialize(
+                this,
+                onReady = { Debug.log("vault created (session open)"); render() },
+                onFailed = { Debug.log("vault creation not completed: $it"); render() }
+            )
+        }
     }
 
     private lateinit var pluginContainer: LinearLayout
@@ -326,6 +375,18 @@ class MainActivity : Activity() {
                 if (batteryOk) "exempt" else "tap to allow background",
                 if (batteryOk) UiKit.State.OK else UiKit.State.WARN,
                 onClick = { requestIgnoreBatteryOptimizations() }
+            )
+        )
+        // The vault: locked by default on every new process; one scan opens it for the
+        // session. Shown here because a locked vault is the reason a secret call would
+        // answer `secret_locked`, and that must be visible before it happens.
+        val vaultOk = SecretVault.isUnlocked()
+        statusContainer.addView(
+            UiKit.statusRow(
+                this, "Secret vault",
+                if (vaultOk) "unlocked (this session)" else "locked — tap to unlock",
+                if (vaultOk) UiKit.State.OK else UiKit.State.WARN,
+                onClick = { lockOnLoad(force = true) }
             )
         )
 
