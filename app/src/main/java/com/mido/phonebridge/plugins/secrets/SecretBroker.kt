@@ -34,9 +34,10 @@ object SecretBroker {
     /**
      * Perform one brokered call. [secret] is the plaintext value, already fetched
      * from the vault by the caller — this function never touches the vault, so the
-     * "locked" decision stays in exactly one place.
+     * "locked" decision stays in exactly one place. [hosts] is the same secret's own
+     * allowlist: the host rule travels with the secret, never a shared global list.
      */
-    fun call(ctx: Context, secret: String, body: JSONObject): JSONObject {
+    fun call(ctx: Context, secret: String, hosts: List<String>, body: JSONObject): JSONObject {
         val rawUrl = body.optString("url", "").trim()
         if (rawUrl.isEmpty()) throw PluginError("bad_request", "missing 'url'")
         val method = body.optString("method", "GET").trim().uppercase()
@@ -49,11 +50,11 @@ object SecretBroker {
             throw PluginError("bad_request", "only https is allowed, got '${url.protocol}'")
         }
         val host = url.host.lowercase()
-        guardPrivateHost(host)                        // R3
-        if (!HostAllowlist.isAllowed(ctx, host)) {    // D3
+        guardPrivateHost(host)                          // R3
+        if (!HostAllowlist.allows(hosts, host)) {      // D3 — this secret's own list
             throw PluginError(
                 "host_not_allowed",
-                "host '$host' is not in the allowlist; add it in the app's Secrets screen"
+                "host '$host' is not allowed for this secret; add it in the app's Secrets screen"
             )
         }
 

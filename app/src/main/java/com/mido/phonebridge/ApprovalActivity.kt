@@ -15,6 +15,7 @@ import android.widget.TextView
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import com.mido.phonebridge.core.SecretVault
 
 /**
  * Full-screen approval UI. Shows every detail of the pending request and
@@ -381,20 +382,44 @@ class ApprovalActivity : FragmentActivity() {
     }
 
     /**
-     * Bind a mutating APPROVE to a live biometric (STRONG or device credential).
+     * Bind a mutating APPROVE to a live biometric.
+     *
+     * When a vault exists the prompt carries the vault's `CryptoObject` (decision A:
+     * every scan is crypto-bound). Two things fall out of that: the approval is
+     * unforgeable — no plugin, bug or stray callback can approve without a live finger on
+     * a hardware key — and if the vault happens to be locked, the SAME authorised cipher
+     * unwraps it, so one modal both unlocks and approves. Fingerprint-only, by platform
+     * rule: a crypto-bound prompt cannot accept `DEVICE_CREDENTIAL`.
+     *
+     * Before the vault exists there is nothing to bind to, so the prompt falls back to
+     * the plain form (STRONG or device credential). That is not a weakening: there is no
+     * secret on the device yet, and keeping the PIN escape hatch until setup is done is
+     * strictly more usable.
      *
      * On success [onApproved] fires and the request resolves. On failure/dismiss we do
      * NOTHING to the request: it stays pending on its own countdown, APPROVE stays
      * live, and tapping it again re-prompts — the window is the only limit. Reads never
      * reach here (see [ApprovalView.requiresBiometric]).
-     *
-     * Biometrics unavailable (none enrolled / no hardware) -> APPROVE must be disabled
-     * by the caller; this method is a no-op guard for that case.
      */
     private fun promptBiometric(onApproved: () -> Unit) {
+        // Prepare the vault cipher FIRST: when a vault exists the prompt must carry it
+        // (decision A — every scan is crypto-bound), and if the key was invalidated there
+        // is no prompt worth showing. Failing closed here is the whole point.
+        val cipher = try {
+            if (SecretVault.exists(this)) SecretVault.prepareUnlockCipher(this) else null
+        } catch (e: Exception) {
+            Log.w("ApprovalActivity", "vault cipher unavailable (${e.message}); not approving")
+            return
+        }
+        val authenticators = if (cipher != null) {
+            // Crypto-bound: the platform forbids DEVICE_CREDENTIAL alongside a
+            // CryptoObject, so a bound prompt is fingerprint-only by construction.
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        } else {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        }
         val manager = BiometricManager.from(this)
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
         val can = manager.canAuthenticate(authenticators)
         if (can != BiometricManager.BIOMETRIC_SUCCESS) {
             // Fails closed: no prompt, no approval. The caller disables APPROVE and
@@ -407,6 +432,27 @@ class ApprovalActivity : FragmentActivity() {
             ContextCompat.getMainExecutor(this),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    if (cipher != null) {
+                        val authorised = result.cryptoObject?.cipher
+                        if (authorised == null) {
+                            // Impossible in principle: we passed a CryptoObject. Refuse
+                            // rather than treat "authenticated" as sufficient.
+                            Log.w("ApprovalActivity", "no authorised cipher returned; not approving")
+                            return
+                        }
+                        if (!SecretVault.isUnlocked()) {
+                            try {
+                                // One modal does both (decision A): the finger that
+                                // approves also opens the vault, so a SECURE call on a
+                                // locked vault is not a dead end.
+                                SecretVault.unlock(this@ApprovalActivity, authorised)
+                                Log.i("ApprovalActivity", "vault unlocked by the approval prompt")
+                            } catch (e: Exception) {
+                                Log.w("ApprovalActivity", "vault unlock failed: ${e.message}")
+                                return
+                            }
+                        }
+                    }
                     // Success wins the race: the request is approved even if the
                     // countdown was about to expire. resolve() is idempotent — if the
                     // window DID close first, it is a no-op and logged, never a wrong
@@ -425,11 +471,18 @@ class ApprovalActivity : FragmentActivity() {
             }
         )
         val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Approve request")
+            .setTitle(if (cipher != null) "Unlock and approve" else "Approve request")
             .setSubtitle(endpointLabel())
             .setAllowedAuthenticators(authenticators)
-            .build()
-        prompt.authenticate(info)
+        // A STRONG-only prompt REQUIRES a negative button (the platform throws without
+        // one). With device credential allowed the system supplies its own, so adding
+        // one there would be an error — hence the branch.
+        if (cipher != null) info.setNegativeButtonText("Cancel")
+        if (cipher != null) {
+            prompt.authenticate(info.build(), BiometricPrompt.CryptoObject(cipher))
+        } else {
+            prompt.authenticate(info.build())
+        }
     }
 
     private fun endpointLabel(): String =
@@ -438,12 +491,32 @@ class ApprovalActivity : FragmentActivity() {
     /**
      * Can this device satisfy the approval requirement right now? Uses the SAME
      * authenticator set as [promptBiometric], so the button state and the prompt can
-     * never disagree: STRONG biometric or device credential. When this is false the
-     * caller disables APPROVE and states the reason — fails closed (point 4).
+     * never disagree: when a vault exists that is STRONG biometric alone (crypto-bound,
+     * decision A), otherwise STRONG or device credential.
+     *
+     * Also fails closed when the vault cipher cannot be prepared — an invalidated key
+     * means the prompt could never succeed, so APPROVE must not enable.
      */
     private fun canUseBiometric(): Boolean {
-        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val bound = if (SecretVault.exists(this)) {
+            try {
+                // Prepare it for its side effect: this throws when the key is
+                // invalidated, which is exactly the case where APPROVE must not enable.
+                SecretVault.prepareUnlockCipher(this)
+                true
+            } catch (e: Exception) {
+                Log.w("ApprovalActivity", "vault cipher unavailable; APPROVE stays disabled: ${e.message}")
+                return false
+            }
+        } else {
+            false
+        }
+        val authenticators = if (bound) {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        } else {
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        }
         return BiometricManager.from(this).canAuthenticate(authenticators) ==
             BiometricManager.BIOMETRIC_SUCCESS
     }

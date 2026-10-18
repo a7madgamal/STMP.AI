@@ -102,9 +102,23 @@ object SecretVault {
     // in the plaintext index precisely so they are readable while the vault is shut,
     // which is exactly when you need them: a key just failed and you want the page that
     // reissues it, without a fingerprint to read a URL you could type from memory.
+    //
+    // The ALLOWED HOSTS live here too, and that is the important one. They used to be a
+    // single global list, which meant the `todoist` secret could be sent to any host
+    // some *other* secret had approved — the domains were shared, so one careless rule
+    // widened every secret's blast radius. A host is a property of the secret it
+    // belongs to, so it is stored with it, in the clear, for the same reason as the
+    // names: the broker must answer "this host is not allowed" while locked.
 
-    /** The two links that go with a secret. Empty strings mean "not set". */
-    data class SecretLinks(val docs: String = "", val key: String = "")
+    /**
+     * Everything about a secret that is NOT the value: the two links, and the hosts
+     * that secret is allowed to reach. Plaintext by design (see above).
+     */
+    data class SecretMeta(
+        val docs: String = "",
+        val key: String = "",
+        val hosts: List<String> = emptyList()
+    )
 
     /** Secret names, sorted. Readable while locked — a name is a label, not a credential. */
     fun names(ctx: Context): List<String> = readMeta(ctx).keys.sorted()
@@ -112,24 +126,31 @@ object SecretVault {
     /** Whether [name] is a registered secret, without needing the vault unlocked. */
     fun has(ctx: Context, name: String): Boolean = readMeta(ctx).containsKey(name)
 
-    /** The links for [name]. Plaintext, so this works while the vault is locked. */
-    fun links(ctx: Context, name: String): SecretLinks =
+    /** The meta for [name]. Plaintext, so this works while the vault is locked. */
+    fun meta(ctx: Context, name: String): SecretMeta =
         readMeta(ctx)[name] ?: throw PluginError("unknown_secret", "no secret named '$name'")
 
     /**
-     * Read the plaintext index. Handles both shapes: 0.14.0 wrote a bare name array
-     * (`F_NAMES`), 0.14.1 writes name -> links (`F_META`). A vault created before the
-     * links existed must not lose its names, so the legacy array is still read.
+     * Read the plaintext index. Handles both older shapes: 0.14.0 wrote a bare name
+     * array (`F_NAMES`), 0.14.1 wrote name -> {docs,key} (`F_META`). A vault created
+     * before hosts existed must not lose its names or its links.
      */
-    private fun readMeta(ctx: Context): Map<String, SecretLinks> {
+    private fun readMeta(ctx: Context): Map<String, SecretMeta> {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.getString(F_META, null)?.let { raw ->
             return try {
                 val o = JSONObject(raw)
-                val m = mutableMapOf<String, SecretLinks>()
+                val m = mutableMapOf<String, SecretMeta>()
                 for (k in o.keys()) {
                     val v = o.optJSONObject(k)
-                    m[k] = SecretLinks(v?.optString("docs") ?: "", v?.optString("key") ?: "")
+                    val hostsArr = v?.optJSONArray("hosts")
+                    val hosts = if (hostsArr == null) emptyList()
+                    else (0 until hostsArr.length()).map { hostsArr.getString(it) }
+                    m[k] = SecretMeta(
+                        docs = v?.optString("docs") ?: "",
+                        key = v?.optString("key") ?: "",
+                        hosts = hosts
+                    )
                 }
                 m
             } catch (e: Exception) {
@@ -139,7 +160,7 @@ object SecretVault {
         val legacy = prefs.getString(F_NAMES, null) ?: return emptyMap()
         return try {
             val arr = org.json.JSONArray(legacy)
-            (0 until arr.length()).associate { arr.getString(it) to SecretLinks() }
+            (0 until arr.length()).associate { arr.getString(it) to SecretMeta() }
         } catch (e: Exception) {
             // A corrupt index is a real fault: it would silently hide secrets that
             // still exist in the blob. Fail loud rather than report an empty vault.
@@ -147,10 +168,16 @@ object SecretVault {
         }
     }
 
-    private fun writeMeta(ctx: Context, meta: Map<String, SecretLinks>) {
+    private fun writeMeta(ctx: Context, meta: Map<String, SecretMeta>) {
         val o = JSONObject()
         for ((k, v) in meta) {
-            o.put(k, JSONObject().put("docs", v.docs).put("key", v.key))
+            o.put(
+                k,
+                JSONObject()
+                    .put("docs", v.docs)
+                    .put("key", v.key)
+                    .put("hosts", org.json.JSONArray(v.hosts))
+            )
         }
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(F_META, o.toString())
@@ -283,23 +310,51 @@ object SecretVault {
         val next = s.toMutableMap().apply { this[name] = value }
         // Read the index BEFORE writing anything: a corrupt index must fail before the
         // blob is touched, not after, or the two would disagree.
-        val meta = readMeta(ctx).toMutableMap().apply { this[name] = SecretLinks(docs, key) }
+        val existing = readMeta(ctx)
+        val hosts = existing[name]?.hosts ?: emptyList()
+        val meta = existing.toMutableMap().apply { this[name] = SecretMeta(docs, key, hosts) }
         persist(ctx, next)
         writeMeta(ctx, meta)
         session = next
     }
 
     /**
-     * Edit just the links. Deliberately does NOT require an unlocked vault: the links
-     * are plaintext, so demanding a fingerprint to fix a URL would be theatre.
+     * Edit the links. Deliberately does NOT require an unlocked vault: the links are
+     * plaintext, so demanding a fingerprint to fix a URL would be theatre.
      */
     @Synchronized
     fun setLinks(ctx: Context, name: String, docs: String, key: String) {
         requireUrlOrEmpty("docs link", docs)
         requireUrlOrEmpty("key link", key)
         val meta = readMeta(ctx)
-        if (!meta.containsKey(name)) throw PluginError("unknown_secret", "no secret named '$name'")
-        writeMeta(ctx, meta.toMutableMap().apply { this[name] = SecretLinks(docs, key) })
+        val cur = meta[name] ?: throw PluginError("unknown_secret", "no secret named '$name'")
+        writeMeta(ctx, meta.toMutableMap().apply { this[name] = cur.copy(docs = docs, key = key) })
+    }
+
+    /**
+     * Add an allowed host to one secret. Plaintext, so no fingerprint is needed — and
+     * that is correct: a host rule is not a credential, and you often want to fix it
+     * right after a call was refused.
+     */
+    @Synchronized
+    fun allowHost(ctx: Context, name: String, host: String) {
+        val rule = com.mido.phonebridge.plugins.secrets.HostAllowlist.requireRule(host)
+        val meta = readMeta(ctx)
+        val cur = meta[name] ?: throw PluginError("unknown_secret", "no secret named '$name'")
+        if (cur.hosts.any { it.equals(rule, ignoreCase = true) }) return
+        writeMeta(ctx, meta.toMutableMap().apply { this[name] = cur.copy(hosts = cur.hosts + rule) })
+    }
+
+    @Synchronized
+    fun revokeHost(ctx: Context, name: String, host: String) {
+        val meta = readMeta(ctx)
+        val cur = meta[name] ?: throw PluginError("unknown_secret", "no secret named '$name'")
+        writeMeta(
+            ctx,
+            meta.toMutableMap().apply {
+                this[name] = cur.copy(hosts = cur.hosts.filterNot { it.equals(host, ignoreCase = true) })
+            }
+        )
     }
 
     /** Delete a secret. Its ciphertext goes with the next blob write — clean revocation. */

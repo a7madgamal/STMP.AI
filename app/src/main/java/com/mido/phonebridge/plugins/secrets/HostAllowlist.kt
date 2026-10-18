@@ -1,41 +1,32 @@
 package com.mido.phonebridge.plugins.secrets
 
-import android.content.Context
-import com.mido.phonebridge.Debug
 import com.mido.phonebridge.core.PluginError
-import org.json.JSONArray
 
 /**
- * The saved host allowlist (plan D3 / R2).
+ * Host matching for the secret broker (plan D3 / R2).
  *
- * The security boundary is the DOMAIN: a request may only reach a host that has
- * already been approved, and approving a new host is a one-time decision that is
- * remembered. Stored as plain JSON in prefs — a host name is not a secret, and the
- * allowlist has to be readable while the vault is locked so the broker can answer
- * "this host is not allowed" without touching any secret.
+ * This used to be a *global* allowlist stored in prefs. It is not any more: the allowed
+ * hosts belong to the SECRET, not to the app. A global list meant the `todoist` secret
+ * could be sent to any host some other secret had approved — the domains were shared, so
+ * the blast radius of one careless rule was every secret. Each secret now carries its
+ * own list (in the vault's plaintext index), and this object is only the matching rule.
  *
- * Matching is deliberately strict: exact host, or a boundary-correct `*.domain`.
- * A naive `endsWith` would let `evil-api.todoist.com` satisfy `api.todoist.com`.
+ * What is left here is deliberately pure: no Context, no storage, no I/O. The one piece
+ * of logic that decides whether a secret may leave the device is therefore a function
+ * you can read, reason about and test in isolation — which is the point.
  */
 object HostAllowlist {
 
-    private const val PREFS = "phonebridge_secrets"
-    private const val F_HOSTS = "allowed_hosts"
-
-    fun all(ctx: Context): List<String> {
-        val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(F_HOSTS, null)
-            ?: return emptyList()
-        return try {
-            val arr = JSONArray(raw)
-            (0 until arr.length()).map { arr.getString(it) }
-        } catch (e: Exception) {
-            throw PluginError("allowlist_corrupt", "host allowlist unreadable: ${e.message}")
-        }
-    }
-
-    fun isAllowed(ctx: Context, host: String): Boolean {
+    /**
+     * Does [host] satisfy any rule in [rules]?
+     *
+     * Matching is deliberately strict: an exact host, or a boundary-correct `*.domain`.
+     * A naive `endsWith` would let `evil-api.todoist.com` satisfy `api.todoist.com` —
+     * and, worse, `evil-todoist.com` satisfy `*.todoist.com`.
+     */
+    fun allows(rules: List<String>, host: String): Boolean {
         val h = host.lowercase()
-        return all(ctx).any { rule ->
+        return rules.any { rule ->
             val r = rule.lowercase()
             when {
                 r.startsWith("*.") -> {
@@ -49,25 +40,24 @@ object HostAllowlist {
         }
     }
 
-    @Synchronized
-    fun allow(ctx: Context, host: String) {
-        val h = host.lowercase().trim()
-        if (h.isEmpty() || h.contains('/') || h.contains(':')) {
-            throw PluginError("bad_request", "host must be a bare hostname, got '$host'")
+    /**
+     * Validate a rule before it is stored, and return it normalised.
+     *
+     * Throws rather than storing something that could never match — or that would match
+     * far more than intended. Only two shapes are legal: a bare hostname, or `*.` plus a
+     * bare hostname. No scheme, no port, no path: those would look like they narrow the
+     * rule while the matcher ignores them, which is worse than refusing them.
+     */
+    fun requireRule(rule: String): String {
+        val r = rule.lowercase().trim()
+        if (r.isEmpty()) throw PluginError("bad_request", "host must not be empty")
+        if (r.contains('/') || r.contains(':') || r.contains(' ')) {
+            throw PluginError("bad_request", "host must be a bare hostname, got '$rule'")
         }
-        val next = (all(ctx) + h).distinct()
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(F_HOSTS, JSONArray(next).toString())
-            .apply()
-        Debug.log("allowlist: added host '$h'")
-    }
-
-    @Synchronized
-    fun revoke(ctx: Context, host: String) {
-        val next = all(ctx).filterNot { it.equals(host, ignoreCase = true) }
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(F_HOSTS, JSONArray(next).toString())
-            .apply()
-        Debug.log("allowlist: revoked host '$host'")
+        val base = if (r.startsWith("*.")) r.substring(2) else r
+        if (base.isEmpty() || base.startsWith('.') || base.endsWith('.')) {
+            throw PluginError("bad_request", "host must be a bare hostname, got '$rule'")
+        }
+        return r
     }
 }

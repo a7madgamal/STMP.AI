@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
-import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
@@ -17,7 +16,6 @@ import android.widget.TextView
 import android.widget.Toast
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.SecretVault
-import com.mido.phonebridge.plugins.secrets.HostAllowlist
 
 /**
  * The secret CRUD screen (plan D1/D7, plus the hardening list).
@@ -36,7 +34,6 @@ import com.mido.phonebridge.plugins.secrets.HostAllowlist
 class SecretsActivity : Activity() {
 
     private lateinit var listContainer: LinearLayout
-    private lateinit var allowContainer: LinearLayout
     private lateinit var header: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,10 +74,6 @@ class SecretsActivity : Activity() {
             ).apply { topMargin = UiKit.dp(this@SecretsActivity, 12) }
         }
         content.addView(addBtn)
-
-        content.addView(sectionTitle("Allowed hosts"))
-        allowContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(allowContainer)
 
         root.addView(scroll)
         setContentView(root)
@@ -139,9 +132,9 @@ class SecretsActivity : Activity() {
             // a call failed. Shown as their own row, above the actions, because "where do
             // I fix this key" is the question the row exists to answer.
             val links = try {
-                SecretVault.links(this, n)
+                SecretVault.meta(this, n)
             } catch (e: Exception) {
-                SecretVault.SecretLinks()
+                SecretVault.SecretMeta()
             }
             val linkRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             linkRow.addView(small(if (links.docs.isEmpty()) "+ docs" else "docs ↗") {
@@ -152,38 +145,33 @@ class SecretsActivity : Activity() {
             })
             linkRow.addView(small("edit links") { editLinksDialog(n, links) })
             rowView.addView(linkRow)
+
+            // Allowed hosts, PER SECRET. This is the security boundary: a secret may
+            // only reach its own hosts. Shown per secret (not once globally) because
+            // that is now the truth — the todoist key cannot be sent to a host that
+            // some other secret happens to have approved.
+            rowView.addView(TextView(this).apply {
+                text = if (links.hosts.isEmpty()) "no hosts allowed — every call will be refused"
+                else "allowed: ${links.hosts.joinToString(", ")}"
+                textSize = 13f
+                setTextColor(if (links.hosts.isEmpty()) 0xFFFFB74D.toInt() else UiKit.TEXT_MUTED)
+                setPadding(0, UiKit.dp(this@SecretsActivity, 6), 0, 0)
+            })
+            val hostRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            hostRow.addView(small("+ host") { addHostDialog(n) })
+            for (h in links.hosts) {
+                hostRow.addView(small("✕ $h") {
+                    try {
+                        SecretVault.revokeHost(this, n, h)
+                    } catch (e: PluginError) {
+                        toast("${e.code}: ${e.message}")
+                    }
+                    render()
+                })
+            }
+            rowView.addView(hostRow)
             listContainer.addView(rowView)
         }
-
-        allowContainer.removeAllViews()
-        val hosts = try {
-            HostAllowlist.all(this)
-        } catch (e: Exception) {
-            allowContainer.addView(row("allowlist unreadable", e.message ?: "", UiKit.RED_BG))
-            emptyList()
-        }
-        if (hosts.isEmpty()) {
-            allowContainer.addView(row("no hosts allowed", "the broker will refuse every call", UiKit.AMBER_BG))
-        }
-        for (h in hosts) {
-            val r = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, UiKit.dp(this@SecretsActivity, 8), 0, UiKit.dp(this@SecretsActivity, 8))
-            }
-            r.addView(TextView(this).apply {
-                text = h
-                textSize = 15f
-                setTextColor(UiKit.TEXT_ON_DARK)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            r.addView(small("revoke") {
-                HostAllowlist.revoke(this, h)
-                render()
-            })
-            allowContainer.addView(r)
-        }
-        allowContainer.addView(small("+ allow a host") { addHostDialog() })
     }
 
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
@@ -246,7 +234,7 @@ class SecretsActivity : Activity() {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
-    private fun editLinksDialog(name: String, current: SecretVault.SecretLinks) {
+    private fun editLinksDialog(name: String, current: SecretVault.SecretMeta) {
         val docsField = EditText(this).apply {
             hint = "API docs (https://…)"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
@@ -289,9 +277,9 @@ class SecretsActivity : Activity() {
             return
         }
         val existingLinks = try {
-            if (existing != null) SecretVault.links(this, existing) else SecretVault.SecretLinks()
+            if (existing != null) SecretVault.meta(this, existing) else SecretVault.SecretMeta()
         } catch (e: Exception) {
-            SecretVault.SecretLinks()
+            SecretVault.SecretMeta()
         }
         val nameField = EditText(this).apply {
             hint = "name (lowercase, e.g. todoist)"
@@ -368,7 +356,7 @@ class SecretsActivity : Activity() {
             .show()
     }
 
-    private fun addHostDialog() {
+    private fun addHostDialog(secret: String) {
         val field = EditText(this).apply {
             hint = "api.todoist.com or *.todoist.com"
             inputType = InputType.TYPE_CLASS_TEXT
@@ -379,11 +367,11 @@ class SecretsActivity : Activity() {
             addView(field)
         }
         AlertDialog.Builder(this)
-            .setTitle("Allow a host")
+            .setTitle("Allow a host for '$secret'")
             .setView(box)
             .setPositiveButton("allow") { _, _ ->
                 try {
-                    HostAllowlist.allow(this, field.text.toString())
+                    SecretVault.allowHost(this, secret, field.text.toString())
                     render()
                 } catch (e: PluginError) {
                     toast("${e.code}: ${e.message}")

@@ -73,7 +73,7 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
         // The docs link rides on the card: it is the answer to "what does this API do",
         // and it is plaintext so showing it costs nothing.
         val docs = try {
-            SecretVault.links(ctx, secretName).docs
+            SecretVault.meta(ctx, secretName).docs
         } catch (e: Exception) {
             ""
         }
@@ -94,12 +94,25 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
             throw PluginError("bad_request", "only https is allowed, got '${parsed.protocol}'")
         }
         val host = parsed.host.lowercase()
-        if (!HostAllowlist.isAllowed(ctx, host)) {
+        if (!HostAllowlist.allows(hostsFor(), host)) {
             throw PluginError(
                 "host_not_allowed",
-                "host '$host' is not in the allowlist; add it in the app's Secrets screen"
+                "host '$host' is not allowed for secret '$secretName'; add it in the app's Secrets screen"
             )
         }
+    }
+
+    /**
+     * This secret's own allowed hosts. Plaintext, so this works while the vault is
+     * locked — which is required: the pre-gate check must be able to answer
+     * "host not allowed" without decrypting anything.
+     */
+    private fun hostsFor(): List<String> = try {
+        SecretVault.meta(ctx, secretName).hosts
+    } catch (e: Exception) {
+        // An unreadable index must refuse, not fall open to an empty list — an empty
+        // list already means "nothing allowed", but the reason differs and must be said.
+        throw PluginError("vault_corrupt", "could not read hosts for '$secretName': ${e.message}")
     }
 
     private fun call(req: Req): Resp {
@@ -107,7 +120,7 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
         // place the vault is consulted. A locked vault fails loud with `secret_locked`
         // — never a prompt from here (a plugin rule cannot raise a modal).
         val secret = SecretVault.get(ctx, secretName)
-        val result = SecretBroker.call(ctx, secret, req.body)
+        val result = SecretBroker.call(ctx, secret, hostsFor(), req.body)
         Debug.log("broker: ${req.body.optString("method", "GET")} ${req.body.optString("url")} -> ${result.optInt("status")}")
         return Resp(200, result)
     }
