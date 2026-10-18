@@ -712,10 +712,17 @@ class HttpServer(
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
 
+        // Target rows, built ONCE and reused for both the AI summary and the modal.
+        // They were built twice in the first cut (once for the summariser, once for
+        // `destructive`), and for a route that pre-fetches its target — gmail trash,
+        // calendar delete — that is a second live Google round-trip per approval. The
+        // throw for a bad id still happens here, i.e. before any modal, unchanged.
+        val rows = pluginRows(route, actualPath, body, query, remote)
+
         // The AI summary, computed once per request from the SAME facts the modal
         // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS; a null answer leaves the
         // three AI fields blank and the modal renders exactly what it always did.
-        val ai = aiSummary(route, summary, pluginRows(route, actualPath, body, query, remote))
+        val ai = aiSummary(route, summary, rows)
 
         // /notifications/{id}/action -> resolve the action against live data.
         if (routePath == "/notifications/{id}/action") {
@@ -762,7 +769,7 @@ class HttpServer(
                 messageCount = sbn?.notification?.number ?: 0,
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
-                destructive = pluginRows(route, actualPath, body, query, remote),
+                destructive = rows,
                 aiDescription = ai?.description ?: "",
                 aiRisk = ai?.risk,
                 aiReason = ai?.reason ?: "",
@@ -790,7 +797,7 @@ class HttpServer(
                 notifText = text,
                 messageCount = sbn.notification.number,
                 replyText = null,
-                destructive = pluginRows(route, actualPath, body, query, remote),
+                destructive = rows,
                 aiDescription = ai?.description ?: "",
                 aiRisk = ai?.risk,
                 aiReason = ai?.reason ?: "",
@@ -821,7 +828,7 @@ class HttpServer(
             // knows its request shapes and can fetch live data to name the target.
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
-            destructive = pluginRows(route, actualPath, body, query, remote),
+            destructive = rows,
             aiDescription = ai?.description ?: "",
             aiRisk = ai?.risk,
             aiReason = ai?.reason ?: "",
