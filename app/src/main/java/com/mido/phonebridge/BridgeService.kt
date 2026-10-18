@@ -234,6 +234,14 @@ class BridgeService : Service() {
         if (PluginRegistry.get("logs") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.logs.LogcatPlugin(applicationContext))
         }
+        // The metadata half of the secrets feature: a route that answers "what is this
+        // secret, where are its docs, what may it reach" WITHOUT the value. Registered
+        // once (not per secret) because it serves the whole index.
+        if (PluginRegistry.get("secrets") == null) {
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.secrets.SecretIndexPlugin(applicationContext)
+            )
+        }
         registerSecretPlugins()
     }
 
