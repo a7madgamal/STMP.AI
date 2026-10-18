@@ -28,13 +28,17 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
             "GET", "/calendar/events", "List your calendar events", Verb.READ,
             // Same parsers run pre-gate and in the handler, so a bad window answers
             // 400 without a tap and the two paths cannot drift.
-            validate = { requireWindow(it); requireMax(it); requireSingleEvents(it) }
+            validate = { requireWindow(it); requireMax(it); requireSingleEvents(it); requireTimeZone(it) }
         ) { list(it) },
         Route("POST", "/calendar/events", "CREATE CALENDAR EVENT", Verb.WRITE) { create(it) },
         Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT", Verb.EDIT) { update(it) },
         Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT", Verb.DELETE) { delete(it) },
         Route("POST", "/calendar/events/{id}/move", "MOVE CALENDAR EVENT", Verb.EDIT) { move(it) },
-        Route("POST", "/calendar/quickadd", "QUICK-ADD CALENDAR EVENT", Verb.WRITE) { quickAdd(it) }
+        Route("POST", "/calendar/quickadd", "QUICK-ADD CALENDAR EVENT", Verb.WRITE,
+            // The zone must MATCH the calendar's, which cannot succeed if it does not — so
+            // it is checked pre-gate and never costs an approval tap. See requireQuickAddZone.
+            validate = { requireQuickAddZone(it) }
+        ) { quickAdd(it) }
     )
 
     /**
@@ -55,7 +59,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
                     summary = requireString(r, "summary"),
                     start = requireString(r, "start"),
                     end = requireString(r, "end"),
-                    tz = requireString(r, "timeZone"),
+                    tz = requireBodyZone(r),
                     location = r.body.optString("location"),
                     description = r.body.optString("description")
                 )
@@ -68,7 +72,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
                             summary = requireString(r, "summary"),
                             start = requireString(r, "start"),
                             end = requireString(r, "end"),
-                            tz = requireString(r, "timeZone"),
+                            tz = requireBodyZone(r),
                             location = r.body.optString("location"),
                             description = r.body.optString("description")
                         )
@@ -101,7 +105,10 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
                 }
             },
             "POST /calendar/quickadd" to { r ->
-                listOf(ApprovalRow("TEXT", requireString(r, "text")))
+                listOf(
+                    ApprovalRow("TEXT", requireString(r, "text")),
+                    ApprovalRow("TIME ZONE", requireBodyZone(r))
+                )
             }
         )
     )
@@ -131,6 +138,47 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
     private fun requireString(req: Req, key: String): String {
         val v = req.body.optString(key).trim()
         if (v.isBlank()) throw PluginError("bad_request", "missing required '$key'")
+        return v
+    }
+
+    /**
+     * The caller's time zone, REQUIRED and validated.
+     *
+     * There is no implicit zone: a window without one was interpreted in the calendar's
+     * own zone (`Asia/Kuala_Lumpur` here), silently reinterpreting a `+02:00` window —
+     * observed live 2026-10-18, where an Oct 1–5 window matched an event starting Oct 6
+     * because its end crossed midnight in the calendar's zone. A required-but-unvalidated
+     * string would be just as silent, so the value is checked against the platform's own
+     * zone database and a typo is a 400 before any approval tap.
+     */
+    private fun requireTimeZone(req: Req): String {
+        val raw = req.query["timeZone"]
+            ?: throw PluginError(
+                "bad_timezone",
+                "missing required 'timeZone' (IANA id, e.g. Europe/Berlin)"
+            )
+        return validZone(raw)
+    }
+
+    /** A required body zone. Same contract as [requireTimeZone], for write routes. */
+    private fun requireBodyZone(req: Req): String {
+        val raw = req.body.optString("timeZone")
+        if (raw.isBlank()) {
+            throw PluginError(
+                "bad_timezone",
+                "missing required 'timeZone' (IANA id, e.g. Europe/Berlin)"
+            )
+        }
+        return validZone(raw)
+    }
+
+    /** Non-blank and a real zone. A required value that is never validated is not required. */
+    private fun validZone(raw: String): String {
+        val v = raw.trim()
+        if (v.isBlank()) throw PluginError("bad_timezone", "'timeZone' must not be blank")
+        if (!TimeZones.isValid(v)) {
+            throw PluginError("bad_timezone", "'timeZone' is not a known zone: '$v'")
+        }
         return v
     }
 
@@ -167,10 +215,12 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
     /**
      * List events in an explicit window.
      *
-     * REQUIRED input: timeMin, timeMax (RFC3339). A missing or malformed value
-     * fails the request with a coded 400 BEFORE any approval modal is shown —
-     * there is NO implicit "today" and NO guessed timezone. The caller's window
-     * is the contract.
+     * REQUIRED input: timeMin, timeMax (RFC3339) AND timeZone. A missing or malformed
+     * value fails the request with a coded 400 BEFORE any approval modal is shown —
+     * there is NO implicit "today" and NO guessed timezone. The calendar's own zone is
+     * NOT a default: leaving it out used to reinterpret a `+02:00` window in
+     * `Asia/Kuala_Lumpur`, which is how an Oct 1–5 window matched an event starting
+     * Oct 6 (observed live 2026-10-18). The caller's window and zone are the contract.
      */
     /** Both ends of the window, and their order. A reversed window is a 400, not a 500. */
     private fun requireWindow(req: Req): Pair<String, String> {
@@ -203,7 +253,8 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         val orderBy = req.query["orderBy"]?.trim()?.takeIf { it.isNotBlank() } ?: "startTime"
         val pageToken = req.query["pageToken"]?.takeIf { it.isNotBlank() }
         val q = req.query["q"]?.takeIf { it.isNotBlank() }
-        val timeZone = req.query["timeZone"]?.trim()?.takeIf { it.isNotBlank() }
+        // REQUIRED and validated — see requireTimeZone. No implicit calendar zone.
+        val timeZone = requireTimeZone(req)
         val calendarId = req.query["calendarId"]?.trim()?.takeIf { it.isNotBlank() } ?: "primary"
 
         val url = StringBuilder("$base/calendars/${enc(calendarId)}/events")
@@ -213,7 +264,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
             .append("&singleEvents=$singleEvents")
         if (orderBy.isNotBlank()) url.append("&orderBy=${enc(orderBy)}")
         if (q != null) url.append("&q=${enc(q)}")
-        if (timeZone != null) url.append("&timeZone=${enc(timeZone)}")
+        url.append("&timeZone=${enc(timeZone)}")
         if (pageToken != null) url.append("&pageToken=${enc(pageToken)}")
 
         val res = GoogleApi.get(ctx, url.toString())
@@ -239,7 +290,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         val summary = requireBodyString(req, "summary")
         val start = requireBodyString(req, "start")
         val end = requireBodyString(req, "end")
-        val timeZone = requireBodyString(req, "timeZone")
+        val timeZone = requireBodyZone(req)
         requireInstant("start", start)
         requireInstant("end", end)
         val calendarId = req.body.optString("calendarId").trim().ifBlank { "primary" }
@@ -273,7 +324,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         val summary = requireBodyString(req, "summary")
         val start = requireBodyString(req, "start")
         val end = requireBodyString(req, "end")
-        val timeZone = requireBodyString(req, "timeZone")
+        val timeZone = requireBodyZone(req)
         requireInstant("start", start)
         requireInstant("end", end)
         val calendarId = req.body.optString("calendarId").trim().ifBlank { "primary" }
@@ -322,16 +373,85 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
 
     /**
      * quickAdd: Google parses natural language ("Lunch Friday 1pm").
-     * REQUIRED: text. This is the ONE explicitly opt-in guesser — Google decides
-     * the date/duration. Isolated from the strict routes; the modal shows the raw
-     * text verbatim so the human sees exactly what is being guessed from.
+     * REQUIRED: text AND timeZone. This is the ONE explicitly opt-in guesser — Google
+     * decides the date and duration.
+     *
+     * The zone is REQUIRED and ENFORCED, not merely accepted. quickAdd takes no
+     * `timeZone` parameter (Google's own reference lists only `text`/`sendUpdates`), so
+     * Google always parses `text` in the CALENDAR's zone. Accepting a caller zone and
+     * dropping it would be the silent reinterpretation this change exists to remove, so
+     * the caller's zone must MATCH the calendar's; a mismatch is a hard 400 and the
+     * event is never created. The calendar's zone is read server-side (no extra approval
+     * tap). Use `create` when the zone must differ from the calendar's.
      */
     private fun quickAdd(req: Req): Resp {
         val text = requireBodyString(req, "text")
+        // Already validated (and matched to the calendar's zone) pre-gate; re-required here
+        // so the handler cannot run on a request that skipped validation.
+        requireBodyZone(req)
         val calendarId = req.body.optString("calendarId").trim().ifBlank { "primary" }
         val url = "$base/calendars/${enc(calendarId)}/events/quickAdd?text=${enc(text)}"
         val res = GoogleApi.post(ctx, url, "{}")
         return Resp.ok(JSONObject().put("event", summarize(res)))
+    }
+
+    /**
+     * quickAdd's zone check, run PRE-GATE: the caller's zone must match the calendar's.
+     *
+     * quickAdd takes no `timeZone` parameter (Google's reference lists only `text` and
+     * `sendUpdates`), so Google always parses `text` in the CALENDAR's zone. Accepting a
+     * caller zone and dropping it would be the silent reinterpretation this whole change
+     * removes, so a mismatch is a hard 400 and no event is created. The calendar's zone is
+     * read server-side; that is a direct Google call, not a bridge request, so it costs no
+     * approval tap. Use `create` when the zone must differ from the calendar's.
+     */
+    private fun requireQuickAddZone(req: Req) {
+        val asked = requireBodyZone(req)
+        val calendarId = req.body.optString("calendarId").trim().ifBlank { "primary" }
+        // The zone lookup is an UPSTREAM call, not caller input, so its failure must not
+        // be recorded as caller noise. This runs pre-gate, where every 4xx is classified
+        // REJECTED_INVALID (noise) — so a Google outage (`google_error`, 409) or an expired
+        // token (`auth_expired`, 401) surfacing here would hide a real fault among typos.
+        // That is the same misclassification this project already fixed for `bad_lines`.
+        // Rethrown as a 5xx (not noise), with the underlying cause kept in the detail.
+        val calZone = try {
+            calendarZone(calendarId)
+        } catch (e: PluginError) {
+            throw PluginError(
+                "calendar_zone_unavailable",
+                "cannot read calendar '$calendarId' zone: ${e.message}"
+            )
+        }
+        if (!TimeZones.same(asked, calZone)) {
+            throw PluginError(
+                "bad_timezone",
+                "quickAdd parses in the calendar's zone '$calZone'; you asked for " +
+                    "'$asked'. Use create to set a different zone explicitly."
+            )
+        }
+    }
+
+    /**
+     * The calendar's own time zone, read from a minimal `events.list`.
+     *
+     * `events.list` returns the calendar's zone in its top-level `timeZone`, and it is
+     * authorized by the scope this plugin already holds, so no extra consent and no extra
+     * approval tap are involved. A calendar that reports no zone is a hard failure: the
+     * value is needed to enforce the caller's, and guessing it is exactly what this change
+     * forbids.
+     */
+    private fun calendarZone(calendarId: String): String {
+        val now = java.time.Instant.now()
+        val from = now.minusSeconds(3600).toString()
+        val to = now.plusSeconds(3600).toString()
+        val url = "$base/calendars/${enc(calendarId)}/events" +
+            "?maxResults=1&singleEvents=true&timeMin=${enc(from)}&timeMax=${enc(to)}"
+        val res = GoogleApi.get(ctx, url)
+        val z = res.optString("timeZone")
+        if (z.isBlank()) {
+            throw PluginError("google_error", "calendar '$calendarId' reported no timeZone")
+        }
+        return z
     }
 
     // --- helpers ---
