@@ -340,20 +340,37 @@ object SecretVault {
     /**
      * Create or replace a secret, and persist. Requires an open session, so the
      * human's finger has already been on VK this session.
+     *
+     * [hosts] is null to mean "leave the existing hosts alone" and a list to mean
+     * "these are the hosts now". Null is a real, documented case, not a fallback: the
+     * one dialog always passes what the human typed, while a programmatic replace
+     * (rotating a value) can omit them and keep the rules.
      */
     @Synchronized
-    fun put(ctx: Context, name: String, value: String, docs: String = "", key: String = "") {
+    fun put(
+        ctx: Context,
+        name: String,
+        value: String,
+        docs: String = "",
+        key: String = "",
+        hosts: List<String>? = null
+    ) {
         requireName(name)
         if (value.isEmpty()) throw PluginError("bad_request", "secret value must not be empty")
         requireUrlOrEmpty("docs link", docs)
         requireUrlOrEmpty("key link", key)
+        // Validate every host BEFORE writing anything, so a typo in the last field
+        // cannot leave the secret half-updated. Same authority as allowHost().
+        val rules = hosts?.map {
+            com.mido.phonebridge.plugins.secrets.HostAllowlist.requireRule(it)
+        }?.distinct()
         val s = openSession()
         val next = s.toMutableMap().apply { this[name] = value }
         // Read the index BEFORE writing anything: a corrupt index must fail before the
         // blob is touched, not after, or the two would disagree.
         val existing = readMeta(ctx)
-        val hosts = existing[name]?.hosts ?: emptyList()
-        val meta = existing.toMutableMap().apply { this[name] = SecretMeta(docs, key, hosts) }
+        val resolvedHosts = rules ?: existing[name]?.hosts ?: emptyList()
+        val meta = existing.toMutableMap().apply { this[name] = SecretMeta(docs, key, resolvedHosts) }
         persist(ctx, next)
         writeMeta(ctx, meta)
         session = next

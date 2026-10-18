@@ -306,6 +306,15 @@ class SecretsActivity : Activity() {
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setText(existingLinks.key)
         }
+        // Allowed hosts live in the SAME dialog as everything else about the secret:
+        // a secret and its domains are one thing, so creating one is one form, not a
+        // form plus a second trip to a host list. Comma-separated, prefilled from what
+        // is already stored so a replace does not silently drop the rules.
+        val hostsField = EditText(this).apply {
+            hint = "allowed hosts (comma-separated, e.g. api.todoist.com)"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(existingLinks.hosts.joinToString(", "))
+        }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(UiKit.dp(this@SecretsActivity, 16), UiKit.dp(this@SecretsActivity, 8),
@@ -314,6 +323,7 @@ class SecretsActivity : Activity() {
             addView(valueField)
             addView(docsField)
             addView(keyField)
+            addView(hostsField)
         }
         AlertDialog.Builder(this)
             .setTitle(if (existing == null) "Add secret" else "Replace '$existing'")
@@ -325,7 +335,8 @@ class SecretsActivity : Activity() {
                     SecretVault.put(
                         this, n, v,
                         docsField.text.toString().trim(),
-                        keyField.text.toString().trim()
+                        keyField.text.toString().trim(),
+                        parseHosts(hostsField.text.toString())
                     )
                     // Registering the plugin makes it routable without a restart.
                     BridgeService.registerSecretPlugin(applicationContext, n)
@@ -338,6 +349,16 @@ class SecretsActivity : Activity() {
             .setNegativeButton("cancel", null)
             .show()
     }
+
+    /**
+     * Split the hosts field into rules. Commas and whitespace both separate, because
+     * people type both; empties are dropped so a trailing comma is not an error. The
+     * rules themselves are validated by the vault, which is the single authority.
+     */
+    private fun parseHosts(raw: String): List<String> =
+        raw.split(',', ' ', '\n')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
     private fun confirmDelete(name: String) {
         AlertDialog.Builder(this)
