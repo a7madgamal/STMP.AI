@@ -28,6 +28,18 @@ object HeuristicSummarizer : SummaryModel {
     override fun isAvailable(ctx: Context): Boolean = true
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary =
+        summarize(facts)
+
+    /**
+     * The pure core, with no Android in the signature.
+     *
+     * The interface takes a `Context` because a model needs one; this summariser does
+     * not, and forcing a test to fabricate a `Context` just to assert a rule is how a
+     * rule ends up untested. So the logic lives here and the interface method is a
+     * one-line delegation — the same split as `isAttended(ctx)` / `isAttended(screen,
+     * keyguard)` in the policy package.
+     */
+    fun summarize(facts: RequestFacts): RequestSummary =
         RequestSummary(
             description = describe(facts),
             risk = risk(facts),
