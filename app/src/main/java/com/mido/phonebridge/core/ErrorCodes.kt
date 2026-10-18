@@ -82,6 +82,7 @@ object ErrorCodes {
         "listener_unavailable" to UNAVAILABLE,
         "vault_missing" to UNAVAILABLE,
         "vault_corrupt" to INTERNAL,
+        "vault_unrecoverable" to INTERNAL,
         "vault_unwrap_failed" to INTERNAL,
         "allowlist_corrupt" to INTERNAL,
         "upstream_timeout" to UNAVAILABLE,

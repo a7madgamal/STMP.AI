@@ -64,6 +64,7 @@ object SecretVault {
     private const val PREFS = "phonebridge_vault"
     private const val VK_ALIAS = "pb_vault_key"
     private const val F_DK_WRAPPED = "vault_dk_wrapped"
+    private const val F_DK_IV = "vault_dk_iv"          // IV of the DK wrap (AES-GCM needs it)
     private const val F_BLOB = "vault_blob"
     private const val F_NAMES = "vault_names"   // legacy (0.14.0): bare name array
     private const val F_META = "vault_meta"     // plaintext: name -> {docs, key}
@@ -88,6 +89,27 @@ object SecretVault {
     /** True when a vault has been created (a wrapped DK exists on disk). */
     fun exists(ctx: Context): Boolean =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(F_DK_WRAPPED, null) != null
+
+    /**
+     * True when a vault exists AND its wrap IV was stored, i.e. it can actually be
+     * unlocked. False for a vault written by 0.14.x, which stored the wrapped data key
+     * WITHOUT the IV — and AES-GCM cannot be decrypted without it, so that vault is dead.
+     */
+    fun isUnlockable(ctx: Context): Boolean {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return p.getString(F_DK_WRAPPED, null) != null && p.getString(F_DK_IV, null) != null
+    }
+
+    /**
+     * True when a vault exists but can never be opened, because the wrap IV is missing
+     * (any vault created by 0.14.x). The secrets inside are unrecoverable — this is a
+     * data-loss state, not a lock, and the only honest move is a reset. Detected rather
+     * than assumed so the UI can say so instead of failing with a cipher error.
+     */
+    fun isUnrecoverable(ctx: Context): Boolean {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return p.getString(F_DK_WRAPPED, null) != null && p.getString(F_DK_IV, null) == null
+    }
 
     // --- names and links are not secret ---------------------------------------
     //
@@ -194,8 +216,22 @@ object SecretVault {
      * the success callback.
      */
     fun prepareUnlockCipher(ctx: Context): Cipher {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val ivB64 = prefs.getString(F_DK_IV, null)
+            ?: throw PluginError(
+                "vault_unrecoverable",
+                "this vault was created before the wrap IV was stored, so its data key " +
+                    "cannot be unwrapped. Reset the vault and re-add the secrets."
+            )
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, vaultKey(ctx))
+        // GCM decryption needs the SAME IV that was used to wrap — it is stored, not
+        // derived, so it must be read back and passed explicitly. Omitting it was the
+        // bug that made every 0.14.x vault unopenable.
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            vaultKey(ctx),
+            GCMParameterSpec(GCM_TAG_BITS, b64d(ivB64))
+        )
         return cipher
     }
 
@@ -222,9 +258,14 @@ object SecretVault {
         }
         val dk = SecretKeySpec(randomBytes(DK_BYTES), "AES")
         val wrapped = authorised.doFinal(dk.encoded)
+        // The IV the cipher generated MUST be stored beside the ciphertext: it is random
+        // per wrap and AES-GCM cannot be decrypted without it. 0.14.x forgot this, which
+        // made every vault it created permanently unopenable (see isUnrecoverable).
+        val wrapIv = authorised.iv
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(F_DK_WRAPPED, b64(wrapped))
+            .putString(F_DK_IV, b64(wrapIv))
             .putString(F_BLOB, null)
             .putString(F_META, "{}")
             .apply()

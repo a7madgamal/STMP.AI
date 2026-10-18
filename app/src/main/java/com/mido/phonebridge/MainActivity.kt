@@ -53,6 +53,9 @@ class MainActivity : FragmentActivity() {
      */
     private var promptAttempted = false
 
+    /** Guards the unrecoverable-vault reset dialog so it does not stack. */
+    private var resetOffered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -253,6 +256,14 @@ class MainActivity : FragmentActivity() {
         if (SecretVault.isUnlocked()) return
         if (promptAttempted && !force) return
         promptAttempted = true
+        if (SecretVault.isUnrecoverable(this)) {
+            // A vault from 0.14.x: the data key was wrapped without storing the IV, and
+            // AES-GCM cannot be unwrapped without it. The secrets inside are gone. Say
+            // so plainly and offer the only honest way forward — a reset — instead of
+            // throwing a cipher error at every unlock attempt.
+            offerVaultReset()
+            return
+        }
         if (VaultGate.hasVault(this)) {
             VaultGate.unlock(
                 this,
@@ -267,6 +278,34 @@ class MainActivity : FragmentActivity() {
                 onFailed = { Debug.log("vault creation not completed: $it"); render() }
             )
         }
+    }
+
+    /**
+     * The 0.14.x vault is dead (missing wrap IV). Offer a reset, once per process, and
+     * be honest that the stored secrets cannot be recovered — a silent fresh vault would
+     * look like success while quietly discarding a credential.
+     */
+    private fun offerVaultReset() {
+        if (resetOffered) return
+        resetOffered = true
+        AlertDialog.Builder(this)
+            .setTitle("Secret vault needs a reset")
+            .setMessage(
+                "This vault was created by an earlier build that saved the key without " +
+                    "the IV it needs to be reopened. The secrets inside it cannot be " +
+                    "recovered — this is a bug in that build, not something you did.\n\n" +
+                    "Resetting clears the vault so you can create a fresh one and re-add " +
+                    "your secrets. Nothing else on the phone is affected."
+            )
+            .setPositiveButton("reset vault") { _, _ ->
+                SecretVault.destroy(this)
+                Debug.log("vault reset (0.14.x unrecoverable wrap)")
+                promptAttempted = false
+                lockOnLoad()
+                render()
+            }
+            .setNegativeButton("not now", null)
+            .show()
     }
 
     private lateinit var pluginContainer: LinearLayout
