@@ -25,6 +25,12 @@ plugins are not the primary path.
   structures — we return what came back, as-is, minus the secret.
 - **D6 — Card shows URL + method.** Caller is a developer; naming the *target* is not our job
   for MVP (that was the expensive part of the manifest idea — dropped).
+- **D7 — Plugin per secret; the secret occupies the `plugin` slot** (Mido liked this,
+  2026-10-18). Each registered secret is its own `Plugin`, `id` = the secret name, so policy
+  reads `todoist × DELETE` as a normal rule — no change to `Rule`, `parse`, `resolve` or the
+  rules screen. **The verb is NOT in the path** (that was the coupling smell): the broker's own
+  HTTP method mirrors the outbound method, and the verb is derived from it by a total
+  `method → Verb` map. The consumer uses HTTP methods, never our invented verb names.
 
 ## Injection — resolved by the placeholder (no taxonomy needed)
 
@@ -55,13 +61,19 @@ placed, so a placeholder cannot express it.
 
 ## Open questions
 
-- **Q5 — How is a generic call governed by policy?** The app's identity is "policy governs what
-  runs", keyed on `plugin × verb`. A generic call has neither. Options: (A) the **secret** is
-  the policy unit; (B) secret × a caller-declared verb; (C) one global bucket for all generic
-  calls. Lean: **A** — you govern the secret, not the call.
+- **Q6 — Verb source, finer control.** Method-only (`GET→READ`, `POST→WRITE`, `PATCH→EDIT`,
+  `DELETE→DELETE`) is simplest and closes the under-declare hole. But it is coarse: `POST
+  /tasks` (create) and `POST /tasks/123/close` (complete) both land as `WRITE`. Optional
+  refinement: the caller may **raise** the verb (never lower) for a call it knows is heavier —
+  e.g. mark a POST as `DELETE`. Raise-only keeps the no-hole property, since it can only make
+  the gate stricter.
+- **Q5 (answered) — governance.** The secret is the policy unit, expressed as the plugin id
+  (see D7). Verb comes from the method.
 
 ## Known edges (not yet decided)
 
 - **Binary responses** (PDF, images, attachments) are not JSON; the envelope needs a rule.
 - **OAuth refresh flows** (Google calendar/gmail) stay as real plugins — different problem.
 - **Timeout** on the outbound call, after the human tap.
+- **`EXECUTE` has no HTTP method.** POST maps to `WRITE`; if a call is really an action, the
+  raise-only override (Q6) is how it gets a stricter bucket.
