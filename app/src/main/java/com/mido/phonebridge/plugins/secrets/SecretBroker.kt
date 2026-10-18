@@ -110,21 +110,22 @@ object SecretBroker {
             throw PluginError("redirect_refused", "upstream answered $status; redirects are not followed")
         }
 
-        // Non-JSON is refused (resolved edge A). Todoist is JSON; a PDF/image/zip is a
-        // second round trip, not a silent base64 blob nobody asked for.
-        val isJson = contentType?.contains("json", ignoreCase = true) == true
-        if (!isJson) {
+        // What came back? A 204 is a SUCCESS with nothing to say, and judging an empty
+        // body by its Content-Type is what turned a successful close into an
+        // `unsupported_content_type` error — Todoist labels its 204s `text/html`.
+        // The rule lives in [ResponseBody], a pure function, so the decision that gates
+        // what a caller may see is actually tested.
+        val kind = ResponseBody.classify(status, rawBody)
+        if (kind == ResponseKind.UNSUPPORTED) {
             throw PluginError(
                 "unsupported_content_type",
-                "expected a JSON response, got '${contentType ?: "unknown"}'"
+                "expected a JSON response, got '${contentType ?: "unknown"}' (${rawBody.length} bytes)"
             )
         }
-
-        val parsed = try {
-            JSONObject(rawBody)
-        } catch (e: Exception) {
-            throw PluginError("upstream_failed", "upstream JSON did not parse: ${e.message}")
-        }
+        // Parsed twice by design: [ResponseBody.classify] had to parse in order to decide,
+        // and this keeps the decision in one tested place instead of threading a parsed
+        // value out of it. Bodies are capped at 512 KiB, so the cost is trivial.
+        val parsed = if (rawBody.isBlank()) JSONObject() else JSONObject(rawBody)
 
         // R4: scrub the secret from the WHOLE response before anything sees it.
         val safeHeaders = JSONObject()
