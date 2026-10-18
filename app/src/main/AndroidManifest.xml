@@ -11,6 +11,10 @@
          in-app checklist. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required for the approval haptics (alert/SoundAlerts.kt). Without it
+         VibrationEffect silently does nothing - a request you were meant to FEEL
+         would be silent, which is the exact failure the alerts exist to fix. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
