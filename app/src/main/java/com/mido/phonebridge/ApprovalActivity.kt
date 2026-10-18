@@ -93,6 +93,26 @@ class ApprovalActivity : FragmentActivity() {
         content.addView(label("🔐 APPROVE?", 22f))
 
         if (view != null) {
+            // --- AI: the plain-language line, when a summariser produced one. ---
+            // Rendered only when present — an unavailable model leaves no block, never
+            // an empty one. Display-only: it changes nothing about what is approved.
+            if (view.aiDescription.isNotBlank()) {
+                content.addView(Theme.sectionHeader(this, "SUMMARY"))
+                content.addView(label(view.aiDescription, 17f, Theme.ON_SURFACE))
+                if (view.aiRisk != null) {
+                    content.addView(label(
+                        "risk: ${view.aiRisk.name.lowercase()}" +
+                            (if (view.aiReason.isNotBlank()) " — ${view.aiReason}" else ""),
+                        14f,
+                        when (view.aiRisk) {
+                            com.mido.phonebridge.ai.Risk.LOW -> Theme.SUCCESS
+                            com.mido.phonebridge.ai.Risk.MEDIUM -> Theme.WARNING
+                            com.mido.phonebridge.ai.Risk.HIGH -> Theme.DANGER
+                        }
+                    ))
+                }
+            }
+
             // --- WHO ---
             content.addView(Theme.sectionHeader(this, "WHO"))
             content.addView(label(view.requester, 17f, Theme.WARNING))

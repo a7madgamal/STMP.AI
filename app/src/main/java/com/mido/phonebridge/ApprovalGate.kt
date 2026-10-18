@@ -137,7 +137,22 @@ object ApprovalGate {
          */
         val requiresBiometric: Boolean = true,
         /** Seconds until auto-deny, for the countdown UI. */
-        val timeoutSeconds: Long = TIMEOUT_SECONDS
+        val timeoutSeconds: Long = TIMEOUT_SECONDS,
+        /**
+         * The AI's plain-language one-liner, or blank when no summary is available.
+         * Display-only: it never changes what is approved, only how clearly it is
+         * stated. Blank is a normal state (no model, cold start, over budget) and the
+         * modal simply omits the block.
+         */
+        val aiDescription: String = "",
+        /**
+         * The AI's coarse risk bucket, or null when unavailable. Rendered as a badge
+         * and (on the NOTIFY card) a tint. It gates NOTHING — see the display-only
+         * decision (Mido, 2026-10-18).
+         */
+        val aiRisk: com.mido.phonebridge.ai.Risk? = null,
+        /** One short phrase explaining the risk bucket. */
+        val aiReason: String = ""
     )
 
     private val seq = AtomicLong(1000)

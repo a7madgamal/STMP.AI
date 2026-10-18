@@ -559,12 +559,19 @@ class HttpServer(
 
                 Mode.SECURE -> {
                     // Central gate: describe the concrete call, then wait for the human.
+                    //
+                    // The AI summary is computed BEFORE the modal is shown (option B,
+                    // Mido 2026-10-18): on SECURE there is a 60s window and a full
+                    // screen, so a ~3s wait buys real clarity for free. It is bounded by
+                    // SummaryProvider.SECURE_BUDGET_MS and a null answer simply means the
+                    // modal shows the deterministic rows it always had.
                     val gate = ApprovalGate.await(
                         ctx, remote, "$method $path", summary,
                         detail = detailFor(resolved.route.path, path, body),
                         account = account,
                         view = approvalView(
                             remote, account, resolved.route, path, body, query,
+                            summary = summary,
                             requiresBiometric = mode == Mode.SECURE
                         )
                     )
@@ -683,9 +690,16 @@ class HttpServer(
         actualPath: String,
         body: JSONObject,
         query: Map<String, String>,
+        summary: String,
         requiresBiometric: Boolean
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
+
+        // The AI summary, computed once per request from the SAME facts the modal
+        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS; a null answer leaves the
+        // three AI fields blank and the modal renders exactly what it always did.
+        val ai = aiSummary(route, summary, pluginRows(route, actualPath, body, query, remote))
+
         // /notifications/{id}/action -> resolve the action against live data.
         if (routePath == "/notifications/{id}/action") {
             val pid = actualPath.trim('/').split('/').getOrNull(1) ?: ""
@@ -732,6 +746,9 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = pluginRows(route, actualPath, body, query, remote),
+                aiDescription = ai?.description ?: "",
+                aiRisk = ai?.risk,
+                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -757,6 +774,9 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = pluginRows(route, actualPath, body, query, remote),
+                aiDescription = ai?.description ?: "",
+                aiRisk = ai?.risk,
+                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -785,12 +805,42 @@ class HttpServer(
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
             destructive = pluginRows(route, actualPath, body, query, remote),
+            aiDescription = ai?.description ?: "",
+            aiRisk = ai?.risk,
+            aiReason = ai?.reason ?: "",
             // Biometric is a SECURE-only rule, computed by the policy and passed in.
             // The gate states it; the Activity renders it and never recomputes it.
             // In R3 this always evaluates true, because a view only exists on the
             // SECURE path — it is correctness plumbing so a future mode reusing the
             // modal cannot silently inherit a fingerprint.
             requiresBiometric = requiresBiometric
+        )
+    }
+
+    /**
+     * Build the facts a summariser sees, run the model within the SECURE budget, and
+     * return its answer or null.
+     *
+     * Facts are the deterministic projection the modal already renders: the route's
+     * own label, the audit summary, and the labelled rows. Raw JSON is deliberately
+     * NOT handed over — it is unbounded and caller-authored, and the rows are the
+     * human-readable truth of it. A summariser that saw different facts than the human
+     * could describe something other than what is being approved.
+     */
+    private fun aiSummary(
+        route: Route,
+        summary: String,
+        rows: List<Pair<String, String>>
+    ): com.mido.phonebridge.ai.RequestSummary? {
+        val facts = com.mido.phonebridge.ai.RequestFacts(
+            plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
+            verb = route.verb.name,
+            routeLabel = route.describe,
+            summary = summary,
+            rows = rows.filter { it.second.isNotBlank() }
+        )
+        return com.mido.phonebridge.ai.SummaryProvider.run(
+            ctx, facts, com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
         )
     }
 
