@@ -2,7 +2,9 @@ package com.mido.phonebridge.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
 import android.util.TypedValue
@@ -192,6 +194,78 @@ object Theme {
     /** A compact filter chip. Same machinery as [button], tighter. */
     fun chip(ctx: Context, label: String, selected: Boolean = false, onClick: () -> Unit): MaterialButton =
         button(ctx, label, if (selected) ButtonStyle.PRIMARY else ButtonStyle.NEUTRAL, small = true, onClick = onClick)
+
+    /**
+     * A button whose own background fills with progress — the "downloading" control.
+     *
+     * **Why a button and not a separate bar.** The action and its feedback are the same
+     * thing here: you tap to start the fetch, and the thing you tapped is what fills. A
+     * detached `ProgressBar` under a status row says "something is happening"; a filling
+     * button says "the thing you pressed is doing it", which is the whole difference
+     * between a control and a readout (Mido, 2026-10-19: *"the loader should be button
+     * scoped, using a bg color progress fill style"*).
+     *
+     * Built from a [MaterialButton] with its OWN background drawable rather than
+     * `backgroundTintList`, because the fill has to be a two-tone layer (track + fill)
+     * that `setLevel` can drain. That means the ripple is gone while loading — which is
+     * correct: a control mid-download is not tappable, so press feedback would be a lie.
+     * On completion the caller swaps back to [button], and the ripple returns with it.
+     *
+     * [progress] is 0..100 and drives the fill width directly. It is set from the real
+     * byte count, never interpolated — a progress bar that animates on a timer is a
+     * decoration, and this one has to be honest about a 474 MB transfer.
+     */
+    fun progressButton(
+        ctx: Context,
+        label: String,
+        progress: Int,
+        style: ButtonStyle = ButtonStyle.SUCCESS
+    ): MaterialButton {
+        val (bg, fg) = styleColors(style)
+        val h = dp(ctx, MIN_TARGET_DP)
+        val pct = progress.coerceIn(0, 100)
+        val radius = radiusPx(ctx, RADIUS_CONTROL)
+        // Track = the button's own colour, dimmed; fill = the solid colour. So the
+        // control reads as itself, partially completed, rather than as a separate bar.
+        val track = GradientDrawable().apply {
+            setColor(withAlpha(bg, 0x33))
+            cornerRadius = radius
+        }
+        val fill = ClipDrawable(
+            GradientDrawable().apply {
+                setColor(bg)
+                cornerRadius = radius
+            },
+            Gravity.START,
+            ClipDrawable.HORIZONTAL
+        ).apply { level = pct * 100 }
+        // A LAYER, not a tint: the fill has to be a second layer that `setLevel` drains,
+        // and `backgroundTintList` can only recolour one. Setting `background` directly
+        // would normally cost the ripple — which is correct here, because a control
+        // mid-download is not tappable (see below) and press feedback would be a lie.
+        // On completion the caller swaps back to [button] and the ripple returns with it.
+        val layered = LayerDrawable(arrayOf(track, fill))
+        return MaterialButton(ctx).apply {
+            text = label
+            textSize = 14f
+            isAllCaps = false
+            minHeight = h
+            minimumHeight = h
+            setTextColor(fg)
+            background = layered
+            cornerRadius = dp(ctx, RADIUS_CONTROL)
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(ctx, 20), 0, dp(ctx, 20), 0)
+            // Not tappable while filling: the download is already running, and a second
+            // writer on one `.part` file is a corrupt model (see ModelProvisioner).
+            isEnabled = false
+        }
+    }
+
+    /** [color] with its alpha replaced. For tinting a token without a second literal. */
+    private fun withAlpha(color: Int, alpha: Int): Int =
+        (color and 0x00FFFFFF) or (alpha shl 24)
 
     /** A status row: coloured dot + label + value, optionally tappable. */
     fun statusRow(

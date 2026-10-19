@@ -436,25 +436,46 @@ class MainActivity : FragmentActivity() {
         )
 
         // The AI model. CORE functionality (Mido, 2026-10-19), so this row is not a
-        // nicety: until it is ready the bridge refuses every request with 503. Tapping
-        // starts (or retries) the download; a download in flight shows its progress and
-        // is not re-triggerable, because two writers on one .part file is a corrupt model.
+        // nicety: until it is ready the bridge refuses every request with 503.
+        //
+        // Rendered as a BUTTON, not a status row, because here the action and its feedback
+        // are the same thing: you press it to fetch, and the thing you pressed fills with
+        // progress (Mido, 2026-10-19). A ready model is a plain row again, so the control
+        // only exists while there is something to do.
         val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
         val downloading = com.mido.phonebridge.ai.ModelProvisioner.running
         val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
-        val modelValue = when {
-            downloading -> progress?.let { "downloading ${it.percent}%" } ?: "downloading…"
-            modelState.ready -> modelState.detail
-            else -> "tap to download — ${modelState.detail}"
-        }
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "AI model",
-                modelValue,
-                if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
-                onClick = { if (!downloading) startModelDownload() }
+        if (downloading) {
+            val pct = progress?.percent ?: 0
+            statusContainer.addView(
+                Theme.progressButton(
+                    this,
+                    "AI MODEL — DOWNLOADING ${pct}%",
+                    pct
+                ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
             )
-        )
+        } else {
+            statusContainer.addView(
+                Theme.statusRow(
+                    this, "AI model",
+                    if (modelState.ready) "${modelState.detail} — tap to re-download"
+                    else "tap to download — ${modelState.detail}",
+                    if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
+                    // A ready model CONFIRMS before re-fetching 474 MB. Tapping a green row
+                    // used to silently start the download again (Mido, 2026-10-19: *"the
+                    // model downloaded, I touched it it started downloading again"*), and
+                    // the provisioner's idempotence alone only made the tap a no-op — this
+                    // makes the intent explicit instead of guessing it.
+                    onClick = {
+                        if (modelState.ready) confirmRedownload() else startModelDownload()
+                    }
+                )
+            )
+        }
 
         // --- account ---
         if (AuthManager.isLoggedIn(this)) {
@@ -620,22 +641,41 @@ class MainActivity : FragmentActivity() {
      * rotation or a trip to another app, and the progress it reports is read back by
      * [render] so returning to the screen shows the live state rather than a stale one.
      */
-    private fun startModelDownload() {
-        Debug.log("model download requested")
-        Toast.makeText(this, "Downloading the AI model (~474 MB)…", Toast.LENGTH_LONG).show()
+    /**
+     * Ask before re-fetching a model that is already present and verified.
+     *
+     * A 474 MB download is not something to start on a stray tap, and the model is
+     * already working — so the default is to do nothing and the human has to mean it.
+     */
+    private fun confirmRedownload() {
+        AlertDialog.Builder(this)
+            .setTitle("Re-download the AI model?")
+            .setMessage(
+                "The model is already downloaded and verified. Re-downloading fetches " +
+                    "~474 MB again and replaces the working copy."
+            )
+            .setNegativeButton("Keep it") { _, _ -> Debug.log("re-download declined") }
+            .setPositiveButton("Re-download") { _, _ -> startModelDownload(force = true) }
+            .show()
+    }
+
+    private fun startModelDownload(force: Boolean = false) {
+        Debug.log("model download requested (force=$force)")
+        // No toast up front. The provisioner is idempotent now, so "Downloading…" would
+        // be a LIE whenever the model is already present and the tap is a no-op (Mido hit
+        // exactly that on device: *"tabbing download again still shows the message"*).
+        // The button itself is the feedback, and the result toast below reports what
+        // actually happened.
         render()
         Thread({
             val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
                 applicationContext,
+                force = force,
                 onProgress = { runOnUiThread { render() } }
             )
             runOnUiThread {
                 Debug.log("model provision: ${result.detail}")
-                Toast.makeText(
-                    this,
-                    if (result.ok) "AI model ready" else "model download failed: ${result.detail}",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this, result.detail, Toast.LENGTH_LONG).show()
                 render()
             }
         }, "model-download").apply { isDaemon = true }.start()
