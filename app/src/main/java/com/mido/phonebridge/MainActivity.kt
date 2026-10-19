@@ -431,15 +431,38 @@ class MainActivity : FragmentActivity() {
                 onClick = { requestNotifPermission() }
             )
         )
+        // Full-screen popup: NOT a checklist requirement any more.
+        //
+        // Measured on device 2026-10-19 with FSI revoked and draw-over-apps granted: a SECURE
+        // calendar request still opened the modal and was approved (8797ms, `APPROVED`) — the
+        // `ctx.startActivity` path alone is enough while the screen is on. So this row no
+        // longer reports a missing FSI as a warning; nagging for a permission the app does not
+        // need is exactly how a checklist trains its user to ignore it.
+        //
+        // It is still reported when GRANTED, because it is not useless: FSI is what wakes a
+        // LOCKED screen. The test above ran with the screen on, so the locked-screen path is
+        // unproven — and until it is, this stays an optional row rather than a removed
+        // permission or a false alarm.
         val fsiOk = ApprovalGate.canUseFullScreenIntent(this)
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Full-screen popup",
-                if (fsiOk) "granted" else "tap to grant",
-                if (fsiOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { openFullScreenIntentSettings() }
+        if (fsiOk) {
+            statusContainer.addView(
+                Theme.statusRow(
+                    this, "Lock-screen popup",
+                    "granted (wakes a locked screen)",
+                    Theme.SUCCESS,
+                    onClick = { openFullScreenIntentSettings() }
+                )
             )
-        )
+        } else {
+            statusContainer.addView(
+                Theme.statusRow(
+                    this, "Lock-screen popup",
+                    "optional — tap if approvals miss on a locked screen",
+                    Theme.ON_SURFACE_VARIANT,
+                    onClick = { openFullScreenIntentSettings() }
+                )
+            )
+        }
         val overlayOk = android.provider.Settings.canDrawOverlays(this)
         statusContainer.addView(
             Theme.statusRow(

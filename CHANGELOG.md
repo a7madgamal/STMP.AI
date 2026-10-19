@@ -1150,7 +1150,7 @@ key, a Settings toggle, a system cleanup) rather than as routine update behaviou
 
 127 tests green. Version 0.25.0 / build 111.
 
-## 0.25.1 — the NOTIFY card went full-height the moment the summary landed (build 112) — CURRENT
+## 0.25.1 — the NOTIFY card went full-height the moment the summary landed (build 112)
 2026-10-19
 
 Reported on device: *"worked, but it looked good until summarize finished then it went back to full
@@ -1178,6 +1178,34 @@ Verified before rebuilding that no other `MATCH_PARENT`-height child remains und
 remaining `MATCH_PARENT` in `NotifyOverlay` is width-only or paired with `WRAP_CONTENT`.
 
 127 tests green. Version 0.25.1 / build 112.
+
+## 0.25.2 — full-screen intent is OPTIONAL, and the checklist stops nagging (build 113) — CURRENT
+2026-10-19
+
+**Measured on device:** with FSI revoked and draw-over-apps granted, a SECURE calendar request
+still opened the modal and was approved — `APPROVED` in 8797ms, and `APPROVED` can only come from
+the modal Activity. So the `ctx.startActivity` path alone is sufficient **while the screen is on**.
+
+That turns the old "Full-screen popup: tap to grant" row into a false alarm: it reported a warning
+for a permission the app demonstrably does not need for the common case, and a checklist row that
+cries wolf is one the user learns to ignore.
+
+The row is now **optional**, and honest about why it still exists:
+
+- granted → `Lock-screen popup · granted (wakes a locked screen)`, green
+- not granted → `Lock-screen popup · optional — tap if approvals miss on a locked screen`, muted,
+  **not** a warning colour
+
+**The permission is NOT removed**, and that restraint is the point: the test ran with the screen
+on. FSI is what wakes a **locked** screen, so the locked-screen path is still unproven. Removing the
+permission on evidence that does not cover its only remaining job would be the same mistake as
+trusting it in the first place. Remove it once a locked-screen test passes.
+
+Also corrected here: an earlier entry in this file claimed an update silently revokes FSI. It does
+not — `permissions.fullScreenIntent` read `true` straight after installing 0.25.0 over 0.24.x. The
+Play Store's auto-revocation applies to Play-installed apps; these are sideloaded.
+
+127 tests green. Version 0.25.2 / build 113.
 
 ---
 
