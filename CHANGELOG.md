@@ -1105,7 +1105,7 @@ prompt is a system surface and cannot outlive its host.
 
 127 tests green. Version 0.24.3 / build 110.
 
-## 0.25.0 — policy rules are readable over HTTP; FSI state is observable (build 111) — CURRENT
+## 0.25.0 — policy rules are readable over HTTP; FSI state is observable (build 111)
 `6b95325` · 2026-10-19
 
 Mido: *"test, and add policy rules to logs but read only"*.
@@ -1135,13 +1135,49 @@ FSI question needed to be observable rather than guessed. `fullScreenIntent` rep
 below API 34** rather than `false` — "not required" and "revoked" are different facts.
 
 Why this matters beyond diagnostics: `USE_FULL_SCREEN_INTENT` is a **special app access** on
-Android 14+, not a runtime permission, so its default is re-derived whenever the package is
-replaced and an update can silently revoke a manual grant. Every other permission in the app
-survives an update; this one does not. The gate has a second delivery path
-(`ctx.startActivity`, legal via draw-over-apps), so whether FSI is actually load-bearing is now
-a question the report can answer.
+Android 14+, not a runtime permission — its default is re-derived from the app's category when the
+package is added, and the user's own grant is what keeps it on. That is the platform rule, and it
+is why this permission deserves a report field rather than a guess. The gate also has a second
+delivery path (`ctx.startActivity`, legal via draw-over-apps), so whether FSI is actually
+load-bearing is now a question the report can answer.
+
+**Measured, correcting an earlier claim in this file:** installing 0.25.0 over 0.24.x did **NOT**
+revoke it — `permissions.fullScreenIntent` read `true` immediately after the update. So the
+"every update revokes it" theory is **not supported by the evidence on this device**. The Play
+Store's automatic revocation applies to Play-installed apps; these are sideloaded, and the app-op
+survived. Treat a lost grant as something to investigate (a reinstall under a different signing
+key, a Settings toggle, a system cleanup) rather than as routine update behaviour.
 
 127 tests green. Version 0.25.0 / build 111.
+
+## 0.25.1 — the NOTIFY card went full-height the moment the summary landed (build 112) — CURRENT
+2026-10-19
+
+Reported on device: *"worked, but it looked good until summarize finished then it went back to full
+height shit"*.
+
+That sentence is the whole diagnosis — **correct until the AI answered** means the fault was in
+something that only becomes visible when the summary arrives. That is the risk strip.
+
+The strip was added to the card as a **`MATCH_PARENT`-height child of a `WRAP_CONTENT` card**. In a
+`WRAP_CONTENT` parent a `MATCH_PARENT` child forces the parent to match *its* parent, so the card
+grows to the whole window. It stayed hidden because the strip is `GONE` until `applyAi`, so the
+card measured fine, the fade-in and countdown looked right, and the screen only snapped the instant
+the model returned.
+
+**This is the 0.6.2 bug, reintroduced.** The rule from that release — *a decorative fill belongs in
+the background or a fixed-size view, never as a `MATCH_PARENT` child of a `WRAP_CONTENT` parent* —
+was written down and then not applied when the strip was added in 0.17.0. A rule that lives only in
+a changelog entry is not a rule.
+
+Fix: the strip is `WRAP_CONTENT` height in the layout tree, and `applyAi` stretches it to the
+card's **measured** height after the text is laid out (`root.post`). Only the strip's own height
+changes — the card's size stays decided by its text, which is what keeps it small.
+
+Verified before rebuilding that no other `MATCH_PARENT`-height child remains under the card: every
+remaining `MATCH_PARENT` in `NotifyOverlay` is width-only or paired with `WRAP_CONTENT`.
+
+127 tests green. Version 0.25.1 / build 112.
 
 ---
 

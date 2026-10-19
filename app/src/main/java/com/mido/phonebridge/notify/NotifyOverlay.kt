@@ -281,6 +281,16 @@ object NotifyOverlay {
         // the summary arrives. Its own view (not a border stroke) so it can be toggled
         // without rebuilding the background, and so it reads as a margin marker rather
         // than a change to the card's silhouette.
+        //
+        // **Height is WRAP_CONTENT and the parent is the CARD, not the column.** It is added
+        // to the WRAP_CONTENT card as a MATCH_PARENT-height child, which is the exact bug
+        // that made the card full-screen in 0.6.2: in a WRAP_CONTENT parent, a MATCH_PARENT
+        // child forces the parent to match ITS parent. It went unnoticed this time because
+        // the strip is GONE until the AI summary lands — so the card looked correct, then
+        // snapped to full height the moment the model answered (reported on device
+        // 2026-10-19: *"looked good until summarize finished then it went back to full
+        // height shit"*). The card gets a FIXED height once the text is laid out, and the
+        // strip is stretched to that measured height afterwards, never by layout.
         val riskStrip = View(ctx).apply {
             visibility = View.GONE
         }
@@ -363,9 +373,12 @@ object NotifyOverlay {
         column.addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         card.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        // WRAP_CONTENT height on purpose. The strip is stretched to the card's measured
+        // height by hand after layout (see [applyAi]); a MATCH_PARENT child here would make
+        // the WRAP_CONTENT card fill the screen the instant it became visible.
         card.addView(
             riskStrip,
-            FrameLayout.LayoutParams(dp(3), MATCH_PARENT).apply { gravity = Gravity.START }
+            FrameLayout.LayoutParams(dp(3), WRAP_CONTENT).apply { gravity = Gravity.START }
         )
 
         val size = screenSize(wm)
@@ -642,6 +655,17 @@ object NotifyOverlay {
         val color = riskColor(result.risk)
         entry.riskStrip?.setBackgroundColor(color)
         entry.riskStrip?.visibility = View.VISIBLE
+        // Stretch the strip to the card's MEASURED height rather than letting layout do it.
+        // \`post\` so the new AI line has been measured first; before that the height is
+        // stale and the strip would be short. Only its own height changes — the card's size
+        // stays decided by the text, which is what keeps it small.
+        entry.root?.post {
+            val h = entry.root?.height ?: 0
+            entry.riskStrip?.layoutParams?.let { lp ->
+                lp.height = h
+                entry.riskStrip?.layoutParams = lp
+            }
+        }
     }
 
     /**
