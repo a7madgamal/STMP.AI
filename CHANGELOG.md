@@ -973,7 +973,7 @@ Two things, both from Mido's 2026-10-19 messages.
 
 **122 tests green.** Version 0.23.2 / build 106. APK taildropped, exit 0.
 
-## 0.24.0 — the modal's third button, and "PER-PAIR RULES" → "EXCEPTIONS" (build 107) — CURRENT
+## 0.24.0 — the modal's third button, and "PER-PAIR RULES" → "EXCEPTIONS" (build 107)
 `e89de3e` · 2026-10-19
 
 Mido: *"in the modal I want a third button to automatically add an exception for the current
@@ -1015,6 +1015,57 @@ set-and-approve, exact verb only, `ALWAYS …` labels, own row above the pair, s
 
 **126 tests green** (4 new: the other-mode mapping, the file round-trip, siblings untouched, exact
 beats ANY). Version 0.24.0 / build 107.
+
+## 0.24.1 — the exception button never rendered on calendar/gmail (build 108)
+`<hash>` · 2026-10-19
+
+Found by testing on the device, and it is the "computed then discarded" trap this project has
+already paid for twice.
+
+`exceptionOffer` was built at the call site and passed to **two of the three**
+`ApprovalView(...)` returns. The generic branch — the one calendar and gmail use — took the
+constructor default of `null`, so the button silently did not exist on exactly the routes that
+went through it. Notifications worked, which is why it looked fine.
+
+**Fixed by passing it in the third branch, and by adding `ApprovalViewWiringTest`: a source scan
+that counts `ApprovalGate.ApprovalView(` constructions against `exceptionOffer = exceptionOffer`
+pass-throughs and fails the build when they disagree.** The regex is anchored to end-of-line on
+purpose — the call site writes `exceptionOffer = exceptionOfferFor(...)`, and an unanchored match
+counts it and fails on a correct tree (that happened on the first run).
+
+The guard was **proven to fail**: breaking one pass-through produced
+"Found 3 construction(s) but 2 offer pass-through(s)".
+
+## 0.24.2 — a settled NOTIFY card could not be dismissed (build 109) — CURRENT
+`<hash>` · 2026-10-19
+
+Reported on device: *"I have a notification card still stuck!"*, then *"it doesn't even dismiss on
+x click"*.
+
+Both symptoms, one cause: **removal was not guaranteed.** `settle()` marks the entry `settled`
+(so the outcome is reported and every tap path early-returns), then starts a fade-out as a chain
+of posted runnables. If any link in that chain never ran, the card stayed on screen and already
+`settled` — so the card body ignored taps, and the `x` called `settle()` again, which
+early-returned. A card with every control dead, and no code path left that would remove it.
+
+This is the same class of defect the overlay has produced before (animator-dependence in 0.9.0):
+**appearance and lifecycle must not hang on a chain that can silently stop.**
+
+Three changes, all pointing at one idea — removal gets its own guaranteed path:
+
+- **`Entry.removed` is separate from `Entry.settled`.** Settled means "the outcome is decided";
+  removed means "the window is gone". Conflating them is what made a stuck card unreachable.
+- **`teardown(entry)` is idempotent and unconditional**, reachable from four places: fade
+  completion, the settle backstop, the `x`, and `dismissAll()`. It is deliberately NOT guarded by
+  `settled` — a settled card still on screen is the bug.
+- **A backstop fires at `FADE_OUT_MS + COMMIT_FRAMES_MS + BACKSTOP_SLACK_MS`** and tears the
+  window down whether or not the fade got there; and a throw inside the fade falls straight to
+  teardown instead of dying quietly. The `x` now calls `settle()` **and** `teardown()`.
+
+`dismissAll()` uses the same path, so service shutdown cannot race a fade and both remove one
+window.
+
+127 tests green. Version 0.24.2 / build 109.
 
 ---
 

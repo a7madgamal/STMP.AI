@@ -993,7 +993,14 @@ class HttpServer(
             // In R3 this always evaluates true, because a view only exists on the
             // SECURE path — it is correctness plumbing so a future mode reusing the
             // modal cannot silently inherit a fingerprint.
-            requiresBiometric = requiresBiometric
+            requiresBiometric = requiresBiometric,
+            // The exception offer is built ONCE by the caller and passed in, like the rows.
+            // Omitting it here was the bug this line exists to prevent: every branch of
+            // this function returns an ApprovalView, and a branch that forgets the offer
+            // silently renders a modal with no third button — no error, no log, just a
+            // feature that is absent on exactly the routes that use this path (calendar,
+            // gmail). Every `return ApprovalView(...)` in this function must pass it.
+            exceptionOffer = exceptionOffer
         )
     }
 

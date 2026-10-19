@@ -159,6 +159,17 @@ object NotifyOverlay {
         var timeout: Runnable? = null
 
         /**
+         * True once the view has been handed back to the window manager.
+         *
+         * Separate from [settled] on purpose, and that separation is the fix for a real
+         * defect: `settled` means "the outcome is decided", while this means "the window is
+         * gone". Conflating them left a card on screen forever — once `settled` was true,
+         * every tap path early-returned, and the only removal was a posted fade chain that
+         * could silently stop. Removal now has its own flag and its own guaranteed path.
+         */
+        var removed = false
+
+        /**
          * The window's layout params, kept so the fade-out can drive WINDOW alpha
          * ([WindowManager.LayoutParams.alpha]) instead of only the view's. The window
          * alpha is what SurfaceFlinger composites with, so the window is genuinely
@@ -434,6 +445,8 @@ object NotifyOverlay {
                         anchorY = params.y
                     } else if (ev.actionMasked == MotionEvent.ACTION_UP) {
                         // Tap = approve, and skip whatever wait remains (fetch included).
+                        // Settle only: this card is meant to fade out normally, and the
+                        // settle backstop guarantees its removal.
                         settle(entry, Reason.APPROVED)
                     }
                     true
@@ -443,7 +456,17 @@ object NotifyOverlay {
             }
         }
 
-        close.setOnClickListener { settle(entry, Reason.TAPPED) }
+        // Dismiss. Settle reports the outcome (once), then teardown removes the window
+        // (once) — calling BOTH is the fix for a stuck card: if the card had already
+        // settled on its own (e.g. it expired while the human was reaching for the x), the
+        // settle above is a no-op and only the teardown does anything. Previously this
+        // called settle alone, which early-returned on an already-settled entry and left
+        // the window on screen with every control dead (reported on device 2026-10-19:
+        // "doesn't even dismiss on x click").
+        close.setOnClickListener {
+            settle(entry, Reason.TAPPED)
+            teardown(entry)
+        }
 
         // Invisible BEFORE the view enters the window manager. Setting alpha after
         // addView leaves one frame where the freshly attached card is drawn at full
@@ -634,11 +657,8 @@ object NotifyOverlay {
     }
 
     /**
-     * Report a card's outcome, then fade it out and remove it. The fade-out is a single
-     * one-shot here (not the per-frame tick), and [promoteNext] runs only after the fade
-     * completes — so the dying card and the next card never coexist, which is what killed
-     * the flash. Removal is guaranteed (not dependent on an animator choosing to fire)
-     * because it is the final step of this method on the main thread.
+     * Report a card's outcome, then fade it out and remove it. Removal is GUARANTEED, not
+     * merely attempted — see [teardown] for why that distinction cost a stuck card.
      */
     private fun settle(entry: Entry, reason: Reason, detail: String = "") {
         if (entry.settled) return
@@ -664,6 +684,15 @@ object NotifyOverlay {
             return
         }
 
+        // THE BACKSTOP, and it is the point of this method. The fade below is a chain of
+        // posted runnables; if any link throws or the main thread drops one, the card was
+        // left on screen with `settled = true` — so every tap early-returned and nothing
+        // could remove it. A user reported exactly that ("card still stuck", then "doesn't
+        // even dismiss on x click"). This callback makes removal unconditional: it runs
+        // after the fade SHOULD have finished, and tears the window down whether or not the
+        // fade got there.
+        main.postDelayed({ teardown(entry) }, FADE_OUT_MS + COMMIT_FRAMES_MS + BACKSTOP_SLACK_MS)
+
         // One-shot fade-out, then remove and hand the screen to the next card.
         //
         // The fade is driven by WINDOW alpha ([WindowManager.LayoutParams.alpha]), not
@@ -679,35 +708,68 @@ object NotifyOverlay {
         // fades out from whatever opacity it had actually reached, with no jump to full.
         val fadeOut = object : Runnable {
             override fun run() {
-                val p = (System.currentTimeMillis() - entry.settledAt).toFloat() / FADE_OUT_MS
-                val a = (1f - p).coerceIn(0f, 1f)
-                entry.params?.let { lp ->
-                    lp.alpha = a
-                    runCatching { wm(entry.ctx).updateViewLayout(card, lp) }
-                }
-                card.translationY =
-                    (10 * entry.ctx.resources.displayMetrics.density).roundToInt() * p
-                if (p < 1f) {
-                    main.postDelayed(this, TICK_MS)
-                } else {
-                    // The window is now at alpha 0. Give the compositor a few frames to
-                    // commit that transparent buffer BEFORE destroying the surface —
-                    // removing in the same frame can tear the surface down while the
-                    // opaque buffer is still what SurfaceFlinger last latched, which is
-                    // the flash. The window is invisible at this point, so the extra
-                    // ~3 frames cost nothing the eye can see.
-                    main.postDelayed({
-                        com.mido.phonebridge.Debug.log(
-                            "notify[${entry.id}] teardown windowAlpha=${entry.params?.alpha} " +
-                                "viewAlpha=${card.alpha}"
-                        )
-                        runCatching { wm(entry.ctx).removeView(card) }
-                        promoteNext()
-                    }, COMMIT_FRAMES_MS)
+                // A failure here must never strand the card: fall straight to teardown.
+                try {
+                    val p = (System.currentTimeMillis() - entry.settledAt).toFloat() / FADE_OUT_MS
+                    val a = (1f - p).coerceIn(0f, 1f)
+                    entry.params?.let { lp ->
+                        lp.alpha = a
+                        runCatching { wm(entry.ctx).updateViewLayout(card, lp) }
+                    }
+                    card.translationY =
+                        (10 * entry.ctx.resources.displayMetrics.density).roundToInt() * p
+                    if (p < 1f) {
+                        main.postDelayed(this, TICK_MS)
+                    } else {
+                        // The window is now at alpha 0. Give the compositor a few frames
+                        // to commit that transparent buffer BEFORE destroying the surface.
+                        main.postDelayed({ teardown(entry) }, COMMIT_FRAMES_MS)
+                    }
+                } catch (e: Exception) {
+                    com.mido.phonebridge.Debug.log(
+                        "notify[${entry.id}] fade-out threw (${e.message}); tearing down now"
+                    )
+                    teardown(entry)
                 }
             }
         }
         main.post(fadeOut)
+    }
+
+    /**
+     * Remove the card's window, exactly once, and hand the screen to the next waiter.
+     *
+     * Idempotent by [Entry.removed] because it is reachable from four places — the fade's
+     * completion, the settle backstop, the `x` tap, and service shutdown — and two of them
+     * can race on the same card. Every one of them must be able to say "make this go away"
+     * without having to know whether another already did.
+     *
+     * This is deliberately NOT guarded by [Entry.settled]: a settled card that is still on
+     * screen is precisely the bug this exists to fix, and the dismiss control has to work
+     * on it.
+     */
+    private fun teardown(entry: Entry) {
+        if (entry.removed) return
+        entry.removed = true
+
+        entry.tick?.let(main::removeCallbacks)
+        entry.timeout?.let(main::removeCallbacks)
+
+        val card = entry.root
+        if (card != null) {
+            com.mido.phonebridge.Debug.log(
+                "notify[${entry.id}] teardown windowAlpha=${entry.params?.alpha} " +
+                    "viewAlpha=${card.alpha}"
+            )
+            runCatching { wm(entry.ctx).removeView(card) }
+                .onFailure {
+                    Log.w(TAG, "notify[${entry.id}] removeView failed: ${it.message}")
+                }
+            // Drop the reference so a second teardown cannot touch a dead view, and so the
+            // card is collectable while the Entry lives on in the queue's retired list.
+            entry.root = null
+        }
+        promoteNext()
     }
 
     /**
@@ -741,7 +803,9 @@ object NotifyOverlay {
                         )
                     )
                 }
-                entry.root?.let { runCatching { wm(entry.ctx).removeView(it) } }
+                // Same idempotent path as every other removal, so shutdown cannot race
+                // the fade and the two cannot both try to remove one window.
+                teardown(entry)
             }
         }
     }
