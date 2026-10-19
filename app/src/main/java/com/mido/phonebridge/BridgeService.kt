@@ -116,6 +116,41 @@ class BridgeService : Service() {
         super.onCreate()
         createChannel()
         Debug.log("service onCreate")
+        // Warm the AI model as soon as the service exists (Mido, 2026-10-19: "warmed up in
+        // memory on app load"), so the first request does not pay the load. Off the main
+        // thread, and a no-op when the model is absent — readiness, not warm-up, is what
+        // decides whether the bridge may serve.
+        Thread({
+            try {
+                com.mido.phonebridge.ai.ModelRegistry.warm(applicationContext)
+                Debug.log("model warm: ${com.mido.phonebridge.ai.ModelRegistry.status(applicationContext)}")
+            } catch (e: Exception) {
+                Debug.log("model warm-up failed: ${e.message}")
+            }
+        }, "model-warm").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Give the warm model back when the OS is short on memory.
+     *
+     * The release valve for a ~700 MiB resident engine (measured 2026-10-19) on a 24/7
+     * service. Surrendering it voluntarily is strictly better than being killed: a killed
+     * foreground service denies every request, while a released engine merely reloads on
+     * the next one. The model FILE is never touched — only the loaded engine.
+     *
+     * **Why there is no level comparison.** The fine-grained levels
+     * (`TRIM_MEMORY_RUNNING_LOW` and friends) are DEPRECATED as of API 34/35 precisely
+     * because apps are no longer notified of them, so testing `level >= RUNNING_LOW`
+     * would be dead logic behind a build warning. Any trim callback is the OS saying
+     * memory is tight, and a luxury is the first thing to surrender — so this releases
+     * unconditionally. That is also free in this app: a request arriving with the screen
+     * off is DENIED as unattended (v0.12.0), so the engine only ever matters while the
+     * screen is on, and the reload cost is bounded by the 0.4 s load measured on the host.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.mido.phonebridge.ai.ModelRegistry.release()
+        Debug.log("onTrimMemory($level): model engine released")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -430,6 +465,31 @@ class HttpServer(
             // a plugin and a verb, and the log is far more useful with them.
             draft.bindRoute(resolved.plugin.id, resolved.route.verb, resolved.route.path)
 
+            // MODEL READINESS. The AI is core functionality (Mido, 2026-10-19), so the
+            // bridge does not serve without it: a missing model is a NOT-READY state,
+            // not a degraded one. Every route answers 503 until the model is
+            // provisioned, which is what turns "the app downloads its own model" into
+            // part of setup rather than a convenience. Checked here, before the body
+            // is read and before validation, so the caller learns the bridge is not up
+            // without first being asked to fix their input.
+            //
+            // `/debug` and `/logs` are exempt: they are how the not-ready state is
+            // DIAGNOSED from outside, and blocking them would make a not-ready bridge
+            // undiagnosable — the dead end `/debug` exists to prevent. Read-only, and
+            // neither opens a decision.
+            val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
+            if (!com.mido.phonebridge.ai.ModelReadiness.serves(modelState.ready, resolved.plugin.id)) {
+                // HANDLER_FAILED, not REJECTED_INVALID: a 503 is OUR side, and the audit
+                // rule is that 5xx is never noise. Recording it as the caller's mistake
+                // would hide a not-ready bridge among typos — the exact misclassification
+                // `AuditClassify` exists to prevent.
+                draft.outcome(AuditOutcome.HANDLER_FAILED)
+                draft.error("model_not_ready")
+                val obj = err("model_not_ready", modelState.detail)
+                draft.response(503, obj.toString())
+                return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)
+            }
+
             val rawBody = if (method == "POST") readRawBody(session) else ""
             // Verbatim, and BEFORE the parse that can throw. A malformed body still
             // has to leave a record: without this the log says "invalid JSON" and
@@ -553,6 +613,17 @@ class HttpServer(
                                 err("denied", "request denied by user")
                             )
                         }
+                        is NotifyGate.Result.AiFailed -> {
+                            // The card could not be described, so it was withdrawn without a
+                            // decision. The AI is core (Mido, 2026-10-19): this is a fault on
+                            // our side, answered as a coded error — NEVER as an approval, and
+                            // never as a deny either, because no human said no.
+                            draft.outcome(AuditOutcome.HANDLER_FAILED)
+                            draft.error("ai_unavailable")
+                            val obj = err("ai_unavailable", decision.detail)
+                            draft.response(500, obj.toString())
+                            return Dispatched(Response.Status.INTERNAL_ERROR, obj)
+                        }
                         is NotifyGate.Result.Unavailable -> {
                             // Could not be shown: no permission, evicted, or the screen
                             // went away mid-window. Deny, and say which. Approving
@@ -580,8 +651,9 @@ class HttpServer(
                     // The AI summary is computed BEFORE the modal is shown (option B,
                     // Mido 2026-10-18): on SECURE there is a 60s window and a full
                     // screen, so a ~3s wait buys real clarity for free. It is bounded by
-                    // SummaryProvider.SECURE_BUDGET_MS and a null answer simply means the
-                    // modal shows the deterministic rows it always had.
+                    // SummaryProvider.SECURE_BUDGET_MS, and a failure THROWS
+                    // `ai_unavailable` (the AI is core, Mido 2026-10-19) rather than
+                    // showing a modal whose summary is silently missing.
                     val gate = ApprovalGate.await(
                         ctx, remote, "$method $path", summary,
                         detail = detailFor(resolved.route.path, path, body),
@@ -720,8 +792,10 @@ class HttpServer(
         val rows = pluginRows(route, actualPath, body, query, remote)
 
         // The AI summary, computed once per request from the SAME facts the modal
-        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS; a null answer leaves the
-        // three AI fields blank and the modal renders exactly what it always did.
+        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS. Since the AI is core
+        // (Mido, 2026-10-19), a failure here THROWS `ai_unavailable` rather than
+        // leaving the AI fields blank: a request the model could not describe must not
+        // be presented for approval as if it had been.
         val ai = aiSummary(route, summary, rows)
 
         // /notifications/{id}/action -> resolve the action against live data.
@@ -770,9 +844,9 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = rows,
-                aiDescription = ai?.description ?: "",
-                aiRisk = ai?.risk,
-                aiReason = ai?.reason ?: "",
+                aiDescription = ai.description,
+                aiRisk = ai.risk,
+                aiReason = ai.reason,
                 requiresBiometric = requiresBiometric
             )
         }
@@ -798,9 +872,9 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = rows,
-                aiDescription = ai?.description ?: "",
-                aiRisk = ai?.risk,
-                aiReason = ai?.reason ?: "",
+                aiDescription = ai.description,
+                aiRisk = ai.risk,
+                aiReason = ai.reason,
                 requiresBiometric = requiresBiometric
             )
         }
@@ -829,9 +903,9 @@ class HttpServer(
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
             destructive = rows,
-            aiDescription = ai?.description ?: "",
-            aiRisk = ai?.risk,
-            aiReason = ai?.reason ?: "",
+            aiDescription = ai.description,
+            aiRisk = ai.risk,
+            aiReason = ai.reason,
             // Biometric is a SECURE-only rule, computed by the policy and passed in.
             // The gate states it; the Activity renders it and never recomputes it.
             // In R3 this always evaluates true, because a view only exists on the
@@ -843,7 +917,13 @@ class HttpServer(
 
     /**
      * Build the facts a summariser sees, run the model within the SECURE budget, and
-     * return its answer or null.
+     * return its answer.
+     *
+     * **Throws rather than returning null.** The AI is core functionality (Mido,
+     * 2026-10-19), so a request that cannot be described must not be approved. A null
+     * answer here is not "render without AI" — it is a fault, and it propagates to the
+     * dispatcher's `PluginError` catch as `ai_unavailable` (500, never noise). The model's
+     * ABSENCE is a different case, caught earlier by the readiness gate as 503.
      *
      * Facts are the deterministic projection the modal already renders: the route's
      * own label, the audit summary, and the labelled rows. Raw JSON is deliberately
@@ -855,7 +935,7 @@ class HttpServer(
         route: Route,
         summary: String,
         rows: List<Pair<String, String>>
-    ): com.mido.phonebridge.ai.RequestSummary? {
+    ): com.mido.phonebridge.ai.RequestSummary {
         val facts = com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
             verb = route.verb.name,
@@ -865,6 +945,10 @@ class HttpServer(
         )
         return com.mido.phonebridge.ai.SummaryProvider.run(
             ctx, facts, com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
+        ) ?: throw PluginError(
+            "ai_unavailable",
+            "the model could not describe this request within " +
+                "${com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS}ms"
         )
     }
 

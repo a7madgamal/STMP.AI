@@ -100,7 +100,14 @@ object NotifyOverlay {
         /** It could not be drawn at all. */
         UNAVAILABLE,
         /** The line was full, so it was refused rather than shown late. */
-        REFUSED
+        REFUSED,
+        /**
+         * The AI could not describe the request. The card is torn down WITHOUT a
+         * decision: the AI is core (Mido, 2026-10-19), so a card that cannot say what
+         * is being approved must not offer to approve it. Distinct from [UNAVAILABLE]
+         * (a drawing failure) and from the 503 not-ready gate (no model at all).
+         */
+        AI_FAILED
     }
 
     /** What actually happened to one prompt. */
@@ -545,7 +552,9 @@ object NotifyOverlay {
     private fun startFetch(entry: Entry) {
         val facts = entry.facts
         if (facts == null) {
-            entry.decisionStartAt = System.currentTimeMillis()
+            // No facts means no AI, and the AI is core: this card cannot describe what
+            // it is asking about, so it is withdrawn rather than shown with a bare label.
+            settle(entry, Reason.AI_FAILED, "no facts for the summary")
             return
         }
         Thread({
@@ -557,29 +566,35 @@ object NotifyOverlay {
             }
             main.post {
                 if (entry.settled) return@post
+                if (result == null) {
+                    // Fail hard (Mido, 2026-10-19): a card that could not be described is
+                    // not a card that may be silently approved. Tear it down with a
+                    // distinct reason so the dispatcher answers a fault, never a decision.
+                    com.mido.phonebridge.Debug.log(
+                        "notify[${entry.id}] AI failed within ${entry.fetchCapMs}ms; withdrawing card"
+                    )
+                    settle(entry, Reason.AI_FAILED, "summary unavailable")
+                    return@post
+                }
                 applyAi(entry, result)
                 // The clock starts now, whatever the outcome. "Fetch first, then count."
                 entry.decisionStartAt = System.currentTimeMillis()
                 com.mido.phonebridge.Debug.log(
                     "notify[${entry.id}] fetch done in " +
                         "${entry.decisionStartAt - entry.shownAt}ms " +
-                        "(risk=${result?.risk ?: "none"}); decision clock starts"
+                        "(risk=${result.risk}); decision clock starts"
                 )
             }
         }, "notify-fetch-${entry.id}").apply { isDaemon = true }.start()
     }
 
     /**
-     * Render the fetch result onto the card. A null result clears the status line
-     * rather than leaving "summarising…" forever — a status that never resolves is a
-     * lie about what the card is doing.
+     * Render the fetch result onto the card. Since the AI is core (Mido, 2026-10-19),
+     * a null result never reaches here — the caller withdraws the card instead. The
+     * non-null signature is what makes that guarantee visible in the type.
      */
-    private fun applyAi(entry: Entry, result: com.mido.phonebridge.ai.RequestSummary?) {
+    private fun applyAi(entry: Entry, result: com.mido.phonebridge.ai.RequestSummary) {
         val line = entry.aiLine ?: return
-        if (result == null) {
-            line.visibility = View.GONE
-            return
-        }
         line.text = result.description
         line.visibility = View.VISIBLE
         line.setTextColor(TEXT)

@@ -32,12 +32,12 @@ import java.io.File
  * *general-purpose* instruct model published as a plain `.litertlm`. Swapping back
  * to Gemma is one constant in [ModelRegistry] once a token is available.
  *
- * **The model is NOT bundled in the APK.** It is a ~475MB `.litertlm` file placed
- * on the device (see [ModelRegistry.MODEL_ASSET]). This class is therefore
- * *absent-safe*: every entry point returns null rather than throwing when the file
- * is missing, so a phone without the model falls back to [HeuristicSummarizer].
- * That is the whole contract of [SummaryModel], and it is what keeps a clarity
- * feature from ever blocking an approval.
+ * **The model is NOT bundled in the APK.** It is a ~474MB `.litertlm` file that the
+ * app fetches for itself (see [ModelProvisioner]) and keeps at
+ * [ModelRegistry.MODEL_ASSET]. The AI is core functionality (Mido, 2026-10-19), so a
+ * missing model is a NOT-READY state rather than a degraded one: there is no heuristic
+ * fallback any more, and the server refuses to serve until [ModelRegistry.readiness]
+ * passes.
  *
  * **One model, one call.** The prompt asks for a single JSON object and the runtime
  * is told to constrain decoding to that schema, so the parse is total: a reply that
@@ -96,6 +96,40 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     private var engine: Engine? = null
 
     override fun isAvailable(ctx: Context): Boolean = modelFile.exists() && modelFile.length() > 0
+
+    /**
+     * Load the model now so the first request does not pay for it.
+     *
+     * Blocking — call off the main thread. Idempotent, and a no-op when the file is
+     * absent: whether the bridge may serve at all is [ModelRegistry.readiness]'s call,
+     * not this one's. Warm-up buys latency, never permission.
+     */
+    fun warm(ctx: Context) {
+        if (!isAvailable(ctx)) return
+        try {
+            engine ?: createEngine().also { engine = it }
+        } catch (e: Exception) {
+            // A failed warm-up is not fatal: the next request retries the load and
+            // reports its own failure. Swallowing here would be a silent fallback only
+            // if it changed an outcome, and it does not.
+            Log.w(TAG, "warm-up failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Drop the loaded model and free its memory (~700 MiB resident, measured 2026-10-19).
+     *
+     * The release valve for [android.app.Service.onTrimMemory]. The engine is a luxury
+     * the OS may reclaim under pressure, and surrendering it on demand is what keeps the
+     * foreground service from being killed outright — a killed service denies every
+     * request, which is strictly worse than a slow one.
+     */
+    fun release() {
+        val e = engine ?: return
+        engine = null
+        runCatching { e.close() }
+        Log.i(TAG, "engine released")
+    }
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
         if (!isAvailable(ctx)) return null

@@ -435,6 +435,27 @@ class MainActivity : FragmentActivity() {
             )
         )
 
+        // The AI model. CORE functionality (Mido, 2026-10-19), so this row is not a
+        // nicety: until it is ready the bridge refuses every request with 503. Tapping
+        // starts (or retries) the download; a download in flight shows its progress and
+        // is not re-triggerable, because two writers on one .part file is a corrupt model.
+        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
+        val downloading = com.mido.phonebridge.ai.ModelProvisioner.running
+        val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
+        val modelValue = when {
+            downloading -> progress?.let { "downloading ${it.percent}%" } ?: "downloading…"
+            modelState.ready -> modelState.detail
+            else -> "tap to download — ${modelState.detail}"
+        }
+        statusContainer.addView(
+            Theme.statusRow(
+                this, "AI model",
+                modelValue,
+                if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
+                onClick = { if (!downloading) startModelDownload() }
+            )
+        )
+
         // --- account ---
         if (AuthManager.isLoggedIn(this)) {
             val email = AuthManager.accountEmail ?: "(email unknown)"
@@ -590,6 +611,34 @@ class MainActivity : FragmentActivity() {
         }
     } catch (e: PolicyException) {
         "rules unreadable: ${e.message}"
+    }
+
+    /**
+     * Start the model download and keep the home screen in step with it.
+     *
+     * The download is owned by [ModelProvisioner], not this Activity: it must survive a
+     * rotation or a trip to another app, and the progress it reports is read back by
+     * [render] so returning to the screen shows the live state rather than a stale one.
+     */
+    private fun startModelDownload() {
+        Debug.log("model download requested")
+        Toast.makeText(this, "Downloading the AI model (~474 MB)…", Toast.LENGTH_LONG).show()
+        render()
+        Thread({
+            val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
+                applicationContext,
+                onProgress = { runOnUiThread { render() } }
+            )
+            runOnUiThread {
+                Debug.log("model provision: ${result.detail}")
+                Toast.makeText(
+                    this,
+                    if (result.ok) "AI model ready" else "model download failed: ${result.detail}",
+                    Toast.LENGTH_LONG
+                ).show()
+                render()
+            }
+        }, "model-download").apply { isDaemon = true }.start()
     }
 
     private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {

@@ -15,9 +15,10 @@ import java.util.concurrent.TimeUnit
  * card, and it is capped).
  *
  * **Never blocks past the budget, never throws.** A model that is cold, slow,
- * missing, or broken yields null and the caller falls back to the deterministic
- * description it already has. That is the invariant that makes the AI a clarity
- * feature: it can be absent and everything still works.
+ * missing, or broken yields null. What the CALLER does with that null is the fail-fast
+ * decision (Mido, 2026-10-19): the AI is core, so a null is a fault the request fails
+ * on, not a silent fallback to rows-only. This object only bounds the wait; it does not
+ * decide whether a null is tolerable.
  */
 object SummaryProvider {
 
@@ -52,7 +53,7 @@ object SummaryProvider {
             val future = pool.submit<RequestSummary?> { model.summarize(ctx, facts, budgetMs) }
             val result = future.get(budgetMs + SLACK_MS, TimeUnit.MILLISECONDS)
             if (result == null) {
-                Log.i(TAG, "${model.id} produced no summary; falling back")
+                Log.w(TAG, "${model.id} produced no summary; the caller fails the request")
             }
             result
         } catch (e: java.util.concurrent.TimeoutException) {

@@ -90,6 +90,13 @@ object NotifyGate {
         class Rejected(val shownAt: Long?, val decidedAt: Long) : Result()
 
         /**
+         * The AI could not describe the request. NOT a human decision and NOT a
+         * not-ready bridge (that is the 503 gate): the model is present but failed, so
+         * this is our fault and it fails the request rather than approving blind.
+         */
+        class AiFailed(val detail: String) : Result()
+
+        /**
          * Nobody could have seen it: screen off, locked, refused when the line was full,
          * or no permission to draw.
          */
@@ -159,6 +166,7 @@ object NotifyGate {
             Reason.EXPIRED -> Result.Approved(shownAt, outcome.decidedAt)
             Reason.APPROVED -> Result.Tapped(shownAt, outcome.decidedAt)
             Reason.TAPPED -> Result.Rejected(shownAt, outcome.decidedAt)
+            Reason.AI_FAILED -> Result.AiFailed(outcome.detail)
             Reason.UNATTENDED ->
                 Result.Unavailable(shownAt, outcome.decidedAt, "screen off or device locked")
             Reason.REFUSED ->

@@ -80,6 +80,14 @@ object ErrorCodes {
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
         "listener_unavailable" to UNAVAILABLE,
+        // The AI model is REQUIRED (Mido, 2026-10-19). Its absence is a not-ready state,
+        // not a degraded one: every route answers 503 until it is provisioned, so a
+        // caller sees "not ready" rather than a decision made without the model.
+        "model_not_ready" to UNAVAILABLE,
+        // The model is present but this call failed (cold load error, malformed reply,
+        // over budget). A fault on our side, never noise — the request could not be
+        // described, so it must not be approved.
+        "ai_unavailable" to INTERNAL,
         "vault_missing" to UNAVAILABLE,
         "vault_corrupt" to INTERNAL,
         "vault_unrecoverable" to INTERNAL,
