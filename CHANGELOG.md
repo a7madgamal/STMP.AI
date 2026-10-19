@@ -955,7 +955,7 @@ silently.
 
 Version 0.23.1 / build 105.
 
-## 0.23.2 — arm64-only ABI (build 106) — CURRENT
+## 0.23.2 — arm64-only ABI (build 106)
 `4b6b4f0` · 2026-10-19
 
 Two things, both from Mido's 2026-10-19 messages.
@@ -1104,7 +1104,7 @@ prompt is a system surface and cannot outlive its host.
 
 127 tests green. Version 0.24.3 / build 110.
 
-## 0.25.0 — policy rules are readable over HTTP; FSI state is observable (build 111)
+## 0.25.0 — policy rules are readable over HTTP; FSI state is observable (build 111) — CURRENT
 `6b95325` · 2026-10-19
 
 Mido: *"test, and add policy rules to logs but read only"*.
