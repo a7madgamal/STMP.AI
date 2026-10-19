@@ -47,11 +47,18 @@ class ModeResolution(
 }
 
 /**
- * The entire policy engine: `find` on a list.
+ * The entire policy engine: `find` on a list, twice.
  *
  * Total and exhaustive over [GlobalMode] with **no `else` branch** — adding a value
  * is a compile error here rather than a silent default, which matters because the
  * default would be a security decision nobody made.
+ *
+ * `AUTOMATIC` resolves in two steps, and the order is the whole precedence rule: an
+ * **exact** `plugin × verb` rule wins, and only if none exists does the plugin's
+ * **ANY** rule apply. Two rules can therefore match one request, which is the one
+ * thing the pre-ANY design forbade — so the order is stated here rather than
+ * computed, and `PolicyTest` asserts it. Still exactly one winner, still nothing to
+ * rank by specificity.
  *
  * `AUTOMATIC` with no matching rule → `SECURE`: silence means "ask me". Nothing
  * auto-approves by accident, which is the invariant every other choice leans on.
@@ -63,7 +70,10 @@ fun resolve(
     verb: Verb
 ): ModeResolution = when (global) {
     GlobalMode.AUTOMATIC -> {
+        // Exact first, then the plugin's ANY fallback. Not `firstOrNull { covers() }`,
+        // which would let list ORDER decide between an exact rule and an ANY rule.
         val rule = rules.find { it.plugin == plugin && it.verb == verb }
+            ?: rules.find { it.plugin == plugin && it.verb == null }
         if (rule == null) ModeResolution(Mode.SECURE, ModeSource.DEFAULT, null)
         else ModeResolution(rule.mode, ModeSource.RULE, rule)
     }

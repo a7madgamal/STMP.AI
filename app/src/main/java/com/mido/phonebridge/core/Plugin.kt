@@ -40,6 +40,24 @@ data class Route(
      */
     val auditResponseBody: Boolean = true,
     /**
+     * Whether this route's approval is DESCRIBED by the on-device model.
+     *
+     * True for everything that asks a human to decide something, because the whole
+     * point of the AI is to say what is being approved in plain words. False for
+     * routes where inference adds nothing and its absence must not block the route:
+     * the diagnostic endpoints (`/debug`, `/logs`) exist to explain a broken bridge,
+     * so depending on the model — the thing most likely to be broken — makes the
+     * route useless exactly when it is needed (reported on device 2026-10-19: *"debug
+     * call waited for the model"*).
+     *
+     * **This is also the model-readiness exemption.** A route that needs no AI needs
+     * no model, so it is served while the bridge is otherwise not-ready — which is
+     * why `debug`/`logs` no longer need a separate hard-coded plugin list. One flag,
+     * one consequence, nothing to keep in sync (Mido, 2026-10-19: *"we need to be able
+     * to disable AI summary for some endpoints"*).
+     */
+    val aiSummary: Boolean = true,
+    /**
      * Pre-gate validation, run BEFORE the approval modal can open.
      *
      * Input that can never succeed must never cost the human a tap: `count=-1`

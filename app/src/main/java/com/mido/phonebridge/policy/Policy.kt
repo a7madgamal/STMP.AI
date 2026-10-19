@@ -30,7 +30,9 @@ class Policy(
                     put(
                         JSONObject()
                             .put("plugin", r.plugin)
-                            .put("verb", r.verb.name)
+                            // An ANY rule stores the literal token, so the file says what
+                            // it means and a missing key is never a silent wildcard.
+                            .put("verb", r.verb?.name ?: Rule.ANY)
                             .put("mode", r.mode.name)
                     )
                 }
@@ -46,8 +48,8 @@ class Policy(
     fun withRule(rule: Rule): Policy =
         Policy(global, rules.filterNot { it.key == rule.key } + rule)
 
-    /** A new policy with the pair's rule removed. */
-    fun withoutRule(plugin: String, verb: Verb): Policy =
+    /** A new policy with the pair's rule removed. [verb] null removes the ANY rule. */
+    fun withoutRule(plugin: String, verb: Verb?): Policy =
         Policy(global, rules.filterNot { it.plugin == plugin && it.verb == verb })
 
     companion object {
@@ -111,11 +113,17 @@ class Policy(
                 throw PolicyException("$where uses '*'; rules are exact, there is no cascade")
             }
             val rawVerb = o.optString("verb", "")
-            val verb = Verb.values().firstOrNull { it.name == rawVerb }
-                ?: throw PolicyException(
-                    "$where has unknown verb '$rawVerb'; this build understands " +
-                        Verb.values().joinToString(", ")
-                )
+            // "ANY" is the any-verb token; a real Verb name is an exact rule. Anything
+            // else is a parse error, and a MISSING verb is an error too — never a
+            // silent wildcard, which would turn a truncated file into broad rules.
+            val verb: Verb? = when {
+                rawVerb == Rule.ANY -> null
+                else -> Verb.values().firstOrNull { it.name == rawVerb }
+                    ?: throw PolicyException(
+                        "$where has unknown verb '$rawVerb'; this build understands " +
+                            (Verb.values().joinToString(", ") + ", or " + Rule.ANY + " for any verb")
+                    )
+            }
             val rawMode = o.optString("mode", "")
             val mode = Mode.values().firstOrNull { it.name == rawMode }
                 ?: throw PolicyException(

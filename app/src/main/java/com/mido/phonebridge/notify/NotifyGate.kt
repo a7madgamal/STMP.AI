@@ -119,7 +119,8 @@ object NotifyGate {
         summary: String,
         label: String,
         verb: Verb,
-        facts: RequestFacts?
+        facts: RequestFacts?,
+        needsAi: Boolean
     ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
@@ -133,6 +134,7 @@ object NotifyGate {
             verb = verb,
             windowMs = WINDOW_MS,
             facts = facts,
+            needsAi = needsAi,
             fetchCapMs = FETCH_CAP_MS
         ) { outcome ->
             decided.set(outcome)

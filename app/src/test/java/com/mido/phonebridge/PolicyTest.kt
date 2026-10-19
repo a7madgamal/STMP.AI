@@ -98,6 +98,124 @@ class PolicyTest {
         assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "calendar", Verb.READ))
     }
 
+    // --- ANY: one axis, two levels (Mido, 2026-10-19) ---
+
+    @Test
+    fun `an ANY rule covers every verb of its plugin`() {
+        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
+        for (v in Verb.values()) {
+            assertEquals(
+                "ANY did not cover gmail/${v.name}",
+                Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", v)
+            )
+        }
+    }
+
+    @Test
+    fun `an ANY rule does not leak to another plugin`() {
+        // The plugin axis stays exact. This is the whole difference between a bounded
+        // two-level rule and the unbounded cascade the plan deleted.
+        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
+        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "calendar", Verb.READ))
+        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "notifications", Verb.EXECUTE))
+    }
+
+    @Test
+    fun `an exact rule wins over the plugin's ANY rule`() {
+        // The precedence rule, asserted rather than left to list order. ANY is a
+        // fallback, so a broad rule cannot silently swallow a deliberate exception.
+        val rules = listOf(
+            PolicyRule("gmail", null, Mode.NOTIFY),
+            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+        )
+        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
+        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
+    }
+
+    @Test
+    fun `precedence does not depend on rule ORDER`() {
+        // The exact-over-ANY rule must hold whichever way the file lists them, or the
+        // same policy resolves differently depending on write order — the defect the
+        // duplicate-pair guard exists to prevent, in a new shape.
+        val exactFirst = listOf(
+            PolicyRule("gmail", Verb.DELETE, Mode.SECURE),
+            PolicyRule("gmail", null, Mode.NOTIFY)
+        )
+        val anyFirst = listOf(
+            PolicyRule("gmail", null, Mode.NOTIFY),
+            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+        )
+        for (rules in listOf(exactFirst, anyFirst)) {
+            assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
+            assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
+        }
+    }
+
+    @Test
+    fun `an ANY rule still cannot weaken a request below NOTIFY`() {
+        // ANY widens WHICH requests a rule covers, never what it may do to them. The
+        // 0.12.0 floor is untouched by it.
+        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
+        for (g in GlobalMode.values()) {
+            val mode = resolveMode(g, rules, "gmail", Verb.DELETE)
+            assertTrue("switch $g resolved to $mode", mode == Mode.NOTIFY || mode == Mode.SECURE)
+        }
+    }
+
+    @Test
+    fun `an ANY rule round-trips through the file`() {
+        val dir = tmp.newFolder()
+        val rules = listOf(
+            PolicyRule("gmail", null, Mode.NOTIFY),
+            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+        )
+        PolicyStore(dir).set(Policy(GlobalMode.AUTOMATIC, rules))
+        val back = PolicyStore(dir).get()
+        assertEquals(rules, back.rules)
+        assertNull(back.rules.first { it.plugin == "gmail" && it.verb == null }.verb)
+    }
+
+    @Test
+    fun `the stored token for an ANY rule is the literal ANY`() {
+        // The file says what it means. A missing verb key must never be read as a
+        // wildcard, which is why the token is explicit and required.
+        val json = Policy(GlobalMode.AUTOMATIC, listOf(PolicyRule("gmail", null, Mode.NOTIFY))).toJson()
+        assertEquals(PolicyRule.ANY, json.getJSONArray("rules").getJSONObject(0).getString("verb"))
+    }
+
+    @Test
+    fun `a rule with a missing verb is refused, never read as ANY`() {
+        val e = assertThrows(PolicyException::class.java) {
+            Policy.parse(
+                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","mode":"NOTIFY"}]}"""
+            )
+        }
+        assertEquals(true, e.message!!.contains("unknown verb"))
+    }
+
+    @Test
+    fun `an exact rule and an ANY rule for one plugin may coexist`() {
+        // They are different keys, so this is NOT a duplicate. If the guard ever treats
+        // them as one, the exact-over-ANY pattern becomes unauthorable.
+        val p = Policy.parse(
+            """{"version":1,"global":"AUTOMATIC","rules":[""" +
+                """{"plugin":"gmail","verb":"ANY","mode":"NOTIFY"},""" +
+                """{"plugin":"gmail","verb":"DELETE","mode":"SECURE"}]}"""
+        )
+        assertEquals(2, p.rules.size)
+    }
+
+    @Test
+    fun `two ANY rules for one plugin are still a duplicate`() {
+        assertThrows(PolicyException::class.java) {
+            Policy.parse(
+                """{"version":1,"global":"AUTOMATIC","rules":[""" +
+                    """{"plugin":"gmail","verb":"ANY","mode":"NOTIFY"},""" +
+                    """{"plugin":"gmail","verb":"ANY","mode":"SECURE"}]}"""
+            )
+        }
+    }
+
     @Test
     fun `every switch value resolves, so nothing can be gated on undefined`() {
         // Guards the seam: adding a GlobalMode without teaching resolve about it must

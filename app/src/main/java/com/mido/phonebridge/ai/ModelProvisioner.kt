@@ -60,8 +60,28 @@ object ModelProvisioner {
     /**
      * Download the model unless it is already present and verified. Blocking; call off
      * the main thread. Returns when the file is in place and verified, or when it failed.
+     *
+     * **Idempotent unless [force].** A verified model is not re-fetched, because the home
+     * screen's row is tappable and a tap on an already-ready row must not silently start a
+     * 474 MB download (reported on device 2026-10-19: *"the model downloaded, I touched it,
+     * it started downloading again"*). Re-downloading is still possible, but it has to be
+     * asked for — the UI confirms first and passes `force = true`.
      */
-    fun provision(ctx: Context, onProgress: ((Progress) -> Unit)? = null): Result {
+    fun provision(
+        ctx: Context,
+        force: Boolean = false,
+        onProgress: ((Progress) -> Unit)? = null
+    ): Result {
+        // Checked BEFORE the `running` flag, so a tap on a ready row while another
+        // download is somehow in flight still answers "already present" rather than
+        // "a download is already running" — the first is the true state of the world.
+        if (!force) {
+            val state = ModelRegistry.readiness(ctx)
+            if (state.ready) {
+                Log.i(TAG, "model already present; not re-fetching")
+                return Result(true, "already present (${state.detail})")
+            }
+        }
         synchronized(this) {
             if (running) return Result(false, "a download is already running")
             running = true

@@ -473,12 +473,13 @@ class HttpServer(
             // is read and before validation, so the caller learns the bridge is not up
             // without first being asked to fix their input.
             //
-            // `/debug` and `/logs` are exempt: they are how the not-ready state is
+            // `/debug` and `/logs` declare `aiSummary = false`, which is what exempts them:
+            // a route that needs no AI needs no model. They are how the not-ready state is
             // DIAGNOSED from outside, and blocking them would make a not-ready bridge
             // undiagnosable — the dead end `/debug` exists to prevent. Read-only, and
             // neither opens a decision.
             val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
-            if (!com.mido.phonebridge.ai.ModelReadiness.serves(modelState.ready, resolved.plugin.id)) {
+            if (!com.mido.phonebridge.ai.ModelReadiness.serves(modelState.ready, resolved.route.aiSummary)) {
                 // HANDLER_FAILED, not REJECTED_INVALID: a 503 is OUR side, and the audit
                 // rule is that 5xx is never noise. Recording it as the caller's mistake
                 // would hide a not-ready bridge among typos — the exact misclassification
@@ -569,7 +570,14 @@ class HttpServer(
                         summary,
                         labelOf(resolved.plugin.id, resolved.route.verb),
                         resolved.route.verb,
-                        aiFactsFor(resolved.route, summary, path, body, query, remote)
+                        // Null facts for a route that declares `aiSummary = false`: the card
+                        // then shows its deterministic content and its clock starts at once.
+                        // Never built for an opted-out route, so the rows are not fetched
+                        // either — an opted-out route pays nothing for the AI.
+                        if (com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary))
+                            aiFactsFor(resolved.route, summary, path, body, query, remote)
+                        else null,
+                        needsAi = com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary)
                     )
                     when (decision) {
                         is NotifyGate.Result.Approved -> {
@@ -650,10 +658,10 @@ class HttpServer(
                     //
                     // The AI summary is computed BEFORE the modal is shown (option B,
                     // Mido 2026-10-18): on SECURE there is a 60s window and a full
-                    // screen, so a ~3s wait buys real clarity for free. It is bounded by
-                    // SummaryProvider.SECURE_BUDGET_MS, and a failure THROWS
-                    // `ai_unavailable` (the AI is core, Mido 2026-10-19) rather than
-                    // showing a modal whose summary is silently missing.
+                    // screen, so a ~3s wait buys real clarity for free. Null (the route
+                    // declares `aiSummary = false`) leaves the AI fields blank by design;
+                    // a failure on a route that DOES use the AI throws `ai_unavailable`
+                    // rather than showing a modal whose summary is silently missing.
                     val gate = ApprovalGate.await(
                         ctx, remote, "$method $path", summary,
                         detail = detailFor(resolved.route.path, path, body),
@@ -792,10 +800,10 @@ class HttpServer(
         val rows = pluginRows(route, actualPath, body, query, remote)
 
         // The AI summary, computed once per request from the SAME facts the modal
-        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS. Since the AI is core
-        // (Mido, 2026-10-19), a failure here THROWS `ai_unavailable` rather than
-        // leaving the AI fields blank: a request the model could not describe must not
-        // be presented for approval as if it had been.
+        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS. Null means the route
+        // declares `aiSummary = false` and the three AI fields stay blank by design;
+        // a route that DOES use the AI and fails THROWS `ai_unavailable` rather than
+        // presenting a modal whose summary is silently missing (Mido, 2026-10-19).
         val ai = aiSummary(route, summary, rows)
 
         // /notifications/{id}/action -> resolve the action against live data.
@@ -844,9 +852,9 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = rows,
-                aiDescription = ai.description,
-                aiRisk = ai.risk,
-                aiReason = ai.reason,
+                aiDescription = ai?.description ?: "",
+                aiRisk = ai?.risk,
+                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -872,9 +880,9 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = rows,
-                aiDescription = ai.description,
-                aiRisk = ai.risk,
-                aiReason = ai.reason,
+                aiDescription = ai?.description ?: "",
+                aiRisk = ai?.risk,
+                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -903,9 +911,9 @@ class HttpServer(
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
             destructive = rows,
-            aiDescription = ai.description,
-            aiRisk = ai.risk,
-            aiReason = ai.reason,
+            aiDescription = ai?.description ?: "",
+            aiRisk = ai?.risk,
+            aiReason = ai?.reason ?: "",
             // Biometric is a SECURE-only rule, computed by the policy and passed in.
             // The gate states it; the Activity renders it and never recomputes it.
             // In R3 this always evaluates true, because a view only exists on the
@@ -917,13 +925,14 @@ class HttpServer(
 
     /**
      * Build the facts a summariser sees, run the model within the SECURE budget, and
-     * return its answer.
+     * return its answer, or null when the route does not use the AI.
      *
-     * **Throws rather than returning null.** The AI is core functionality (Mido,
-     * 2026-10-19), so a request that cannot be described must not be approved. A null
-     * answer here is not "render without AI" — it is a fault, and it propagates to the
-     * dispatcher's `PluginError` catch as `ai_unavailable` (500, never noise). The model's
-     * ABSENCE is a different case, caught earlier by the readiness gate as 503.
+     * **Null now means exactly one thing: this route declares `aiSummary = false`.**
+     * It is no longer a failure signal — a route that needs no AI is a legitimate
+     * answer, and the caller renders its deterministic rows. A route that DOES use the
+     * AI and cannot get an answer throws `ai_unavailable` instead, because the AI is
+     * core (Mido, 2026-10-19) and a request that cannot be described must not be
+     * presented for approval as if it had been.
      *
      * Facts are the deterministic projection the modal already renders: the route's
      * own label, the audit summary, and the labelled rows. Raw JSON is deliberately
@@ -935,7 +944,11 @@ class HttpServer(
         route: Route,
         summary: String,
         rows: List<Pair<String, String>>
-    ): com.mido.phonebridge.ai.RequestSummary {
+    ): com.mido.phonebridge.ai.RequestSummary? {
+        // The route's own flag decides, before anything is built: no model call, no
+        // facts, no latency. `/debug` and `/logs` take this path, which is what makes
+        // them work while the model is broken.
+        if (!com.mido.phonebridge.ai.ModelReadiness.requiresAi(route.aiSummary)) return null
         val facts = com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
             verb = route.verb.name,

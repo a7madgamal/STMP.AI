@@ -25,23 +25,50 @@ object ModelReadiness {
     class State(val ready: Boolean, val detail: String)
 
     /**
-     * Plugins that must stay reachable even when the model is not.
+     * Plugins that must stay reachable even when the model is not, and that never use
+     * the AI at all.
      *
      * `/debug` and `/logs` are the app's own diagnosis: they report WHY the model is not
      * ready, and blocking them would make a not-ready bridge undiagnosable from outside
      * — the exact dead end `GET /debug` was built to prevent. They are read-only and
      * open no decision, so serving them costs nothing and is never a way around the gate.
+     *
+     * **One concept, two consequences** (and they must not drift apart): a diagnostic
+     * route needs no model to RUN, and it needs no model to DESCRIBE. The first version
+     * of this exemption only covered the first, so `/debug` was served while not-ready and
+     * then failed anyway — its card is built from an AI summary, so a broken model made
+     * the diagnostic route answer `ai_unavailable` (reported on device 2026-10-19: *"debug
+     * call waited for the model"*). The route that exists to explain a failure must not
+     * depend on the thing that failed.
      */
     private val DIAGNOSTIC_PLUGINS = setOf("debug", "logs")
+
+    /**
+     * Is this plugin's whole purpose to diagnose a broken bridge?
+     *
+     * Kept for documentation and for the UI, NOT for the readiness decision any more:
+     * that now follows the route's own `aiSummary` flag (see [serves]), so a plugin name
+     * is never what decides whether a request may run.
+     */
+    fun isDiagnostic(pluginId: String): Boolean = pluginId in DIAGNOSTIC_PLUGINS
 
     /**
      * May this request be served at all?
      *
      * The fail-fast rule (Mido, 2026-10-19): the AI is core, so without the model the
-     * bridge is not up. Pure, so the exemption list is a decision a test can assert
-     * rather than a branch buried in the dispatcher.
+     * bridge is not up — EXCEPT for a route that does not use the AI, which is the one
+     * case where a missing model is not a missing capability. Expressed over
+     * `aiRequired` rather than a plugin list so the exemption and the thing it exempts
+     * cannot drift: a route with `aiSummary = false` is by definition a route that needs
+     * no model, and the two are now the same fact rather than two lists to keep aligned.
      */
-    fun serves(ready: Boolean, pluginId: String): Boolean = ready || pluginId in DIAGNOSTIC_PLUGINS
+    fun serves(ready: Boolean, aiRequired: Boolean): Boolean = ready || !aiRequired
+
+    /**
+     * Must this request be described by the model? Always the route's own
+     * `aiSummary` flag — never re-derived from a plugin name here.
+     */
+    fun requiresAi(aiSummary: Boolean): Boolean = aiSummary
 
     /**
      * The verdict for one file.

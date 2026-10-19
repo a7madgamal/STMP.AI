@@ -45,7 +45,13 @@ class DebugPlugin(private val ctx: Context) : Plugin {
             // The report contains the recent log tail. Storing that response would
             // copy the log into the log on every call, so this route opts out — the
             // record keeps outcome/status/summary, and says the body was not kept.
-            auditResponseBody = false
+            auditResponseBody = false,
+            // No AI: this route EXISTS to explain a broken bridge, so it must not depend
+            // on the model — the thing most likely to be broken. It also needs no
+            // decision, so there is nothing for a summary to clarify. Declaring it here
+            // is what exempts it from the model-readiness gate (Mido, 2026-10-19:
+            // "we need to be able to disable AI summary for some endpoints").
+            aiSummary = false
         ) { report(it) }
     )
 

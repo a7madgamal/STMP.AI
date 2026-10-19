@@ -129,6 +129,12 @@ object NotifyOverlay {
         val windowMs: Long,
         /** Facts for the AI summary, or null to skip inference entirely. */
         val facts: RequestFacts?,
+        /**
+         * Whether this route uses the AI at all (its `Route.aiSummary`). Distinguishes
+         * "no AI by design" from "the AI failed": the first is a normal card whose
+         * clock starts at once, the second withdraws the card.
+         */
+        val needsAi: Boolean,
         /** How long the fetch may take before the clock starts regardless. */
         val fetchCapMs: Long,
         val onOutcome: (Outcome) -> Unit
@@ -193,12 +199,14 @@ object NotifyOverlay {
         verb: Verb,
         windowMs: Long,
         facts: RequestFacts?,
+        needsAi: Boolean,
         fetchCapMs: Long,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
             val entry = Entry(
-                ctx.applicationContext, id, summary, label, verb, windowMs, facts, fetchCapMs, onOutcome
+                ctx.applicationContext, id, summary, label, verb, windowMs, facts, needsAi,
+                fetchCapMs, onOutcome
             )
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
@@ -550,10 +558,19 @@ object NotifyOverlay {
      * card, which is exactly the pre-AI behaviour and never worse.
      */
     private fun startFetch(entry: Entry) {
+        // No AI by design (the route declares `aiSummary = false`): there is nothing to
+        // fetch and nothing to fail, so the clock starts now and the card shows exactly
+        // its deterministic content. This is the pre-AI behaviour, kept for routes that
+        // opted out — it is NOT a fallback for a broken model.
+        if (!entry.needsAi) {
+            entry.decisionStartAt = System.currentTimeMillis()
+            return
+        }
         val facts = entry.facts
         if (facts == null) {
-            // No facts means no AI, and the AI is core: this card cannot describe what
-            // it is asking about, so it is withdrawn rather than shown with a bare label.
+            // The route USES the AI but no facts were built for it. That is a defect in
+            // the caller, not a normal state, and a card that cannot say what it is
+            // asking about must not be offered for approval.
             settle(entry, Reason.AI_FAILED, "no facts for the summary")
             return
         }

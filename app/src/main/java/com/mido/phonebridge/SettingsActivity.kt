@@ -28,8 +28,9 @@ import com.mido.phonebridge.ui.Theme
  * rule table, with no way to fill that table, is the exact defect that got `NOTIFY`
  * cut from R2 in the first place.
  *
- * Rules are exact `plugin × verb` pairs. No wildcards, no cascade, nothing to rank.
- * The picker offers `default | notify | secure`: `default` deletes the rule.
+ * Rules are exact `plugin × verb` pairs, and a verb may be ANY. The picker offers
+ * `default | notify | secure`: `default` deletes the rule. ANY is one axis, two
+ * levels — an exact rule wins over the plugin's ANY rule (see `policy.resolve`).
  */
 class SettingsActivity : Activity() {
 
@@ -118,7 +119,12 @@ class SettingsActivity : Activity() {
         )
     }
 
-    /** One configured pair, with its current mode and a way to change it. */
+    /**
+     * One configured pair, with its current mode and a way to change it.
+     *
+     * [rule.verb] null is an ANY rule and is rendered as "any" — the label has to say
+     * what the rule actually covers, or a broad rule reads as a narrow one.
+     */
     private fun ruleRow(policy: Policy, rule: Rule): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -132,7 +138,7 @@ class SettingsActivity : Activity() {
             // `secure (default)` because a stored SECURE and no rule behave
             // identically. Saying so stops anyone hunting for a difference
             // that does not exist.
-            "${rule.plugin} · ${rule.verb.name.lowercase()} — " +
+            "${rule.plugin} · ${rule.verb?.name?.lowercase() ?: "any"} — " +
                 rule.mode.name.lowercase() +
                 if (rule.mode == Mode.SECURE) " (default)" else "",
             13f
@@ -172,23 +178,26 @@ class SettingsActivity : Activity() {
     }
 
     private fun pickVerb(policy: Policy, plugin: String) {
-        val verbs = Verb.values().map { it.name }
+        // ANY first, then the real verbs. Order matters for a picker: the broad rule is
+        // the one you reach for when you do not want to enumerate, so it leads.
+        val options = listOf(Rule.ANY) + Verb.values().map { it.name }
         AlertDialog.Builder(this)
             .setTitle("$plugin — which verb?")
-            .setItems(verbs.toTypedArray()) { _, which ->
-                pickMode(policy, plugin, Verb.values()[which])
+            .setItems(options.toTypedArray()) { _, which ->
+                val verb = if (which == 0) null else Verb.values()[which - 1]
+                pickMode(policy, plugin, verb)
             }
             .show()
     }
 
-    private fun pickMode(policy: Policy, plugin: String, verb: Verb) {
+    private fun pickMode(policy: Policy, plugin: String, verb: Verb?) {
         val labels = arrayOf(
             "default — ask me (removes any rule)",
             "notify — 5s overlay, silence approves",
             "secure — full-screen + fingerprint"
         )
         AlertDialog.Builder(this)
-            .setTitle("$plugin · ${verb.name.lowercase()}")
+            .setTitle("$plugin · ${verb?.name?.lowercase() ?: "any verb"}")
             .setItems(labels) { _, which ->
                 when (which) {
                     0 -> clearRule(policy, plugin, verb, "settings")
@@ -209,7 +218,7 @@ class SettingsActivity : Activity() {
         save(policy.withRule(rule), PolicyAudit.recordRule(before, rule, policy.global, source))
     }
 
-    private fun clearRule(policy: Policy, plugin: String, verb: Verb, source: String) {
+    private fun clearRule(policy: Policy, plugin: String, verb: Verb?, source: String) {
         val before = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }
         save(
             policy.withoutRule(plugin, verb),

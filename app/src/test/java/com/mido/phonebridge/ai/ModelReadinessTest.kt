@@ -55,37 +55,35 @@ class ModelReadinessTest {
 }
 
 /**
- * The exemption list is the one way a not-ready bridge still answers, so it is a rule
- * worth asserting: it must cover the diagnosis routes and nothing else.
+ * The readiness rule now follows the route's own `aiSummary` flag rather than a plugin
+ * name, so the exemption and the thing it exempts cannot drift. Asserted here because it
+ * decides whether a request may run at all.
  */
 class ModelReadinessServesTest {
 
     @Test
-    fun `a ready model serves every plugin`() {
-        assertTrue(ModelReadiness.serves(ready = true, pluginId = "gmail"))
-        assertTrue(ModelReadiness.serves(ready = true, pluginId = "debug"))
-        assertTrue(ModelReadiness.serves(ready = true, pluginId = "calendar"))
+    fun `a ready model serves every route`() {
+        assertTrue(ModelReadiness.serves(ready = true, aiRequired = true))
+        assertTrue(ModelReadiness.serves(ready = true, aiRequired = false))
     }
 
     @Test
-    fun `a not-ready model refuses a normal plugin`() {
-        assertFalse(ModelReadiness.serves(ready = false, pluginId = "gmail"))
-        assertFalse(ModelReadiness.serves(ready = false, pluginId = "notifications"))
-        assertFalse(ModelReadiness.serves(ready = false, pluginId = "calendar"))
+    fun `a not-ready model refuses a route that uses the AI`() {
+        assertFalse(ModelReadiness.serves(ready = false, aiRequired = true))
     }
 
     @Test
-    fun `the diagnosis routes stay reachable when the model is not ready`() {
+    fun `a route that does not use the AI is served even when the model is not ready`() {
         // Otherwise a not-ready bridge is undiagnosable from outside — the exact dead end
-        // /debug was built to prevent.
-        assertTrue(ModelReadiness.serves(ready = false, pluginId = "debug"))
-        assertTrue(ModelReadiness.serves(ready = false, pluginId = "logs"))
+        // /debug was built to prevent. This is the half that was missing in 0.19.0: the
+        // route was SERVED but still ran inference to build its card, so it failed anyway
+        // (reported on device: "debug call waited for the model").
+        assertTrue(ModelReadiness.serves(ready = false, aiRequired = false))
     }
 
     @Test
-    fun `a plugin that merely contains the word debug is not exempt`() {
-        // Guards against a future `contains` check replacing the set membership.
-        assertFalse(ModelReadiness.serves(ready = false, pluginId = "debug-tools"))
-        assertFalse(ModelReadiness.serves(ready = false, pluginId = "my-debug"))
+    fun `requiresAi is the route flag, inverted for no one`() {
+        assertTrue(ModelReadiness.requiresAi(aiSummary = true))
+        assertFalse(ModelReadiness.requiresAi(aiSummary = false))
     }
 }
