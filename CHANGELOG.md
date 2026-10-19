@@ -974,7 +974,7 @@ Two things, both from Mido's 2026-10-19 messages.
 **122 tests green.** Version 0.23.2 / build 106. APK taildropped, exit 0.
 
 ## 0.24.0 — the modal's third button, and "PER-PAIR RULES" → "EXCEPTIONS" (build 107) — CURRENT
-`<hash>` · 2026-10-19
+`e89de3e` · 2026-10-19
 
 Mido: *"in the modal I want a third button to automatically add an exception for the current
 request. using our same system for per-pair rules, and change this stupid name while at it"*.
