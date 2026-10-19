@@ -1301,7 +1301,7 @@ Two things fell out of writing it:
 139 tests green (6 new for the budget: the total-fits property across 1–20 rows, the floor, the
 max, the clip marker, and that an unclipped value is left untouched). Version 0.26.1 / build 115.
 
-## 0.26.2 — the broker's verb comes from the OUTBOUND METHOD (build 116) — CURRENT
+## 0.26.2 — the broker's verb comes from the OUTBOUND METHOD (build 116)
 2026-10-19
 
 Mido tapped "always notify" on a Todoist read and it silenced deletes too: *"I clicked meaning it
@@ -1347,6 +1347,48 @@ no-standing-backward-compat rule — not live, so the fix is to re-tap.
 144 tests green (5 new: the read set, DELETE as its own verb, the mutating set, and that the
 fallback is LOUD for `TRACE`/`PROPFIND`/empty — plus case/whitespace tolerance). Version 0.26.2 /
 build 116.
+
+## 0.26.3 — the prompt's worked example was being parroted (build 117) — CURRENT
+2026-10-19
+
+Mido: *"still says adding 8 todos which is VERY misleading"* — on a **read**.
+
+**I caused this, one release after fixing the last one.** The prompt said:
+
+```kotlin
+"say it: 'Adding 8 todos' beats 'updating tasks'"
+```
+
+To a 0.6B model a concrete example is not an illustration, it is a **template**. It copied the
+sentence onto every request, including reads that add nothing. The previous release taught it the
+word "8"; this release taught it the whole phrase.
+
+**Two fixes, because removing the example is not enough on its own.**
+
+1. **No worked example in the prompt.** The rule is stated abstractly — *"Do not state a quantity
+   unless the summary or facts contain it"* — because a model that needs an example will copy it.
+
+2. **`core/SummaryGuard` — a deterministic check the model cannot talk its way past.** Two lexical
+   rules, both cheap:
+
+   - **The verb must match the language.** A `READ` must not claim to mutate (`add`, `delet`,
+     `updat`, …). Read vocabulary is checked first, so "listing tasks, adding nothing" survives —
+     an accurate sentence must not be discarded for a word used in negation.
+   - **A stated quantity must exist in the facts.** If the description says "8", something the
+     model actually saw must contain "8". A believable number is the most dangerous kind of error
+     because "8 todos" reads as measured.
+
+   Rejection yields **no AI line**, not a corrected one. The modal still renders every
+   deterministic row, so a blank summary section is honest where an invented one is not — the same
+   fail-closed choice as `parse` returning null on malformed JSON.
+
+**The lesson worth keeping:** for a small model, an example in a prompt is instruction-shaped. Any
+future prompt change should be checked against "will it copy this sentence verbatim?" — and the
+guard now catches the answer when it does.
+
+152 tests green (8 new for the guard, including the exact reported case). The guard test was
+**proven to fail**: breaking the empty-description check fails `an empty description is not shown`.
+Version 0.26.3 / build 117.
 
 ---
 

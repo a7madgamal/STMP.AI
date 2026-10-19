@@ -1,5 +1,7 @@
 package com.mido.phonebridge.ai
 
+import com.mido.phonebridge.core.Verb
+
 import android.content.Context
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
@@ -116,9 +118,14 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 // is about to happen; the human is approving the CONTENTS. The prompt asks
                 // for the count and the object, and the deterministic `summary` line now
                 // carries the payload shape, so the model has something concrete to name.
-                "Describe WHAT THE PAYLOAD DOES, not the endpoint. If the summary or facts " +
-                "name a count (e.g. '8 commands (item_add x8)'), say it: 'Adding 8 todos' beats " +
-                "'updating tasks'. Name the object being changed. " +
+                // NO WORKED EXAMPLE HERE. The previous version said "say it: 'Adding 8 todos'
+                // beats 'updating tasks'" and a 0.6B model PARROTED the example: every request
+                // came back "Adding 8 todos", including a READ that added nothing. A concrete
+                // example is a template to a small model, not an illustration (Mido,
+                // 2026-10-19: *"still says adding 8 todos which is VERY misleading"*).
+                // The rule is stated abstractly instead, and [SummaryGuard] enforces it.
+                "Describe WHAT THE PAYLOAD DOES, not the endpoint. Name the object being " +
+                "changed. Do not state a quantity unless the summary or facts contain it. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
     }
@@ -216,7 +223,7 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 Log.w(TAG, "inference ${elapsed}ms exceeded budget ${budgetMs}ms; discarding")
                 return null
             }
-            parse(reply)?.also {
+            parse(reply, com.mido.phonebridge.core.PromptBudget.render(facts.rows), parseVerb(facts))?.also {
                 Log.i(TAG, "summarised in ${elapsed}ms: risk=${it.risk}")
             }
         } catch (e: Exception) {
@@ -228,6 +235,17 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             null
         }
     }
+
+    /**
+     * The [Verb] from the facts, which arrive as a NAME string.
+     *
+     * `RequestFacts.verb` is a string because the facts cross the seam without depending on the
+     * policy package. An unknown name falls back to EXECUTE, which the guard treats as
+     * mutating — the fail-closed direction, since an unrecognised verb must not licence a
+     * "reading" claim.
+     */
+    private fun parseVerb(facts: RequestFacts): Verb =
+        Verb.values().firstOrNull { it.name == facts.verb } ?: Verb.EXECUTE
 
     /** One fresh conversation per call, so no request is described in another's context. */
     private fun runInference(eng: Engine, facts: RequestFacts): String {
@@ -324,7 +342,7 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
      * is not the expected JSON object returns null (→ heuristic fallback) rather than
      * being coerced into a half-answer.
      */
-    private fun parse(reply: String): RequestSummary? {
+    private fun parse(reply: String, factsText: String, verb: Verb): RequestSummary? {
         val json = extractJson(reply) ?: return null
         val obj = try {
             org.json.JSONObject(json)
@@ -339,6 +357,15 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             "medium", "med" -> Risk.MEDIUM
             "high" -> Risk.HIGH
             else -> return null // an unlabelled risk is a failed answer, not a guess
+        }
+        // LAST LINE OF DEFENCE: a small model parrots its prompt and invents quantities, and a
+        // misleading approval prompt is worse than none — the human approves what they were
+        // told. A rejected summary yields NO AI line rather than a corrected one; the modal
+        // still renders every deterministic row (Mido, 2026-10-19: *"still says adding 8 todos
+        // which is VERY misleading"*).
+        if (!com.mido.phonebridge.core.SummaryGuard.allows(description, verb, factsText)) {
+            Log.w(TAG, "summary contradicts the request (verb=$verb): ${description.take(90)}")
+            return null
         }
         return RequestSummary(
             description = description.take(160),
