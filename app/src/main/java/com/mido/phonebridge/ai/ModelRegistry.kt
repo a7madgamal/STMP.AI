@@ -37,27 +37,37 @@ object ModelRegistry {
      * app's own external files dir, so no storage permission is needed and an
      * uninstall removes it.
      */
-    const val MODEL_ASSET = "models/qwen3_0_6b_dyn_int4.litertlm"
+    const val MODEL_ASSET = "models/qwen3_1_7b_dyn_int4.litertlm"
 
     /**
      * Where [ModelProvisioner] fetches it from. An **ungated** `litert-community`
      * artifact: every small Gemma in that zoo is `gated: auto` (401 without a token),
-     * which is why Qwen3-0.6B is the shipped model.
+     * which is why Qwen3 is the shipped family rather than Gemma.
      *
-     * **This is the `dynamic_wi4b32_afp32` variant, not the `mixed_int4` one, and the
-     * difference is the whole reason for the swap** (Mido, 2026-10-19). The mixed-int4
-     * sibling carries a Qwen3 chat template whose line 14 does `'\n' + content`, which
-     * is valid for a STRING but explodes when content arrives as a list of parts — and
-     * `Contents` always serialises to parts. Every inference failed with
-     * `Failed to apply template: invalid operation: tried to use + operator on
-     * unsupported types string and sequence`, which took the whole bridge down because
-     * the AI is core. This variant is documented as carrying LiteRT-LM's official
-     * Qwen3 configuration and **accepts the system instruction**, which is the shape
-     * the app actually sends. Verified by hand on 2026-10-19: system prompt + a plain
-     * facts prompt produced valid JSON on READ, DELETE and EXECUTE.
+     * **`dynamic_wi4b32_afp32`, never `mixed_int4`.** The mixed-int4 sibling carries a
+     * Qwen3 chat template whose line 14 does `'\n' + content` — valid for a STRING, fatal
+     * when content arrives as a list of parts, which is what `Contents` always serialises
+     * to. Every inference failed with `Failed to apply template: … tried to use + operator
+     * on unsupported types string and sequence`, and because the AI is core it took the
+     * whole bridge down. This variant carries LiteRT-LM's official Qwen3 config and accepts
+     * the system instruction, which is the shape the app actually sends.
+     *
+     * **Why 1.7B and not 0.6B (Mido, 2026-10-19: *"swap"*).** The 0.6B was fast (1.2s) but
+     * could not compose: given a payload-first prompt it still copied whatever distinctive
+     * string it saw first, so a Todoist write described itself as
+     * `POST https://api.todoist.com/api/v1/tasks` with the actual task text right there in
+     * the facts. Six releases of fact-tuning could not fix a model that pattern-matches
+     * instead of reading. 1.7B is the next size up in the SAME family and quantisation
+     * recipe, so nothing else changes — and the app re-downloads automatically because
+     * [MODEL_ASSET] names a different file.
+     *
+     * Cost, measured/estimated: file 0.34 GB → 0.98 GB, inference ~1.2s → ~3.4s, resident
+     * ~700 MiB → ~2 GiB. Both the 10s SECURE budget and the 10s NOTIFY cap still fit. The
+     * real risk is memory on a 24/7 service, which is why the `onTrimMemory` release valve
+     * exists — a killed service is survivable, an OOM is not.
      */
     const val MODEL_URL =
-        "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm"
+        "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/main/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm"
 
     /**
      * The exact byte count and digest a complete download has. Pinned, and checked by
@@ -65,8 +75,8 @@ object ModelRegistry {
      * download must never be mistaken for a model. The digest is the repo's
      * `x-linked-etag`, verified against a local `sha256sum` of the fetched file.
      */
-    const val EXPECTED_SIZE = 344_671_744L
-    const val EXPECTED_SHA256 = "03e7da1eb1108b50dffaa9bb52cc7bcbad2eb0c66ca990267f480c1e545d2856"
+    const val EXPECTED_SIZE = 977_184_032L
+    const val EXPECTED_SHA256 = "2a72330b504a6596d53a2c00923c57173b10f1b83e6a541213ffec08d1fc5de8"
 
     /** The expected file name, derived from [MODEL_ASSET] so the two cannot drift. */
     val MODEL_FILE: String get() = MODEL_ASSET.substringAfterLast('/')

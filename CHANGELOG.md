@@ -1487,7 +1487,7 @@ alert sounds, and the NOTIFY card's AI line). Each closed individually with its 
 
 152 tests green. Version 0.27.0 / build 120.
 
-## 0.27.1 — the prompt is logged, and content leads the facts (build 121) — CURRENT
+## 0.27.1 — the prompt is logged, and content leads the facts (build 121)
 2026-10-19
 
 Mido, on a write: *"ai desc says POST https://api.todoist.com /api/v1/tasks this is BS. Are you sure
@@ -1520,6 +1520,43 @@ Recorded because it generalises: **a prompt is read in order, and a small model 
 beginning.** Fact ordering is a prompt-engineering decision, not a data-model one.
 
 152 tests green. Version 0.27.1 / build 121.
+
+## 0.28.0 — swapped to Qwen3-1.7B (build 122) — CURRENT
+2026-10-19
+
+Mido: *"swap"* — after the 0.6B copied `TARGET` verbatim even with the body FIRST in the prompt
+(`ai-prompt: - PAYLOAD: content ⏎ - BODY: {"content": "TEMP — prompt-log test"} ⏎ - TARGET: …` →
+`said="POST https://api.todoist.com/api/v1/tasks"`).
+
+**The diagnosis, from evidence rather than belief.** Six releases of fact-tuning could not fix it:
+truncation, route strings, bare URLs, resource names, query rows, content-first ordering. Each was a
+real defect and each helped. The 0.6B still pattern-matched a distinctive string out of the prompt
+instead of reading it. That is a model ceiling, not a pipeline bug — and the prompt log from 0.27.1
+is what finally made it provable instead of arguable.
+
+**The swap is four constants, by design:**
+
+| | 0.6B | 1.7B |
+|---|---|---|
+| file | 0.34 GB | 0.98 GB |
+| inference | ~1.2 s measured | ~3.4 s est |
+| RAM idle | ~700 MiB | ~2.0 GiB |
+| gated | no | no |
+
+Same family, same `dynamic_wi4b32_afp32` quantisation recipe — so the chat template that killed
+`mixed_int4` is the one already proven working. `MODEL_ASSET` names a different file, so the app
+re-downloads automatically and the old 0.6B file is simply unused; reverting is one constant.
+
+Both budgets still fit (10s SECURE, 10s NOTIFY). **The real cost is memory, not latency:** ~2 GiB
+resident on a 24/7 foreground service makes the app a prime LMK target. The `onTrimMemory` release
+valve already exists for exactly this and a killed engine reloads rather than denying — so the
+failure mode is "slower next time", not "bridge down".
+
+**What this is expected to fix, and what it is not.** It should compose a sentence from the facts
+instead of echoing one. It will not make a bad fact set good — the deterministic summary already
+carries the payload, and that work stands on its own with the AI switched off.
+
+152 tests green. Version 0.28.0 / build 122.
 
 ---
 
