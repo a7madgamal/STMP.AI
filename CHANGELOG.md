@@ -1017,7 +1017,7 @@ set-and-approve, exact verb only, `ALWAYS …` labels, own row above the pair, s
 beats ANY). Version 0.24.0 / build 107.
 
 ## 0.24.1 — the exception button never rendered on calendar/gmail (build 108)
-`<hash>` · 2026-10-19
+`2aa39ab` · 2026-10-19
 
 Found by testing on the device, and it is the "computed then discarded" trap this project has
 already paid for twice.
@@ -1037,7 +1037,7 @@ The guard was **proven to fail**: breaking one pass-through produced
 "Found 3 construction(s) but 2 offer pass-through(s)".
 
 ## 0.24.2 — a settled NOTIFY card could not be dismissed (build 109) — CURRENT
-`<hash>` · 2026-10-19
+`2aa39ab` · 2026-10-19
 
 Reported on device: *"I have a notification card still stuck!"*, then *"it doesn't even dismiss on
 x click"*.
