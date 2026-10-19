@@ -206,7 +206,7 @@ class MainActivity : FragmentActivity() {
         content.addView(fullWidthButton("OPEN REQUEST LOG", Theme.ButtonStyle.NEUTRAL) {
             startActivity(Intent(this, LogActivity::class.java))
         })
-        content.addView(fullWidthButton("PER-PAIR RULES", Theme.ButtonStyle.NEUTRAL) {
+        content.addView(fullWidthButton("EXCEPTIONS", Theme.ButtonStyle.NEUTRAL) {
             startActivity(Intent(this, SettingsActivity::class.java))
         })
 

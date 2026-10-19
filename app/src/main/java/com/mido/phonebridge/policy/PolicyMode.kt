@@ -88,3 +88,24 @@ fun resolveMode(
     plugin: String,
     verb: Verb
 ): Mode = resolve(global, rules, plugin, verb).mode
+
+/**
+ * The mode an EXCEPTION for a pair should set, given the mode the request resolved to.
+ *
+ * The exception is the OTHER mode: a request that was about to demand a fingerprint
+ * becomes a 5-second overlay, and a quiet pair can be made loud. That is what "an
+ * exception to how this pair behaves" means, and it is why the modal's third button
+ * needs no mode picker — there is exactly one sensible value, and this computes it.
+ *
+ * Total and exhaustive with **no `else`**: adding a third [Mode] becomes a compile
+ * error here rather than a silent default, which matters because this decides what a
+ * one-tap policy write records.
+ *
+ * It can never return an auto-approve value, because no such [Mode] exists — `NOTIFY`
+ * is the floor. So an exception can only choose *how* a pair is asked about, never
+ * whether it is asked at all. That invariant is the whole reason the button is safe.
+ */
+fun exceptionModeFor(resolved: Mode): Mode = when (resolved) {
+    Mode.SECURE -> Mode.NOTIFY
+    Mode.NOTIFY -> Mode.SECURE
+}

@@ -973,6 +973,49 @@ Two things, both from Mido's 2026-10-19 messages.
 
 **122 tests green.** Version 0.23.2 / build 106. APK taildropped, exit 0.
 
+## 0.24.0 — the modal's third button, and "PER-PAIR RULES" → "EXCEPTIONS" (build 107) — CURRENT
+`<hash>` · 2026-10-19
+
+Mido: *"in the modal I want a third button to automatically add an exception for the current
+request. using our same system for per-pair rules, and change this stupid name while at it"*.
+
+**The rename.** The rules screen was `PER-PAIR RULES`, which named the *implementation*. It is now
+`EXCEPTIONS` — one word for one concept, and it explains itself, because the default **is** "ask"
+(`AUTOMATIC` with no rule → `SECURE`), so every rule is literally an exception to it.
+
+**The button.** A third decision in the `SECURE` modal: it approves the request **and** writes an
+exception for its pair in one tap. Details that matter:
+
+- **Its own full-width row above DENY/APPROVE, not a third column in that pair.** The 0.23.0 pass
+  put 12dp between DENY and APPROVE precisely so the two decisions are never one fat-finger apart;
+  wedging a third button between them would undo it. Secondary style, so a reflexive tap meant for
+  APPROVE cannot land here.
+- **The label names the behaviour the tap produces** — `ALWAYS NOTIFY` / `ALWAYS ASK` — because the
+  exception is the *other* mode, computed by the new pure `exceptionModeFor(resolved)`.
+- **Scoped to `AUTOMATIC` — and ONLY `AUTOMATIC`.** `resolve()` reads the rule table in that mode
+  alone, so under a forced `SECURE`/`NOTIFY` a written rule is inert. Mido's call (2026-10-19):
+  *"just add it, it should work with automatic and that's it"* — so the button is **absent**, not
+  disabled, outside `AUTOMATIC`. No flipping the switch behind the human's back, no button that
+  lies about what it just did.
+- **The floor holds.** `Rule.ALLOWED_MODES` is `NOTIFY | SECURE`, so an exception can at most make a
+  pair *quiet*. It can never auto-approve, and no tap here can create a path that skips a human.
+- **The Activity never writes policy.** It renders the offer and hands the finished `Rule` back;
+  `BridgeService.writeException` persists it — the single place policy is written, read-modify-write
+  (`withRule`, never a fresh `Policy`), audited with `source = "modal"` so the log says *where* a
+  policy decision came from. A failed write does not fail the request (the human did approve) but is
+  surfaced through the audit-health banner, never swallowed.
+- **Same biometric gate as APPROVE** — the tap approves a request, so it clears the same finger,
+  and arms on the same signal (never before the summary the human is meant to read).
+- `GateResult.ApprovedWithException` carries the rule back. It is checked **before** plain
+  `Approved` in the gate, because the exception tap also sets `approved = true` — testing approval
+  first would silently downgrade it and lose the rule the human asked for.
+
+Planned in `EXCEPTIONS-PLAN.md`; the open questions there (Q1/Q2/Q3/Q5/Q6) were settled in chat as:
+set-and-approve, exact verb only, `ALWAYS …` labels, own row above the pair, shared arm delay.
+
+**126 tests green** (4 new: the other-mode mapping, the file round-trip, siblings untouched, exact
+beats ANY). Version 0.24.0 / build 107.
+
 ---
 
 ## Keeping this file honest

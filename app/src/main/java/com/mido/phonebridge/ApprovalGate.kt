@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.mido.phonebridge.policy.Rule
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -54,6 +55,22 @@ object ApprovalGate {
             val enqueuedAt: Long,
             val shownAt: Long,
             val expiredAt: Long,
+            val queueDepth: Int
+        ) : GateResult()
+
+        /**
+         * The human tapped the exception button: the request is approved AND an exception
+         * was written for its pair.
+         *
+         * Distinct from [Approved] because the caller has one more job — persist the rule.
+         * The decision and the policy change are ONE tap, so the write and the record
+         * happen together at the single dispatch site, never in the UI.
+         */
+        data class ApprovedWithException(
+            val rule: Rule,
+            val enqueuedAt: Long,
+            val shownAt: Long,
+            val decidedAt: Long,
             val queueDepth: Int
         ) : GateResult()
     }
@@ -124,6 +141,17 @@ object ApprovalGate {
     )
 
     /**
+     * The modal's exception offer: the rule to write for THIS request's pair, plus the
+     * label for the button.
+     *
+     * Carrying the finished [rule] (rather than the pair, leaving the UI to assemble one)
+     * is deliberate: the Activity then does no policy reasoning at all — it renders
+     * [label] and hands [rule] back. Every decision about what the exception MEANS stays
+     * on the gate/dispatch side, where it is unit-tested and audited.
+     */
+    class ExceptionOffer(val rule: Rule, val label: String)
+
+    /**
      * Everything the modal needs to state, in human terms, exactly what is being
      * requested. Built from the RESOLVED action + live notification, never from
      * the raw request, so the modal can't understate what will happen.
@@ -168,6 +196,16 @@ object ApprovalGate {
          * request, reads included (biometric is part of the modal for now).
          */
         val requiresBiometric: Boolean = true,
+        /**
+         * The third-button offer, or null when the modal must not offer one.
+         *
+         * Decided by the GATE, rendered by the Activity — same split as
+         * [requiresBiometric]. It is non-null only when the switch is `AUTOMATIC`,
+         * because that is the only mode that reads the rule table: under a forced
+         * `SECURE`/`NOTIFY` a written rule is inert, so offering the button there would
+         * be offering a tap that changes nothing.
+         */
+        val exceptionOffer: ExceptionOffer? = null,
         /** Seconds until auto-deny, for the countdown UI. */
         val timeoutSeconds: Long = TIMEOUT_SECONDS
         // NOTE: there are no AI fields here any more. The summary arrives AFTER this view is
@@ -219,7 +257,14 @@ object ApprovalGate {
          */
         @Volatile var enabledAtMs: Long = 0L,
         @Volatile var decidedAtMs: Long = 0L,
-        @Volatile var approved: Boolean? = null
+        @Volatile var approved: Boolean? = null,
+        /**
+         * Set when the human tapped the exception button: the exact rule to persist for
+         * this request's pair. Carried on the pending request so [await] can hand it to
+         * the caller, which is the ONLY place policy is written. Non-null implies
+         * [approved] is true — the tap approves and writes in one gesture.
+         */
+        @Volatile var exceptionRule: Rule? = null
     ) {
         /**
          * The longest this request can legitimately take: the fetch, then a full window.
@@ -318,6 +363,24 @@ object ApprovalGate {
     }
 
     /**
+     * Called by ApprovalActivity when the human taps the exception button: approve this
+     * request AND write [rule] for its pair.
+     *
+     * The rule travels back on the pending request so the CALLER persists it — the
+     * Activity renders and signals, it never writes policy. Same split as the modal rows
+     * and [ApprovalView.requiresBiometric].
+     */
+    fun resolveWithException(requestId: Long, rule: Rule): Boolean {
+        val p = current ?: return false
+        if (p.requestId != requestId) return false
+        p.exceptionRule = rule
+        p.approved = true
+        p.decidedAtMs = System.currentTimeMillis()
+        p.latch.countDown()
+        return true
+    }
+
+    /**
      * Block until the human approves/denies. Throws on deny/timeout.
      */
     fun await(
@@ -381,6 +444,17 @@ object ApprovalGate {
                     expiredAt = decidedAt,
                     queueDepth = pending.queueDepthAtEnqueue
                 )
+                // The exception tap is checked FIRST: it also sets approved = true, so
+                // testing `approved` first would silently downgrade it to a plain approval
+                // and lose the rule the human asked for.
+                pending.approved == true && pending.exceptionRule != null ->
+                    GateResult.ApprovedWithException(
+                        rule = pending.exceptionRule!!,
+                        enqueuedAt = pending.createdAtMs,
+                        shownAt = pending.shownAtMs,
+                        decidedAt = decidedAt,
+                        queueDepth = pending.queueDepthAtEnqueue
+                    )
                 pending.approved == true -> GateResult.Approved(
                     enqueuedAt = pending.createdAtMs,
                     shownAt = pending.shownAtMs,

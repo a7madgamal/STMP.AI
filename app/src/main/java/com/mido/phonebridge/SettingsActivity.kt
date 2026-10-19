@@ -21,7 +21,13 @@ import com.mido.phonebridge.policy.Rule
 import com.mido.phonebridge.ui.Theme
 
 /**
- * Where per-pair rules are authored. The only place, deliberately.
+ * Where EXCEPTIONS are authored. The only place, deliberately.
+ *
+ * An exception is one `plugin × verb` pair that behaves differently from the default,
+ * and the default is "ask": `AUTOMATIC` with no rule resolves to `SECURE`. So the list
+ * is every rule — each one an exception to the ask-everything default. (The screen was
+ * called "PER-PAIR RULES" until 2026-10-19; the name described the implementation
+ * instead of the intent, and Mido asked for it changed.)
  *
  * `AUTOMATIC` is a switch position that does nothing until a rule exists, so this
  * screen and `AUTOMATIC` ship together — a switch value whose whole point is the
@@ -55,7 +61,7 @@ class SettingsActivity : Activity() {
     private fun render() {
         container.removeAllViews()
 
-        container.addView(Theme.text(this, "PER-PAIR RULES", 20f).apply {
+        container.addView(Theme.text(this, "EXCEPTIONS", 20f).apply {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         })
 

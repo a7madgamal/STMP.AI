@@ -87,6 +87,9 @@ class ApprovalActivity : FragmentActivity() {
         // The gate decides whether this request needs a biometric; the UI only renders
         // that decision (see ApprovalView.requiresBiometric). Read once, here.
         val requiresBiometric = view?.requiresBiometric == true
+        // The exception offer, or null. Read once, like requiresBiometric: the gate
+        // decided whether the modal may offer it (only under AUTOMATIC).
+        val offer = view?.exceptionOffer
 
         val pad = Theme.dp(this, 24)
 
@@ -411,6 +414,47 @@ class ApprovalActivity : FragmentActivity() {
             isEnabled = false
             alpha = 0.4f
         }
+
+        // The exception button (Mido, 2026-10-19): approve this request AND make its pair
+        // behave this way from now on. Its own full-width row, NOT a third column in the
+        // DENY/APPROVE pair — that pair carries 12dp specifically so the two decisions are
+        // never one fat-finger apart, and wedging a third button between them would undo
+        // that. Secondary style, so a reflexive tap meant for APPROVE cannot land here.
+        //
+        // The offer is null unless the switch is AUTOMATIC (the only mode that reads the
+        // rule table), so the row simply does not exist otherwise — no disabled button
+        // implying a feature that is off.
+        var exceptionButton: MaterialButton? = null
+        val exceptionRow: View? = offer?.let { off ->
+            val btn = Theme.button(this, off.label, Theme.ButtonStyle.NEUTRAL) {
+                // Same biometric gate as APPROVE: this tap approves a request, so it must
+                // clear the same finger. The rule only reaches the caller after the prompt
+                // succeeds — resolveWithException is called from the same success callback
+                // APPROVE uses.
+                if (requiresBiometric) {
+                    promptBiometric { ApprovalGate.resolveWithException(id, off.rule) }
+                } else {
+                    ApprovalGate.resolveWithException(id, off.rule)
+                }
+                finish()
+            }.apply {
+                isEnabled = false
+                alpha = 0.4f
+            }
+            exceptionButton = btn
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(btn)
+                addView(
+                    label(
+                        "approves this request, and sets ${off.rule.plugin} · " +
+                            "${off.rule.verb?.name?.lowercase() ?: "any verb"} to " +
+                            "${off.rule.mode.name.lowercase()} from now on",
+                        11f, Theme.ON_SURFACE_VARIANT
+                    )
+                )
+            }
+        }
         // Fails closed: if a mutating route needs a biometric that this device cannot
         // provide (none enrolled, none present), APPROVE must never be tappable — only
         // DENY works, and the reason is stated.
@@ -435,9 +479,14 @@ class ApprovalActivity : FragmentActivity() {
                 if (armed && !biometricBlocked) {
                     allow.isEnabled = true
                     allow.alpha = 1f
+                    // The exception button approves a request, so it arms on the SAME
+                    // signal APPROVE does — never earlier, or a tap could land before the
+                    // summary the human is meant to read.
+                    exceptionButton?.let { it.isEnabled = true; it.alpha = 1f }
                 } else if (!armed) {
                     allow.isEnabled = false
                     allow.alpha = 0.4f
+                    exceptionButton?.let { it.isEnabled = false; it.alpha = 0.4f }
                 }
             }
         }
@@ -476,6 +525,14 @@ class ApprovalActivity : FragmentActivity() {
         }
         pinned.addView(iconRow)
         pinned.addView(armBar)
+        if (exceptionRow != null) {
+            pinned.addView(
+                exceptionRow,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Theme.dp(this@ApprovalActivity, 10) }
+            )
+        }
         pinned.addView(btnRow)
 
         val outer = LinearLayout(this).apply {

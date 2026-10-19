@@ -14,17 +14,20 @@ import android.os.IBinder
 import android.util.Log
 import com.mido.phonebridge.audit.AuditClassify
 import com.mido.phonebridge.audit.AuditDraft
+import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditOutcome
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditStore
 import com.mido.phonebridge.audit.Decision
 import com.mido.phonebridge.audit.DecisionSource
+import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.audit.recordResponse
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.Route
+import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.labelOf
 import com.mido.phonebridge.notify.NotifyGate
 import com.mido.phonebridge.plugins.calendar.CalendarPlugin
@@ -36,6 +39,8 @@ import com.mido.phonebridge.policy.ModeResolution
 import com.mido.phonebridge.policy.ModeSource
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.policy.Rule
+import com.mido.phonebridge.policy.exceptionModeFor
 import com.mido.phonebridge.policy.isAttended
 import com.mido.phonebridge.policy.resolve
 import fi.iki.elonen.NanoHTTPD
@@ -674,7 +679,10 @@ class HttpServer(
                             remote, account, resolved.route, path, body, query,
                             summary = summary,
                             requiresBiometric = mode == Mode.SECURE,
-                            rows = rows
+                            rows = rows,
+                            exceptionOffer = exceptionOfferFor(
+                                globalMode, resolved.plugin.id, resolved.route.verb, mode
+                            )
                         ),
                         // Null for a route that declares `aiSummary = false`: there is nothing
                         // to wait for, so its buttons go live at once.
@@ -702,6 +710,15 @@ class HttpServer(
                                 Response.Status.REQUEST_TIMEOUT,
                                 err("approval_timeout", "approval timed out")
                             )
+                        }
+                        is ApprovalGate.GateResult.ApprovedWithException -> {
+                            // The human approved AND asked for this pair to behave
+                            // differently next time. Both halves are real, so both are
+                            // recorded: the approval here, the policy move in the same
+                            // commit below. A write that fails does NOT deny the request —
+                            // the human did approve — but it is surfaced, never swallowed.
+                            draft.outcome(AuditOutcome.APPROVED)
+                            writeException(gate.rule)
                         }
                         is ApprovalGate.GateResult.Approved ->
                             draft.outcome(AuditOutcome.APPROVED)
@@ -752,6 +769,13 @@ class HttpServer(
                 mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
+            // The exception tap is an approval first: the decision block reads like an
+            // approval (a human did approve this request), and the policy move it also
+            // caused is its own POLICY_CHANGED record. Two facts, two lines.
+            is ApprovalGate.GateResult.ApprovedWithException -> Decision(
+                mode, source, globalMode.name, ruleKey,
+                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+            )
             is ApprovalGate.GateResult.Denied -> Decision(
                 mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
@@ -760,6 +784,57 @@ class HttpServer(
                 mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.expiredAt, g.queueDepth
             )
+        }
+    }
+
+    /**
+     * The exception the modal may offer for this request, or null when it must not.
+     *
+     * **Only under `AUTOMATIC`.** `resolve()` reads the rule table in that mode alone, so
+     * under a forced `SECURE`/`NOTIFY` a written rule is inert — offering the button there
+     * would be offering a tap that changes nothing. Rather than flip the switch behind the
+     * human's back (Mido's call, 2026-10-19: *"it should work with automatic and that's
+     * it"*), the offer is simply absent and the button does not render.
+     *
+     * The mode is the OTHER one — see [exceptionModeFor] — so the label always names the
+     * behaviour the tap will produce.
+     */
+    private fun exceptionOfferFor(
+        globalMode: GlobalMode,
+        plugin: String,
+        verb: Verb,
+        resolvedMode: Mode
+    ): ApprovalGate.ExceptionOffer? {
+        if (globalMode != GlobalMode.AUTOMATIC) return null
+        val exceptionMode = exceptionModeFor(resolvedMode)
+        return ApprovalGate.ExceptionOffer(
+            rule = Rule(plugin, verb, exceptionMode),
+            label = if (exceptionMode == Mode.NOTIFY) "ALWAYS NOTIFY" else "ALWAYS ASK"
+        )
+    }
+
+    /**
+     * Persist a rule the human authored from the modal, and record it.
+     *
+     * Read-modify-write, never a fresh [Policy]: constructing a new one would reset every
+     * sibling rule, which is a bug this project already paid for once in `applyGate`.
+     * Recorded with `source = "modal"` so the log says WHERE a policy decision came from,
+     * not merely that one happened.
+     *
+     * A failure here does not fail the request — the human already approved — but it is
+     * surfaced through the audit health banner rather than swallowed, because a rule that
+     * took effect unrecorded is the same class of failure as an unrecorded switch flip.
+     */
+    private fun writeException(rule: Rule) {
+        try {
+            val store = PolicyStore.from(ctx)
+            val current = store.get()
+            val before = current.rules.firstOrNull { it.key == rule.key }
+            store.set(current.withRule(rule))
+            auditStore.append(PolicyAudit.recordRule(before, rule, current.global, "modal"))
+        } catch (e: Exception) {
+            AuditHealth.markDegraded("modal exception not recorded: ${e.message}")
+            Log.w("BridgeService", "exception write failed: ${e.message}")
         }
     }
 
@@ -806,7 +881,9 @@ class HttpServer(
          * (see [factsFor]) and building them twice is a second live Google round-trip per
          * approval on a route that pre-fetches its target — gmail trash, calendar delete.
          */
-        rows: List<Pair<String, String>>
+        rows: List<Pair<String, String>>,
+        /** The exception the modal may offer, or null. See [exceptionOfferFor]. */
+        exceptionOffer: ApprovalGate.ExceptionOffer? = null
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
 
@@ -856,7 +933,8 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = rows,
-                requiresBiometric = requiresBiometric
+                requiresBiometric = requiresBiometric,
+                exceptionOffer = exceptionOffer
             )
         }
 
@@ -881,7 +959,8 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = rows,
-                requiresBiometric = requiresBiometric
+                requiresBiometric = requiresBiometric,
+                exceptionOffer = exceptionOffer
             )
         }
 

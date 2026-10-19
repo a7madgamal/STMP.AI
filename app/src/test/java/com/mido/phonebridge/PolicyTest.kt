@@ -8,6 +8,7 @@ import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.policy.Rule as PolicyRule
+import com.mido.phonebridge.policy.exceptionModeFor
 import com.mido.phonebridge.policy.isAttended
 import com.mido.phonebridge.policy.resolve
 import com.mido.phonebridge.policy.resolveMode
@@ -389,6 +390,65 @@ class PolicyTest {
         val next = p.withoutRule("gmail", Verb.DELETE)
         assertEquals(1, next.rules.size)
         assertEquals("calendar", next.rules.single().plugin)
+    }
+
+    // --- the modal's exception offer ---
+
+    @Test
+    fun `an exception is the OTHER mode, and can never auto-approve`() {
+        // The whole point of the button: one tap changes HOW a pair is asked about.
+        assertEquals(Mode.NOTIFY, exceptionModeFor(Mode.SECURE))
+        assertEquals(Mode.SECURE, exceptionModeFor(Mode.NOTIFY))
+        // The floor holds by construction — there is no auto-approve Mode to return.
+        for (m in Mode.values()) {
+            assertTrue(
+                "exception mode must be a rule-settable mode",
+                exceptionModeFor(m) in PolicyRule.ALLOWED_MODES
+            )
+        }
+    }
+
+    @Test
+    fun `a modal-written exception round-trips through the file`() {
+        // What the button writes must reload as the same decision, or the tap is a lie
+        // the next boot undoes.
+        val written = Policy(GlobalMode.AUTOMATIC).withRule(
+            PolicyRule("gmail", Verb.DELETE, exceptionModeFor(Mode.SECURE))
+        )
+        val reloaded = Policy.parse(written.toJson().toString())
+        assertEquals(written.rules, reloaded.rules)
+        assertEquals(
+            Mode.NOTIFY,
+            resolveMode(reloaded.global, reloaded.rules, "gmail", Verb.DELETE)
+        )
+    }
+
+    @Test
+    fun `a modal exception does not disturb sibling rules`() {
+        // Read-modify-write, never a fresh Policy: constructing a new one would drop every
+        // sibling rule, which this project already paid for once in applyGate.
+        val p = Policy(
+            GlobalMode.AUTOMATIC,
+            listOf(PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
+        )
+        val next = p.withRule(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY))
+        assertEquals(2, next.rules.size)
+        assertEquals(GlobalMode.AUTOMATIC, next.global)
+        assertEquals(
+            Mode.NOTIFY,
+            resolveMode(next.global, next.rules, "calendar", Verb.READ)
+        )
+    }
+
+    @Test
+    fun `an exact modal exception beats the plugin's ANY rule`() {
+        // The precedence the engine already promises must survive a write from the modal.
+        val rules = listOf(
+            PolicyRule("gmail", null, Mode.NOTIFY),
+            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+        )
+        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
+        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
     }
 
     // --- first run ---
