@@ -1190,7 +1190,32 @@ class HttpServer(
         val method = body.optString("method", "GET").uppercase()
         val url = body.optString("url", "")
         val path = runCatching { java.net.URL(url).path }.getOrNull().orEmpty().ifBlank { url.ifBlank { "?" } }
-        return "$pluginId · $method $path"
+
+        // Name the RESOURCE, not the path. `GET /api/v1/tasks` gives a summariser nothing to
+        // say, so it restates the URL — reported on device as *"says read todoist api both
+        // times, absolutely useless"*. The last meaningful path segment is the object being
+        // acted on, which is what a human would call it: "tasks", "events", "messages".
+        //
+        // Deliberately derived from the path rather than a per-API dictionary: this route is
+        // generic (any secret, any host), so a table would be a second thing to maintain and
+        // would silently miss every API nobody added. The segment is usually right, and when
+        // it is not it is still more informative than the raw URL.
+        val resource = path.trim('/').split('/')
+            .lastOrNull { it.isNotBlank() && !it.all { c -> c.isDigit() } && it.length <= 24 }
+            ?.replace('-', ' ')
+            ?.replace('_', ' ')
+
+        val query = body.optJSONObject("query")
+        val filters = if (query == null) "" else buildList {
+            for (k in query.keys()) {
+                val v = query.optString(k, "")
+                if (v.isNotBlank()) add("$k=$v")
+            }
+        }.joinToString(", ")
+
+        val head = if (resource.isNullOrBlank()) "$pluginId · $method $path"
+        else "$pluginId · $method $resource"
+        return if (filters.isBlank()) head else "$head · query: $filters"
     }
 
     private fun jsonArrayToStrings(arr: JSONArray?): List<String> {

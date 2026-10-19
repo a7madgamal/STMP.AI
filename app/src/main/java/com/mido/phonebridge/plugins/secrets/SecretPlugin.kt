@@ -74,6 +74,21 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
             ApprovalRow("TARGET", "$method $url", ApprovalRow.Style.MONO),
             ApprovalRow("SECRET", secretName, ApprovalRow.Style.NORMAL)
         )
+        // The QUERY is part of what is being approved, and for a read it is often the ONLY
+        // substantive content: a filtered list, a project scope, a search term. Without it the
+        // modal says "read todoist api" and the human has nothing to judge — reported on device
+        // 2026-10-19: *"says read todoist api both times, absolutely useless"*.
+        req.body.optJSONObject("query")?.let { q ->
+            val parts = buildList {
+                for (k in q.keys()) {
+                    val v = q.optString(k, "")
+                    if (v.isNotBlank()) add("$k=$v")
+                }
+            }
+            if (parts.isNotEmpty()) {
+                rows.add(ApprovalRow("QUERY", parts.joinToString(", "), ApprovalRow.Style.MONO))
+            }
+        }
         // Name the host explicitly: it is the security boundary, so the human should
         // see the decision they are making about where the secret goes.
         val host = runCatching { java.net.URL(url).host }.getOrNull()

@@ -1348,7 +1348,7 @@ no-standing-backward-compat rule — not live, so the fix is to re-tap.
 fallback is LOUD for `TRACE`/`PROPFIND`/empty — plus case/whitespace tolerance). Version 0.26.2 /
 build 116.
 
-## 0.26.3 — the prompt's worked example was being parroted (build 117) — CURRENT
+## 0.26.3 — the prompt's worked example was being parroted (build 117)
 2026-10-19
 
 Mido: *"still says adding 8 todos which is VERY misleading"* — on a **read**.
@@ -1389,6 +1389,41 @@ guard now catches the answer when it does.
 152 tests green (8 new for the guard, including the exact reported case). The guard test was
 **proven to fail**: breaking the empty-description check fails `an empty description is not shown`.
 Version 0.26.3 / build 117.
+
+## 0.26.4 — the facts named a URL, so the summary could only restate it (build 118) — CURRENT
+2026-10-19
+
+Mido: *"says read todoist api both times, absolutely useless"*.
+
+And it was **accurate** — that is the problem. For a GET the model received only:
+
+```
+TARGET: GET https://api.todoist.com/api/v1/tasks
+SECRET: ***
+HOST: api.todoist.com
+```
+
+There is nothing else to say about that. **A bigger model would produce the same sentence**, because
+it is being asked to describe a URL. So this is a FACTS bug, not an intelligence bug — the third time
+in this feature that the model was blamed for what the pipeline fed it.
+
+Two additions, both deterministic (true with or without the AI):
+
+- **The summary names the RESOURCE.** `describeSecretCall` now takes the last meaningful path
+  segment — `todoist · GET tasks` instead of `todoist · GET /api/v1/tasks`. Derived from the path
+  rather than a per-API dictionary: this route is generic (any secret, any host), so a table would
+  be a second thing to maintain and would silently miss every API nobody added.
+- **The query is part of the prompt AND the modal.** `QUERY: project_id=…, limit=…` is often the
+  only substantive content of a read — a project scope, a filter, a search term. Without it the
+  modal says "read todoist api" and the human has nothing to judge.
+
+The summary line carries the query too: `todoist · GET tasks · query: project_id=…, limit=50`.
+
+**The standing lesson, now three releases deep:** when a summary is unhelpful, read the facts before
+touching the model. Every time so far the pipeline was the fault — a truncated body, a route string,
+a bare URL.
+
+152 tests green. Version 0.26.4 / build 118.
 
 ---
 
