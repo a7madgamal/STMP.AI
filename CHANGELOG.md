@@ -1036,7 +1036,7 @@ counts it and fails on a correct tree (that happened on the first run).
 The guard was **proven to fail**: breaking one pass-through produced
 "Found 3 construction(s) but 2 offer pass-through(s)".
 
-## 0.24.2 — a settled NOTIFY card could not be dismissed (build 109) — CURRENT
+## 0.24.2 — a settled NOTIFY card could not be dismissed (build 109)
 `2aa39ab` · 2026-10-19
 
 Reported on device: *"I have a notification card still stuck!"*, then *"it doesn't even dismiss on
@@ -1066,6 +1066,43 @@ Three changes, all pointing at one idea — removal gets its own guaranteed path
 window.
 
 127 tests green. Version 0.24.2 / build 109.
+
+## 0.24.3 — the exception button killed the modal before the fingerprint (build 110) — CURRENT
+`<hash>` · 2026-10-19
+
+Reported on device: *"I clicked always notify like 5 times, modal kept coming back, only when I
+clicked approve I got a fingerprint"*.
+
+The report contained the diagnosis. **No fingerprint and the modal returning mean the request was
+never resolved** — a prompt that never appears means the Activity died before it could show one.
+
+The handler called `finish()` **unconditionally, immediately after** starting the biometric
+prompt:
+
+```kotlin
+if (requiresBiometric) {
+    promptBiometric { ApprovalGate.resolveWithException(id, off.rule) }
+} else {
+    ApprovalGate.resolveWithException(id, off.rule)
+}
+finish()          // <-- runs at once, before the async prompt can appear
+```
+
+`promptBiometric` is **asynchronous**: it shows the system prompt and returns immediately, and the
+resolve happens later in its callback. So `finish()` destroyed the Activity first — the callback
+never fired, the request was never resolved, and the gate re-posted the modal. Five taps, five
+dead ends.
+
+`APPROVE` never had this bug because its `finishWith()` lives **inside** the callback. The fix
+mirrors that exactly: resolve, then finish, both in the success callback; on a dismissed or failed
+prompt nothing happens at all, so the request stays pending and can be retried.
+
+**The durable rule: any code that starts an ASYNC confirmation must put its completion (and its
+`finish()`) inside that confirmation's callback — never on the line after the call.** `finish()`
+after `promptBiometric(...)` is a no-op against an Activity that is about to be destroyed; the
+prompt is a system surface and cannot outlive its host.
+
+127 tests green. Version 0.24.3 / build 110.
 
 ---
 

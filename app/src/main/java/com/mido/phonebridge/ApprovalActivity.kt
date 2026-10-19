@@ -427,16 +427,32 @@ class ApprovalActivity : FragmentActivity() {
         var exceptionButton: MaterialButton? = null
         val exceptionRow: View? = offer?.let { off ->
             val btn = Theme.button(this, off.label, Theme.ButtonStyle.NEUTRAL) {
-                // Same biometric gate as APPROVE: this tap approves a request, so it must
-                // clear the same finger. The rule only reaches the caller after the prompt
-                // succeeds — resolveWithException is called from the same success callback
-                // APPROVE uses.
+                // Same biometric gate as APPROVE — and the same ORDERING, which is not
+                // cosmetic. `promptBiometric` is ASYNCHRONOUS: it shows the system prompt
+                // and returns immediately, and the resolve happens later in its callback.
+                //
+                // The first version called `finish()` unconditionally right after starting
+                // the prompt, which destroyed this Activity before the fingerprint could
+                // run. The callback never fired, the request was never resolved, and the
+                // gate re-posted the modal — reported on device as *"I clicked always
+                // notify like 5 times, modal kept coming back, only when I clicked approve
+                // I got a fingerprint"*. The missing prompt was the tell: a prompt that
+                // never appears means the Activity died first.
+                //
+                // APPROVE never had this bug because its resolve+finish lives INSIDE the
+                // callback. This now mirrors it exactly: nothing finishes until the
+                // decision is actually resolved. On a dismissed or failed prompt we do
+                // nothing at all, so the request stays pending and the human can retry —
+                // same behaviour as APPROVE.
                 if (requiresBiometric) {
-                    promptBiometric { ApprovalGate.resolveWithException(id, off.rule) }
+                    promptBiometric {
+                        ApprovalGate.resolveWithException(id, off.rule)
+                        finish()
+                    }
                 } else {
                     ApprovalGate.resolveWithException(id, off.rule)
+                    finish()
                 }
-                finish()
             }.apply {
                 isEnabled = false
                 alpha = 0.4f
