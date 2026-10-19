@@ -27,6 +27,27 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PhoneBridge">
 
+        <!--
+          GPU acceleration for LiteRT-LM REQUIRES these declarations (verified on device
+          2026-10-19). Without them the app cannot see the vendor OpenCL driver, the GPU
+          sampler fails to load, and inference dies with
+          `Can not find OpenCL library on this device` — even though the engine itself
+          initialises and reports `engine on GPU`. The failure is at INFERENCE time, not
+          load time, which is what made it look like a slow model rather than a missing
+          library.
+
+          `required="false"` on purpose: these are VENDOR libraries, present on most real
+          devices (Samsung/Qualcomm/MediaTek ship an OpenCL driver) but absent on some
+          emulators and AOSP builds. Making them required would refuse to install there;
+          leaving them optional means a device without them installs and simply falls back
+          to CPU, which LiteRtLm handles explicitly and logs.
+
+          `libvndksupport.so` is declared alongside because the vendor OpenCL driver links
+          against it; without it the driver still fails to dlopen.
+        -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">

@@ -63,9 +63,6 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
          */
         private const val MAX_CONTEXT_TOKENS = 1024
 
-        /** Threads for the CPU backend; the device has 8 cores, leave headroom for UI. */
-        private const val CPU_THREADS = 4
-
         /**
          * The output contract, stated in the prompt rather than enforced by constrained
          * decoding.
@@ -97,29 +94,76 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
      * chat history, and each request must be described on its own facts, never in
      * the shadow of the previous one.
      */
+    /**
+     * The loaded engine. GPU only — there is no CPU variant, by decision (Mido,
+     * 2026-10-19): *"fail hard ... only the best most efficient performance for my phone
+     * is accepted"*. A CPU fallback is a silent degradation that hides a broken GPU behind
+     * acceptable-looking behaviour, which is the exact pattern this project forbids.
+     */
     @Volatile
     private var engine: Engine? = null
+
+    /**
+     * Why the engine is not usable, or "" — surfaced in `/debug`.
+     *
+     * Fail-hard still has to be DIAGNOSABLE: a request that fails because the GPU cannot
+     * run must say so, or the only symptom is `ai_unavailable` with no cause. This is the
+     * cause.
+     */
+    @Volatile
+    var lastEngineError: String = ""
+        private set
 
     override fun isAvailable(ctx: Context): Boolean = modelFile.exists() && modelFile.length() > 0
 
     /**
-     * Load the model now so the first request does not pay for it.
+     * Load the model on the GPU and PROVE it can infer.
      *
-     * Blocking — call off the main thread. Idempotent, and a no-op when the file is
-     * absent: whether the bridge may serve at all is [ModelRegistry.readiness]'s call,
-     * not this one's. Warm-up buys latency, never permission.
+     * Blocking — call off the main thread. Idempotent, and a no-op when the file is absent:
+     * whether the bridge may serve at all is [ModelRegistry.readiness]'s call.
+     *
+     * **The probe is the point.** A GPU engine can initialise and still fail every
+     * inference — measured on device 2026-10-19, where the engine reported `engine on GPU`
+     * and then died with `Can not find OpenCL library on this device`, because LiteRT-LM's
+     * GPU sampler needs OpenCL and the app had not declared it. Loading is not proof;
+     * running is. So warm-up runs one throwaway inference, and a failure is recorded loudly
+     * here rather than discovered on a request the human is waiting on.
      */
     fun warm(ctx: Context) {
         if (!isAvailable(ctx)) return
         try {
             engine ?: createEngine().also { engine = it }
         } catch (e: Exception) {
-            // A failed warm-up is not fatal: the next request retries the load and
-            // reports its own failure. Swallowing here would be a silent fallback only
-            // if it changed an outcome, and it does not.
-            Log.w(TAG, "warm-up failed: ${e.message}")
+            lastEngineError = "engine load failed: ${e.message}"
+            Log.e(TAG, lastEngineError)
+            return
+        }
+        try {
+            runInference(engine!!, PROBE_FACTS)
+            lastEngineError = ""
+            Log.i(TAG, "warm-up: GPU proven, inference OK")
+        } catch (e: Exception) {
+            // Fail hard: no demotion to CPU, no retry on another backend. The GPU is the
+            // only accepted path, so a GPU that cannot run is a hard failure that says why.
+            lastEngineError = "GPU inference failed: ${e.message}"
+            Log.e(TAG, "$lastEngineError — no CPU fallback (fail-hard)")
+            release()
         }
     }
+
+    /**
+     * A throwaway request used only to prove the backend can infer.
+     *
+     * Deliberately tiny and static: its RESULT is discarded, so it must not depend on
+     * anything, and it must not look like real traffic in the log.
+     */
+    private val PROBE_FACTS = RequestFacts(
+        plugin = "probe",
+        verb = "READ",
+        routeLabel = "WARM UP",
+        summary = "warm up",
+        rows = emptyList()
+    )
 
     /**
      * Drop the loaded model and free its memory (~700 MiB resident, measured 2026-10-19).
@@ -154,9 +198,11 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 Log.i(TAG, "summarised in ${elapsed}ms: risk=${it.risk}")
             }
         } catch (e: Exception) {
-            // Never throw: a summariser failure must degrade to the heuristic, not
-            // fail the request.
-            Log.w(TAG, "inference failed: ${e.message}")
+            // Fail hard, loudly, with the reason kept for /debug. No CPU fallback and no
+            // retry: the GPU is the only accepted path, so a failure here is reported by
+            // the caller as `ai_unavailable` rather than papered over with a slow answer.
+            lastEngineError = "inference failed: ${e.message}"
+            Log.e(TAG, lastEngineError)
             null
         }
     }
@@ -189,18 +235,23 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     }
 
     /**
-     * GPU first, CPU second. The GPU is several times faster on this class of model
-     * (the difference between fitting the modal's budget and not), but OpenCL is not
-     * guaranteed on every device — so a GPU that will not initialise is an explicit,
-     * logged fallback to CPU, not a silent one.
+     * Build the GPU engine. There is no other backend.
+     *
+     * GPU is not a preference here, it is the requirement (Mido, 2026-10-19: *"only the
+     * best most efficient performance for my phone is accepted"*), so this does not catch
+     * and it does not retry elsewhere — a GPU that will not initialise is a hard failure
+     * whose message reaches [lastEngineError] and `/debug`.
+     *
+     * The one platform prerequisite is declared in the manifest, not here: LiteRT-LM's
+     * GPU sampler loads the VENDOR OpenCL driver, and an app cannot dlopen `libOpenCL.so`
+     * without a `<uses-native-library>` entry. Without it the engine still reports
+     * `engine on GPU` and then fails every inference with `Can not find OpenCL library on
+     * this device` — which is exactly what happened on device before the declaration was
+     * added (LiteRT-LM issue #3867 documents the same case).
      */
     private fun createEngine(): Engine {
-        return try {
-            buildEngine(Backend.GPU()).also { Log.i(TAG, "engine on GPU") }
-        } catch (e: Exception) {
-            Log.w(TAG, "GPU backend unavailable (${e.message}); using CPU")
-            buildEngine(Backend.CPU(threadCount = CPU_THREADS)).also { Log.i(TAG, "engine on CPU") }
-        }
+        Log.i(TAG, "loading ${modelFile.name} (${modelFile.length() / 1024 / 1024} MB) on GPU")
+        return buildEngine(Backend.GPU())
     }
 
     private fun buildEngine(backend: Backend): Engine {
