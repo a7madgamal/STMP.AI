@@ -1452,7 +1452,7 @@ answers "did it run", never "was it right".** Both are needed, and only one was 
 
 152 tests green. Version 0.26.5 / build 119.
 
-## 0.27.0 — insets on every screen, and more room above the model row (build 120) — CURRENT
+## 0.27.0 — insets on every screen, and more room above the model row (build 120)
 2026-10-19
 
 Mido: *"fix inset. Add more top margin to the model"*.
@@ -1486,6 +1486,40 @@ memory (Material 3, the UiKit cleanup, the AI engine, the risk badge, the modal 
 alert sounds, and the NOTIFY card's AI line). Each closed individually with its own `sync_status: ok`.
 
 152 tests green. Version 0.27.0 / build 120.
+
+## 0.27.1 — the prompt is logged, and content leads the facts (build 121) — CURRENT
+2026-10-19
+
+Mido, on a write: *"ai desc says POST https://api.todoist.com /api/v1/tasks this is BS. Are you sure
+we are passing all body text to the model?"*
+
+**I was not sure, and I had no way to become sure.** I had been asserting "the body reaches it" by
+reading the code, three times across three releases. That is the exact failure this project keeps
+paying for, so the first fix is not the prompt — it is the evidence.
+
+**1. The prompt itself is now logged.**
+
+```
+ai-prompt[todoist/WRITE] plugin: todoist ⏎ verb: WRITE ⏎ … ⏎ facts: ⏎ - TARGET: … ⏎ - BODY: …
+```
+
+Through `Debug.log`, so it reaches both `/debug` → `logTail` and `/logs` → logcat. Truncated at 600
+chars, which is enough to see the STRUCTURE — which rows exist and what leads — without flooding the
+ring. "What did the model see?" is now answerable from the log instead of from confidence.
+
+**2. Content-first fact ordering, which is a real fix and not a tidy-up.** A 0.6B model reads the
+first fact and largely describes THAT. With `TARGET: POST https://api.todoist.com/api/v1/tasks`
+first, every write summarised as the URL — the body was present and simply never reached. The
+prompt now orders rows by audience: `PAYLOAD`/`BODY`/`QUERY` lead, `TARGET`/`HOST`/`SECRET` trail.
+
+**Two audiences, two orders, one source of facts.** The MODAL keeps URL-first because a human
+scanning an approval wants the address. The MODEL gets content-first because it will restate
+whatever it reads first, and "POST tasks" says more than a URL ever will.
+
+Recorded because it generalises: **a prompt is read in order, and a small model weights the
+beginning.** Fact ordering is a prompt-engineering decision, not a data-model one.
+
+152 tests green. Version 0.27.1 / build 121.
 
 ---
 

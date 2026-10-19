@@ -281,7 +281,17 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         var conversation: Conversation? = null
         return try {
             conversation = eng.createConversation(config)
-            conversation.sendMessage(buildPrompt(facts)).toString()
+            val prompt = buildPrompt(facts)
+            // LOG THE PROMPT. Repeatedly I asserted "the body is passed" by reading the code,
+            // and could not prove it when challenged — the exact failure mode this project
+            // keeps paying for. One line makes the question answerable from `/logs` instead
+            // of from confidence. Truncated to keep the ring readable; the STRUCTURE (which
+            // rows exist and what leads) survives in that window.
+            com.mido.phonebridge.Debug.log(
+                "ai-prompt[${facts.plugin}/${facts.verb}] " +
+                    prompt.replace("\n", " ⏎ ").take(600)
+            )
+            conversation.sendMessage(prompt).toString()
         } finally {
             conversation?.close()
         }
@@ -339,7 +349,22 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         // reason I added AI"*). The budget divides the ONE real constraint (context window)
         // across however many rows exist, so two rows get long excerpts and eight get short
         // ones — and a clipped value is marked '…' rather than silently presented as whole.
-        val rows = com.mido.phonebridge.core.PromptBudget.render(facts.rows)
+        //
+        // **CONTENT FIRST, and this is a real fix, not a tidy-up.** A 0.6B model reads the
+        // first fact and largely describes THAT. With `TARGET: POST https://api.todoist.com/
+        // api/v1/tasks` first, every write summarised as the URL — the body was present and
+        // simply never reached (Mido, 2026-10-19: *"ai desc says POST https://api.todoist.com
+        // /api/v1/tasks this is BS"*). The human needs the URL first in the MODAL; the model
+        // does not. So the prompt reorders: the rows that say WHAT is changing lead, and the
+        // address trails. Two audiences, two orders, one source of facts.
+        val ordered = facts.rows.sortedBy { (label, _) ->
+            when (label.uppercase()) {
+                "PAYLOAD", "BODY", "QUERY", "SUBJECT", "BODY TEXT" -> 0
+                "TARGET", "HOST", "SECRET" -> 2
+                else -> 1
+            }
+        }
+        val rows = com.mido.phonebridge.core.PromptBudget.render(ordered)
         return """
             plugin: ${facts.plugin}
             verb: ${facts.verb}
