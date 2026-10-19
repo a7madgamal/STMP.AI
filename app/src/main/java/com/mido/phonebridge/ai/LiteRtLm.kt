@@ -211,9 +211,15 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
         if (!isAvailable(ctx)) return null
-        val start = System.currentTimeMillis()
         return try {
+            // ENGINE LOAD IS NOT INFERENCE TIME. The first request after a cold start pays the
+            // whole model-map + OpenCL-init cost (~15s on the 1.7B, measured 2026-10-19), and
+            // that was being charged to the caller's budget — so a perfectly good inference was
+            // discarded as "too slow" purely because it was the first one. The budget exists to
+            // bound the HUMAN's wait for a summary, and a cold engine is a one-off setup cost
+            // that `warm()` is supposed to have already paid on service start.
             val eng = engine ?: createEngine().also { engine = it }
+            val start = System.currentTimeMillis()
             val reply = runInference(eng, facts)
             val elapsed = System.currentTimeMillis() - start
             // Over budget: the caller's window is the promise. A late answer on a

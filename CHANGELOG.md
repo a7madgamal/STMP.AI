@@ -1521,7 +1521,7 @@ beginning.** Fact ordering is a prompt-engineering decision, not a data-model on
 
 152 tests green. Version 0.27.1 / build 121.
 
-## 0.28.0 — swapped to Qwen3-1.7B (build 122) — CURRENT
+## 0.28.0 — swapped to Qwen3-1.7B (build 122)
 2026-10-19
 
 Mido: *"swap"* — after the 0.6B copied `TARGET` verbatim even with the body FIRST in the prompt
@@ -1557,6 +1557,39 @@ instead of echoing one. It will not make a bad fact set good — the determinist
 carries the payload, and that work stands on its own with the AI switched off.
 
 152 tests green. Version 0.28.0 / build 122.
+
+## 0.28.1 — engine load no longer counts as inference time (build 123) — CURRENT
+2026-10-19
+
+The 1.7B swap appeared to fail on the first request:
+
+```
+04:19:34  engine creation starts (OpenCL init)
+04:19:49  engine ready                        <- ~15s
+04:19:52  inference starts
+04:19:54  "inference 19843ms exceeded budget 10000ms; discarding"
+```
+
+**The timer was started before `createEngine()`.** So a cold start — mapping a 1 GB model and
+initialising OpenCL — was charged to the *inference* budget, and a perfectly good answer was
+discarded as "too slow" purely for being the first one.
+
+That is a measurement bug, and it had been there since the summariser was written. It only became
+visible now because the 0.6B warmed fast enough (~0.4 s) that the load cost never mattered.
+
+**Fix:** `val start` moved to AFTER the engine exists, so the budget measures what it claims to
+measure — the human's wait for a summary, not the one-off cost of setting up the runtime.
+
+**Why this is not a fudge to make the bigger model pass.** The budget exists to bound how long a
+decision waits for a helpful line. Engine construction is setup: `warm()` is supposed to have paid
+it at service start, and when it has not, the correct answer is to make the FIRST request slow, not
+to silently return no summary. What was happening before was the worst of both: the work completed
+and then got thrown away.
+
+**Still true and worth stating:** ~2 GiB resident on a 24/7 foreground service means more cold
+reloads after `onTrimMemory`. This release makes each one cost time rather than a missing summary.
+
+152 tests green. Version 0.28.1 / build 123.
 
 ---
 
