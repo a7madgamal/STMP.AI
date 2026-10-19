@@ -9,8 +9,9 @@ changed behaviour, the entry goes here in the same commit — a version bump wit
 line is an incomplete change.
 
 Format per entry: what shipped, and **why** — the reasoning is the part that stops a future
-change from undoing it. Commit hash and date are on each heading so `git show <hash>` lands you
-on the diff.
+change from undoing it. Dates are on each heading; find a release's commit with
+`git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
+hash.
 
 Current build: **v0.23.2 (build 106)**.
 
@@ -1156,6 +1157,15 @@ a question the report can answer.
   fix that was paid for. "Fixed the flash" is useless; "the fade drove `View.alpha` while the
   window alpha stayed 1, so the opaque buffer flashed at teardown" is the entry that prevents a
   regression.
-- **Every entry carries its commit hash and date**, so `git show <hash>` lands on the diff.
+- **Do NOT write the entry's own commit hash.** A commit's hash is computed FROM its content, so
+  writing the hash in changes the hash — it cannot contain itself, and amending only produces a
+  new hash the file would then contradict. The entry lands **in the same commit as the change**
+  and records the **date**; find the commit later with:
+  `git log --oneline --grep "0.25.0"`. A hash already in an entry (from before this rule) points
+  at the commit that CHANGED THE APP, which is the useful one to `git show`.
+- **`— CURRENT` lives on the newest entry and nowhere else.** A stale marker makes shipped
+  releases look unshipped. `tools/changelog-check.py` enforces this, that the version and build
+  match `app/build.gradle.kts`, and that no `<hash>` placeholder survives — and a `pre-commit`
+  hook runs it and BLOCKS any commit that touches `app/` without also touching this file.
 - **Do not rewrite history here.** If a release is later corrected, add a new entry that names the
   correction; do not edit the old one into being right.
