@@ -14,7 +14,7 @@ import java.io.File
  * is the same move one level up: implement [SummaryModel] and return it from [active].
  *
  * **The model is REQUIRED (Mido, 2026-10-19).** This used to fall back to a pure
- * [HeuristicSummarizer] when the file was absent, and the app ran in a permanently
+ * heuristic when the file was absent, and the app ran in a permanently
  * degraded mode where the "AI summary" was really a rule. That is exactly the silent
  * fallback the fail-hard rule forbids, and the AI is core functionality rather than a
  * nice-to-have — so the fallback is GONE. A missing model is now a NOT-READY state that
