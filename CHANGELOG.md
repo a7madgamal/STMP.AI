@@ -1252,7 +1252,7 @@ when restored.
 
 133 tests green. Version 0.26.0 / build 114.
 
-## 0.26.1 — the prompt cap is a BUDGET, and the shape is ADDITIVE (build 115) — CURRENT
+## 0.26.1 — the prompt cap is a BUDGET, and the shape is ADDITIVE (build 115)
 2026-10-19
 
 Two corrections from Mido, both right.
@@ -1300,6 +1300,53 @@ Two things fell out of writing it:
 
 139 tests green (6 new for the budget: the total-fits property across 1–20 rows, the floor, the
 max, the clip marker, and that an unclipped value is left untouched). Version 0.26.1 / build 115.
+
+## 0.26.2 — the broker's verb comes from the OUTBOUND METHOD (build 116) — CURRENT
+2026-10-19
+
+Mido tapped "always notify" on a Todoist read and it silenced deletes too: *"I clicked meaning it
+as a read only operation."*
+
+**Not a mis-tap — the pair had no read in it.** The broker is ONE route for every third-party call:
+
+```kotlin
+Route("POST", "/secrets/$secretName/call", ..., Verb.EXECUTE, ...)
+```
+
+So policy, the audit label, the exception button and the AI facts all keyed on `todoist/EXECUTE`.
+"Reads only" was **inexpressible**, and the audit log said `todoist.execute` for a GET.
+
+**The fix: derive the verb from the method in the payload.**
+
+```
+GET / HEAD / OPTIONS  -> READ
+DELETE                -> DELETE
+everything else       -> WRITE
+```
+
+New `core/OutboundVerb` (pure, unit-tested). The mapping is by **effect**, and it errs loud: only
+methods that provably change nothing are READ, and anything unrecognised is a WRITE — because the
+one direction that can hurt is guessing quiet, which would make a destructive call approvable by
+silence on a NOTIFY card. A POST-based search API therefore reads as WRITE; visible and
+interruptive is the safe way to be wrong.
+
+**Designed for the smallest possible diff**, as asked:
+
+- `Route.verbFor: ((Req) -> Verb)?` plus `Route.effectiveVerb(req)` — opt-in per route, so every
+  other route keeps its static verb and the gate is not rewritten.
+- Dispatch computes the verb **once** into a local and the six consumers read that local, so they
+  cannot disagree about what the request was. That single local IS the fix; the alternative was
+  six independent derivations.
+- A second `bindRoute` after the body is parsed, because the first bind ran before the body
+  existed and could only record the static fallback. `bindRoute` is a plain field-set, so the
+  later call wins with no duplicate label.
+
+**Consequence, accepted:** existing `todoist/EXECUTE` rules stop matching. Fine under the
+no-standing-backward-compat rule — not live, so the fix is to re-tap.
+
+144 tests green (5 new: the read set, DELETE as its own verb, the mutating set, and that the
+fallback is LOUD for `TRACE`/`PROPFIND`/empty — plus case/whitespace tolerance). Version 0.26.2 /
+build 116.
 
 ---
 

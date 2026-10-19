@@ -512,6 +512,23 @@ class HttpServer(
                 remote = remote
             )
 
+            // THE VERB, resolved ONCE for this request.
+            //
+            // A route may derive its verb from the payload (the secrets broker maps the
+            // OUTBOUND method, so a GET is READ and a DELETE is DELETE). Everything that
+            // needs a verb reads this local: policy, the audit label, the exception offer,
+            // the NOTIFY card and the AI facts. Six call sites reading one value is the
+            // point — they cannot disagree about what the request was, which is exactly how
+            // `todoist/EXECUTE` once made "reads only" inexpressible (Mido, 2026-10-19).
+            //
+            // Computed after the body is parsed (a resolver needs it) but BEFORE validation
+            // and the gate, so a bad request is still labelled with what it attempted.
+            val verb = resolved.route.effectiveVerb(req)
+            // Re-bind: the first bind ran before the body existed, so it could only record
+            // the static fallback verb. bindRoute is a plain field-set, so the later call
+            // simply wins — no duplicate-label risk.
+            draft.bindRoute(resolved.plugin.id, verb, resolved.route.path)
+
             // PRE-GATE. Input that can never succeed must not cost a tap: the modal
             // is a decision, and there is no decision to make about `count=-1`.
             // Runs before the description, so a bad request never even builds a
@@ -532,7 +549,7 @@ class HttpServer(
             // must never run on a mode nobody could read.
             val resolvedPolicy = try {
                 val p = policy
-                resolve(p.global, p.rules, resolved.plugin.id, resolved.route.verb)
+                resolve(p.global, p.rules, resolved.plugin.id, verb)
             } catch (e: Exception) {
                 draft.outcome(AuditOutcome.HANDLER_FAILED)
                 draft.error("policy_unavailable")
@@ -573,14 +590,14 @@ class HttpServer(
                     val decision = NotifyGate.await(
                         ctx,
                         summary,
-                        labelOf(resolved.plugin.id, resolved.route.verb),
-                        resolved.route.verb,
+                        labelOf(resolved.plugin.id, verb),
+                        verb,
                         // Null facts for a route that declares `aiSummary = false`: the card
                         // then shows its deterministic content and its clock starts at once.
                         // Never built for an opted-out route, so the rows are not fetched
                         // either — an opted-out route pays nothing for the AI.
                         if (com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary))
-                            aiFactsFor(resolved.route, summary, path, body, query, remote)
+                            aiFactsFor(resolved.route, verb, summary, path, body, query, remote)
                         else null,
                         needsAi = com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary)
                     )
@@ -681,14 +698,14 @@ class HttpServer(
                             requiresBiometric = mode == Mode.SECURE,
                             rows = rows,
                             exceptionOffer = exceptionOfferFor(
-                                globalMode, resolved.plugin.id, resolved.route.verb, mode
+                                globalMode, resolved.plugin.id, verb, mode
                             )
                         ),
                         // Null for a route that declares `aiSummary = false`: there is nothing
                         // to wait for, so its buttons go live at once.
                         aiFacts = if (com.mido.phonebridge.ai.ModelReadiness
                                 .requiresAi(resolved.route.aiSummary))
-                            factsFor(resolved.route, summary, rows) else null
+                            factsFor(resolved.route, verb, summary, rows) else null
                     )
                     draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
 
@@ -1026,12 +1043,13 @@ class HttpServer(
      */
     private fun factsFor(
         route: Route,
+        verb: Verb,
         summary: String,
         rows: List<Pair<String, String>>
     ): com.mido.phonebridge.ai.RequestFacts =
         com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
-            verb = route.verb.name,
+            verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
             rows = rows.filter { it.second.isNotBlank() }
@@ -1046,6 +1064,7 @@ class HttpServer(
      */
     private fun aiFactsFor(
         route: Route,
+        verb: Verb,
         summary: String,
         actualPath: String,
         body: JSONObject,
@@ -1059,7 +1078,7 @@ class HttpServer(
         }
         return com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
-            verb = route.verb.name,
+            verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
             rows = rows.filter { it.second.isNotBlank() }

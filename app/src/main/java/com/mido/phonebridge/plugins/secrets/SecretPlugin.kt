@@ -35,7 +35,23 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
             "POST",
             "/secrets/$secretName/call",
             "Call an API with the '$secretName' secret",
+            // FALLBACK verb, used only if `verbFor` returns null. It stays EXECUTE because
+            // that is what an unrecognised method genuinely is, and because a route must be
+            // classifiable even when its body is unparseable (the draft binds a label before
+            // the parse runs).
             Verb.EXECUTE,
+            // The real verb comes from the OUTBOUND METHOD in the payload, not the path.
+            //
+            // This route carries every third-party call, so a fixed EXECUTE made "reads
+            // only" inexpressible: policy, the audit label, the exception button and the AI
+            // facts all keyed on `todoist/EXECUTE`, and an exception tapped while reading
+            // also silenced DELETEs. Mido, 2026-10-19: *"I clicked meaning it as a read only
+            // operation."*
+            //
+            // Mapping is by EFFECT, and errs loud: anything that is not obviously a read is
+            // a write, so a POST-based search API stays visible rather than silently
+            // becoming approvable-by-silence.
+            verbFor = { req -> com.mido.phonebridge.core.OutboundVerb.of(req.body.optString("method", "GET")) },
             // Validate BEFORE the gate: a request with no URL, a non-https URL, or a
             // host that is not on the allowlist can never succeed, so it must not cost
             // a tap. Only the shape and the host are checked here; the secret itself

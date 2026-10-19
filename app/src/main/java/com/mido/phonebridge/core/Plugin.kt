@@ -70,8 +70,34 @@ data class Route(
      * [Plugin.describeRows] runs pre-gate too.
      */
     val validate: ((Req) -> Unit)? = null,
+    /**
+     * Resolve the verb from the REQUEST, for routes whose meaning depends on the payload
+     * rather than the path.
+     *
+     * The broker is the reason this exists. One route — `POST /secrets/{name}/call` — carries
+     * every third-party call, so a static [verb] of `EXECUTE` keyed policy, the audit label,
+     * the exception button and the AI facts all on `todoist/EXECUTE`. That made "reads only"
+     * inexpressible: an exception tapped while reading also silenced DELETEs, because the pair
+     * had no read in it. Mido, 2026-10-19: *"I clicked meaning it as a read only operation."*
+     *
+     * Null means "the static [verb] is the answer", which is right for every route whose path
+     * already names the effect (`/gmail/messages/{id}/trash` is DELETE, not WRITE).
+     *
+     * **Called once per request, and its result is used everywhere** — policy, audit, label,
+     * exception offer, AI facts. Six call sites reading one value is the whole point: they
+     * cannot disagree about what the request was.
+     */
+    val verbFor: ((Req) -> Verb)? = null,
     val handler: suspend (Req) -> Resp
-)
+) {
+    /**
+     * The verb this request actually carries.
+     *
+     * Defaults to [verb] so a route with no resolver behaves exactly as before — the change is
+     * opt-in per route, not a rewrite of the gate.
+     */
+    fun effectiveVerb(req: Req): Verb = verbFor?.invoke(req) ?: verb
+}
 
 /** Incoming request handed to a route handler (post-approval). */
 class Req(
