@@ -224,6 +224,19 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 return null
             }
             parse(reply, com.mido.phonebridge.core.PromptBudget.render(facts.rows), parseVerb(facts))?.also {
+                // LOG THE TEXT, not just the risk. Every round of tuning this feature has been
+                // blocked on "what did the modal actually say?" — the log recorded the risk and
+                // the timing and nothing else, so the one fact that mattered had to be read off
+                // the phone by a human (Mido, 2026-10-19: *"let's add the AI text to logs"*).
+                //
+                // Written through [Debug.log] rather than [Log.i] so it lands in BOTH the
+                // on-screen ring (which `GET /debug` returns as `logTail`) and logcat (which
+                // `GET /logs` returns). Redaction runs inside it, so a summariser that echoes
+                // something token-shaped cannot leak it here.
+                com.mido.phonebridge.Debug.log(
+                    "ai[${facts.plugin}/${facts.verb}] ${elapsed}ms risk=${it.risk} " +
+                        "why=\"${it.reason}\" said=\"${it.description}\""
+                )
                 Log.i(TAG, "summarised in ${elapsed}ms: risk=${it.risk}")
             }
         } catch (e: Exception) {
@@ -364,6 +377,12 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         // still renders every deterministic row (Mido, 2026-10-19: *"still says adding 8 todos
         // which is VERY misleading"*).
         if (!com.mido.phonebridge.core.SummaryGuard.allows(description, verb, factsText)) {
+            // Logged through Debug too: a rejected summary is the most diagnostic event in this
+            // feature — it is the model being wrong — and it previously left one logcat line
+            // that `GET /logs` could not reach on this build.
+            com.mido.phonebridge.Debug.log(
+                "ai[REJECTED verb=$verb] said=\"${description.take(140)}\""
+            )
             Log.w(TAG, "summary contradicts the request (verb=$verb): ${description.take(90)}")
             return null
         }

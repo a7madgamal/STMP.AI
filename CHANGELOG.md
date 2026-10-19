@@ -1390,7 +1390,7 @@ guard now catches the answer when it does.
 **proven to fail**: breaking the empty-description check fails `an empty description is not shown`.
 Version 0.26.3 / build 117.
 
-## 0.26.4 — the facts named a URL, so the summary could only restate it (build 118) — CURRENT
+## 0.26.4 — the facts named a URL, so the summary could only restate it (build 118)
 2026-10-19
 
 Mido: *"says read todoist api both times, absolutely useless"*.
@@ -1424,6 +1424,33 @@ touching the model. Every time so far the pipeline was the fault — a truncated
 a bare URL.
 
 152 tests green. Version 0.26.4 / build 118.
+
+## 0.26.5 — the AI's text now reaches the log (build 119) — CURRENT
+2026-10-19
+
+Mido: *"let's add the AI text to logs"*.
+
+Every round of tuning this feature has been blocked on the same missing fact. The log recorded
+`summarised in 1198ms: risk=LOW` — the timing and the bucket, never **the sentence**. So "what did
+the modal actually say?" was a question only a human holding the phone could answer, and four
+releases went by asking it.
+
+Two log points now carry the text, through `Debug.log` so it lands in **both** channels — the
+on-screen ring (`GET /debug` → `logTail`) and logcat (`GET /logs`):
+
+- **Accepted:** `ai[todoist/READ] 1198ms risk=LOW why="…" said="…"`
+- **Rejected by the guard:** `ai[REJECTED verb=READ] said="Adding 8 todos"`
+
+The rejected line matters most. A guard rejection is the model being wrong, which is precisely the
+event worth seeing, and it was previously one `Log.w` line that `/logs` could not reach.
+
+Redaction runs inside `Debug.log`, so a summariser that echoes something token-shaped cannot leak
+it through the new line.
+
+Recorded because it generalises: **a diagnostic that reports a duration but not the produced text
+answers "did it run", never "was it right".** Both are needed, and only one was being logged.
+
+152 tests green. Version 0.26.5 / build 119.
 
 ---
 
