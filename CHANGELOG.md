@@ -1558,7 +1558,7 @@ carries the payload, and that work stands on its own with the AI switched off.
 
 152 tests green. Version 0.28.0 / build 122.
 
-## 0.28.1 — engine load no longer counts as inference time (build 123) — CURRENT
+## 0.28.1 — engine load no longer counts as inference time (build 123)
 2026-10-19
 
 The 1.7B swap appeared to fail on the first request:
@@ -1590,6 +1590,39 @@ and then got thrown away.
 reloads after `onTrimMemory`. This release makes each one cost time rather than a missing summary.
 
 152 tests green. Version 0.28.1 / build 123.
+
+## 0.29.0 — APPROVE wears the risk colour (build 125) — CURRENT
+2026-10-19
+
+Mido: *"lame description but it increased the risk detection which is alone very useful. make the
+approve button color match the risk label color"*.
+
+Worth recording his first clause: **the swap half-worked.** The 1.7B's description is still weak —
+it echoed a prompt field until that field was removed in 0.28.2 — but its RISK assessment is
+genuinely better: `risk=HIGH why="Writes to external API"` on a write, where the 0.6B said `LOW`.
+That is the one output a small model can be trusted with, because it is a single label rather than
+composition. The swap is justified on that alone.
+
+**The change:** APPROVE is tinted by the risk bucket — green / amber / red for LOW / MEDIUM / HIGH.
+
+Three design decisions, each to avoid a specific trap:
+
+- **One mapping, in `Theme.riskColor`.** The card had its own private palette (`0xFF81C784` and
+  friends) while the modal used the semantic colours, so "HIGH" was literally two different reds
+  depending on where you looked. Both now delegate to one function; a second copy is how two
+  surfaces start disagreeing about what a word means.
+- **DENY stays NEUTRAL.** Two coloured decision buttons read as a pair of equal choices — exactly
+  what the 0.23.0 pass separated them to avoid. Red APPROVE beside grey DENY still says
+  "approve, carefully".
+- **No risk = no colour.** While loading, and when the fetch FAILED, the button keeps its resting
+  green rather than implying safety. An absent assessment is not "safe", and painting it green
+  would say that it was.
+
+Implemented through an `applyRisk` holder rather than touching `allow` directly: the tick that
+paints is created ~150 lines before the button exists, and `applyArmed` already solved that exact
+ordering problem the same way.
+
+152 tests green. Version 0.29.0 / build 125.
 
 ---
 

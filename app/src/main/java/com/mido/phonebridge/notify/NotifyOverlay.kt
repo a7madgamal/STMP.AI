@@ -861,12 +861,15 @@ object NotifyOverlay {
         else -> VERB_WRITE
     }
 
-    /** The risk strip's colour. Display-only; it never changes what the card does. */
-    private fun riskColor(r: Risk): Int = when (r) {
-        Risk.LOW -> RISK_LOW
-        Risk.MEDIUM -> RISK_MEDIUM
-        Risk.HIGH -> RISK_HIGH
-    }
+    /**
+     * The risk strip's colour. Display-only; it never changes what the card does.
+     *
+     * Delegates to [com.mido.phonebridge.ui.Theme.riskColor] so the card, the modal's risk
+     * line and the modal's APPROVE button cannot drift apart. They previously had separate
+     * palettes — the card used its own softer hues while the modal used the semantic ones —
+     * which meant "HIGH" was literally two different reds depending on where you looked.
+     */
+    private fun riskColor(r: Risk): Int = com.mido.phonebridge.ui.Theme.riskColor(r)
 
     /**
      * Real screen size, for clamping drags. `currentWindowMetrics` needs API 30; below
@@ -899,10 +902,6 @@ object NotifyOverlay {
     private const val VERB_DEL = 0xFFE57373.toInt()
     private const val BADGE_TEXT = 0xFF1A1A1A.toInt()
 
-    // Risk strip. Same hues as the badge family, so the card reads as one palette.
-    private const val RISK_LOW = 0xFF81C784.toInt()
-    private const val RISK_MEDIUM = 0xFFFFD54F.toInt()
-    private const val RISK_HIGH = 0xFFE57373.toInt()
 
     private const val CARD_WIDTH_DP = 216
     private const val CORNER_DP = 14

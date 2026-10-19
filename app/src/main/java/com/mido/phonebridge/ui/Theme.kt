@@ -67,6 +67,25 @@ object Theme {
     const val DANGER = 0xFFE5534B.toInt()
     const val DANGER_SURFACE = 0xFF3D1A18.toInt()
 
+    /**
+     * How a RISK bucket looks, in one place.
+     *
+     * Three surfaces now say the same thing: the NOTIFY card's strip, the modal's risk line,
+     * and — since Mido asked for it (2026-10-19: *"make the approve button color match the
+     * risk label color"*) — the APPROVE button itself. A second copy of this mapping is how
+     * the card and the modal end up disagreeing about what HIGH looks like, which is worse
+     * than either being wrong on its own.
+     *
+     * Deliberately the app's existing semantic colours rather than a new palette: SUCCESS /
+     * WARNING / DANGER already mean "fine / careful / stop" everywhere else on these screens,
+     * and a risk badge that introduced a fourth green would just be decoration.
+     */
+    fun riskColor(risk: com.mido.phonebridge.ai.Risk): Int = when (risk) {
+        com.mido.phonebridge.ai.Risk.LOW -> SUCCESS
+        com.mido.phonebridge.ai.Risk.MEDIUM -> WARNING
+        com.mido.phonebridge.ai.Risk.HIGH -> DANGER
+    }
+
     /** Text/icons on a filled coloured control. */
     const val ON_COLOR = 0xFFFFFFFF.toInt()
 

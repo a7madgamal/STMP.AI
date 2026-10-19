@@ -266,6 +266,16 @@ class ApprovalActivity : FragmentActivity() {
         // `fun` so the tick above can call it without a forward reference, and so there is
         // exactly ONE place that decides whether the controls are live.
         var applyArmed: (Boolean) -> Unit = {}
+
+        /**
+         * Paint APPROVE with a risk colour — assigned once the button exists.
+         *
+         * A holder rather than touching `allow` directly because the tick that DOES the
+         * painting is created ~150 lines before the button is; `applyArmed` solved the same
+         * ordering problem the same way. Null risk = "no assessment", which restores the
+         * resting colour instead of leaving a stale one behind.
+         */
+        var applyRisk: (com.mido.phonebridge.ai.Risk?) -> Unit = {}
         val tick = object : Runnable {
             override fun run() {
                 // The AI block is LIVE: read the gate's current state every tick rather
@@ -281,6 +291,9 @@ class ApprovalActivity : FragmentActivity() {
                         aiLine.text = word + ".".repeat(dotCount)
                         aiLine.setTextColor(Theme.ON_SURFACE_VARIANT)
                         aiRiskLine.visibility = ViewGroup.GONE
+                        // Back to the resting colour while we do not yet know the risk —
+                        // otherwise a previous assessment's colour would linger on the button.
+                        applyRisk(null)
                         dotCount = (dotCount + 1) % (DOTS_MAX + 1)
                         if (dotCount == 0) wordIdx++
                     }
@@ -291,12 +304,20 @@ class ApprovalActivity : FragmentActivity() {
                         val reason = ai.summary.reason
                         aiRiskLine.text = "risk: ${ai.summary.risk.name.lowercase()}" +
                             (if (reason.isNotBlank()) " — $reason" else "")
-                        aiRiskLine.setTextColor(when (ai.summary.risk) {
-                            com.mido.phonebridge.ai.Risk.LOW -> Theme.SUCCESS
-                            com.mido.phonebridge.ai.Risk.MEDIUM -> Theme.WARNING
-                            com.mido.phonebridge.ai.Risk.HIGH -> Theme.DANGER
-                        })
+                        // One mapping, shared with the NOTIFY card's strip (Theme.riskColor).
+                        aiRiskLine.setTextColor(Theme.riskColor(ai.summary.risk))
                         aiRiskLine.visibility = ViewGroup.VISIBLE
+
+                        // APPROVE carries the risk colour too (Mido, 2026-10-19: *"make the
+                        // approve button color match the risk label color"*). The risk is the
+                        // one thing the human needs before tapping, and putting it on the thing
+                        // they tap is the strongest place it can sit.
+                        //
+                        // DENY stays NEUTRAL, deliberately: two coloured decision buttons would
+                        // make them look like a pair of equal choices, which is exactly the
+                        // confusion the 0.23.0 pass fixed by separating and restyling them. Red
+                        // APPROVE next to grey DENY still reads as "approve, carefully".
+                        applyRisk(ai.summary.risk)
                     }
                     is ApprovalGate.AiState.Failed -> {
                         // Fail LOUDLY but unlock (Mido, 2026-10-19). The human sees the
@@ -306,6 +327,10 @@ class ApprovalActivity : FragmentActivity() {
                         aiLine.text = "⚠ could not summarise — ${ai.detail}"
                         aiLine.setTextColor(Theme.DANGER)
                         aiRiskLine.visibility = ViewGroup.GONE
+                        // No risk was assessed, so the button must not wear a risk colour —
+                        // an absent assessment is not "safe", and painting it green would say
+                        // it was. Resting colour, with the error stated above it.
+                        applyRisk(null)
                     }
                     ApprovalGate.AiState.NotNeeded -> {
                         // The route declares `aiSummary = false`: no summary is expected,
@@ -506,6 +531,24 @@ class ApprovalActivity : FragmentActivity() {
                 }
             }
         }
+        // APPROVE wears the risk colour (Mido, 2026-10-19: *"make the approve button color
+        // match the risk label color"*). The risk is the one fact the human needs before
+        // tapping, and the button is the strongest place it can sit.
+        //
+        // DENY stays NEUTRAL on purpose: two coloured decision buttons would read as a pair of
+        // equal choices, which is what the 0.23.0 pass separated them to avoid. Red APPROVE
+        // beside grey DENY still says "approve, carefully".
+        //
+        // null means no assessment yet (still loading, or the fetch failed). The button then
+        // keeps its resting green rather than implying a safety that was never determined —
+        // an absent assessment is not "safe".
+        applyRisk = { risk ->
+            if (!isFinishing) {
+                val colour = if (risk == null) Theme.SUCCESS else Theme.riskColor(risk)
+                allow.backgroundTintList = android.content.res.ColorStateList.valueOf(colour)
+            }
+        }
+
         // Start in the loading state: buttons disabled, indicator visible. The tick flips
         // this the moment the gate reports the request is enabled.
         applyArmed(false)

@@ -46,7 +46,12 @@ import java.io.File
  */
 class LiteRtLm(private val modelFile: File) : SummaryModel {
 
-    override val id: String = "qwen3-0.6b-int4"
+    /**
+     * Reported in `model warm:` and `/debug`. It said `qwen3-0.6b-int4` while actually loading
+     * the 1.7B file after the swap — a log line that lies about which model is resident, which
+     * is precisely the kind of thing that makes a later diagnosis wrong.
+     */
+    override val id: String = "qwen3-1.7b-int4"
 
     companion object {
         private const val TAG = "LiteRtLm"
@@ -371,11 +376,19 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             }
         }
         val rows = com.mido.phonebridge.core.PromptBudget.render(ordered)
+        // NO `summary:` LINE. It was a verbatim echo target: the 1.7B answered
+        // `said="POST tasks"`, which is exactly this field minus the plugin prefix (measured
+        // 2026-10-19). A distinctive string near the top of a prompt is the thing a small
+        // model copies, so the field is gone.
+        //
+        // It was also REDUNDANT: the deterministic summary already lives in the audit record
+        // (`todoist · POST tasks · query: …`) and `PAYLOAD` carries the same information as a
+        // fact row. Asking the model to improve on a line it can only repeat was never going
+        // to produce anything but a repeat.
         return """
             plugin: ${facts.plugin}
             verb: ${facts.verb}
             route: ${facts.routeLabel}
-            summary: ${facts.summary}
             facts:
             $rows
         """.trimIndent()
