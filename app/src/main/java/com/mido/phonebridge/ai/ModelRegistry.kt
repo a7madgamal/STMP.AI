@@ -37,15 +37,27 @@ object ModelRegistry {
      * app's own external files dir, so no storage permission is needed and an
      * uninstall removes it.
      */
-    const val MODEL_ASSET = "models/qwen3_0_6b_mixed_int4.litertlm"
+    const val MODEL_ASSET = "models/qwen3_0_6b_dyn_int4.litertlm"
 
     /**
      * Where [ModelProvisioner] fetches it from. An **ungated** `litert-community`
      * artifact: every small Gemma in that zoo is `gated: auto` (401 without a token),
      * which is why Qwen3-0.6B is the shipped model.
+     *
+     * **This is the `dynamic_wi4b32_afp32` variant, not the `mixed_int4` one, and the
+     * difference is the whole reason for the swap** (Mido, 2026-10-19). The mixed-int4
+     * sibling carries a Qwen3 chat template whose line 14 does `'\n' + content`, which
+     * is valid for a STRING but explodes when content arrives as a list of parts — and
+     * `Contents` always serialises to parts. Every inference failed with
+     * `Failed to apply template: invalid operation: tried to use + operator on
+     * unsupported types string and sequence`, which took the whole bridge down because
+     * the AI is core. This variant is documented as carrying LiteRT-LM's official
+     * Qwen3 configuration and **accepts the system instruction**, which is the shape
+     * the app actually sends. Verified by hand on 2026-10-19: system prompt + a plain
+     * facts prompt produced valid JSON on READ, DELETE and EXECUTE.
      */
     const val MODEL_URL =
-        "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/qwen3_0_6b_mixed_int4.litertlm"
+        "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm"
 
     /**
      * The exact byte count and digest a complete download has. Pinned, and checked by
@@ -53,8 +65,8 @@ object ModelRegistry {
      * download must never be mistaken for a model. The digest is the repo's
      * `x-linked-etag`, verified against a local `sha256sum` of the fetched file.
      */
-    const val EXPECTED_SIZE = 497_516_544L
-    const val EXPECTED_SHA256 = "7900eb4e7362d88c58782c6f9999bb7a129e03544aa98b8f338ea0cc5d8c22c1"
+    const val EXPECTED_SIZE = 344_671_744L
+    const val EXPECTED_SHA256 = "03e7da1eb1108b50dffaa9bb52cc7bcbad2eb0c66ca990267f480c1e545d2856"
 
     /** The expected file name, derived from [MODEL_ASSET] so the two cannot drift. */
     val MODEL_FILE: String get() = MODEL_ASSET.substringAfterLast('/')

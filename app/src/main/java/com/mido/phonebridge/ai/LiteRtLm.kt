@@ -8,7 +8,6 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.ResponseFormat
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import java.io.File
@@ -68,22 +67,28 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val CPU_THREADS = 4
 
         /**
-         * The output contract, enforced by constrained decoding rather than hoped
-         * for in the prompt. A small model that cannot ramble cannot produce prose
-         * the human would read as fact.
+         * The output contract, stated in the prompt rather than enforced by constrained
+         * decoding.
+         *
+         * **Constrained decoding was tried and REMOVED** (2026-10-19): with the
+         * `LL_GUIDANCE` provider this model truncates mid-object — a real run returned
+         * the literal string `{"description":"}` — while the same prompt without the
+         * constraint produced valid JSON on READ, DELETE and EXECUTE. A constraint that
+         * silently emits half an object is worse than none, because the parser would
+         * reject it and (with the AI as core) fail the whole request.
+         *
+         * So the shape is ASKED for, and [parse] is what guarantees correctness: it
+         * returns null on anything that is not the expected object. The prompt is
+         * deliberately rigid because that is what makes a small model comply.
          */
-        private val SCHEMA = """
-            {"type":"object","properties":{
-              "description":{"type":"string"},
-              "risk":{"type":"string","enum":["low","medium","high"]},
-              "reason":{"type":"string"}},
-             "required":["description","risk","reason"]}
-        """.trimIndent()
-
         private const val SYSTEM =
             "You describe an API request to the person who must approve it. " +
-                "State plainly what will happen, in one short sentence. " +
-                "Never invent names or values that are not given."
+                "Reply with ONE JSON object and nothing else, in exactly this shape: " +
+                "{\"description\": \"<one short sentence>\", " +
+                "\"risk\": \"low|medium|high\", \"reason\": \"<a few words>\"}. " +
+                "State plainly what will happen, in plain words, no jargon. " +
+                "risk is low for reads, medium for edits, high for deletes or anything " +
+                "sent outside the account. Never invent names or values that are not given."
     }
 
     /**
@@ -159,6 +164,10 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     /** One fresh conversation per call, so no request is described in another's context. */
     private fun runInference(eng: Engine, facts: RequestFacts): String {
         val config = ConversationConfig(
+            // The system instruction is the guide (Mido, 2026-10-19: "I think it makes
+            // sense for the model to have a short system prompt to guide it"). It is
+            // also the exact shape the OLD model file crashed on, so its presence here is
+            // load-bearing — see ModelRegistry.MODEL_URL for why the artifact was swapped.
             systemInstruction = Contents.of(SYSTEM),
             // Greedy: the same request must describe itself the same way twice.
             samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0),
@@ -166,16 +175,14 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             // and only waste the token budget here.
             thinkingConfig = ThinkingConfig(enableThinking = false),
             maxOutputToken = MAX_OUTPUT_TOKENS,
-            // Required for `responseFormat` below to be accepted.
-            enableResponseFormat = true,
+            // NO `enableResponseFormat`. Constrained decoding truncated mid-object on
+            // this model (see SYSTEM); the prompt asks for the shape and [parse] enforces
+            // it. Leaving it off is the tested-working configuration.
         )
         var conversation: Conversation? = null
         return try {
             conversation = eng.createConversation(config)
-            conversation.sendMessage(
-                buildPrompt(facts),
-                responseFormat = ResponseFormat.json(SCHEMA),
-            ).toString()
+            conversation.sendMessage(buildPrompt(facts)).toString()
         } finally {
             conversation?.close()
         }
