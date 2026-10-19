@@ -24,8 +24,21 @@ object SummaryProvider {
 
     private const val TAG = "SummaryProvider"
 
-    /** Patience on the full-screen modal: the human is already looking at it. */
-    const val SECURE_BUDGET_MS = 3_000L
+    /**
+     * Patience on the full-screen modal: the human is already looking at it.
+     *
+     * **10s, raised from 3s on measured evidence (Mido, 2026-10-19).** The 0.6B model on
+     * the S22 Ultra's GPU takes ~3.2s per summary — measured on device, twice (3194ms,
+     * 3176ms) — so the original 3s budget discarded EVERY answer as "too late" and the
+     * whole AI appeared broken when it was merely 0.2s over. The budget is not a
+     * performance target, it is the point at which a late answer stops being worth having;
+     * 10s clears the measured cost with room for a colder GPU and a longer request.
+     *
+     * The cost is real and accepted: the modal is built AFTER the summary, so the human now
+     * waits up to 10s before the prompt appears. The 60s decision window starts when it is
+     * shown, so that wait is not taken out of the human's time to decide.
+     */
+    const val SECURE_BUDGET_MS = 10_000L
 
     /** Patience on the NOTIFY card, before its decision clock starts. */
     const val NOTIFY_BUDGET_MS = 10_000L
