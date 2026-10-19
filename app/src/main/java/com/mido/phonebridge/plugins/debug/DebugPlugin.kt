@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Environment
 import android.os.StatFs
+import com.mido.phonebridge.ApprovalGate
 import com.mido.phonebridge.BridgeService
 import com.mido.phonebridge.BuildConfig
 import com.mido.phonebridge.Debug
@@ -18,6 +19,7 @@ import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.policy.Rule
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -68,6 +70,7 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         o.put("storage", storageInfo())
         o.put("account", accountInfo())
         o.put("policy", policyInfo())
+        o.put("permissions", permissionsInfo())
         o.put("audit", auditInfo())
         o.put("accessLog", accessLog())
         o.put("logTail", logTail())
@@ -127,15 +130,80 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         .put("clientIdConfigured", AuthManager.clientId.isNotBlank())
         .put("accessTokenCachedMs", AuthManager.tokenRemainingMs())
 
+    private fun permissionsInfo(): JSONObject = JSONObject()
+        // `USE_FULL_SCREEN_INTENT` is a SPECIAL APP ACCESS on Android 14+, not a runtime
+        // permission: its default is re-derived whenever the package is replaced, so an
+        // update can silently revoke a manual grant. Reported here because the gate has a
+        // SECOND delivery path (`ctx.startActivity`, legal via draw-over-apps), so whether
+        // this is granted should never be guessed — read it.
+        .put("fullScreenIntent", canUseFullScreenIntentSafe())
+        .put("drawOverApps", android.provider.Settings.canDrawOverlays(ctx))
+        .put("notifications", hasNotifPermission())
+
     /**
-     * The switch and its file. An unreadable policy is a real, reportable state —
-     * it is the one condition that stops the server, so it must be visible here
-     * rather than inferred from a silent absence of traffic.
+     * The FSI app-op, without the API-34 guard leaking into here.
+     *
+     * Below 34 there is no such permission and the answer is "not applicable" — reported as
+     * JSON null rather than `false`, because "not required" and "revoked" are different
+     * facts and a reader must not confuse them.
+     */
+    private fun canUseFullScreenIntentSafe(): Any {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            return JSONObject.NULL
+        }
+        return try {
+            ApprovalGate.canUseFullScreenIntent(ctx)
+        } catch (e: Exception) {
+            JSONObject.NULL
+        }
+    }
+
+    private fun hasNotifPermission(): Boolean =
+        android.os.Build.VERSION.SDK_INT < 33 ||
+            ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /**
+     * The switch, its file, and the RULES — read-only.
+     *
+     * Rules are reported because without them the gate cannot be inspected from outside: a
+     * caller could see `global: AUTOMATIC` and still have no idea whether a given
+     * `plugin × verb` will open a modal or a 5-second card. That made every rule question a
+     * round trip through the human reading the phone screen, which is exactly what this
+     * endpoint exists to avoid.
+     *
+     * **Read-only by construction: there is no write route, and no parameter here can change
+     * anything.** Policy is written in two places only — the EXCEPTIONS screen and the
+     * modal's exception button — both of which audit the change. A diagnostic surface that
+     * could mutate the gate would be a security hole, not a feature (Mido, 2026-10-19: *"add
+     * policy rules to logs but read only"*).
+     *
+     * The `verb` field carries the literal `"ANY"` for an any-verb rule, matching the on-disk
+     * format and `Rule.key` — so a reader never has to interpret a null.
      */
     private fun policyInfo(): JSONObject = try {
+        val p = PolicyStore.from(ctx).get()
         JSONObject()
-            .put("global", PolicyStore.from(ctx).get().global.name)
+            .put("global", p.global.name)
             .put("readable", true)
+            .put("ruleCount", p.rules.size)
+            .put(
+                "rules",
+                JSONArray().apply {
+                    for (r in p.rules) {
+                        put(
+                            JSONObject()
+                                .put("plugin", r.plugin)
+                                .put("verb", r.verb?.name ?: Rule.ANY)
+                                .put("mode", r.mode.name)
+                                // `plugin/VERB` — the exact key a record's `rule` field
+                                // carries, so a log line and this report can be compared
+                                // without reconstructing the string by hand.
+                                .put("key", r.key)
+                        )
+                    }
+                }
+            )
     } catch (e: PolicyException) {
         JSONObject()
             .put("readable", false)

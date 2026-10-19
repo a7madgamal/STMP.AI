@@ -1067,7 +1067,7 @@ window.
 
 127 tests green. Version 0.24.2 / build 109.
 
-## 0.24.3 — the exception button killed the modal before the fingerprint (build 110) — CURRENT
+## 0.24.3 — the exception button killed the modal before the fingerprint (build 110)
 `31b727f` · 2026-10-19
 
 Reported on device: *"I clicked always notify like 5 times, modal kept coming back, only when I
@@ -1103,6 +1103,44 @@ after `promptBiometric(...)` is a no-op against an Activity that is about to be 
 prompt is a system surface and cannot outlive its host.
 
 127 tests green. Version 0.24.3 / build 110.
+
+## 0.25.0 — policy rules are readable over HTTP; FSI state is observable (build 111) — CURRENT
+`<hash>` · 2026-10-19
+
+Mido: *"test, and add policy rules to logs but read only"*.
+
+**`/debug` now reports the rules.** `policy` was `{global, readable}` and nothing else, so a
+`plugin × verb` decision could not be inspected from outside — every rules question meant the
+human reading the screen aloud, which is exactly what this endpoint exists to prevent.
+
+```
+policy: {
+  global, readable, ruleCount,
+  rules: [ { plugin, verb, mode, key } ]
+}
+```
+
+`verb` carries the literal `"ANY"` (matching the on-disk format and `Rule.key`), so a reader
+never interprets a null; `key` is the same `plugin/VERB` string an audit record's `rule` field
+carries, so a log line and this report compare without hand-reconstruction.
+
+**Read-only by construction.** No write route, and no parameter here can change anything. Policy
+is written in exactly two places — the EXCEPTIONS screen and the modal's exception button — and
+both audit it. A diagnostic surface that could mutate the gate would be a security hole, not a
+feature. That constraint is stated in the code so a future change has to argue with it.
+
+**`permissions` block added** (`fullScreenIntent`, `drawOverApps`, `notifications`), because the
+FSI question needed to be observable rather than guessed. `fullScreenIntent` reports **JSON null
+below API 34** rather than `false` — "not required" and "revoked" are different facts.
+
+Why this matters beyond diagnostics: `USE_FULL_SCREEN_INTENT` is a **special app access** on
+Android 14+, not a runtime permission, so its default is re-derived whenever the package is
+replaced and an update can silently revoke a manual grant. Every other permission in the app
+survives an update; this one does not. The gate has a second delivery path
+(`ctx.startActivity`, legal via draw-over-apps), so whether FSI is actually load-bearing is now
+a question the report can answer.
+
+127 tests green. Version 0.25.0 / build 111.
 
 ---
 
