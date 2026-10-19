@@ -64,6 +64,14 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
         if (host != null) rows.add(ApprovalRow("HOST", host, ApprovalRow.Style.WARN))
         val body = req.body.optString("body", "")
         if (body.isNotEmpty()) {
+            // ADDITIVE, not a replacement: BODY still shows the payload, and PAYLOAD states its
+            // shape as its own row. Mido, 2026-10-19: *"the itemadd x 8 thing should be an
+            // addition to the context not a replacement"*. Both facts matter — the raw payload
+            // is what gets sent, the shape is what a human (and the summariser) can actually
+            // reason about. Putting the shape in the summary line instead displaced it.
+            com.mido.phonebridge.core.PayloadShape.of(body)?.let {
+                rows.add(ApprovalRow("PAYLOAD", it, ApprovalRow.Style.NORMAL))
+            }
             rows.add(ApprovalRow("BODY", body, ApprovalRow.Style.LONG))
         }
         return rows

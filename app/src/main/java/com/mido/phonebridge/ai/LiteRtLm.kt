@@ -302,7 +302,13 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
      * — never raw JSON, which is unbounded and caller-authored.
      */
     private fun buildPrompt(facts: RequestFacts): String {
-        val rows = facts.rows.joinToString("\n") { "- ${it.first}: ${it.second.take(200)}" }
+        // The cap comes from PromptBudget, NOT a flat number. A flat take(200) was applied
+        // per row, so a 5.3 KB payload arrived as a 200-char prefix and the model could no
+        // longer count what it was approving (Mido, 2026-10-19: *"the payload is the whole
+        // reason I added AI"*). The budget divides the ONE real constraint (context window)
+        // across however many rows exist, so two rows get long excerpts and eight get short
+        // ones — and a clipped value is marked '…' rather than silently presented as whole.
+        val rows = com.mido.phonebridge.core.PromptBudget.render(facts.rows)
         return """
             plugin: ${facts.plugin}
             verb: ${facts.verb}

@@ -1207,7 +1207,7 @@ Play Store's auto-revocation applies to Play-installed apps; these are sideloade
 
 127 tests green. Version 0.25.2 / build 113.
 
-## 0.26.0 — the summary describes the PAYLOAD, not the route (build 114) — CURRENT
+## 0.26.0 — the summary describes the PAYLOAD, not the route (build 114)
 2026-10-19
 
 Mido, after writing 8 todos: *"I didn't like the AI summary. I expected the todolist adding one
@@ -1251,6 +1251,55 @@ real object made the test real: breaking `items` → `WRONG` fails it (verified)
 when restored.
 
 133 tests green. Version 0.26.0 / build 114.
+
+## 0.26.1 — the prompt cap is a BUDGET, and the shape is ADDITIVE (build 115) — CURRENT
+2026-10-19
+
+Two corrections from Mido, both right.
+
+**1. "the itemadd x 8 thing should be an addition to the context not a replacement."**
+In 0.26.0 the payload shape was folded into the `summary:` line, which meant it displaced what
+that line would otherwise have said. It is now its **own fact row** in the secrets plugin:
+
+```
+- TARGET: POST https://api.todoist.com/api/v1/sync
+- PAYLOAD: 8 commands (item_add ×8)      <- the shape, as its own fact
+- BODY: {"commands": [...]}              <- and the payload, still there
+```
+
+Additive, so the model gets both the shape AND the content. The human gets both rows in the modal
+too, which is the more valuable half: the shape is what makes a 5 KB payload judgeable at a glance.
+
+**2. "what's the model limit? and what's the longest cap you recommend."**
+
+The real numbers, from `LiteRtLm.kt`:
+
+```
+MAX_CONTEXT_TOKENS = 1024   (KV cache: input + output)
+MAX_OUTPUT_TOKENS  =  128
+-> input budget    =  896 tok
+   system prompt   ~  265 tok  (1,061 chars)
+   scaffolding     ~   30 tok
+   -> facts        ~  601 tok  ~ 2,400 chars
+```
+
+**A flat per-row cap was the actual bug**, not the number 200. It was fine for six short rows and
+catastrophic for one 5.3 KB body, because the constraint is on the TOTAL and a per-row number
+cannot know how many rows exist. New `core/PromptBudget` divides the budget across however many
+rows there are: **600 chars max each, 120 floor, 2,000 total.** Two rows get long excerpts, eight
+get short ones, and the total always fits.
+
+Two things fell out of writing it:
+
+- **A clipped value is now marked `…`.** The old cap cut silently, so the model asserted
+  confidently about half a payload. Silence is the bug as much as the length.
+- **Past ~16 rows the floor multiplied out exceeds the budget**, which would silently overflow the
+  context window — a failed request, since the AI is core. The renderer therefore stops adding rows
+  when the next would break the budget and prints `(+N more facts not shown)`. An honest omission
+  beats a prompt the model cannot read.
+
+139 tests green (6 new for the budget: the total-fits property across 1–20 rows, the floor, the
+max, the clip marker, and that an unclipped value is left untouched). Version 0.26.1 / build 115.
 
 ---
 

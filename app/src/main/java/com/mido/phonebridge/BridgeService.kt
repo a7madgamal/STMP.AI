@@ -1156,38 +1156,23 @@ class HttpServer(
     }
 
     /**
-     * A brokered call, described by its SHAPE rather than its URL.
+     * A brokered call, described by what it does rather than by its URL.
      *
-     * `POST https://api.todoist.com/api/v1/sync` with a body is, to a reader, "some sync
-     * call". With this it becomes `POST /api/v1/sync · 8 commands: item_add ×8`, which is
-     * what lets a small model answer "Adding 8 todos".
+     * `POST https://api.todoist.com/api/v1/sync` with a body is, to a reader, "some sync call".
+     * This turns it into `todoist · POST /api/v1/sync`, and the payload's SHAPE is contributed
+     * separately as its own fact row by the secrets plugin — deliberately ADDITIVE (Mido,
+     * 2026-10-19: *"the itemadd x 8 thing should be an addition to the context not a
+     * replacement"*). Squeezing it into this string instead displaced what the summary was for.
      *
-     * Everything here is derived from the payload itself and is deterministic — no model
-     * involved — so it is true even when the AI is unavailable, and the audit record is
+     * Deterministic, so it is true even when the AI is unavailable and the audit record is
      * readable on its own.
      */
     private fun describeSecretCall(pluginId: String, body: JSONObject): String {
         val method = body.optString("method", "GET").uppercase()
         val url = body.optString("url", "")
         val path = runCatching { java.net.URL(url).path }.getOrNull().orEmpty().ifBlank { url.ifBlank { "?" } }
-        val raw = body.optString("body", "").trim()
-        if (raw.isEmpty()) return "$pluginId · $method $path"
-        // Shape comes from the real object, not a copy — see [PayloadShape].
-        val shape = com.mido.phonebridge.core.PayloadShape.of(raw)
-        return "$pluginId · $method $path · ${shape ?: "${raw.length}-char body"}"
+        return "$pluginId · $method $path"
     }
-
-    /**
-     * The shape of a JSON payload in a few words: how many items, and of what kind.
-     *
-     * Walks the top level for arrays and counts them, and for an array of objects counts the
-     * distinct `type` values — the convention every batch API uses (`item_add`, `mail.send`,
-     * `changes.create`, …). Returns null when the body is not a JSON object, because at that
-     * point there is nothing honest to say about it and the caller falls back to a byte count.
-     *
-     * Pure and Context-free so it is unit-testable: this string is the difference between a
-     * useful summary and "todoist: /secrets/todoist/call".
-     */
 
     private fun jsonArrayToStrings(arr: JSONArray?): List<String> {
         if (arr == null) return emptyList()
