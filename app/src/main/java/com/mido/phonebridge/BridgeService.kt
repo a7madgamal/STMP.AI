@@ -656,12 +656,16 @@ class HttpServer(
                 Mode.SECURE -> {
                     // Central gate: describe the concrete call, then wait for the human.
                     //
-                    // The AI summary is computed BEFORE the modal is shown (option B,
-                    // Mido 2026-10-18): on SECURE there is a 60s window and a full
-                    // screen, so a ~3s wait buys real clarity for free. Null (the route
-                    // declares `aiSummary = false`) leaves the AI fields blank by design;
-                    // a failure on a route that DOES use the AI throws `ai_unavailable`
-                    // rather than showing a modal whose summary is silently missing.
+                    // The AI summary is NO LONGER computed here (Mido, 2026-10-19). It used
+                    // to block the modal for up to 10s and then leave the buttons dead for
+                    // another second — two static waits stacked. The modal now appears
+                    // immediately and the gate fetches in the background: the buttons enable
+                    // when the summary lands, and the 60s clock starts from THAT instant, so
+                    // the model's latency is never charged to the human's decision time.
+                    //
+                    // Rows are built ONCE, before the view, because a bad target must still
+                    // throw pre-gate (coded 4xx, no modal) and the AI needs the same rows.
+                    val rows = pluginRows(resolved.route, path, body, query, remote)
                     val gate = ApprovalGate.await(
                         ctx, remote, "$method $path", summary,
                         detail = detailFor(resolved.route.path, path, body),
@@ -669,8 +673,14 @@ class HttpServer(
                         view = approvalView(
                             remote, account, resolved.route, path, body, query,
                             summary = summary,
-                            requiresBiometric = mode == Mode.SECURE
-                        )
+                            requiresBiometric = mode == Mode.SECURE,
+                            rows = rows
+                        ),
+                        // Null for a route that declares `aiSummary = false`: there is nothing
+                        // to wait for, so its buttons go live at once.
+                        aiFacts = if (com.mido.phonebridge.ai.ModelReadiness
+                                .requiresAi(resolved.route.aiSummary))
+                            factsFor(resolved.route, summary, rows) else null
                     )
                     draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
 
@@ -788,23 +798,17 @@ class HttpServer(
         body: JSONObject,
         query: Map<String, String>,
         summary: String,
-        requiresBiometric: Boolean
+        requiresBiometric: Boolean,
+        /**
+         * Target rows, built ONCE by the caller and shared with the AI facts.
+         *
+         * Passed in rather than gathered here because the summary now needs the SAME rows
+         * (see [factsFor]) and building them twice is a second live Google round-trip per
+         * approval on a route that pre-fetches its target — gmail trash, calendar delete.
+         */
+        rows: List<Pair<String, String>>
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
-
-        // Target rows, built ONCE and reused for both the AI summary and the modal.
-        // They were built twice in the first cut (once for the summariser, once for
-        // `destructive`), and for a route that pre-fetches its target — gmail trash,
-        // calendar delete — that is a second live Google round-trip per approval. The
-        // throw for a bad id still happens here, i.e. before any modal, unchanged.
-        val rows = pluginRows(route, actualPath, body, query, remote)
-
-        // The AI summary, computed once per request from the SAME facts the modal
-        // shows. Bounded by SummaryProvider.SECURE_BUDGET_MS. Null means the route
-        // declares `aiSummary = false` and the three AI fields stay blank by design;
-        // a route that DOES use the AI and fails THROWS `ai_unavailable` rather than
-        // presenting a modal whose summary is silently missing (Mido, 2026-10-19).
-        val ai = aiSummary(route, summary, rows)
 
         // /notifications/{id}/action -> resolve the action against live data.
         if (routePath == "/notifications/{id}/action") {
@@ -852,9 +856,6 @@ class HttpServer(
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
                 destructive = rows,
-                aiDescription = ai?.description ?: "",
-                aiRisk = ai?.risk,
-                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -880,9 +881,6 @@ class HttpServer(
                 messageCount = sbn.notification.number,
                 replyText = null,
                 destructive = rows,
-                aiDescription = ai?.description ?: "",
-                aiRisk = ai?.risk,
-                aiReason = ai?.reason ?: "",
                 requiresBiometric = requiresBiometric
             )
         }
@@ -911,9 +909,6 @@ class HttpServer(
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
             destructive = rows,
-            aiDescription = ai?.description ?: "",
-            aiRisk = ai?.risk,
-            aiReason = ai?.reason ?: "",
             // Biometric is a SECURE-only rule, computed by the policy and passed in.
             // The gate states it; the Activity renders it and never recomputes it.
             // In R3 this always evaluates true, because a view only exists on the
@@ -924,46 +919,37 @@ class HttpServer(
     }
 
     /**
-     * Build the facts a summariser sees, run the model within the SECURE budget, and
-     * return its answer, or null when the route does not use the AI.
+     * Build the facts a summariser sees, from rows the caller ALREADY built.
      *
-     * **Null now means exactly one thing: this route declares `aiSummary = false`.**
-     * It is no longer a failure signal — a route that needs no AI is a legitimate
-     * answer, and the caller renders its deterministic rows. A route that DOES use the
-     * AI and cannot get an answer throws `ai_unavailable` instead, because the AI is
-     * core (Mido, 2026-10-19) and a request that cannot be described must not be
-     * presented for approval as if it had been.
+     * Facts are the deterministic projection the modal renders: the route's own label, the
+     * audit summary, and the labelled rows. Raw JSON is deliberately NOT handed over — it is
+     * unbounded and caller-authored, and the rows are the human-readable truth of it. A
+     * summariser that saw different facts than the human could describe something other than
+     * what is being approved.
      *
-     * Facts are the deterministic projection the modal already renders: the route's
-     * own label, the audit summary, and the labelled rows. Raw JSON is deliberately
-     * NOT handed over — it is unbounded and caller-authored, and the rows are the
-     * human-readable truth of it. A summariser that saw different facts than the human
-     * could describe something other than what is being approved.
+     * **This no longer RUNS the model.** It used to be `aiSummary`, which called the model
+     * inline and threw `ai_unavailable` on failure. That moved into [ApprovalGate], because
+     * the modal now appears BEFORE the summary and only the gate knows when the request
+     * actually becomes the one on screen (Mido, 2026-10-19). Keeping the call here would
+     * have meant fetching for a queued request nobody can see yet. This is now a pure
+     * projection — cheap, no I/O, no latency.
+     *
+     * Rows are passed in rather than gathered here so they are built ONCE: the modal needs
+     * them and so does the AI, and a second gather is a second live Google round-trip per
+     * approval on a route that pre-fetches its target (gmail trash, calendar delete).
      */
-    private fun aiSummary(
+    private fun factsFor(
         route: Route,
         summary: String,
         rows: List<Pair<String, String>>
-    ): com.mido.phonebridge.ai.RequestSummary? {
-        // The route's own flag decides, before anything is built: no model call, no
-        // facts, no latency. `/debug` and `/logs` take this path, which is what makes
-        // them work while the model is broken.
-        if (!com.mido.phonebridge.ai.ModelReadiness.requiresAi(route.aiSummary)) return null
-        val facts = com.mido.phonebridge.ai.RequestFacts(
+    ): com.mido.phonebridge.ai.RequestFacts =
+        com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
             verb = route.verb.name,
             routeLabel = route.describe,
             summary = summary,
             rows = rows.filter { it.second.isNotBlank() }
         )
-        return com.mido.phonebridge.ai.SummaryProvider.run(
-            ctx, facts, com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
-        ) ?: throw PluginError(
-            "ai_unavailable",
-            "the model could not describe this request within " +
-                "${com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS}ms"
-        )
-    }
 
     /**
      * The facts a summariser sees, built for any mode. Row gathering is GUARDED: a

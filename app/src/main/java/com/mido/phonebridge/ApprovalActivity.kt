@@ -34,8 +34,21 @@ class ApprovalActivity : FragmentActivity() {
         const val EXTRA_CREATED_AT = "createdAt"
         const val EXTRA_WAITING_BEHIND = "waitingBehind"
 
-        /** How long the decision buttons stay disabled after the modal appears. */
-        private const val DECISION_DELAY_MS = 1_000L
+        /**
+         * Words cycled while the model works, so the wait reads as thinking rather than
+         * hanging (Mido, 2026-10-19: *"add fake loading feeling, claude style some word like
+         * thinking... wondering..."*).
+         *
+         * Deliberately honest about being indeterminate: there is no token stream to measure,
+         * so a percentage would be invented. A rotating word plus a dot cycle shows liveness
+         * and nothing more.
+         */
+        private val LOADING_WORDS = listOf(
+            "thinking", "wondering", "considering", "reading", "summarising", "weighing it up"
+        )
+
+        /** Dots cycle 0→3 then the word advances, so the line visibly moves. */
+        private const val DOTS_MAX = 3
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,27 +105,23 @@ class ApprovalActivity : FragmentActivity() {
 
         content.addView(label("🔐 APPROVE?", 22f))
 
-        if (view != null) {
-            // --- AI: the plain-language line, when a summariser produced one. ---
-            // Rendered only when present — an unavailable model leaves no block, never
-            // an empty one. Display-only: it changes nothing about what is approved.
-            if (view.aiDescription.isNotBlank()) {
-                content.addView(Theme.sectionHeader(this, "SUMMARY"))
-                content.addView(label(view.aiDescription, 17f, Theme.ON_SURFACE))
-                if (view.aiRisk != null) {
-                    content.addView(label(
-                        "risk: ${view.aiRisk.name.lowercase()}" +
-                            (if (view.aiReason.isNotBlank()) " — ${view.aiReason}" else ""),
-                        14f,
-                        when (view.aiRisk) {
-                            com.mido.phonebridge.ai.Risk.LOW -> Theme.SUCCESS
-                            com.mido.phonebridge.ai.Risk.MEDIUM -> Theme.WARNING
-                            com.mido.phonebridge.ai.Risk.HIGH -> Theme.DANGER
-                        }
-                    ))
-                }
-            }
+        // --- AI: LIVE, because the summary arrives AFTER this view is built. ---
+        // The modal now appears immediately and the model answers in the background (Mido,
+        // 2026-10-19), so these views cannot be filled from the intent — they are created
+        // empty and driven by the tick below, from ApprovalGate.currentAiState().
+        val aiHeader = Theme.sectionHeader(this, "SUMMARY")
+        val aiLine = Theme.text(this, "", 17f, Theme.ON_SURFACE).apply {
+            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
+        }
+        val aiRiskLine = Theme.text(this, "", 14f, Theme.ON_SURFACE_VARIANT).apply {
+            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
+            visibility = ViewGroup.GONE
+        }
+        content.addView(aiHeader)
+        content.addView(aiLine)
+        content.addView(aiRiskLine)
 
+        if (view != null) {
             // --- WHO ---
             content.addView(Theme.sectionHeader(this, "WHO"))
             content.addView(label(view.requester, 17f, Theme.WARNING))
@@ -219,7 +228,11 @@ class ApprovalActivity : FragmentActivity() {
             }
         }
 
-        // --- Countdown to auto-deny. Visualized, updated every 250ms. ---
+        // --- Countdown to auto-deny, from the moment the buttons go live. ---
+        // NOT from createdAtMs: the clock starts when the human can actually decide, so a
+        // slow model never spends their decision time before they can use any of it (Mido,
+        // 2026-10-19: "60 at enable"). While the AI is still working there is no countdown
+        // to show, because it has not started.
         val countdown = Theme.text(this, "", 13f, Theme.WARNING).apply {
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
         }
@@ -233,15 +246,80 @@ class ApprovalActivity : FragmentActivity() {
         }
 
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        // Loading-word + dot animation state. Advanced only while the fetch is running.
+        var wordIdx = 0
+        var dotCount = 0
+        // Assigned once the buttons and the bar exist (below). A `var` rather than a local
+        // `fun` so the tick above can call it without a forward reference, and so there is
+        // exactly ONE place that decides whether the controls are live.
+        var applyArmed: (Boolean) -> Unit = {}
         val tick = object : Runnable {
             override fun run() {
-                val elapsedSec = (System.currentTimeMillis() - createdAtMs) / 1000L
-                val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
-                val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
-                countdown.text = "⏳ auto-deny in ${left}s"
-                countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
-                // A simple text bar keeps it dependency-free and unmissable.
-                countdown.contentDescription = "timeout progress ${pct}%"
+                // The AI block is LIVE: read the gate's current state every tick rather
+                // than trusting a value captured at build time.
+                when (val ai = ApprovalGate.currentAiState()) {
+                    is ApprovalGate.AiState.Loading -> {
+                        aiHeader.text = "SUMMARY"
+                        // A thinking word + a dot cycle (Mido, 2026-10-19). The words are
+                        // honest about being indeterminate: there is no token stream to
+                        // measure, so a percentage would be invented. The dots loop
+                        // 0,1,2,3 to show the app is alive rather than hung.
+                        val word = LOADING_WORDS[wordIdx % LOADING_WORDS.size]
+                        aiLine.text = word + ".".repeat(dotCount)
+                        aiLine.setTextColor(Theme.ON_SURFACE_VARIANT)
+                        aiRiskLine.visibility = ViewGroup.GONE
+                        dotCount = (dotCount + 1) % (DOTS_MAX + 1)
+                        if (dotCount == 0) wordIdx++
+                    }
+                    is ApprovalGate.AiState.Ready -> {
+                        aiHeader.text = "SUMMARY"
+                        aiLine.text = ai.summary.description
+                        aiLine.setTextColor(Theme.ON_SURFACE)
+                        val reason = ai.summary.reason
+                        aiRiskLine.text = "risk: ${ai.summary.risk.name.lowercase()}" +
+                            (if (reason.isNotBlank()) " — $reason" else "")
+                        aiRiskLine.setTextColor(when (ai.summary.risk) {
+                            com.mido.phonebridge.ai.Risk.LOW -> Theme.SUCCESS
+                            com.mido.phonebridge.ai.Risk.MEDIUM -> Theme.WARNING
+                            com.mido.phonebridge.ai.Risk.HIGH -> Theme.DANGER
+                        })
+                        aiRiskLine.visibility = ViewGroup.VISIBLE
+                    }
+                    is ApprovalGate.AiState.Failed -> {
+                        // Fail LOUDLY but unlock (Mido, 2026-10-19). The human sees the
+                        // error and can still decide — a modal with dead buttons because
+                        // one transient call failed is a dead end, not a safety property.
+                        aiHeader.text = "SUMMARY"
+                        aiLine.text = "⚠ could not summarise — ${ai.detail}"
+                        aiLine.setTextColor(Theme.DANGER)
+                        aiRiskLine.visibility = ViewGroup.GONE
+                    }
+                    ApprovalGate.AiState.NotNeeded -> {
+                        // The route declares `aiSummary = false`: no summary is expected,
+                        // so the block is removed rather than left saying "loading".
+                        aiHeader.visibility = ViewGroup.GONE
+                        aiLine.visibility = ViewGroup.GONE
+                        aiRiskLine.visibility = ViewGroup.GONE
+                    }
+                }
+
+                // The 60s clock only exists once the buttons are live.
+                val enabledAt = ApprovalGate.currentEnabledAtMs()
+                if (enabledAt == 0L) {
+                    countdown.text = "⏳ waiting for the summary…"
+                    countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
+                } else {
+                    val elapsedSec = (System.currentTimeMillis() - enabledAt) / 1000L
+                    val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
+                    val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
+                    countdown.text = "⏳ auto-deny in ${left}s"
+                    countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
+                    countdown.contentDescription = "timeout progress ${pct}%"
+                }
+
+                // The gate's live state is the ONLY enable trigger now — no timer.
+                applyArmed(ApprovalGate.currentEnabledAtMs() > 0L)
+
                 // Refresh the queue label from live state every tick, so it appears
                 // the moment a follower queues (never a value sampled once at
                 // enqueue time, which was always 0 for the request that became
@@ -251,7 +329,19 @@ class ApprovalActivity : FragmentActivity() {
                 if (behind > 0) {
                     queueLine.text = "≡ $behind waiting behind this one"
                 }
-                if (left > 0 && !isFinishing) handler.postDelayed(this, 250L)
+
+                // Keep ticking while the modal is live. A loading modal has no countdown to
+                // expire on, so the tick — not a timer — is what ends it.
+                if (!isFinishing) {
+                    if (ApprovalGate.isCurrent(id)) {
+                        handler.postDelayed(this, 120L)
+                    } else {
+                        // The gate gave up (window expired) or the request was replaced.
+                        // Close the modal rather than leaving a dead prompt on screen: the
+                        // server has already answered, so a modal still asking is a lie.
+                        finish()
+                    }
+                }
             }
         }
         handler.post(tick)
@@ -261,14 +351,12 @@ class ApprovalActivity : FragmentActivity() {
             gravity = Gravity.CENTER
         }
 
-        // The arming bar: fills over DECISION_DELAY_MS while the decision buttons are
-        // disabled, so the wait is visible instead of feeling like an unresponsive
-        // button. Driven by the same handler tick style as the countdown (no animator
-        // dependency), and removed from view the instant arming completes.
+        // The arming indicator. INDETERMINATE on purpose: inference is a blocking call with
+        // no token stream, so any determinate fill would be a number we made up. It is shown
+        // only while the summary is being fetched and hidden the instant the buttons go live
+        // (Mido, 2026-10-19 — the buttons enable on the fetch, not on a fixed timer).
         val armBar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
-            isIndeterminate = false
-            max = 100
-            setProgressCompat(0, false)
+            isIndeterminate = true
             trackThickness = Theme.dp(this@ApprovalActivity, 3)
             trackCornerRadius = Theme.dp(this@ApprovalActivity, 2)
             setIndicatorColor(Theme.ACCENT)
@@ -315,42 +403,37 @@ class ApprovalActivity : FragmentActivity() {
         }
         // Fails closed: if a mutating route needs a biometric that this device cannot
         // provide (none enrolled, none present), APPROVE must never be tappable — only
-        // DENY works, and the reason is stated. Resolved before the 3s reserve so the
-        // button simply never enables.
+        // DENY works, and the reason is stated.
         val biometricUsable = requiresBiometric && canUseBiometric()
         val biometricBlocked = requiresBiometric && !biometricUsable
-        // Reserved-space delay: the buttons render in place immediately but stay
-        // disabled for DECISION_DELAY_MS, so a reflexive tap (a muscle-memory DENY)
-        // cannot kill a request the human has not actually read. They are never
-        // removed, so the layout does not jump under the thumb when they enable. The
-        // arming bar shows the wait rather than hiding it.
-        val enableDelay = android.os.Handler(android.os.Looper.getMainLooper())
-        val armStart = System.currentTimeMillis()
-        val armTick = object : Runnable {
-            override fun run() {
-                val p = ((System.currentTimeMillis() - armStart).toFloat() / DECISION_DELAY_MS)
-                    .coerceIn(0f, 1f)
-                armBar.setProgressCompat((p * 100).toInt(), true)
-                if (p < 1f && !isFinishing) {
-                    enableDelay.postDelayed(this, 40L)
+
+        // The ONE enable path. No timer any more (Mido, 2026-10-19): the tick above calls
+        // this with the gate's live `enabledAtMs > 0`, so the controls go live exactly when
+        // the summary lands — or when a route needs no summary at all.
+        //
+        // DENY is enabled FIRST and independently: denying is fail-closed, and making someone
+        // wait for a summary they do not need in order to REJECT a request is backwards.
+        // APPROVE waits for the fetch and, when a biometric is required but unusable, never
+        // enables at all (fails closed, stated below).
+        applyArmed = { armed ->
+            // Guarded rather than early-returned: a lambda assigned to a `var` has no label
+            // to `return@` from, and the guard reads the same anyway.
+            if (!isFinishing) {
+                armBar.visibility = if (armed) ViewGroup.GONE else ViewGroup.VISIBLE
+                deny.isEnabled = true
+                deny.alpha = 1f
+                if (armed && !biometricBlocked) {
+                    allow.isEnabled = true
+                    allow.alpha = 1f
+                } else if (!armed) {
+                    allow.isEnabled = false
+                    allow.alpha = 0.4f
                 }
             }
         }
-        enableDelay.post(armTick)
-        enableDelay.postDelayed({
-            if (!isFinishing) {
-                armBar.visibility = ViewGroup.GONE
-                deny.isEnabled = true
-                deny.alpha = 1f
-                // APPROVE only enables when the route needs no biometric, or the device
-                // can actually satisfy it. When blocked, it stays disabled forever and
-                // the reason is shown below — fails closed (point 4).
-                if (!biometricBlocked) {
-                    allow.isEnabled = true
-                    allow.alpha = 1f
-                }
-            }
-        }, DECISION_DELAY_MS)
+        // Start in the loading state: buttons disabled, indicator visible. The tick flips
+        // this the moment the gate reports the request is enabled.
+        applyArmed(false)
         btnRow.addView(deny, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         btnRow.addView(allow, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 

@@ -50,6 +50,19 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val TAG = "LiteRtLm"
 
         /**
+         * Why the engine is not usable, or "" — surfaced in `/debug` and in the modal.
+         *
+         * **Companion-level, not per-instance**, because [ModelRegistry] caches exactly one
+         * summariser: there is one engine in the process, so there is one failure reason.
+         * Keeping it per-instance would have made it unreadable from the gate, which is
+         * where it is needed — the modal has to say WHY the summary failed, and a bare
+         * "failed" is the dead end this change exists to remove.
+         */
+        @Volatile
+        var lastEngineError: String = ""
+            private set
+
+        /**
          * Cap on generated tokens. The answer is one short line plus a risk word and
          * a short reason — ~60 tokens is generous. A tight cap is what keeps latency
          * in the seconds range, which is the whole budget on the NOTIFY card.
@@ -89,30 +102,17 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     }
 
     /**
-     * The engine is expensive to build (it maps the model file) and cheap to reuse,
-     * so it is created once and cached. The *conversation* is NOT cached: it carries
-     * chat history, and each request must be described on its own facts, never in
-     * the shadow of the previous one.
-     */
-    /**
      * The loaded engine. GPU only — there is no CPU variant, by decision (Mido,
      * 2026-10-19): *"fail hard ... only the best most efficient performance for my phone
      * is accepted"*. A CPU fallback is a silent degradation that hides a broken GPU behind
      * acceptable-looking behaviour, which is the exact pattern this project forbids.
+     *
+     * Expensive to build (it maps the model file) and cheap to reuse, so it is created once
+     * and cached. The *conversation* is NOT cached: it carries chat history, and each request
+     * must be described on its own facts, never in the shadow of the previous one.
      */
     @Volatile
     private var engine: Engine? = null
-
-    /**
-     * Why the engine is not usable, or "" — surfaced in `/debug`.
-     *
-     * Fail-hard still has to be DIAGNOSABLE: a request that fails because the GPU cannot
-     * run must say so, or the only symptom is `ai_unavailable` with no cause. This is the
-     * cause.
-     */
-    @Volatile
-    var lastEngineError: String = ""
-        private set
 
     override fun isAvailable(ctx: Context): Boolean = modelFile.exists() && modelFile.length() > 0
 

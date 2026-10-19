@@ -59,6 +59,38 @@ object ApprovalGate {
     }
 
     /**
+     * The state of this request's AI summary.
+     *
+     * The modal appears BEFORE the model answers (Mido, 2026-10-19: the buttons enable on
+     * the fetch, not on a fixed timer), so "is there a summary yet" has to be readable
+     * while the human is looking at the prompt. The Activity reads it live on its own tick,
+     * the same way it reads [waitingBehindCurrent] — one live source rather than a value
+     * pushed at build time, which would be stale the instant it mattered.
+     */
+    sealed class AiState {
+        /** The fetch is running. Buttons stay disabled and the UI shows it is working. */
+        object Loading : AiState()
+
+        /** The model answered. Buttons enable now, and the clock starts. */
+        class Ready(val summary: com.mido.phonebridge.ai.RequestSummary) : AiState()
+
+        /**
+         * The model is present but this call failed.
+         *
+         * The modal is UNLOCKED and the failure is shown (Mido, 2026-10-19: *"if AI fails
+         * show error but unlock modal for user"*). This is not a weakening of fail-hard:
+         * a MISSING model still refuses the whole bridge with `503` before a modal is ever
+         * built. This is the transient case — one call failed on a model that is installed
+         * and proven — and a human staring at dead buttons because of it is a dead end,
+         * not a safety property. Nothing is cached, so the next request tries again.
+         */
+        class Failed(val detail: String) : AiState()
+
+        /** The route declares `aiSummary = false`: there is nothing to wait for. */
+        object NotNeeded : AiState()
+    }
+
+    /**
      * One labelled row in the modal: a short label and its value, plus an optional
      * style hint so a plugin never has to teach the Activity about itself. The
      * Activity renders rows and nothing else — it has no idea whether the data came
@@ -137,22 +169,11 @@ object ApprovalGate {
          */
         val requiresBiometric: Boolean = true,
         /** Seconds until auto-deny, for the countdown UI. */
-        val timeoutSeconds: Long = TIMEOUT_SECONDS,
-        /**
-         * The AI's plain-language one-liner, or blank when no summary is available.
-         * Display-only: it never changes what is approved, only how clearly it is
-         * stated. Blank is a normal state (no model, cold start, over budget) and the
-         * modal simply omits the block.
-         */
-        val aiDescription: String = "",
-        /**
-         * The AI's coarse risk bucket, or null when unavailable. Rendered as a badge
-         * and (on the NOTIFY card) a tint. It gates NOTHING — see the display-only
-         * decision (Mido, 2026-10-18).
-         */
-        val aiRisk: com.mido.phonebridge.ai.Risk? = null,
-        /** One short phrase explaining the risk bucket. */
-        val aiReason: String = ""
+        val timeoutSeconds: Long = TIMEOUT_SECONDS
+        // NOTE: there are no AI fields here any more. The summary arrives AFTER this view is
+        // built (Mido, 2026-10-19), so it cannot be part of it — a field that is always blank
+        // by construction is a field that lies about what the view knows. The modal renders
+        // the AI live from ApprovalGate.currentAiState() instead.
     )
 
     private val seq = AtomicLong(1000)
@@ -175,9 +196,41 @@ object ApprovalGate {
         @Volatile var shownAtMs: Long = 0L,
         /** Requests already waiting behind this one when it enqueued. */
         val queueDepthAtEnqueue: Int = 0,
+        /**
+         * Facts for the AI fetch, or null when the route declares `aiSummary = false`.
+         * Null is the ONLY reason there is no summary — it is not a failure signal.
+         */
+        val aiFacts: com.mido.phonebridge.ai.RequestFacts? = null,
+        /** How long the fetch may take before the buttons enable regardless. */
+        val aiFetchCapMs: Long = com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS,
+        /**
+         * Live summary state, read by the Activity each tick. Starts Loading when a fetch
+         * is coming, and is set to NotNeeded at post time when it is not.
+         */
+        @Volatile var aiState: AiState = AiState.Loading,
+        /**
+         * When the decision buttons went live — the instant the human could actually
+         * decide. 0 until then, which is the UI's signal to show the loading state instead
+         * of a countdown.
+         *
+         * The 60s clock runs from HERE, not from [createdAtMs] (Mido, 2026-10-19: *"60 at
+         * enable"*). Otherwise a slow model would spend the human's decision time before
+         * they could use any of it.
+         */
+        @Volatile var enabledAtMs: Long = 0L,
         @Volatile var decidedAtMs: Long = 0L,
         @Volatile var approved: Boolean? = null
-    )
+    ) {
+        /**
+         * The longest this request can legitimately take: the fetch, then a full window.
+         *
+         * Derived rather than hardcoded, so a fetch that is allowed to run long cannot
+         * silently exceed the wait the server is doing on the other side of the latch.
+         */
+        fun maxWaitMs(): Long =
+            if (aiFacts == null) TIMEOUT_SECONDS * 1000L
+            else aiFetchCapMs + TIMEOUT_SECONDS * 1000L
+    }
 
     @Volatile
     private var current: Pending? = null
@@ -205,6 +258,29 @@ object ApprovalGate {
 
     /** Structured WHAT/ON payload for the currently pending request, if any. */
     fun currentView(): ApprovalView? = current?.view
+
+    /**
+     * The live summary state for the request on screen.
+     *
+     * NotNeeded when nothing is pending, so a stale modal cannot show a loading state for
+     * a request that is already gone.
+     */
+    fun currentAiState(): AiState = current?.aiState ?: AiState.NotNeeded
+
+    /** When the on-screen request's buttons went live, or 0 while still loading. */
+    fun currentEnabledAtMs(): Long = current?.enabledAtMs ?: 0L
+
+    /**
+     * Is [requestId] still the request on screen and undecided?
+     *
+     * The modal polls this so it can dismiss ITSELF when the gate gives up (the latch
+     * expired, or the request was replaced). Without it a loading modal has no countdown
+     * to run out and would sit there forever after the server had already answered.
+     */
+    fun isCurrent(requestId: Long): Boolean {
+        val p = current ?: return false
+        return p.requestId == requestId && p.approved == null
+    }
 
     /**
      * Put the modal back on screen for the currently pending request. Called when
@@ -251,7 +327,16 @@ object ApprovalGate {
         summary: String,
         detail: org.json.JSONObject?,
         account: String = "—",
-        view: ApprovalView? = null
+        view: ApprovalView? = null,
+        /**
+         * Facts to summarise, or null for a route that declares `aiSummary = false`.
+         *
+         * The fetch happens HERE rather than in the caller, because the modal must be
+         * posted before the model answers and only the gate knows when the request
+         * actually becomes the one on screen.
+         */
+        aiFacts: com.mido.phonebridge.ai.RequestFacts? = null,
+        aiFetchCapMs: Long = com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
     ): GateResult {
         val id = seq.incrementAndGet()
         val behind = synchronized(this) { (queue.size).coerceAtLeast(0) }
@@ -264,7 +349,9 @@ object ApprovalGate {
             endpoint = endpoint,
             summary = summary,
             account = account,
-            queueDepthAtEnqueue = behind
+            queueDepthAtEnqueue = behind,
+            aiFacts = aiFacts,
+            aiFetchCapMs = aiFetchCapMs
         )
 
         // Enqueue, then wait for OUR turn. A second concurrent request no longer
@@ -285,7 +372,7 @@ object ApprovalGate {
             if (shouldPost) {
                 postApprovalNotification(ctx, pending)
             }
-            val ok = pending.latch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val ok = pending.latch.await(pending.maxWaitMs(), TimeUnit.MILLISECONDS)
             val decidedAt = if (pending.decidedAtMs > 0) pending.decidedAtMs else System.currentTimeMillis()
             return when {
                 !ok || pending.approved == null -> GateResult.TimedOut(
@@ -379,6 +466,16 @@ object ApprovalGate {
 
         nm.notify(p.requestId.toInt(), notif)
 
+        // The summary fetch starts when this request becomes the one ON SCREEN — not at
+        // enqueue. A queued request nobody can see yet has no business burning an
+        // inference, and the human's clock has not started for it either.
+        if (p.aiFacts == null) {
+            p.aiState = AiState.NotNeeded
+            p.enabledAtMs = p.shownAtMs
+        } else {
+            startAiFetch(ctx, p)
+        }
+
         // Belt-and-braces: also launch the approval activity directly. If the
         // OS honors the full-screen intent, this is a no-op (singleTop). If it
         // doesn't, this still puts the modal on screen instead of silently timing
@@ -390,6 +487,49 @@ object ApprovalGate {
         } catch (e: Exception) {
             android.util.Log.w("ApprovalGate", "direct activity launch failed: ${e.message}")
         }
+    }
+
+    /**
+     * Fetch the summary in the background, then unlock the modal.
+     *
+     * The modal is ALREADY on screen when this starts (Mido, 2026-10-19: the buttons enable
+     * on the fetch, not on a fixed timer), so the human sees the real request immediately
+     * instead of a blank wait.
+     *
+     * Two things happen when it finishes, and both matter:
+     *  - **The buttons enable** ([Pending.enabledAtMs] is stamped). That is the only trigger
+     *    now; the old flat arming delay is gone.
+     *  - **The 60s clock starts** from that same instant, so a slow model never spends the
+     *    human's decision time before they can act on it.
+     *
+     * A FAILURE also unlocks (see [AiState.Failed]): the modal states the error and lets the
+     * human decide. That is not a weakening of fail-hard — a missing model still refuses the
+     * whole bridge with 503 before any modal exists. This is one transient call failing on a
+     * model that is installed and proven, and a human staring at dead buttons because of it
+     * is a dead end rather than a safety property. Nothing is cached, so the next request
+     * tries again.
+     */
+    private fun startAiFetch(ctx: Context, p: Pending) {
+        val facts = p.aiFacts ?: return
+        Thread({
+            val result = try {
+                com.mido.phonebridge.ai.SummaryProvider.run(ctx, facts, p.aiFetchCapMs)
+            } catch (e: Exception) {
+                Log.w(TAG, "summary fetch threw for id=${p.requestId}: ${e.message}")
+                null
+            }
+            // The gate's own reason if it has one, else a plain statement. Never blank:
+            // the modal has to say something, and "failed" with no cause is the dead end
+            // this whole change exists to remove.
+            val failureDetail = com.mido.phonebridge.ai.LiteRtLm.lastEngineError
+                .ifBlank { "the model did not answer within ${p.aiFetchCapMs}ms" }
+            p.aiState = if (result != null) AiState.Ready(result) else AiState.Failed(failureDetail)
+            p.enabledAtMs = System.currentTimeMillis()
+            com.mido.phonebridge.Debug.log(
+                "approval[${p.requestId}] AI ${if (result != null) "ready" else "FAILED"} " +
+                    "in ${p.enabledAtMs - p.shownAtMs}ms; buttons live, clock starts"
+            )
+        }, "approval-ai-${p.requestId}").apply { isDaemon = true }.start()
     }
 
     /**
