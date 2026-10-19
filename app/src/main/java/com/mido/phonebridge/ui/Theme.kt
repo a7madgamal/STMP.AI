@@ -315,8 +315,25 @@ object Theme {
                 setTextColor(ON_SURFACE_VARIANT)
             })
         }
+        // A gap between stacked rows (Mido, 2026-10-19: "add margin around list items they
+        // are touching"). Set HERE rather than at every call site: the spacing is a property
+        // of the component, and a row that has to be spaced by its caller is a row that will
+        // eventually be added somewhere without spacing. `addView` keeps these params when
+        // they are already a `LinearLayout.LayoutParams`, which they are, so a vertical
+        // parent honours this without the caller passing anything.
+        row.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(ctx, ROW_GAP_DP) }
         return row
     }
+
+    /**
+     * The gap between stacked rows. One constant, so every list in the app breathes by the
+     * same amount — the alternative is a different number per screen, which is how a UI
+     * drifts into looking assembled rather than designed.
+     */
+    const val ROW_GAP_DP = 8
 
     /** Vertical space. */
     fun spacer(ctx: Context, dp: Int): View = View(ctx).apply {

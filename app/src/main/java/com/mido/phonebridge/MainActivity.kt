@@ -59,6 +59,16 @@ class MainActivity : FragmentActivity() {
      */
     private var promptAttempted = false
 
+    /**
+     * Guards auto-start so it runs once per process.
+     *
+     * Without this, a deliberate STOP would be undone by the next onResume — you would
+     * stop the server, switch apps, come back, and find it running again with no way to
+     * keep it down. Auto-start is a convenience on launch, not a policy that overrides
+     * the human (Mido, 2026-10-19: *"start server on app load automatically"*).
+     */
+    private var autoStartAttempted = false
+
     /** Guards the unrecoverable-vault reset dialog so it does not stack. */
     private var resetOffered = false
 
@@ -235,6 +245,32 @@ class MainActivity : FragmentActivity() {
         }
         render()
         lockOnLoad()
+        maybeAutoStartServer()
+    }
+
+    /**
+     * Start the bridge on app load if it is not already running.
+     *
+     * Mido, 2026-10-19: *"start server on app load automatically"*. The whole point of the
+     * app is the server, so requiring a tap to reach the normal state is a step that only
+     * ever gets in the way.
+     *
+     * Two rules keep it from becoming a trap:
+     *  - **Once per process.** [autoStartAttempted] means a manual STOP stays stopped; a
+     *    restart on every onResume would make STOP impossible to keep.
+     *  - **Never over a running server.** `serverUp` covers the case where the service was
+     *    already started (or survived), so this cannot double-start or disturb it.
+     */
+    private fun maybeAutoStartServer() {
+        if (autoStartAttempted) return
+        autoStartAttempted = true
+        if (BridgeService.serverUp) {
+            Debug.log("auto-start skipped: server already up")
+            return
+        }
+        Debug.log("auto-start: bringing the server up on app load")
+        startBridge()
+        statusContainer.postDelayed({ render() }, 600)
     }
 
     /**

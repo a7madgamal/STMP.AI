@@ -159,7 +159,7 @@ class LogActivity : Activity() {
         ).apply { setPadding(0, Theme.dp(this@LogActivity, 2), 0, 0) })
         val lp = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@LogActivity, 6) }
+        ).apply { bottomMargin = Theme.dp(this@LogActivity, Theme.ROW_GAP_DP) }
         row.layoutParams = lp
         return row
     }

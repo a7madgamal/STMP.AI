@@ -156,6 +156,12 @@ class SettingsActivity : Activity() {
                 clearRule(policy, rule.plugin, rule.verb, "settings")
             }
         )
+        // Same gap as every other list (Theme.ROW_GAP_DP). Set here because these rows are
+        // built by this screen rather than by Theme.statusRow.
+        row.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = Theme.dp(this@SettingsActivity, Theme.ROW_GAP_DP) }
         return row
     }
 
