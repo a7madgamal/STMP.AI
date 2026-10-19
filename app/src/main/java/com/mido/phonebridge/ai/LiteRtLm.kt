@@ -94,9 +94,15 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val SYSTEM =
             "You describe an API request to the person who must approve it. " +
                 "Reply with ONE JSON object and nothing else, in exactly this shape: " +
-                "{\"description\": \"<one short sentence>\", " +
-                "\"risk\": \"low|medium|high\", \"reason\": \"<a few words>\"}. " +
-                "State plainly what will happen, in plain words, no jargon. " +
+                "{\"description\": \"<max 8 words>\", " +
+                "\"risk\": \"low|medium|high\", \"reason\": \"<max 5 words>\"}. " +
+                // Brevity is demanded explicitly (Mido, 2026-10-19: *"make the ui summary
+                // more concise"*). Left to itself this model produces wordy sentences like
+                // "The user requested to read an email from bob@example.com using the Google
+                // plugin" — accurate, and far too long for a 216dp card or a glance. The
+                // modal renders it LARGE, so every wasted word costs real screen space.
+                "Be terse: a headline, not a sentence. No filler like 'the user requested' " +
+                "or 'using the Google plugin' — state the act and its object. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
     }

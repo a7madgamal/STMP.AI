@@ -14,6 +14,8 @@ import android.widget.TextView
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
@@ -103,17 +105,25 @@ class ApprovalActivity : FragmentActivity() {
                 setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             }
 
-        content.addView(label("🔐 APPROVE?", 22f))
+        content.addView(label("🔐 APPROVE?", 20f))
 
         // --- AI: LIVE, because the summary arrives AFTER this view is built. ---
         // The modal now appears immediately and the model answers in the background (Mido,
         // 2026-10-19), so these views cannot be filled from the intent — they are created
         // empty and driven by the tick below, from ApprovalGate.currentAiState().
         val aiHeader = Theme.sectionHeader(this, "SUMMARY")
-        val aiLine = Theme.text(this, "", 17f, Theme.ON_SURFACE).apply {
-            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
+        // The summary is the ONE thing the human actually reads, so it is the largest text
+        // on the screen (Mido, 2026-10-19: *"make the ui summary more concise and larger"*).
+        // "Concise" is enforced by BOUNDING it (3 lines, ellipsized) rather than by cutting
+        // the model's sentence — the shape is already one short line, and silently dropping
+        // its tail would hide exactly the detail a summary exists to surface.
+        val aiLine = Theme.text(this, "", 26f, Theme.ON_SURFACE).apply {
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            maxLines = 3
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 10))
         }
-        val aiRiskLine = Theme.text(this, "", 14f, Theme.ON_SURFACE_VARIANT).apply {
+        val aiRiskLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             visibility = ViewGroup.GONE
         }
@@ -124,27 +134,27 @@ class ApprovalActivity : FragmentActivity() {
         if (view != null) {
             // --- WHO ---
             content.addView(Theme.sectionHeader(this, "WHO"))
-            content.addView(label(view.requester, 17f, Theme.WARNING))
+            content.addView(label(view.requester, 15f, Theme.WARNING))
             if (view.account.isNotBlank() && view.account != "—") {
-                content.addView(label("as ${view.account}", 15f, Theme.SUCCESS))
+                content.addView(label("as ${view.account}", 13f, Theme.SUCCESS))
             }
 
             // --- WHAT (the resolved action, in words) ---
             content.addView(Theme.sectionHeader(this, "WHAT"))
-            content.addView(label("\"${view.actionLabel}\"", 20f))
+            content.addView(label("\"${view.actionLabel}\"", 16f))
 
             // Render a labelled row: label on its own quiet line, value below in the
             // style the row asked for. This is the ONE renderer; it knows nothing
             // about Gmail, Calendar, or notifications — only rows. Never print a
             // label with nothing under it (an empty row is a defect, not a state).
             fun row(r: ApprovalGate.Row) {
-                content.addView(Theme.text(this, r.label, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                content.addView(Theme.text(this, r.label, 11f, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
                 content.addView(Theme.text(
                     this,
                     r.value,
-                    16f,
+                    13f,
                     if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
                     mono = r.style == ApprovalGate.Row.Style.MONO ||
                         r.style == ApprovalGate.Row.Style.WARN
@@ -173,15 +183,15 @@ class ApprovalActivity : FragmentActivity() {
             // "count=3, package=com.whatsapp", never a bare verb.
             if (view.filters.isNotEmpty()) {
                 val scope = view.filters.entries.joinToString(", ") { "${it.key}=${it.value}" }
-                content.addView(label("filter: $scope", 15f, Theme.WARNING))
+                content.addView(label("filter: $scope", 13f, Theme.WARNING))
             }
             if (!view.replyText.isNullOrBlank()) {
-                content.addView(label("reply: ${view.replyText}", 16f, Theme.SUCCESS))
+                content.addView(label("reply: ${view.replyText}", 13f, Theme.SUCCESS))
             }
             // Other buttons the same notification offers (options are a menu, the
             // resolved WHAT is the pick). Show them so the human sees the space.
             if (view.options.isNotEmpty()) {
-                content.addView(label("other actions: " + view.options.joinToString(" · "), 14f, Theme.ON_SURFACE_VARIANT))
+                content.addView(label("other actions: " + view.options.joinToString(" · "), 12f, Theme.ON_SURFACE_VARIANT))
             }
 
             // Notification content as ordinary rows — the same renderer as every
@@ -201,9 +211,9 @@ class ApprovalActivity : FragmentActivity() {
             }
         } else {
             // No structured view (e.g. non-notification routes): keep the old fields.
-            content.addView(label("Source: $remote", 15f, Theme.WARNING))
-            content.addView(label("Endpoint: $endpoint", 15f, Theme.WARNING))
-            content.addView(label("Summary: $summary", 16f))
+            content.addView(label("Source: $remote", 12f, Theme.WARNING))
+            content.addView(label("Endpoint: $endpoint", 12f, Theme.WARNING))
+            content.addView(label("Summary: $summary", 13f))
         }
 
         // --- Details: raw endpoint + full JSON, collapsed by default. ---
@@ -434,7 +444,11 @@ class ApprovalActivity : FragmentActivity() {
         // Start in the loading state: buttons disabled, indicator visible. The tick flips
         // this the moment the gate reports the request is enabled.
         applyArmed(false)
-        btnRow.addView(deny, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // A gap between the two decisions, so APPROVE and DENY are never one fat-finger
+        // apart (Mido, 2026-10-19: *"add margins between the buttons"*).
+        btnRow.addView(deny, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginEnd = Theme.dp(this@ApprovalActivity, 12)
+        })
         btnRow.addView(allow, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         // Scroll the DESCRIPTIVE content only; pin the decision controls (icon,
@@ -471,6 +485,17 @@ class ApprovalActivity : FragmentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))
             addView(pinned)
+        }
+        // Keep the modal clear of the system bars (Mido, 2026-10-19: *"add top padding so
+        // that when I get a notification with the modal it doesn't overlap"*). Applied as
+        // WINDOW INSETS, not a fixed dp: the status bar is a different height per device and
+        // orientation, and this modal is drawn over whatever was on screen — so a hardcoded
+        // number would be wrong exactly where it matters. Bottom is included too, so the
+        // buttons never sit under the navigation bar.
+        ViewCompat.setOnApplyWindowInsetsListener(outer) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(0, bars.top, 0, bars.bottom)
+            insets
         }
         setContentView(outer)
     }
