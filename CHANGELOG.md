@@ -1068,7 +1068,7 @@ window.
 127 tests green. Version 0.24.2 / build 109.
 
 ## 0.24.3 — the exception button killed the modal before the fingerprint (build 110) — CURRENT
-`<hash>` · 2026-10-19
+`31b727f` · 2026-10-19
 
 Reported on device: *"I clicked always notify like 5 times, modal kept coming back, only when I
 clicked approve I got a fingerprint"*.
