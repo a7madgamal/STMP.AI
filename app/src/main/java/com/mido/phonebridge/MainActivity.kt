@@ -227,7 +227,7 @@ class MainActivity : FragmentActivity() {
         content.addView(logView)
 
         root.addView(scroll)
-        setContentView(root)
+        setContentView(Theme.inset(root))
 
         Debug.init(applicationContext)
         Debug.log("=== PhoneBridge ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}) ===")
@@ -515,7 +515,14 @@ class MainActivity : FragmentActivity() {
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                ).apply {
+                    // Extra breathing room above the model control (Mido, 2026-10-19: *"Add
+                    // more top margin to the model"*). It is the one row that can be a big
+                    // action button, so it reads as a separate thing rather than the next
+                    // line of the checklist. Applied to BOTH branches — the download button
+                    // and the ready row — or the spacing would jump when the download ends.
+                    topMargin = Theme.dp(this@MainActivity, 16)
+                }
             )
         } else {
             statusContainer.addView(
@@ -532,7 +539,11 @@ class MainActivity : FragmentActivity() {
                     onClick = {
                         if (modelState.ready) confirmRedownload() else startModelDownload()
                     }
-                )
+                ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
             )
         }
 

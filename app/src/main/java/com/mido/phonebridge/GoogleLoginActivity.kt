@@ -46,7 +46,7 @@ class GoogleLoginActivity : Activity() {
         root.addView(ScrollView(this).apply { addView(log) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
 
-        setContentView(root)
+        setContentView(Theme.inset(root))
 
         if (AuthManager.clientId.isBlank()) {
             status.text = "No OAuth client id configured in this build."

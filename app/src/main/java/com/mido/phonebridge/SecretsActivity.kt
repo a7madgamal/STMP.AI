@@ -72,7 +72,7 @@ class SecretsActivity : Activity() {
         content.addView(addBtn)
 
         root.addView(scroll)
-        setContentView(root)
+        setContentView(Theme.inset(root))
         render()
     }
 

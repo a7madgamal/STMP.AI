@@ -12,6 +12,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.R
 
@@ -85,6 +87,38 @@ object Theme {
     ).toInt()
 
     private fun radiusPx(ctx: Context, radiusDp: Int): Float = dp(ctx, radiusDp).toFloat()
+
+    /**
+     * Keep a screen clear of the system bars.
+     *
+     * **Every screen needs this, not just the modal.** The app is edge-to-edge (targetSdk 35),
+     * so by default content draws UNDER the status bar and the navigation bar. Only
+     * `ApprovalActivity` had handling; the other six screens did not, which is why content sat
+     * under the clock and the buttons sat under the gesture bar (Mido, 2026-10-19:
+     * *"no need for app ui to render under the notification bar"*).
+     *
+     * Applied as WINDOW INSETS, never a fixed dp: the bar height varies per device, per OEM and
+     * per orientation, so a hardcoded number is wrong exactly where it matters.
+     *
+     * Pads TOP and BOTTOM only. Horizontal insets are handled by each screen's own padding, and
+     * adding them here would double-pad. Bottom is included because a pinned control under the
+     * gesture bar is unreachable.
+     *
+     * Returns [root] so a call site can write `setContentView(Theme.inset(root))`.
+     */
+    fun <T : View> inset(root: T): T {
+        // Capture the existing padding and ADD to it rather than replacing: several screens
+        // already pad their root for content breathing room, and clobbering that would make
+        // every one of them flush to the edges.
+        val baseTop = root.paddingTop
+        val baseBottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, baseTop + bars.top, v.paddingRight, baseBottom + bars.bottom)
+            insets
+        }
+        return root
+    }
 
     // --- surfaces ---
 

@@ -54,7 +54,7 @@ class LogDetailActivity : Activity() {
             content.addView(Theme.text(
                 this, "This record is no longer stored (aged out, or cleared).", 15f, Theme.ON_SURFACE_VARIANT
             ))
-            setContentView(root)
+            setContentView(Theme.inset(root))
             return
         }
 
@@ -64,7 +64,7 @@ class LogDetailActivity : Activity() {
             content.addView(Theme.text(
                 this, "Stored line is not valid JSON:\n\n$raw", 12f, Theme.DANGER, mono = true
             ).apply { setTextIsSelectable(true) })
-            setContentView(root)
+            setContentView(Theme.inset(root))
             return
         }
 
@@ -172,6 +172,6 @@ class LogDetailActivity : Activity() {
             ).apply { topMargin = Theme.dp(this@LogDetailActivity, 16) }
         )
 
-        setContentView(root)
+        setContentView(Theme.inset(root))
     }
 }

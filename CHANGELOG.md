@@ -1425,7 +1425,7 @@ a bare URL.
 
 152 tests green. Version 0.26.4 / build 118.
 
-## 0.26.5 — the AI's text now reaches the log (build 119) — CURRENT
+## 0.26.5 — the AI's text now reaches the log (build 119)
 2026-10-19
 
 Mido: *"let's add the AI text to logs"*.
@@ -1451,6 +1451,41 @@ Recorded because it generalises: **a diagnostic that reports a duration but not 
 answers "did it run", never "was it right".** Both are needed, and only one was being logged.
 
 152 tests green. Version 0.26.5 / build 119.
+
+## 0.27.0 — insets on every screen, and more room above the model row (build 120) — CURRENT
+2026-10-19
+
+Mido: *"fix inset. Add more top margin to the model"*.
+
+**Insets — all six remaining screens.** Only `ApprovalActivity` had system-bar handling (added in
+0.23.0); `MainActivity`, `SettingsActivity`, `LogActivity`, `LogDetailActivity`, `SecretsActivity`
+and `GoogleLoginActivity` had none. The app is edge-to-edge at targetSdk 35, so content drew under
+the status bar and pinned controls sat under the gesture bar. This was the third item on the
+test-sweep list and had been open since it was reported.
+
+One shared helper — `Theme.inset(root)` — rather than six copies:
+
+- **Insets, never a fixed dp.** Bar height varies per device, OEM and orientation.
+- **Adds to the existing padding** instead of replacing it. Several roots already pad for breathing
+  room, and clobbering that would have made every screen flush to the edges — the fix would have
+  traded one layout bug for another.
+- **Top and bottom only.** Horizontal insets are each screen's own concern; adding them here would
+  double-pad.
+- Returns its argument, so a call site reads `setContentView(Theme.inset(root))`.
+
+`LogDetailActivity` has three `setContentView` sites (aged-out, unparseable, normal) but each
+branch returns immediately, so only one ever runs and the listener cannot stack.
+
+**Model row — 16dp above it, on BOTH branches.** The model control can be a large action button
+(during download) or a plain status row (when ready). The margin is applied to both, because
+applying it to only the button makes the spacing collapse the instant the download finishes — a
+layout jump at exactly the moment the user is watching that row.
+
+Also in this release: **8 OpenClaw todos closed**, verified against the code first rather than from
+memory (Material 3, the UiKit cleanup, the AI engine, the risk badge, the modal arm delay, both
+alert sounds, and the NOTIFY card's AI line). Each closed individually with its own `sync_status: ok`.
+
+152 tests green. Version 0.27.0 / build 120.
 
 ---
 

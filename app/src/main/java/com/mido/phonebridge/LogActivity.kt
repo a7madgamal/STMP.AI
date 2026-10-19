@@ -77,7 +77,7 @@ class LogActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
-        setContentView(root)
+        setContentView(Theme.inset(root))
         render()
     }
 

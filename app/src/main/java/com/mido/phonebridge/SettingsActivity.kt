@@ -53,7 +53,7 @@ class SettingsActivity : Activity() {
             setBackgroundColor(Theme.BG)
         }
         scroll.addView(container)
-        setContentView(scroll)
+        setContentView(Theme.inset(scroll))
 
         render()
     }
