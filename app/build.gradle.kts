@@ -27,8 +27,26 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 105
-        versionName = "0.23.1"
+        versionCode = 106
+        versionName = "0.23.2"
+
+        /*
+         * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and
+         * x86_64, and we were packaging both: 25.1 MB of `lib/x86_64/liblitertlm_jni.so`
+         * that can never load on the target phone, on every single APK. That is 36% of a
+         * 69 MB download spent on a library for an emulator nobody runs — and it is what
+         * made the Taildrop transfer of 0.23.x stall repeatedly (two 150s timeouts, then a
+         * background run that moved ~10 MB of 69 MB and froze).
+         *
+         * The target device is a Samsung S22 Ultra (arm64-v8a) and the app is sideloaded by
+         * hand, so x86_64 has no use here. If an emulator is ever needed, add it back
+         * deliberately — do NOT "fix" a future x86_64 install by deleting this filter and
+         * shipping the dead weight to the phone again.
+         */
+        ndk {
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
