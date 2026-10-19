@@ -1179,7 +1179,7 @@ remaining `MATCH_PARENT` in `NotifyOverlay` is width-only or paired with `WRAP_C
 
 127 tests green. Version 0.25.1 / build 112.
 
-## 0.25.2 — full-screen intent is OPTIONAL, and the checklist stops nagging (build 113) — CURRENT
+## 0.25.2 — full-screen intent is OPTIONAL, and the checklist stops nagging (build 113)
 2026-10-19
 
 **Measured on device:** with FSI revoked and draw-over-apps granted, a SECURE calendar request
@@ -1206,6 +1206,51 @@ not — `permissions.fullScreenIntent` read `true` straight after installing 0.2
 Play Store's auto-revocation applies to Play-installed apps; these are sideloaded.
 
 127 tests green. Version 0.25.2 / build 113.
+
+## 0.26.0 — the summary describes the PAYLOAD, not the route (build 114) — CURRENT
+2026-10-19
+
+Mido, after writing 8 todos: *"I didn't like the AI summary. I expected the todolist adding one
+to say Adding 8 todos to PhoneBridge or something"* — then, naming why it matters: *"the payload
+is the whole reason I added AI, so it's critical to describe it too"*.
+
+He is right, and the cause was upstream of the model. The facts handed to it were:
+
+```
+summary: todoist: /secrets/todoist/call
+facts:
+- TARGET: POST https://api.todoist.com/api/v1/sync
+- BODY: {"commands": [{"type": "item_add", ...      <- truncated at 200 chars
+```
+
+Two failures stacked:
+
+1. **The deterministic summary described a ROUTE.** `describe()`'s fallback branch produced
+   `todoist: /secrets/todoist/call`, which says nothing about what is happening.
+2. **The payload was reported as a truncated string.** A 5.3 KB body cut at 200 characters shows
+   the model that *something* is being sent and gives it no way to count what.
+
+No amount of prompt engineering fixes that: the model cannot name a number it was never shown.
+
+**Fix — describe the shape, deterministically.** New `core/PayloadShape` (pure, Context-free,
+unit-tested) turns a JSON body into `8 commands (item_add ×8)`. Rules: an array of objects is
+counted BY `type` (the convention every batch API uses), an array of scalars is a count, a scalar
+names the FIELD and never its value, an empty array contributes nothing, and a non-object body
+returns null so the caller falls back to an honest byte count.
+
+`describe()` gains a `/secrets/` branch that produces
+`todoist · POST /api/v1/sync · 8 commands (item_add ×8)` — true with or without the AI, and
+readable in the audit log on its own.
+
+The prompt now says: *describe what the PAYLOAD does, not the endpoint; if the summary names a
+count, say it — "Adding 8 todos" beats "updating tasks"*.
+
+**A test that cannot fail, caught and fixed.** The first version of `PayloadShapeTest` inlined a
+COPY of the logic and asserted against it — it could never fail. Extracting `PayloadShape` into a
+real object made the test real: breaking `items` → `WRONG` fails it (verified), and 133 tests pass
+when restored.
+
+133 tests green. Version 0.26.0 / build 114.
 
 ---
 

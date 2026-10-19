@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 113
-        versionName = "0.25.2"
+        versionCode = 114
+        versionName = "0.26.0"
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and

@@ -1145,8 +1145,49 @@ class HttpServer(
         pluginId == "gmail" -> "Gmail: ${routePath.removePrefix("/gmail")}"
         pluginId == "notifications" ->
             "Notifications: ${routePath.removePrefix("/notifications").ifBlank { "list" }}"
+        // A brokered third-party call. The default branch would produce
+        // `todoist: /secrets/todoist/call` — a path, which tells the summariser
+        // NOTHING about what is about to happen. That was a real complaint (Mido,
+        // 2026-10-19: *"I expected the todolist adding one to say Adding 8 todos to
+        // PhoneBridge"*): the payload is the whole reason the AI exists, so the
+        // deterministic summary has to describe the payload, not the route.
+        routePath.startsWith("/secrets/") -> describeSecretCall(pluginId, body)
         else -> if (pluginId.isBlank()) routePath else "$pluginId: $routePath"
     }
+
+    /**
+     * A brokered call, described by its SHAPE rather than its URL.
+     *
+     * `POST https://api.todoist.com/api/v1/sync` with a body is, to a reader, "some sync
+     * call". With this it becomes `POST /api/v1/sync · 8 commands: item_add ×8`, which is
+     * what lets a small model answer "Adding 8 todos".
+     *
+     * Everything here is derived from the payload itself and is deterministic — no model
+     * involved — so it is true even when the AI is unavailable, and the audit record is
+     * readable on its own.
+     */
+    private fun describeSecretCall(pluginId: String, body: JSONObject): String {
+        val method = body.optString("method", "GET").uppercase()
+        val url = body.optString("url", "")
+        val path = runCatching { java.net.URL(url).path }.getOrNull().orEmpty().ifBlank { url.ifBlank { "?" } }
+        val raw = body.optString("body", "").trim()
+        if (raw.isEmpty()) return "$pluginId · $method $path"
+        // Shape comes from the real object, not a copy — see [PayloadShape].
+        val shape = com.mido.phonebridge.core.PayloadShape.of(raw)
+        return "$pluginId · $method $path · ${shape ?: "${raw.length}-char body"}"
+    }
+
+    /**
+     * The shape of a JSON payload in a few words: how many items, and of what kind.
+     *
+     * Walks the top level for arrays and counts them, and for an array of objects counts the
+     * distinct `type` values — the convention every batch API uses (`item_add`, `mail.send`,
+     * `changes.create`, …). Returns null when the body is not a JSON object, because at that
+     * point there is nothing honest to say about it and the caller falls back to a byte count.
+     *
+     * Pure and Context-free so it is unit-testable: this string is the difference between a
+     * useful summary and "todoist: /secrets/todoist/call".
+     */
 
     private fun jsonArrayToStrings(arr: JSONArray?): List<String> {
         if (arr == null) return emptyList()

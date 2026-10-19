@@ -110,6 +110,15 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 "Be terse: a headline, not a sentence. No filler like 'the user requested' " +
                 "or 'using the Google plugin' — state the act and its object. If the exact " +
                 "target needs more words, use them rather than dropping it. " +
+                // THE PAYLOAD IS THE POINT (Mido, 2026-10-19: *"the payload is the whole
+                // reason I added AI, so it's critical to describe it too"*). A path-like
+                // summary such as "todoist: /secrets/todoist/call" says nothing about what
+                // is about to happen; the human is approving the CONTENTS. The prompt asks
+                // for the count and the object, and the deterministic `summary` line now
+                // carries the payload shape, so the model has something concrete to name.
+                "Describe WHAT THE PAYLOAD DOES, not the endpoint. If the summary or facts " +
+                "name a count (e.g. '8 commands (item_add x8)'), say it: 'Adding 8 todos' beats " +
+                "'updating tasks'. Name the object being changed. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
     }
