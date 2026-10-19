@@ -94,15 +94,22 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val SYSTEM =
             "You describe an API request to the person who must approve it. " +
                 "Reply with ONE JSON object and nothing else, in exactly this shape: " +
-                "{\"description\": \"<max 8 words>\", " +
-                "\"risk\": \"low|medium|high\", \"reason\": \"<max 5 words>\"}. " +
+                // A SUGGESTION, not a cap (Mido, 2026-10-19: *"remove the hard cab 8 words,
+                // or make it a suggestion instead"*). A hard ceiling makes a small model either
+                // contort the sentence or drop the very noun that matters — and a truncated
+                // summary is worse than a slightly long one, because the human reads it as the
+                // whole truth. The length is guided here and bounded by the RENDERER instead
+                // (3 lines, ellipsized), which degrades visibly rather than silently.
+                "{\"description\": \"<brief, ideally under ~8 words>\", " +
+                "\"risk\": \"low|medium|high\", \"reason\": \"<a few words>\"}. " +
                 // Brevity is demanded explicitly (Mido, 2026-10-19: *"make the ui summary
                 // more concise"*). Left to itself this model produces wordy sentences like
                 // "The user requested to read an email from bob@example.com using the Google
                 // plugin" — accurate, and far too long for a 216dp card or a glance. The
                 // modal renders it LARGE, so every wasted word costs real screen space.
                 "Be terse: a headline, not a sentence. No filler like 'the user requested' " +
-                "or 'using the Google plugin' — state the act and its object. " +
+                "or 'using the Google plugin' — state the act and its object. If the exact " +
+                "target needs more words, use them rather than dropping it. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
     }
