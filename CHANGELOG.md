@@ -1664,7 +1664,7 @@ real backlog item that merely contains the word.
 
 154 tests green. Version 0.30.0 / build 126.
 
-## 0.31.0 — the model gets the request body VERBATIM (build 127) — CURRENT
+## 0.31.0 — the model gets the request body VERBATIM (build 127)
 2026-10-20
 
 Mido: *"no fucking processing of any kind. the full json as is + plugin name + url + our system
@@ -1698,6 +1698,44 @@ thing it acts on… 'Creating a test todo item' beats 'Create task with content 
 it validates against what the model actually saw.
 
 155 tests green. Version 0.31.0 / build 127.
+
+## 0.32.0 — the detail is GUARANTEED from the body, not requested (build 128) — CURRENT
+2026-10-20
+
+Mido: *"no you shit, even the example you gave is not what i want. I want FUCKING DETAILS FROM THE
+BODY"*.
+
+He was right twice. The example I wrote — "Creating a test todo item" — was **my invented phrase**,
+not text from his body. And prompt wording had failed eight releases running, so asking a ninth
+time was not a plan.
+
+**So the detail is no longer requested. It is supplied.**
+
+New `core/BodyDetail`: given the verb and the raw body, it produces the line itself —
+`Writing "test todo item"`, `Deleting "old notes"`, `Reading "today"`. `LiteRtLm.summarize` keeps
+the model's sentence only when it actually quotes a body value; otherwise the model's **risk** is
+kept (which it is genuinely good at — a single label, not composition) and the description comes
+from the body.
+
+**Three real bugs surfaced while testing it, all in code I had just written:**
+
+1. **`optString` on a container returns RAW JSON, not ""** — so the walk quoted `["a@b.com"]` and
+   `{"query":"today"}` at the user as if they were prose. Fixed with a `scalar()` gate that accepts
+   only strings and numbers.
+2. **The fallback quoted routing metadata.** A brokered GET carries `{"url":…, "method":"GET"}`,
+   and the fallback happily returned `"GET"` — producing `Reading "GET"`. Fixed with a
+   `NOT_CONTENT` deny-list (url, method, headers, ids, version).
+3. **`Sending` was wrong phrasing** for a create; `Writing` is true of every write without guessing
+   which kind.
+
+All three were caught by `BodyDetailTest`, not by reading the code — which is the point of writing
+tests for the part that decides what the human reads.
+
+Also removed the blunt `namesSomethingFromTheBody` rule I had added to `SummaryGuard`: it broke four
+existing tests and, worse, **rejection means no line at all** — so it punished the human for the
+model's failure. Guaranteeing the detail is strictly better than refusing the summary.
+
+165 tests green (10 new for `BodyDetail`). Version 0.32.0 / build 128.
 
 ---
 

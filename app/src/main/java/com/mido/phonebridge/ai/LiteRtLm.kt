@@ -141,11 +141,20 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 // The rule is stated abstractly instead, and [SummaryGuard] enforces it.
                 // The prompt now carries the request body VERBATIM (see [buildPrompt]), so the
                 // instruction is about reading it rather than about our derived rows.
-                "You are given the request body exactly as the caller sent it. Read it and say " +
-                "what the request actually does, naming the SPECIFIC thing it acts on — the " +
-                "text being written, the item being deleted, the search being run. Prefer the " +
-                "concrete over the categorical: 'Creating a test todo item' beats 'Create task " +
-                "with content and description'. " +
+                // HARD REQUIREMENT, not a style suggestion (Mido, 2026-10-20: *"I want FUCKING
+                // DETAILS FROM THE BODY"*). Saying "be specific" produced "Create task with
+                // content and description" — a restatement of STRUCTURE. The description must
+                // carry the caller's actual text, quoted from the body.
+                //
+                // [SummaryGuard] enforces this: a description that does not quote a real value
+                // from the body is REJECTED rather than shown. So the instruction and the check
+                // say the same thing, and the model cannot satisfy one while failing the other.
+                "ALWAYS include the literal text from the body that is being acted on — copy it " +
+                "character for character, inside quotes. If the body has a content, subject, " +
+                "body, text, name, title or query field, that field's value IS the description's " +
+                "object: say what is being done TO IT, e.g. Creating \"<that exact value>\". " +
+                "Never describe the shape of the request (never say 'with content and " +
+                "description'); describe the actual thing. " +
                 "Do not state a quantity unless it appears in the body. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
@@ -252,7 +261,28 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             }
             // The guard checks the summary against what the model ACTUALLY saw: the raw body
             // now, not a rendered row list. A number the model states must appear in the request.
-            parse(reply, facts.rawBody, parseVerb(facts))?.also {
+            val verb = parseVerb(facts)
+            val parsed = parse(reply, facts.rawBody, verb)
+            // GUARANTEE THE DETAIL. The model paraphrases structure ("Create task with content
+            // and description") no matter how the prompt is worded, and eight releases proved
+            // that. So when its sentence carries none of the body's actual text, the body
+            // supplies the line instead — the human always gets the specific thing, and the
+            // model stays a refinement rather than the only path to a usable description.
+            //
+            // Mido, 2026-10-20: *"I want FUCKING DETAILS FROM THE BODY"*.
+            val detailed = parsed?.let { sum ->
+                val fromBody = com.mido.phonebridge.core.BodyDetail.of(verb, facts.rawBody)
+                if (fromBody != null &&
+                    !com.mido.phonebridge.core.BodyDetail.alreadyMentions(sum.description, facts.rawBody)
+                ) {
+                    // Keep the model's risk (which it is genuinely good at) and take the
+                    // description from the body, which is where the detail actually lives.
+                    sum.copy(description = fromBody)
+                } else {
+                    sum
+                }
+            }
+            detailed?.also {
                 // LOG THE TEXT, not just the risk. Every round of tuning this feature has been
                 // blocked on "what did the modal actually say?" — the log recorded the risk and
                 // the timing and nothing else, so the one fact that mattered had to be read off

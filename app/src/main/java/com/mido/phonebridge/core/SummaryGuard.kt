@@ -56,6 +56,12 @@ object SummaryGuard {
         if (text.isEmpty()) return false
         if (!verbMatchesVerbLanguage(text, verb)) return false
         if (!statedCountsAreSupported(text, facts)) return false
+        // NOTE: there is deliberately NO "must quote body text" rule here. An earlier version
+        // had one and it was wrong twice over: it rejected accurate summaries (four tests broke),
+        // and rejection means NO line at all — so the human got nothing. Guaranteeing the detail
+        // is the job of [com.mido.phonebridge.core.BodyDetail], which supplies it from the body
+        // when the model fails to; that way the human always gets detail, and the model stays an
+        // optional refinement rather than the only path to a usable description.
         return true
     }
 
