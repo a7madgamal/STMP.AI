@@ -1699,7 +1699,7 @@ it validates against what the model actually saw.
 
 155 tests green. Version 0.31.0 / build 127.
 
-## 0.32.0 — the detail is GUARANTEED from the body, not requested (build 128) — CURRENT
+## 0.32.0 — the detail is GUARANTEED from the body, not requested (build 128)
 2026-10-20
 
 Mido: *"no you shit, even the example you gave is not what i want. I want FUCKING DETAILS FROM THE
@@ -1736,6 +1736,43 @@ existing tests and, worse, **rejection means no line at all** — so it punished
 model's failure. Guaranteeing the detail is strictly better than refusing the summary.
 
 165 tests green (10 new for `BodyDetail`). Version 0.32.0 / build 128.
+
+## 0.32.1 — reverted to Qwen3-0.6B (build 129) — CURRENT
+2026-10-20
+
+Mido: *"too slow and I think it crashed. new plan: recert to the old small one."* — and *"revert,
+only model"*, so nothing else changed.
+
+**The 1.7B was the wrong trade.** It measured ~3.4s per inference and ~2 GiB resident, and the
+bridge process died three times in one morning: twice while idle and once mid-request, during an
+inference. Whatever the precise kill — low-memory reaper or a native abort, unconfirmed because the
+process took its log with it — the memory was the only difference from the 0.6B, which had run for
+days at ~700 MiB.
+
+**What the 1.7B actually bought, in the end: better risk labels.** That is all. Its descriptions
+were still structural restatements — *"Create task with content and description"* — which is exactly
+why the description is now built deterministically by `BodyDetail` rather than asked of any model.
+Once composition stopped riding on the model, the remaining job was a single risk label, and that
+is the kind of task a small model handles reliably. So 1.3 GiB of extra resident memory was buying
+a marginal label improvement and an unstable service.
+
+Four constants, as designed for a swap:
+
+```
+MODEL_ASSET    qwen3_1_7b → qwen3_0_6b
+MODEL_URL      Qwen3-1.7B → Qwen3-0.6B
+EXPECTED_SIZE  977,184,032 → 344,671,744
+EXPECTED_SHA   2a72330b… → 03e7da1e…
+```
+
+The filename differs, so the app re-downloads the 345 MB file. **The old 1.7B file stays on disk and
+is dead weight** (~1 GB) — nothing deletes it, because deleting a user's file to reclaim space is
+not this app's call.
+
+The doc comment in `ModelRegistry` was rewritten: it still argued for the 1.7B, which would now be a
+lie sitting next to the code.
+
+165 tests green. Version 0.32.1 / build 129.
 
 ---
 
