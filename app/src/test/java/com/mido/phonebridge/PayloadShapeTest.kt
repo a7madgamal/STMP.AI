@@ -2,7 +2,9 @@ package com.mido.phonebridge
 
 import com.mido.phonebridge.core.PayloadShape
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -56,10 +58,36 @@ class PayloadShapeTest {
     }
 
     @Test
-    fun `a scalar field names the field, never its value`() {
-        // The value is already a modal row and may be long or sensitive; the summary says
-        // that something is being SET, not what it is set to.
-        assertEquals("subject", PayloadShape.of("""{"subject":"very long subject line"}"""))
+    fun `a scalar field quotes its value, so the model can name the thing`() {
+        // The report that changed this (Mido, 2026-10-20): *"Says Create task with title and
+        // description. This is toooo generic ... I want something like Creating a test todo
+        // item"*. Field NAMES alone let the model only restate the field list; the value is
+        // what lets it name the object.
+        assertEquals(
+            """content="test todo item"""",
+            PayloadShape.of("""{"content":"test todo item"}""")
+        )
+    }
+
+    @Test
+    fun `a long value is clipped, because the full text is already in BODY`() {
+        val long = "x".repeat(200)
+        val out = PayloadShape.of("""{"content":"$long"}""")!!
+        // The ellipsis lands INSIDE the quotes (`content="xxx…"`), not at the end of the
+        // string — asserting endsWith was this test's own bug, not the code's.
+        assertTrue("expected a clip marker, got: $out", out.contains("…"))
+        assertTrue("clipped value should stay short, got ${out.length} chars", out.length < 90)
+    }
+
+    @Test
+    fun `a credential-shaped field is named but its value is withheld`() {
+        // This string reaches the model prompt AND the on-screen AI line, so echoing a token
+        // would print it. The FIELD is still named so the model knows something was set.
+        val out = PayloadShape.of(
+            """{"access_token":"ya29.secretvalue","content":"ok"}"""
+        )!!
+        assertFalse("a token value must never appear: $out", out.contains("ya29"))
+        assertTrue("the field name should still be reported: $out", out.contains("access_token"))
     }
 
     @Test

@@ -1591,7 +1591,7 @@ reloads after `onTrimMemory`. This release makes each one cost time rather than 
 
 152 tests green. Version 0.28.1 / build 123.
 
-## 0.29.0 — APPROVE wears the risk colour (build 125) — CURRENT
+## 0.29.0 — APPROVE wears the risk colour (build 125)
 2026-10-19
 
 Mido: *"lame description but it increased the risk detection which is alone very useful. make the
@@ -1623,6 +1623,46 @@ paints is created ~150 lines before the button exists, and `applyArmed` already 
 ordering problem the same way.
 
 152 tests green. Version 0.29.0 / build 125.
+
+## 0.30.0 — PAYLOAD quotes values, so the model can name the thing (build 126) — CURRENT
+2026-10-20
+
+Mido: *"Says Create task with title and description. This is toooo generic from what i want, I want
+something like Creating a test todo item or something. experiment with the prompt"*.
+
+**The prompt was not the problem — the FACT was.** `PAYLOAD` reported field NAMES only:
+
+```
+- PAYLOAD: content · description
+- BODY: {"content": "TEMP - write test 2026-10-20", "description": "delete after test"}
+```
+
+So the model could only restate the field list. It could not say "Creating a test todo item" because
+that text existed in `BODY` and nowhere it was reading first. **Same lesson as six releases of this
+feature: when a summary is generic, read the facts before touching the model.**
+
+`PayloadShape` now quotes each scalar, clipped to 60 chars:
+
+```
+- PAYLOAD: content="TEMP - write test 2026-10-20" · description="delete after test"
+```
+
+The full text still lives in `BODY`; this row exists to be *read*, not to carry the payload.
+
+**Credential-shaped keys are named but their values are withheld.** A blunt substring check
+(`token`, `secret`, `password`, `auth`, `key`, `credential`, `cookie`, `session`). This string
+reaches both the model prompt AND the on-screen AI line, so echoing a token would print it. The
+field is still reported, so the model knows something was set — it just does not see what. A false
+positive costs one uninformative field; a false negative leaks a credential into a log and a screen.
+
+Tests went 152 → 154: the old "names the field, never its value" assertion was replaced (it encoded
+the behaviour being fixed), plus coverage for clipping and the credential guard.
+
+Also this session: **3 temp tasks deleted** (verified by re-read, not by trusting `sync_status`), and
+one false positive correctly ignored — "Secrets: **temp**lates + 10 famous integrations prefill" is a
+real backlog item that merely contains the word.
+
+154 tests green. Version 0.30.0 / build 126.
 
 ---
 

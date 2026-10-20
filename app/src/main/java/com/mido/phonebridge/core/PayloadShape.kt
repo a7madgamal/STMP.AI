@@ -28,8 +28,9 @@ object PayloadShape {
      * - An array of objects with a `type` field is counted BY KIND — the convention every
      *   batch API uses (`item_add`, `mail.send`, `changes.create`).
      * - An array without types (Gmail's `to`) is just a count.
-     * - A scalar names the FIELD, never its value: the value is already a modal row and may
-     *   be long or sensitive.
+     * - A scalar names the field AND quotes its value (`content="test todo"`), truncated —
+     *   because a field name alone let the model only restate the field list. Credential-shaped
+     *   keys are named but their values are withheld.
      * - An empty array contributes nothing, so an empty `cc`/`bcc` cannot pad the summary.
      */
     fun of(raw: String): String? {
@@ -56,9 +57,42 @@ object PayloadShape {
                 }
                 parts.add("${value.length()} $key ($what)")
             } else if (value != null && value !== JSONObject.NULL && value.toString().isNotBlank()) {
-                parts.add(key)
+                // NAME THE VALUE, not just the field (Mido, 2026-10-20: *"too generic ... I want
+                // something like Creating a test todo item"*). Reporting only `content ·
+                // description` told the model WHICH fields were set and nothing about what they
+                // said, so it could only answer "Create task with content and description" — a
+                // restatement of the field list. With the value in the fact it can name the
+                // thing: `Creating a test todo item`.
+                //
+                // Truncated short on purpose: the full text is still in the BODY row, and this
+                // row exists to be *read*, not to carry the payload.
+                val text = value.toString().trim()
+                parts.add(if (isSensitive(key)) key else "$key=\"${clip(text)}\"")
             }
         }
         return if (parts.isEmpty()) null else parts.joinToString(" · ")
     }
+
+    /**
+     * Never echo a value for a credential-shaped field.
+     *
+     * These strings travel into the model prompt AND into the on-screen AI line, so a token in
+     * a payload would otherwise be summarised out loud. The FIELD is still named, so the model
+     * knows something was set — it just does not see what.
+     *
+     * Deliberately a blunt substring match: a false positive costs one uninformative field in a
+     * summary, a false negative leaks a credential into a log and a screen.
+     */
+    private fun isSensitive(key: String): Boolean {
+        val k = key.lowercase()
+        return listOf("token", "secret", "password", "passwd", "auth", "key", "credential", "cookie", "session")
+            .any { k.contains(it) }
+    }
+
+    /** Short enough to read in a summary; the full value stays in the BODY row. */
+    private fun clip(text: String): String =
+        if (text.length <= MAX_VALUE_CHARS) text else text.take(MAX_VALUE_CHARS) + "…"
+
+    /** How much of a value a summary may quote. */
+    private const val MAX_VALUE_CHARS = 60
 }
