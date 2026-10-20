@@ -597,7 +597,13 @@ class HttpServer(
                         // Never built for an opted-out route, so the rows are not fetched
                         // either — an opted-out route pays nothing for the AI.
                         if (com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary))
-                            aiFactsFor(resolved.route, verb, summary, path, body, query, remote)
+                            aiFactsFor(
+                                resolved.route, verb, summary, path, body, query, remote,
+                                // The body EXACTLY as received — `rawBody` is captured before
+                                // parsing, so this is byte-for-byte what the caller sent.
+                                rawBody = rawBody,
+                                url = body.optString("url", "")
+                            )
                         else null,
                         needsAi = com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary)
                     )
@@ -705,7 +711,11 @@ class HttpServer(
                         // to wait for, so its buttons go live at once.
                         aiFacts = if (com.mido.phonebridge.ai.ModelReadiness
                                 .requiresAi(resolved.route.aiSummary))
-                            factsFor(resolved.route, verb, summary, rows) else null
+                            factsFor(
+                                resolved.route, verb, summary, rows,
+                                rawBody = rawBody,
+                                url = body.optString("url", "")
+                            ) else null
                     )
                     draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
 
@@ -1045,14 +1055,18 @@ class HttpServer(
         route: Route,
         verb: Verb,
         summary: String,
-        rows: List<Pair<String, String>>
+        rows: List<Pair<String, String>>,
+        rawBody: String = "",
+        url: String = ""
     ): com.mido.phonebridge.ai.RequestFacts =
         com.mido.phonebridge.ai.RequestFacts(
             plugin = PluginRegistry.resolve(route.method, route.path)?.plugin?.id ?: "?",
             verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
-            rows = rows.filter { it.second.isNotBlank() }
+            rows = rows.filter { it.second.isNotBlank() },
+            rawBody = rawBody,
+            url = url
         )
 
     /**
@@ -1069,7 +1083,9 @@ class HttpServer(
         actualPath: String,
         body: JSONObject,
         query: Map<String, String>,
-        remote: String
+        remote: String,
+        rawBody: String = "",
+        url: String = ""
     ): com.mido.phonebridge.ai.RequestFacts {
         val rows = try {
             pluginRows(route, actualPath, body, query, remote)
@@ -1081,7 +1097,9 @@ class HttpServer(
             verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
-            rows = rows.filter { it.second.isNotBlank() }
+            rows = rows.filter { it.second.isNotBlank() },
+            rawBody = rawBody,
+            url = url
         )
     }
 

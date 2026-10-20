@@ -27,7 +27,23 @@ data class RequestFacts(
     /** The deterministic summary the audit already records. */
     val summary: String,
     /** label -> value, exactly as the modal renders them. */
-    val rows: List<Pair<String, String>>
+    val rows: List<Pair<String, String>>,
+    /**
+     * The request body EXACTLY as it arrived, byte for byte.
+     *
+     * **Nothing is derived from this — it is passed through.** Mido, 2026-10-20: *"no fucking
+     * processing of any kind, the full json as is + plugin name + url + our system prompt"*.
+     *
+     * Every previous attempt summarised the payload first (field names, then quoted values, then
+     * a JSON shape), and each one gave the model something other than the request. This field
+     * exists so the model reads what the caller actually sent, and any judgement about what
+     * matters is the MODEL's to make rather than ours to pre-chew.
+     *
+     * Empty for a GET — there is no body. That is a fact, not a truncation.
+     */
+    val rawBody: String = "",
+    /** The outbound URL for a brokered call; empty for native routes. */
+    val url: String = ""
 )
 
 /**

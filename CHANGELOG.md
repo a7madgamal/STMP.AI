@@ -1624,7 +1624,7 @@ ordering problem the same way.
 
 152 tests green. Version 0.29.0 / build 125.
 
-## 0.30.0 — PAYLOAD quotes values, so the model can name the thing (build 126) — CURRENT
+## 0.30.0 — PAYLOAD quotes values, so the model can name the thing (build 126)
 2026-10-20
 
 Mido: *"Says Create task with title and description. This is toooo generic from what i want, I want
@@ -1663,6 +1663,41 @@ one false positive correctly ignored — "Secrets: **temp**lates + 10 famous int
 real backlog item that merely contains the word.
 
 154 tests green. Version 0.30.0 / build 126.
+
+## 0.31.0 — the model gets the request body VERBATIM (build 127) — CURRENT
+2026-10-20
+
+Mido: *"no fucking processing of any kind. the full json as is + plugin name + url + our system
+prompt"*.
+
+He is right, and this closes an eight-release arc of getting it wrong.
+
+**Every previous version transformed the payload first.** Truncated it at 200 chars; reordered its
+rows; derived a "shape" from its arrays; quoted its scalar values; rendered it through a budget.
+Each step was a judgement about *what mattered*, made by us, before the model ever saw the request.
+Each produced a summary that described our view of the request rather than the request.
+
+**Now: `plugin`, `verb`, `route`, `url`, and the body exactly as the caller sent it.** Nothing
+derived, nothing reshaped, no rows. `RequestFacts.rawBody` carries the bytes captured by
+`readRawBody` before parsing, so it is what arrived — not a re-serialisation.
+
+The only remaining concession is `PromptBudget`, and it is a hard platform limit rather than a
+judgement: an input that overflows the context window fails the whole request, because the AI is
+core. So the window went **1024 → 8192 tokens** (the old value could not hold a 4.9 KB body), and
+the fact budget **2,000 → 16,000 chars**. When it does bite, the truncation is *marked* — a silent
+cut presenting half a payload as whole is the exact failure this feature kept paying for.
+
+Also raised `MAX_PER_ROW` 600 → 12,000, which existed to stop one row starving others but was
+clipping real bodies to their first few fields.
+
+**The system prompt was rewritten for what it now receives:** "You are given the request body
+exactly as the caller sent it. Read it and say what the request actually does, naming the SPECIFIC
+thing it acts on… 'Creating a test todo item' beats 'Create task with content and description'."
+
+`SummaryGuard` now checks stated quantities against the raw body rather than a rendered row list —
+it validates against what the model actually saw.
+
+155 tests green. Version 0.31.0 / build 127.
 
 ---
 

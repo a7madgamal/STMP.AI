@@ -2,6 +2,7 @@ package com.mido.phonebridge
 
 import com.mido.phonebridge.core.PromptBudget
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,9 +37,25 @@ class PromptBudgetTest {
     }
 
     @Test
-    fun `two rows get long excerpts`() {
-        // With few rows the cap is MAX_PER_ROW, so a large payload is readable in full up to it.
-        assertEquals(PromptBudget.MAX_PER_ROW, PromptBudget.capFor(2))
+    fun `two rows get the even split, which is what actually fits`() {
+        // NOT "the per-row max". With a 16,000 total and 2 rows the even split is 8,000, which is
+        // under MAX_PER_ROW (12,000) — so the cap is the SPLIT, not the ceiling. The old assertion
+        // demanded the max and only passed because the total was small enough that the ceiling
+        // always bound first. Asserting the real relationship keeps this test honest after a
+        // budget change instead of pinning a number that happens to be true today.
+        val cap = PromptBudget.capFor(2)
+        assertEquals(PromptBudget.MAX_TOTAL_CHARS / 2, cap)
+        assertTrue("cap must never exceed the per-row ceiling", cap <= PromptBudget.MAX_PER_ROW)
+    }
+
+    @Test
+    fun `a real 5 KB payload fits without clipping`() {
+        // The complaint that raised the budget: a representative Todoist body is ~4,900 chars and
+        // was being cut to a 600-char prefix. It must now pass through whole.
+        val body = "{\"" + "k\":\"v\"," .repeat(0) // placeholder to keep the diff readable
+        val real = "x".repeat(4_931)
+        val rendered = PromptBudget.render(listOf("BODY" to real))
+        assertFalse("a 5 KB payload must not be clipped: ${rendered.length} chars", rendered.contains("…"))
     }
 
     @Test

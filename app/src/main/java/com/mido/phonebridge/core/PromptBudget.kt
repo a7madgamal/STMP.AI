@@ -34,11 +34,18 @@ object PromptBudget {
     /**
      * Characters of fact rows the prompt may contain, total.
      *
-     * Conservative on purpose: a prompt that overflows the context is not a degraded summary, it
-     * is a failed request (the AI is core), so being 20% short of the theoretical ceiling costs a
-     * few characters of detail and buys immunity to a bad token estimate.
+     * **Raised 2,000 -> 16,000, because the old number silently cut real payloads in half**
+     * (Mido, 2026-10-20: *"can you just pass it the full fucking payload? All of it?"*).
+     *
+     * The budget has to be derived from the CONTEXT WINDOW, not picked by feel. At
+     * `MAX_CONTEXT_TOKENS = 8192` there are ~7,700 tokens for facts; JSON tokenises at roughly
+     * 2.5 chars/token, so ~19,000 chars. 16,000 keeps a ~15% margin for a worse-than-average
+     * estimate without ever cutting a payload a human is approving.
+     *
+     * The old 2,000 was chosen against a 1024-token window and then never revisited when the
+     * window grew — which is exactly how a limit outlives the constraint that justified it.
      */
-    const val MAX_TOTAL_CHARS = 2_000
+    const val MAX_TOTAL_CHARS = 16_000
 
     /**
      * Nobody gets less than this, even when there are many rows.
@@ -46,16 +53,20 @@ object PromptBudget {
      * Below ~120 chars a row is a fragment — a URL with no path, a subject with no noun — and a
      * fragment is worse than an omission because the model treats it as the whole fact.
      */
-    const val MIN_PER_ROW = 120
+    const val MIN_PER_ROW = 400
 
     /**
      * Nobody gets more than this, however few rows there are.
      *
-     * A single enormous row must not eat the entire budget: the OTHER rows (TARGET, HOST, what
-     * the secret is) are what makes the payload interpretable, and a summary that read only the
-     * body would be describing text rather than an action.
+     * Raised 600 -> 12,000 alongside the total. The original cap existed so one huge row could
+     * not starve the others — still true, but 600 was cutting a 5 KB JSON body down to its first
+     * few fields, which is the very complaint that started this. 12,000 leaves room for the other
+     * rows while letting a real payload through whole.
+     *
+     * A row is still trimmed if it alone would exceed the TOTAL; the renderer drops trailing rows
+     * and says so rather than overflowing the window.
      */
-    const val MAX_PER_ROW = 600
+    const val MAX_PER_ROW = 12_000
 
     /**
      * The per-row character allowance for [rowCount] rows.

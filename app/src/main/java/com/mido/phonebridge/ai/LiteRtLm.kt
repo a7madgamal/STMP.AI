@@ -77,11 +77,21 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val MAX_OUTPUT_TOKENS = 128
 
         /**
-         * KV-cache size (input + output). The facts are a handful of short rows; a
-         * 1024-token window is generous and keeps the cache small, which is the
-         * dominant memory term on a 0.6B model.
+         * KV-cache size (input + output).
+         *
+         * **Raised 1024 -> 8192 because the old value silently truncated real payloads**
+         * (Mido, 2026-10-20: *"can you just pass it the full fucking payload? All of it?"*).
+         * A representative Todoist batch body is ~4,900 chars of JSON, which tokenises at
+         * roughly 2.5 chars/token — about 2,000 tokens, plus ~285 for the system prompt. At
+         * 1024 the fact block was cut to a fraction of the real payload while the code and the
+         * UI both claimed the payload was being sent.
+         *
+         * 8192 holds ~7,700 tokens of facts (~19,000 chars), which covers the real bodies seen
+         * so far with headroom. The cost is KV cache: this is the dominant memory term, so a
+         * larger window is paid for in resident RAM on a 24/7 service — the trade Mido chose
+         * over describing a payload it cannot see.
          */
-        private const val MAX_CONTEXT_TOKENS = 1024
+        private const val MAX_CONTEXT_TOKENS = 8192
 
         /**
          * The output contract, stated in the prompt rather than enforced by constrained
@@ -129,8 +139,14 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 // example is a template to a small model, not an illustration (Mido,
                 // 2026-10-19: *"still says adding 8 todos which is VERY misleading"*).
                 // The rule is stated abstractly instead, and [SummaryGuard] enforces it.
-                "Describe WHAT THE PAYLOAD DOES, not the endpoint. Name the object being " +
-                "changed. Do not state a quantity unless the summary or facts contain it. " +
+                // The prompt now carries the request body VERBATIM (see [buildPrompt]), so the
+                // instruction is about reading it rather than about our derived rows.
+                "You are given the request body exactly as the caller sent it. Read it and say " +
+                "what the request actually does, naming the SPECIFIC thing it acts on — the " +
+                "text being written, the item being deleted, the search being run. Prefer the " +
+                "concrete over the categorical: 'Creating a test todo item' beats 'Create task " +
+                "with content and description'. " +
+                "Do not state a quantity unless it appears in the body. " +
                 "risk is low for reads, medium for edits, high for deletes or anything " +
                 "sent outside the account. Never invent names or values that are not given."
     }
@@ -234,7 +250,9 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
                 Log.w(TAG, "inference ${elapsed}ms exceeded budget ${budgetMs}ms; discarding")
                 return null
             }
-            parse(reply, com.mido.phonebridge.core.PromptBudget.render(facts.rows), parseVerb(facts))?.also {
+            // The guard checks the summary against what the model ACTUALLY saw: the raw body
+            // now, not a rendered row list. A number the model states must appear in the request.
+            parse(reply, facts.rawBody, parseVerb(facts))?.also {
                 // LOG THE TEXT, not just the risk. Every round of tuning this feature has been
                 // blocked on "what did the modal actually say?" — the log recorded the risk and
                 // the timing and nothing else, so the one fact that mattered had to be read off
@@ -349,48 +367,41 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     }
 
     /**
-     * The prompt. Deliberately rigid: a small model needs one unambiguous job and an
-     * exact output shape. The facts are labelled rows — the same ones the human sees
-     * — never raw JSON, which is unbounded and caller-authored.
+     * The prompt: the request, VERBATIM, plus our system prompt.
+     *
+     * **No processing of any kind.** Mido, 2026-10-20: *"no fucking processing of any kind, the
+     * full json as is + plugin name + url + our system prompt"*.
+     *
+     * Eight releases went into transforming this payload — truncating it, ordering its rows,
+     * quoting field values, deriving a "shape" from arrays — and every transformation was a
+     * judgement about what mattered. Each one produced a summary that described our view of the
+     * request rather than the request. The model is the thing that should decide what matters,
+     * and it can only do that if it sees the actual bytes.
+     *
+     * So: plugin, verb, URL, and the body exactly as the caller sent it. The ONLY concession is
+     * [PromptBudget], because the context window is finite and a request that overflows it fails
+     * outright (the AI is core). That is a hard platform limit, not a choice about relevance —
+     * and when it bites, the truncation is marked so the model can see it happened.
      */
     private fun buildPrompt(facts: RequestFacts): String {
-        // The cap comes from PromptBudget, NOT a flat number. A flat take(200) was applied
-        // per row, so a 5.3 KB payload arrived as a 200-char prefix and the model could no
-        // longer count what it was approving (Mido, 2026-10-19: *"the payload is the whole
-        // reason I added AI"*). The budget divides the ONE real constraint (context window)
-        // across however many rows exist, so two rows get long excerpts and eight get short
-        // ones — and a clipped value is marked '…' rather than silently presented as whole.
-        //
-        // **CONTENT FIRST, and this is a real fix, not a tidy-up.** A 0.6B model reads the
-        // first fact and largely describes THAT. With `TARGET: POST https://api.todoist.com/
-        // api/v1/tasks` first, every write summarised as the URL — the body was present and
-        // simply never reached (Mido, 2026-10-19: *"ai desc says POST https://api.todoist.com
-        // /api/v1/tasks this is BS"*). The human needs the URL first in the MODAL; the model
-        // does not. So the prompt reorders: the rows that say WHAT is changing lead, and the
-        // address trails. Two audiences, two orders, one source of facts.
-        val ordered = facts.rows.sortedBy { (label, _) ->
-            when (label.uppercase()) {
-                "PAYLOAD", "BODY", "QUERY", "SUBJECT", "BODY TEXT" -> 0
-                "TARGET", "HOST", "SECRET" -> 2
-                else -> 1
-            }
+        val budget = com.mido.phonebridge.core.PromptBudget.MAX_TOTAL_CHARS
+        val body = if (facts.rawBody.isBlank()) {
+            "(no body — this is a read)"
+        } else if (facts.rawBody.length > budget) {
+            // Marked, never silent: half a payload presented as whole is the failure this whole
+            // feature keeps paying for.
+            facts.rawBody.take(budget) + "\n…[TRUNCATED — request body exceeded ${budget} chars]"
+        } else {
+            facts.rawBody
         }
-        val rows = com.mido.phonebridge.core.PromptBudget.render(ordered)
-        // NO `summary:` LINE. It was a verbatim echo target: the 1.7B answered
-        // `said="POST tasks"`, which is exactly this field minus the plugin prefix (measured
-        // 2026-10-19). A distinctive string near the top of a prompt is the thing a small
-        // model copies, so the field is gone.
-        //
-        // It was also REDUNDANT: the deterministic summary already lives in the audit record
-        // (`todoist · POST tasks · query: …`) and `PAYLOAD` carries the same information as a
-        // fact row. Asking the model to improve on a line it can only repeat was never going
-        // to produce anything but a repeat.
+
+        val where = if (facts.url.isBlank()) "" else "\nurl: ${facts.url}"
         return """
             plugin: ${facts.plugin}
             verb: ${facts.verb}
-            route: ${facts.routeLabel}
-            facts:
-            $rows
+            route: ${facts.routeLabel}$where
+            request body (verbatim JSON):
+            $body
         """.trimIndent()
     }
 
