@@ -42,3 +42,29 @@ bridge is down.
   no need for app ui to render under the notification bar"* — screens draw beneath the system
   bars instead of respecting the insets. No `fitsSystemWindows` / `WindowInsets` handling exists
   anywhere in the app.
+
+## New backlog (2026-10-20) — written here because the bridge was down
+
+The Todoist path was unavailable when these were requested (bridge `000` / port 8787 refused),
+so they are recorded locally rather than claiming they were filed. Move to Todoist sub-todos
+under the PhoneBridge parent (`6hp83cg6Q5764fwM`) once the bridge is back.
+
+- [ ] **Revert the model to Qwen3-0.6B.** Mido: *"too slow and I think it crashed. new plan:
+  recert to the old small one."* The 1.7B idles ~2 GiB and peaked ~5.7 GiB; the bridge died
+  twice in one morning (both times around a request). Four constants in `ModelRegistry`; the app
+  re-downloads because `MODEL_ASSET` names a different file. Description quality is no longer
+  riding on the model — `BodyDetail` guarantees it — so only the RISK label is lost, and a 0.6B
+  produces a single label far more reliably than a sentence.
+- [ ] **Options screen.** A new screen (not the Exceptions screen) holding device-level settings.
+  First two occupants below; the screen exists so the next setting has a home rather than
+  becoming another row on the home checklist.
+- [ ] **Options: enable/disable fingerprint.** When disabled, `SECURE` is just the modal — a tap,
+  no biometric. Must respect the crypto-bound rule: once a vault exists the prompt *is* the vault
+  unlock, so disabling fingerprints has to either (a) keep the vault prompt for secret calls only,
+  or (b) refuse to disable while a vault exists. Decide before building.
+- [ ] **Options: AI backend — off / local / external.** Off = no summary and no risk, deterministic
+  rows only (must not 503 the bridge). Local = the on-device `.litertlm` (current). External =
+  Ollama or unsloth server over the tailnet, so the phone can ask a bigger model on the LAN/box.
+  Needs: a reachability check, a timeout, a fail-closed behaviour when the endpoint is down, and
+  the prompt sent over the wire must not leak a secret (the broker scrubs its own response, not
+  our request to a model server).
