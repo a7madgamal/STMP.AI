@@ -2599,7 +2599,7 @@ So the connection reached the host and read its key correctly; only the classifi
 `408 approval_timeout` on the first attempts (nobody at the phone), and the tap that did land hit
 the classification bug above before any command could run.
 
-## 0.40.7 — tests run Android's runtime now (build 148) — CURRENT
+## 0.40.7 — tests run Android's runtime now (build 148)
 2026-10-24
 
 Mido, after the third bug of the day with the same root: *"can you stop this fucking different env
@@ -2633,6 +2633,43 @@ on the phone.
 reported the NUC's real fingerprint), generation and signing are proven, and the JSON-null fix from
 0.40.6 is what unblocks first contact. What has NOT happened is a full approved round trip that
 executes a command on the NUC.
+
+## 0.40.8 — the NOTIFY card gets the same 3s guard (build 149) — CURRENT
+2026-10-24
+
+Mido: *"add the same 3 seconds waiting period before ANY touch event on the notification works so
+that I don't approve or cancel by mistake"*.
+
+**The overlay had no guard at all.** `ArmGuard` existed and was wired into the SECURE modal, but the
+NOTIFY card's touch listener approved on `ACTION_UP` unconditionally:
+
+```kotlin
+} else if (ev.actionMasked == MotionEvent.ACTION_UP) {
+    settle(entry, Reason.APPROVED)     // no time check
+}
+```
+
+So a card arriving under a finger already in motion — exactly the case the guard was written for —
+approved a request nobody had read. The modal was protected; the surface that appears WITHOUT
+deliberate navigation was not.
+
+Both decisions are now gated through `ArmGuard.decisionsAllowed(shownAt, now)`:
+
+- the tap that approves
+- the `x` that dismisses (it answers REJECTED, so it is equally a decision)
+
+**Dragging is deliberately still allowed while unarmed.** Moving the card is not an answer to the
+request, and blocking it would read as a frozen UI rather than a careful one.
+
+**`shownAt == 0` is refused.** `Entry.shownAt` is 0 until the view is attached, and a real clock
+reading is far past `0 + 3000`, so treating it as a timestamp would leave an unattached card fully
+armed. There is an explicit guard and a test for it.
+
+A refused tap is not silent: it logs `tap ignored: still in the 3s guard` to `/debug`, so a card
+that seems unresponsive can be told apart from one that is broken.
+
+291 tests green (3 new in `ArmGuardTest`, including one asserting the overlay and modal guards are
+the SAME duration so the two surfaces cannot drift). Version 0.40.8 / build 149.
 
 ---
 

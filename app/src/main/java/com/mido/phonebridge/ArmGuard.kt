@@ -50,6 +50,34 @@ object ArmGuard {
     fun isArmed(armAtMs: Long, nowMs: Long): Boolean = nowMs >= armAtMs
 
     /**
+     * Whether a touch may DECIDE anything (approve, or dismiss) right now.
+     *
+     * **The NOTIFY card used to approve on any tap, with no guard at all.** Mido, 2026-10-24:
+     * *"add the same 3 seconds waiting period before ANY touch event on the notification works so
+     * that I don't approve or cancel by mistake"*. The overlay is a floating card that can appear
+     * under a finger already in motion, and a tap means APPROVE — so the same minimum window the
+     * modal uses has to apply here.
+     *
+     * **Dragging is deliberately still allowed while unarmed.** Moving the card is not a decision,
+     * and blocking it would make the guard feel like a frozen UI rather than a careful one. Only the
+     * two things that answer the request are gated.
+     *
+     * A pure function so the boundary is pinned by [ArmGuardTest] rather than living inside a touch
+     * listener where only a device could check it.
+     *
+     * @param shownAtMs when the card appeared. The guard is measured from here — never from the
+     *   fetch, so a slow summary cannot shorten the wait.
+     */
+    fun decisionsAllowed(shownAtMs: Long, nowMs: Long): Boolean {
+        // `0` means "never attached" (see `Entry.shownAt`). Treating it as a timestamp would make
+        // every comparison true, since a real clock reading is far past 0 + 3000 — so a card that
+        // somehow received a touch before it was stamped would be fully armed. Refuse instead: an
+        // unattached card has no decision to make yet.
+        if (shownAtMs <= 0L) return false
+        return isArmed(shownAtMs + MISCLICK_GUARD_MS, nowMs)
+    }
+
+    /**
      * How much of the guard is left, for the countdown line. Zero once armed, so a caller can
      * render it unconditionally.
      */

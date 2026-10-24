@@ -86,4 +86,37 @@ class ArmGuardTest {
     fun `the guard is the agreed three seconds`() {
         assertEquals(3_000L, ArmGuard.MISCLICK_GUARD_MS)
     }
+
+    // --- the NOTIFY overlay's decision gate ---
+
+    @Test
+    fun `a notify card refuses decisions for the first three seconds`() {
+        // Mido, 2026-10-24: "add the same 3 seconds waiting period before ANY touch event on the
+        // notification works so that I don't approve or cancel by mistake". The overlay approves on
+        // a plain tap and had NO guard, unlike the modal — so a card arriving under a moving finger
+        // could approve a request nobody read.
+        val shown = 5_000_000L
+        assertFalse("a tap at t=0 must not decide", ArmGuard.decisionsAllowed(shown, shown))
+        assertFalse(ArmGuard.decisionsAllowed(shown, shown + 2_999L))
+        assertTrue("the guard expires exactly at 3s", ArmGuard.decisionsAllowed(shown, shown + 3_000L))
+        assertTrue(ArmGuard.decisionsAllowed(shown, shown + 10_000L))
+    }
+
+    @Test
+    fun `an unattached card allows no decision`() {
+        // `Entry.shownAt` is 0 until the view is attached. A real clock reading is far past
+        // 0 + 3000, so treating 0 as a timestamp would leave an unattached card fully armed.
+        assertFalse(ArmGuard.decisionsAllowed(0L, System.currentTimeMillis()))
+        assertFalse(ArmGuard.decisionsAllowed(-1L, 10_000L))
+    }
+
+    @Test
+    fun `the overlay guard and the modal guard are the same duration`() {
+        // The two surfaces must not drift: "how soon can a human accidentally agree" is a property
+        // of the gate, not of which UI happened to show.
+        val shown = 1_000L
+        val modalArmedAt = ArmGuard.armAt(shown, shown)
+        val overlayAllowsAt = shown + ArmGuard.MISCLICK_GUARD_MS
+        assertEquals(modalArmedAt, overlayAllowsAt)
+    }
 }

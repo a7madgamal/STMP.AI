@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.mido.phonebridge.ArmGuard
 import com.mido.phonebridge.ai.RequestFacts
 import com.mido.phonebridge.ai.Risk
 import com.mido.phonebridge.ai.SummaryProvider
@@ -460,7 +461,18 @@ object NotifyOverlay {
                         // Tap = approve, and skip whatever wait remains (fetch included).
                         // Settle only: this card is meant to fade out normally, and the
                         // settle backstop guarantees its removal.
-                        settle(entry, Reason.APPROVED)
+                        //
+                        // **Gated by the same 3s guard as the modal.** A card can appear under a
+                        // finger already travelling, and a tap here MEANS APPROVE — so the first
+                        // three seconds must not decide anything. Nothing is lost by refusing the
+                        // tap: the card simply stays, fully visible, until the guard expires.
+                        if (ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
+                            settle(entry, Reason.APPROVED)
+                        } else {
+                            com.mido.phonebridge.Debug.log(
+                                "notify[${entry.id}] tap ignored: still in the 3s guard"
+                            )
+                        }
                     }
                     true
                 }
@@ -477,6 +489,16 @@ object NotifyOverlay {
         // the window on screen with every control dead (reported on device 2026-10-19:
         // "doesn't even dismiss on x click").
         close.setOnClickListener {
+            // Same guard as the tap-to-approve: dismissing is also a decision about the request
+            // (it answers REJECTED), so a stray touch in the first 3s must not perform it either.
+            // Mido, 2026-10-24: "before ANY touch event on the notification works so that I don't
+            // approve or cancel by mistake".
+            if (!ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
+                com.mido.phonebridge.Debug.log(
+                    "notify[${entry.id}] dismiss ignored: still in the 3s guard"
+                )
+                return@setOnClickListener
+            }
             settle(entry, Reason.TAPPED)
             teardown(entry)
         }
