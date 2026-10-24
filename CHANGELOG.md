@@ -2505,7 +2505,7 @@ even though our `sign()` matches the RFC — unresolved, and NOT claimed as work
 
 281 tests green. Version 0.40.4 / build 145.
 
-## 0.40.5 — the hooks register on the CONNECTION path too (build 146) — CURRENT
+## 0.40.5 — the hooks register on the CONNECTION path too (build 146)
 2026-10-24
 
 The last blocker, found by asking the right question: *what loads when the app restarts and a
@@ -2552,6 +2552,52 @@ the symptom was a key that simply never appeared. It now catches `Throwable` and
 
 **Still not verified on the device**: that the APK's vault, biometric unlock and network path behave
 like the harness. Everything below the UI is now proven on the Android-shaped jar.
+
+## 0.40.6 — a JSON null is not the string "null" (build 147) — CURRENT
+2026-10-24
+
+First real device call after 0.40.5, and it failed in a way that contained its own contradiction:
+the error code said the host key **changed**, while the message printed `pinned: null`.
+
+Both cannot be true. `ssh_host_key_changed` is only produced when a pin exists. So the pin was not
+null — it was the four-character STRING `"null"`, which renders identically.
+
+**`optString` on a JSON null differs between implementations.**
+
+```
+toJson writes JSONObject.NULL
+
+Android org.json  -> optString returns "null"   <- the phone
+reference org.json -> optString returns ""       <- what the unit tests run
+```
+
+`fromJson` did `optString("hostKeyFingerprint").takeUnless { it.isBlank() }`. On the phone that
+yielded the string `"null"`, which can never equal a real fingerprint, so **every connection to a
+never-pinned host reported `ssh_host_key_changed` forever** — and trust-on-first-use could never
+complete, because the first call has to be `ssh_host_key_unknown` for the caller to learn the
+fingerprint at all.
+
+This is the second bug of the session with the identical root shape: **the unit tests run a
+different implementation than the device.** The first was the Multi-Release JAR; this is `org.json`.
+
+The fix reads the field with `has` + `isNull` (identical on both) and treats a literal `"null"` as
+absent. A real fingerprint is asserted to survive the round trip, because a guard eager enough to
+eat a legitimate pin would silently disable host-key verification — worse than the bug.
+
+**Verified against the real target** (the NUC, `100.64.0.12`):
+
+```
+ssh-keyscan -> SHA256:NqIEY3V6FtVJXDRJmCn76lciI5r/IUg6pnOuAQg3PAk
+app reported -> SHA256:NqIEY3V6FtVJXDRJmCn76lciI5r/IUg6pnOuAQg3PAk
+```
+
+So the connection reached the host and read its key correctly; only the classification was wrong.
+
+285 tests green (4 new in `SshConnectionTest`). Version 0.40.6 / build 147.
+
+**Still not verified:** a full approved round trip that runs a command on the NUC. The gate returned
+`408 approval_timeout` on the first attempts (nobody at the phone), and the tap that did land hit
+the classification bug above before any command could run.
 
 ---
 

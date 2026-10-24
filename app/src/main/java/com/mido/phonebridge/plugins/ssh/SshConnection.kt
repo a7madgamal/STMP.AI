@@ -52,8 +52,33 @@ data class SshConnection(
             if (key.isBlank()) throw IllegalArgumentException("stored connection has no private key")
             val port = o.optInt("port", 22)
             if (port !in 1..65535) throw IllegalArgumentException("stored port $port is out of range")
-            val fp = o.optString("hostKeyFingerprint").takeUnless { it.isBlank() }
+            // **`optString` on a JSON null is NOT safe across implementations.**
+            //
+            // `toJson` writes `JSONObject.NULL` for an unpinned connection. Reading it back:
+            //   Android's org.json  -> optString returns the STRING "null"
+            //   reference org.json  -> optString returns ""
+            // So on the phone every never-pinned connection carried a pin of "null", which can
+            // never equal a real fingerprint, and every call reported `ssh_host_key_changed` —
+            // while the message printed `pinned: null`, because that string renders identically to
+            // a real null. It looked like a MITM warning on first contact.
+            //
+            // The unit tests could not catch it: they run the reference implementation, where the
+            // old code behaved correctly. Hence `isNull` (identical on both) plus a literal-"null"
+            // guard for any entry already affected.
+            val fp = jsonStringOrNull(o, "hostKeyFingerprint")
             return SshConnection(host, port, user, key, fp)
+        }
+
+        /**
+         * Read a string that may legitimately be JSON null, on any org.json implementation.
+         *
+         * Returns null for an absent key, an explicit JSON null, a blank string, or the literal
+         * text `"null"` (which is what Android's `optString` produces for a JSON null — see the
+         * comment above for why that matters).
+         */
+        private fun jsonStringOrNull(o: JSONObject, name: String): String? {
+            if (!o.has(name) || o.isNull(name)) return null
+            return o.optString(name).trim().takeUnless { it.isEmpty() || it == "null" }
         }
     }
 }

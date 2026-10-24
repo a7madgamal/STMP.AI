@@ -117,4 +117,42 @@ class SshConnectionTest {
         }
         assertTrue("expected IllegalArgumentException", threw)
     }
+
+    // --- the JSON-null trap ---
+
+    @Test
+    fun `a literal null string fingerprint is read as unpinned`() {
+        // **This is the shape Android produces.** `toJson` writes `JSONObject.NULL`, and Android's
+        // `optString` returns the STRING "null" for it (the reference implementation used by these
+        // tests returns ""). The old code did `optString(...).takeUnless { it.isBlank() }`, so on
+        // the phone every never-pinned connection came back with a pin of "null", which can never
+        // match a real fingerprint — every call reported `ssh_host_key_changed` while printing
+        // `pinned: null`, because the two render identically. It looked like a MITM warning on
+        // first contact with a brand-new host.
+        val raw = """{"host":"h","user":"u","privateKey":"k","hostKeyFingerprint":"null"}"""
+        assertNull(SshConnection.fromJson(raw).hostKeyFingerprint)
+    }
+
+    @Test
+    fun `an explicit JSON null fingerprint is unpinned`() {
+        val raw = """{"host":"h","user":"u","privateKey":"k","hostKeyFingerprint":null}"""
+        assertNull(SshConnection.fromJson(raw).hostKeyFingerprint)
+    }
+
+    @Test
+    fun `an absent fingerprint is unpinned`() {
+        val raw = """{"host":"h","user":"u","privateKey":"k"}"""
+        assertNull(SshConnection.fromJson(raw).hostKeyFingerprint)
+    }
+
+    @Test
+    fun `a real fingerprint survives the round trip`() {
+        // The guard must not be so eager that it eats a legitimate pin: swallowing a real value
+        // here would silently disable host-key verification, which is worse than the bug it fixes.
+        val fp = "SHA256:NqIEY3V6FtVJXDRJmCn76lciI5r/IUg6pnOuAQg3PAk"
+        val back = SshConnection.fromJson(
+            SshConnection("h", 22, "u", "k", fp).toJson().toString()
+        )
+        assertEquals(fp, back.hostKeyFingerprint)
+    }
 }
