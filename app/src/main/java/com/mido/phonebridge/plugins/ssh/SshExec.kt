@@ -212,20 +212,25 @@ object SshExec {
                 hostKeyFingerprint = repo.seenFingerprint ?: "",
                 hostKeyType = repo.seenKeyType ?: "",
             )
-        } catch (e: com.jcraft.jsch.JSchException) {
+        } catch (e: com.jcraft.jsch.JSchHostKeyException) {
             // The handshake aborted because the repository said NOT_INCLUDED or CHANGED. These are
             // the two states a human must act on, so they get their own codes rather than being
             // flattened into a generic ssh_failed.
+            //
+            // **Classify by EXCEPTION TYPE, never by message text.** The previous version matched
+            // `"UnknownHostKey"` / `"not included"` against `e.message`, and JSch 2.28.8 says
+            // neither: an untrusted host throws `JSchUnknownHostKeyException` with the message
+            // `reject HostKey: <host>`. So the first call to any new host — the entire
+            // trust-on-first-use flow — fell through to a generic `ssh_failed` that reported no
+            // fingerprint and no way to proceed. Verified against a real sshd:
+            //   no pin  -> JSchUnknownHostKeyException  "reject HostKey: 127.0.0.1"
+            //   bad pin -> JSchChangedHostKeyException  "HostKey has been changed: 127.0.0.1"
+            // The subclasses are the contract; the strings are just what they happen to say
+            // today.
             val seen = repo.seenFingerprint
             val type = repo.seenKeyType ?: "unknown"
-            val message = e.message ?: ""
-            val unknown = message.contains("UnknownHostKey", ignoreCase = true) ||
-                message.contains("not included", ignoreCase = true)
-            val changed = message.contains("changed", ignoreCase = true) ||
-                message.contains("HostKey has been changed", ignoreCase = true)
-
             when {
-                unknown && seen != null -> throw PluginError(
+                e is com.jcraft.jsch.JSchUnknownHostKeyException && seen != null -> throw PluginError(
                     "ssh_host_key_unknown",
                     "This is the first connection to ${conn.host}, so its host key is not yet " +
                         "trusted.\n\n  algorithm:   $type\n  fingerprint: $seen\n\n" +
@@ -233,7 +238,7 @@ object SshExec {
                         "\"trustHostKey\": \"$seen\". Compare the fingerprint with what the " +
                         "server reports (ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub) before you do."
                 )
-                changed && seen != null -> throw PluginError(
+                e is com.jcraft.jsch.JSchChangedHostKeyException && seen != null -> throw PluginError(
                     "ssh_host_key_changed",
                     "The host key for ${conn.host} CHANGED.\n\n" +
                         "  pinned: $pinned\n  now:    $seen\n\n" +
@@ -241,11 +246,25 @@ object SshExec {
                         "server looks like. Nothing was run. If you rebuilt it, delete this " +
                         "connection and create it again to re-pin."
                 )
+                // A host-key refusal we cannot name. Still NOT a generic failure: it is a
+                // host-key decision, and saying so keeps the fingerprint visible.
+                seen != null -> throw PluginError(
+                    "ssh_host_key_refused",
+                    "The host key for ${conn.host} was refused (${e.javaClass.simpleName}).\n\n" +
+                        "  algorithm:   $type\n  fingerprint: $seen\n  pinned:      ${pinned ?: "none"}\n\n" +
+                        "Nothing was run."
+                )
                 else -> throw PluginError(
-                    "ssh_failed",
-                    "${conn.user}@${conn.host}:${conn.port}: $message"
+                    "ssh_host_key_refused",
+                    "The host key for ${conn.host} was refused (${e.javaClass.simpleName}): " +
+                        "${e.message ?: "no detail"}. Nothing was run."
                 )
             }
+        } catch (e: com.jcraft.jsch.JSchException) {
+            // Everything else the handshake can fail with: refused, auth rejected, algorithm
+            // mismatch, timeout. Still worth a coded error — an escaping raw exception becomes a
+            // 500 with no explanation of which host failed.
+            throw PluginError("ssh_failed", "${conn.user}@${conn.host}:${conn.port}: ${e.message ?: e.javaClass.simpleName}")
         } catch (e: PluginError) {
             throw e
         } catch (e: Exception) {

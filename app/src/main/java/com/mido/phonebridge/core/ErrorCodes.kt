@@ -117,6 +117,10 @@ object ErrorCodes {
         // because it is not a permission verdict — it is a DISAGREEMENT that a human must look
         // at, and the message says so.
         "ssh_host_key_changed" to CONFLICT,
+        // A host-key refusal whose exact JSch type we do not recognise. It is still a
+        // host-key decision that a human must resolve, not a server fault — 409 keeps it out of
+        // the 5xx bucket, where it would be logged as our bug and retried pointlessly.
+        "ssh_host_key_refused" to CONFLICT,
         // A command still running at the deadline. 503: our side gave up, not the caller's fault.
         "ssh_timeout" to UNAVAILABLE,
         // Auth rejected, host unreachable, algorithm mismatch. All are "the other end said no",
