@@ -2394,7 +2394,7 @@ could not possibly work was the only one with no test.
 **Still not verified on device:** that the 0.40.2 APK uploads the 385 MB file, and that a real SSH
 connection authenticates. The streaming change is proven at the HTTP layer, not through Drive.
 
-## 0.40.3 — trust-on-first-use actually works (build 144) — CURRENT
+## 0.40.3 — trust-on-first-use actually works (build 144)
 2026-10-24
 
 The SSH gate had a THIRD defect, behind the two in 0.40.2, and this one made the feature's central
@@ -2443,6 +2443,115 @@ present and skips otherwise). Version 0.40.3 / build 144.
 
 **Not verified on device:** that the APK's vault unlock, key generation and network path behave the
 same as the JVM harness. The logic is proven; the phone is not.
+
+## 0.40.4 — ed25519 is implemented here, because JSch's cannot run on Android (build 145)
+2026-10-24
+
+**The real reason `generate key` never worked, after three releases of "fixes".**
+
+`com.github.mwiede:jsch` is a **Multi-Release JAR**. Its Java-8 base classes are stubs that throw,
+and the real implementations live under `META-INF/versions/15/`, which the Android runtime does not
+read:
+
+| config key | base class (what Android loads) | real class (unreachable on Android) |
+|---|---|---|
+| `keypairgen.eddsa` | `jce.KeyPairGenEdDSA` — every method throws "requires Java15+" | `META-INF/versions/15/...` |
+| `ssh-ed25519` | `jce.SignatureEd25519` — the **constructor** throws | same |
+
+The fallbacks are `com.jcraft.jsch.bc.*`, which need BouncyCastle — not on this classpath.
+Reproduced by deleting `META-INF/versions` from the jar (exactly what Android sees):
+
+```
+FAILED: JSchException: java.lang.NoClassDefFoundError:
+  org/bouncycastle/crypto/params/Ed25519PrivateKeyParameters
+```
+
+Every earlier JVM verification loaded the versioned classes and proved nothing about the phone. That
+is the mistake this release is mostly about.
+
+**The fix: ed25519 implemented directly from RFC 8032** (`Ed25519.kt`), with `MessageDigest` as the
+only dependency, registered into JSch's two hooks by `SshKeygen`'s `init` block. No provider, no
+BouncyCastle, no API-33 requirement (this app's `minSdk` is 26 and platform Ed25519 arrived in 33).
+
+Correctness is pinned by RFC 8032's published vectors, for **both** halves:
+
+- key derivation: TEST 1/2/3 public keys match exactly
+- signatures: TEST 1 (empty message) and TEST 2 (one byte) match byte for byte
+
+**Two bugs the vectors caught while writing this:** `verify` compared `ByteArray`s with `==`
+(reference equality — it rejected every valid signature), and the verification equation was written
+as `[S]B − [k]A` with a twisted-Edwards negation in the wrong coordinate. Signing was right the
+whole time; only verification was wrong, which is exactly the class of bug a shape-only test misses.
+
+**Also fixed:** `addDialog` caught `Exception`, but the failure was a `NoClassDefFoundError` — an
+`Error`. So the dialog threw, nothing was caught, and **nothing was logged**. That is why the
+symptom was "a key never appears" with no error anywhere. It now catches `Throwable` and logs to
+`/debug`'s ring buffer.
+
+**Proven on the Android-shaped jar** (app classes, `META-INF/versions` removed):
+
+```
+PEM_HEAD=-----BEGIN OPENSSH PRIVATE KEY-----   PUB=ssh-ed25519 AAAA...IFJljvkE crab
+DERIVED_MATCH=true   TYPE=ssh-ed25519
+ssh-keygen -y -f <generated>  -> the same public key
+ssh -i <generated> openclaw@127.0.0.1 'echo OPENSSH_OK'  -> OPENSSH_OK
+```
+
+**Not proven:** authentication through JSch itself. Generation and signing are individually
+correct (RFC vectors, and the adapter's signature verifies against its own public key), but a full
+JSch session against the local sshd still answers `Auth fail for methods 'publickey,password'`
+while the OpenSSH client accepts the same key. So JSch is producing a signature the server rejects
+even though our `sign()` matches the RFC — unresolved, and NOT claimed as working.
+
+281 tests green. Version 0.40.4 / build 145.
+
+## 0.40.5 — the hooks register on the CONNECTION path too (build 146) — CURRENT
+2026-10-24
+
+The last blocker, found by asking the right question: *what loads when the app restarts and a
+command is run, without anyone opening the SSH screen?*
+
+**Registration lived in the wrong place.** `SshKeygen`'s `init` block installed JSch's two ed25519
+hooks. But `SshKeygen` is only loaded by the SSH screen — a run that connects with an already-stored
+key never touches it. So after a restart, `SshExec` connected with JSch's DEFAULT hooks, which are
+the BouncyCastle classes that do not exist on the device:
+
+```
+hook BEFORE SshExec loads: com.jcraft.jsch.bc.SignatureEd25519
+```
+
+JSch swallows the resulting `NoClassDefFoundError` inside its signer and reports only
+`Auth fail for methods 'publickey,password'` — indistinguishable from a rejected key, which is why
+this looked like a crypto problem for hours. Generation worked (the screen had loaded), and signing
+worked (the tests generated a key in the same JVM first), so every isolated test passed while the
+real path stayed broken.
+
+`JschHooks.install()` is now idempotent and called by BOTH `SshKeygen` and `SshExec`, so whichever
+loads first is enough.
+
+**Verified in restart order** — `SshExec` touched first, `SshKeygen` never loaded before the run:
+
+```
+hook before anything: com.jcraft.jsch.bc.SignatureEd25519
+hook after SshExec:   com.mido.phonebridge.plugins.ssh.JschEd25519Signature
+STEP1 ssh_host_key_unknown
+STEP2 exit=9 stdout=[openclaw|SSH_GATE_WORKS]
+STEP3 exit=0   (pinned reconnect)
+```
+
+All of it on the Android-shaped jar (app classes, `META-INF/versions` removed). The earlier
+`Auth fail` in the same harness was a test-setup artifact: `authorized_keys` had been restored
+between generating the key and connecting, so the key genuinely was not authorized.
+
+**Also fixed in this release:** `addDialog` caught `Exception` around a call that failed with
+`NoClassDefFoundError` — an `Error`. The dialog threw, nothing was caught, and nothing was logged;
+the symptom was a key that simply never appeared. It now catches `Throwable` and writes to the
+`/debug` ring buffer.
+
+281 tests green. Version 0.40.5 / build 146.
+
+**Still not verified on the device**: that the APK's vault, biometric unlock and network path behave
+like the harness. Everything below the UI is now proven on the Android-shaped jar.
 
 ---
 

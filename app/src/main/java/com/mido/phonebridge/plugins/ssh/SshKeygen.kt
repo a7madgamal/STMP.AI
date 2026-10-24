@@ -2,24 +2,209 @@ package com.mido.phonebridge.plugins.ssh
 
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.KeyPair
+import com.jcraft.jsch.KeyPairGenEdDSA
+import com.jcraft.jsch.SignatureEdDSA
 import com.mido.phonebridge.core.PluginError
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+
+/**
+ * JSch's two ed25519 hooks, backed by [Ed25519] instead of any JVM provider.
+ *
+ * **Why both are needed, and why the library's own are unusable on Android.**
+ * `com.github.mwiede:jsch` is a Multi-Release JAR. Its Java-8 base classes are deliberate stubs
+ * that throw, and Android never reads `META-INF/versions/`:
+ *
+ * | config key | JSch's default | on Android |
+ * |---|---|---|
+ * | `keypairgen.eddsa` | `jce.KeyPairGenEdDSA` | stub: every method throws "requires Java15+" |
+ * | `ssh-ed25519` | `jce.SignatureEd25519` | stub: its CONSTRUCTOR throws "requires Java15+" |
+ *
+ * The `com.jcraft.jsch.bc.*` fallbacks need BouncyCastle, which is not on this classpath. So
+ * generation alone was not enough: with generation fixed, a valid key still could not authenticate,
+ * because the client could not produce a signature. Both hooks are replaced here.
+ *
+ * These adapters hold no logic of their own — they translate JSch's call order into [Ed25519],
+ * which is where the RFC 8032 maths lives and where the test vectors point.
+ */
+class JschEd25519Generator : KeyPairGenEdDSA {
+
+    private var seed: ByteArray? = null
+    private var pub: ByteArray? = null
+
+    override fun init(name: String, keylen: Int) {
+        if (name != "Ed25519") {
+            // Generating a different curve under an ed25519 label would produce a key that the
+            // label lies about. Refuse instead.
+            throw java.security.NoSuchAlgorithmException("unsupported ed25519 curve: $name")
+        }
+        val kp = Ed25519.generate()
+        seed = kp.seed
+        pub = kp.publicKey
+    }
+
+    /** JSch copies these into its own `prv_array` / `pub_array`. */
+    override fun getPrv(): ByteArray = seed ?: throw IllegalStateException("init() was not called")
+
+    override fun getPub(): ByteArray = pub ?: throw IllegalStateException("init() was not called")
+}
+
+/**
+ * The signing hook, registered under the config key `ssh-ed25519`.
+ *
+ * JSch calls `init()`, `setPrvKey(prv_array)`, `update(message)`, `sign()`. `prv_array` for an
+ * ed25519 key is the 32-byte seed (that is what the OpenSSH private-key format stores), and the
+ * public key is derived when it was not supplied — so signing does not depend on `setPubKey` having
+ * been called first.
+ */
+class JschEd25519Signature : SignatureEdDSA {
+
+    private var seed: ByteArray? = null
+    private var pub: ByteArray? = null
+    private val message = ByteArrayOutputStream()
+
+    override fun init() {
+        seed = null
+        pub = null
+        message.reset()
+    }
+
+    override fun setPrvKey(prv: ByteArray) {
+        // 32 is the seed. A 64-byte value is the seed followed by the public key (some encoders
+        // concatenate them); take the seed half. Anything else cannot be an ed25519 private key.
+        seed = when (prv.size) {
+            32 -> prv.copyOf()
+            64 -> prv.copyOfRange(0, 32)
+            else -> throw IllegalArgumentException("ed25519 private key must be 32 or 64 bytes, got ${prv.size}")
+        }
+        message.reset()
+    }
+
+    override fun setPubKey(pubKey: ByteArray) {
+        pub = pubKey.copyOf()
+        message.reset()
+    }
+
+    override fun update(data: ByteArray) {
+        message.write(data)
+    }
+
+    /**
+     * The bare 64-byte signature (R ‖ S). JSch wraps it in the SSH signature blob itself
+     * (`string ssh-ed25519` + `string <sig>`), so returning the raw bytes here is correct.
+     */
+    override fun sign(): ByteArray {
+        val s = seed ?: throw IllegalStateException("sign() without a private key")
+        // Derive the public half when the caller did not supply it: the signature commits to it, so
+        // it cannot be skipped.
+        val p = pub ?: Ed25519.fromSeed(s).publicKey
+        return Ed25519.sign(s, p, message.toByteArray())
+    }
+
+    /**
+     * Verify. **This is not optional, and it is not only for our own signatures.**
+     *
+     * JSch calls this while checking the SERVER's host-key signature during key exchange. When the
+     * host key is ed25519 — which is the default on any current OpenSSH — a failure here aborts the
+     * handshake before authentication is even attempted. Instrumenting the hook showed exactly
+     * that: `setPubKey`, then `verify(83 bytes, msgLen=32) = false`, then `verify: false`, with
+     * `sign()` never called at all.
+     *
+     * **The argument is the SSH signature BLOB, not 64 raw bytes.** For ed25519 that is
+     * `string "ssh-ed25519" || string <64-byte sig>` = 4 + 11 + 4 + 64 = 83 bytes. Accepting only
+     * the bare form is why every connection failed while the crypto itself was correct — the RFC
+     * signature vectors passed the whole time.
+     */
+    override fun verify(sig: ByteArray): Boolean {
+        val p = pub ?: return false
+        val raw = unwrapSignature(sig) ?: return false
+        return Ed25519.verify(p, message.toByteArray(), raw)
+    }
+
+    /**
+     * Pull the 64-byte signature out of whatever JSch handed us.
+     *
+     * Handles the two shapes that occur in practice: the bare signature (some call sites pass it
+     * after parsing) and the SSH blob (`string name || string sig`). Returns null for anything
+     * else rather than guessing — a verifier that guesses is worse than one that refuses.
+     */
+    private fun unwrapSignature(blob: ByteArray): ByteArray? {
+        if (blob.size == 64) return blob
+        if (blob.size < 8) return null
+
+        fun u32(at: Int): Int? {
+            if (at + 4 > blob.size) return null
+            return ((blob[at].toInt() and 0xff) shl 24) or
+                ((blob[at + 1].toInt() and 0xff) shl 16) or
+                ((blob[at + 2].toInt() and 0xff) shl 8) or
+                (blob[at + 3].toInt() and 0xff)
+        }
+
+        var i = 0
+        // Some callers prefix the whole blob with its own length; skip it only when it is exactly
+        // consistent with the array we were given, so a real name-length is never mistaken for one.
+        val outer = u32(0)
+        if (outer != null && outer == blob.size - 4) i = 4
+
+        val nameLen = u32(i) ?: return null
+        i += 4
+        if (nameLen <= 0 || i + nameLen > blob.size) return null
+        i += nameLen
+
+        val sigLen = u32(i) ?: return null
+        i += 4
+        if (sigLen != 64 || i + sigLen > blob.size) return null
+
+        return blob.copyOfRange(i, i + sigLen)
+    }
+}
+
+/**
+ * Installs JSch's two ed25519 hooks, exactly once.
+ *
+ * **Why this is a separate object with an idempotent installer.** JSch resolves both hooks from
+ * static config at the moment of use, and its defaults are the Android stubs (see [Ed25519]).
+ * Registration therefore has to happen before ANY connection — not only before key generation. An
+ * `init` block on [SshKeygen] alone was not enough: a run that imports a stored key never touches
+ * the key-generation object, and the earlier same-process test only passed because it had just
+ * generated a key in the same JVM. After a real app restart the hooks were unregistered and JSch
+ * fell back to BouncyCastle classes that do not exist on the device.
+ *
+ * Both [SshKeygen] and [SshExec] call this, so whichever loads first is enough.
+ */
+internal object JschHooks {
+
+    @Volatile
+    private var installed = false
+
+    fun install() {
+        if (installed) return
+        synchronized(this) {
+            if (installed) return
+            JSch.setConfig("keypairgen.eddsa", JschEd25519Generator::class.java.name)
+            JSch.setConfig("ssh-ed25519", JschEd25519Signature::class.java.name)
+            installed = true
+        }
+    }
+}
 
 /**
  * ed25519 keypairs, generated on the phone.
  *
- * Mido, 2026-10-21: *"generate, or use one if already generated"* and *"ed25519 keys"*.
- *
  * **Why ed25519 rather than RSA.** Shorter, faster, and the type every current OpenSSH accepts
- * (`ssh-ed25519` has been the default since OpenSSH 9). JSch 2.28.8 carries a pure-Java
- * `KeyPairEd25519`, so no BouncyCastle dependency is needed for generation — verified by inspecting
- * the jar, though it is still proven only when a real key is generated on the device.
+ * (`ssh-ed25519` has been the default since OpenSSH 9).
  *
  * **No passphrase.** The vault is the boundary: a key that needs a second unlock per call buys
  * nothing, because the private key is in memory during the call either way. The PEM written here
  * has an empty passphrase by design, not by omission.
  */
 object SshKeygen {
+
+    init {
+        // Idempotent, and shared with SshExec — see JschHooks for why registration cannot live here
+        // alone.
+        JschHooks.install()
+    }
 
     /** A fresh keypair. The private half goes straight to the vault and is never displayed. */
     data class Generated(val privateKey: String, val publicKey: String)
@@ -45,18 +230,12 @@ object SshKeygen {
         try {
             // `writeOpenSSHv1PrivateKey`, NOT `writePrivateKey`.
             //
-            // On JSch 2.28.8 an ed25519 keypair is a `KeyPairEdDSA`, and that class does not
-            // implement `getPrivateKey()` — the method `writePrivateKey` is built on. Calling it
-            // throws `UnsupportedOperationException` on the first ed25519 key, which is every key
-            // this app creates. Verified on the JVM against the same jar:
-            //   KeyPairEdDSA.getPrivateKey(KeyPairEdDSA.java:75)
-            //   KeyPair.writePrivateKey(KeyPair.java:163)
-            // The OpenSSH-v1 writer encodes the key from `prv_array` directly, so it works for
-            // ed25519 (and RSA/ECDSA too), and emits the `OPENSSH PRIVATE KEY` block that
-            // `KeyPair.load` reads back — proven by a round-trip and by `JSch.addIdentity`.
+            // `writePrivateKey` is built on `KeyPairEdDSA.getPrivateKey`, which the ed25519
+            // subclass does not implement — it throws `UnsupportedOperationException`. The
+            // OpenSSH-v1 writer encodes from `prv_array` directly, so it works for every key type,
+            // and emits the `OPENSSH PRIVATE KEY` block that `KeyPair.load` reads back.
             //
-            // The null passphrase is the documented no-passphrase case, not an oversight: the
-            // vault is the boundary (see the class comment).
+            // The null passphrase is the documented no-passphrase case, not an oversight.
             val priv = ByteArrayOutputStream()
                 .also { kpg.writeOpenSSHv1PrivateKey(it, null) }
                 .toString(Charsets.UTF_8.name())

@@ -88,6 +88,16 @@ class PinningHostKeyRepository(
  */
 object SshExec {
 
+    init {
+        // **Register the ed25519 hooks on the CONNECTION path, not just the generation path.**
+        // JSch resolves them from static config when it signs, and its defaults are the Android
+        // stubs. A run that only imports a stored key never touches SshKeygen, so registering
+        // there alone left every connection after an app restart falling back to BouncyCastle
+        // classes that do not exist on the device — which surfaces as a bare `Auth fail`, with
+        // the real `NoClassDefFoundError` swallowed inside JSch's signer.
+        JschHooks.install()
+    }
+
     /** Hard cap on captured stdout. Big enough for a log tail, small enough to survive. */
     const val MAX_OUTPUT_BYTES = 64 * 1024
 

@@ -296,9 +296,19 @@ class SshActivity : Activity() {
                     // human installs it, so handing it over now is the only useful next step.
                     copyPublicKey(name, conn)
                 } catch (e: PluginError) {
+                    // Logged as well as toasted: a toast disappears, and this is the one path whose
+                    // failure the human reports as "it just doesn't work".
+                    Debug.log("ssh: create '$name' failed: ${e.code}: ${e.message}")
                     toast("${e.code}: ${e.message}")
-                } catch (e: Exception) {
-                    toast("could not create '$name': ${e.message}")
+                } catch (e: Throwable) {
+                    // **Throwable, not Exception.** The 0.40.3 failure was a
+                    // `NoClassDefFoundError` from inside JSch — an `Error`, which an `Exception`
+                    // catch does not see at all. So the dialog threw, nothing was caught, nothing
+                    // was logged, and the only symptom was a key that never appeared. Catching
+                    // `Throwable` here is correct precisely because this is a UI boundary: the
+                    // process must not die and the reason must reach the log.
+                    Debug.log("ssh: create '$name' CRASHED: ${e.javaClass.name}: ${e.message}")
+                    toast("could not create '$name': ${e.javaClass.simpleName}: ${e.message}")
                 }
             }
             .setNegativeButton("cancel", null)
