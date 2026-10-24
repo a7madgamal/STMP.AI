@@ -5,6 +5,9 @@ import com.mido.phonebridge.core.Verb
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The guard that stops a small model misleading the human.
@@ -13,6 +16,8 @@ import org.junit.Test
  * report that prompted this: a READ summarised as "Adding 8 todos" because the prompt contained a
  * worked example the model then parroted onto every request.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class SummaryGuardTest {
 
     // The facts of a real read: a list of open tasks. No count is stated, and nothing is added.

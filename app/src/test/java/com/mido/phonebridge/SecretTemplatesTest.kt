@@ -8,6 +8,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Every built-in template must be SAVABLE.
@@ -22,6 +25,8 @@ import org.junit.Test
  * `SecretRules` and `HostAllowlist` objects the vault uses. A test that re-implemented them would
  * pass while the real code disagreed — the failure mode this project has paid for more than once.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class SecretTemplatesTest {
 
     @Test

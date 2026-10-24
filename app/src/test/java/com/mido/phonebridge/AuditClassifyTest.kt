@@ -7,6 +7,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Pins the classification that the device log got wrong on 2026-10-17.
@@ -20,6 +23,8 @@ import org.junit.Test
  * caller's fault and is noise; a failure after a human approved is a real fault
  * and is signal.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class AuditClassifyTest {
 
     @Test

@@ -4,6 +4,9 @@ import com.mido.phonebridge.core.TimeZones
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Pins the rule behind the Calendar routes' REQUIRED `timeZone`.
@@ -13,6 +16,8 @@ import org.junit.Test
  * (`Asia/Kuala_Lumpur`). The fix is to require the zone — and a required value that is
  * never validated is not required, so this is the validation rule, tested on the JVM.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class TimeZonesTest {
 
     @Test

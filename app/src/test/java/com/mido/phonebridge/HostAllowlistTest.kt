@@ -6,6 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The host matcher is the one function that decides whether a secret may leave the
@@ -16,6 +19,8 @@ import org.junit.Test
  * all that remained, and leaving it pure was the point: a security boundary you cannot
  * unit test is a security boundary you are only hoping works.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class HostAllowlistTest {
 
     @Test

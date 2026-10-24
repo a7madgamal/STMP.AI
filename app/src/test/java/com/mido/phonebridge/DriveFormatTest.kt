@@ -3,6 +3,9 @@ package com.mido.phonebridge
 import com.mido.phonebridge.plugins.drive.DriveFormat
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The formatting rules behind the approval card.
@@ -16,6 +19,8 @@ import org.junit.Test
  * caller passes -1 for that. Rendering -1 as `-1 B` or `0 B` would claim an empty file, which leads
  * a human to the opposite conclusion from "we do not know".
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class DriveFormatTest {
 
     @Test

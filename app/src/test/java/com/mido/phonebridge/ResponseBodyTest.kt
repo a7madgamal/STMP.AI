@@ -4,6 +4,9 @@ import com.mido.phonebridge.plugins.secrets.ResponseBody
 import com.mido.phonebridge.plugins.secrets.ResponseKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The rule that decides whether a brokered response is usable.
@@ -14,6 +17,8 @@ import org.junit.Test
  * was unreachable. The fix is not "be careful next time"; it is making the decision a
  * pure function with cases written down.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ResponseBodyTest {
 
     private fun kind(status: Int, body: String) = ResponseBody.classify(status, body)

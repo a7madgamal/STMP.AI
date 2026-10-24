@@ -11,6 +11,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
@@ -22,6 +25,8 @@ import java.io.File
  *
  * AuditLog takes a [File], not a Context, precisely so this can run on a plain JVM.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class AuditLogTest {
 
     @get:Rule

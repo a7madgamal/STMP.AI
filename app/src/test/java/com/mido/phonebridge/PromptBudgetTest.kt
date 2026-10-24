@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The prompt budget rule.
@@ -19,6 +22,8 @@ import org.junit.Test
  * either overflows the window (a failed request, since the AI is core) or clips a row to a
  * fragment the model will misread as whole.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class PromptBudgetTest {
 
     @Test

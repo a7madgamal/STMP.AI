@@ -5,6 +5,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
@@ -14,6 +17,8 @@ import java.io.File
  * asserted here — the alternative is discovering a bad model at inference time on a
  * device, where the failure is opaque.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ModelProvisionerVerifyTest {
 
     @get:Rule

@@ -4,6 +4,9 @@ import com.mido.phonebridge.core.ErrorCodes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
 /**
@@ -19,6 +22,8 @@ import java.io.File
  * must be classified", and the only place that rule can be broken is the source tree, so
  * that is where the test looks. A code cannot be added quietly.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ErrorCodesTest {
 
     @Test

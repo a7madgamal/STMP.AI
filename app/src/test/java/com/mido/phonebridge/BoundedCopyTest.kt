@@ -6,6 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -22,6 +25,8 @@ import java.io.ByteArrayOutputStream
  * The rule is small, pure and entirely testable, which is exactly why it is a function rather
  * than an inline loop: an inline copy in the I/O path cannot be exercised without a socket.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class BoundedCopyTest {
 
     @Test

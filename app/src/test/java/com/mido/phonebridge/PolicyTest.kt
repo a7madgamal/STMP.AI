@@ -18,6 +18,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
@@ -29,6 +32,8 @@ import java.io.File
  * policy that fails to load must never quietly become `SECURE` (reattaching a gate
  * the user turned off) nor quietly become anything weaker (detaching one they rely on).
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class PolicyTest {
 
     @get:Rule

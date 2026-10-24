@@ -20,6 +20,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.net.ServerSocket
 
 /**
@@ -37,6 +40,8 @@ import java.net.ServerSocket
  * strings the old code looked for — if JSch ever "fixes" its wording, that test tells us the
  * assumption moved.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class SshHostKeyTest {
 
     private val realKey: String = SshKeygen.generate(comment = "hostkey-test").privateKey

@@ -4,6 +4,9 @@ import com.mido.phonebridge.core.OutboundVerb
 import com.mido.phonebridge.core.Verb
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The outbound-method → verb mapping.
@@ -17,6 +20,8 @@ import org.junit.Test
  * an exception tapped while reading also silenced deletes. Mido, 2026-10-19: *"I clicked
  * meaning it as a read only operation."*
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class OutboundVerbTest {
 
     @Test

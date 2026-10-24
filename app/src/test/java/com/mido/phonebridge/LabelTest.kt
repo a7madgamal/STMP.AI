@@ -7,12 +7,17 @@ import com.mido.phonebridge.core.requesterLabelFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * originOf() is a total function over untrusted input (a socket address). It must
  * never throw and never guess UP: a stranger mislabelled OPENCLAW would be treated
  * as the trusted caller.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class LabelTest {
 
     @Test

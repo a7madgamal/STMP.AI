@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The rules for putting a Drive file on the phone.
@@ -17,6 +20,8 @@ import org.junit.Test
  * a Sheet, and a file literally named `" Cover tmp.pdf"` — leading space, uppercase, and a PDF. A
  * name with a `/` is legal in Drive and illegal in MediaStore, which is the case that matters most.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class PhoneSaveTest {
 
     @Test

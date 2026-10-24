@@ -2553,7 +2553,7 @@ the symptom was a key that simply never appeared. It now catches `Throwable` and
 **Still not verified on the device**: that the APK's vault, biometric unlock and network path behave
 like the harness. Everything below the UI is now proven on the Android-shaped jar.
 
-## 0.40.6 — a JSON null is not the string "null" (build 147) — CURRENT
+## 0.40.6 — a JSON null is not the string "null" (build 147)
 2026-10-24
 
 First real device call after 0.40.5, and it failed in a way that contained its own contradiction:
@@ -2598,6 +2598,41 @@ So the connection reached the host and read its key correctly; only the classifi
 **Still not verified:** a full approved round trip that runs a command on the NUC. The gate returned
 `408 approval_timeout` on the first attempts (nobody at the phone), and the tap that did land hit
 the classification bug above before any command could run.
+
+## 0.40.7 — tests run Android's runtime now (build 148) — CURRENT
+2026-10-24
+
+Mido, after the third bug of the day with the same root: *"can you stop this fucking different env
+shit then?"* — and that was the correct call. The bug class was never the individual defects, it was
+that **`./gradlew testDebugUnitTest` did not run the code the phone runs.**
+
+Two shipped failures came from exactly this:
+
+| divergence | test JVM | Android |
+|---|---|---|
+| `optString` on a JSON null | `""` (reference `org.json`) | `"null"` |
+| JSch ed25519 classes | reads `META-INF/versions/15/` | ignores it, loads the stub |
+
+**Unit tests now run under Robolectric** (4.14.1), against real Android framework classes, and
+`org.json:json` is REMOVED from the test classpath — keeping it would let the reference
+implementation win and re-open the hole.
+
+That change immediately did its job: **the moment it was enabled, dozens of previously-green tests
+failed** with `Method opt in org.json.JSONObject not mocked`. They had been passing against a
+different implementation the whole time. Every test class now carries
+`@RunWith(RobolectricTestRunner::class)`.
+
+`AndroidJsonProofTest` makes the runtime itself an assertion — it checks that `optString` returns
+the Android string `"null"`, and that `Build.VERSION.SDK_INT` exists. If the suite ever drifts back
+to a bare JVM, it fails with a clear message instead of the difference surfacing as a phantom bug
+on the phone.
+
+288 tests green, all on Robolectric. Version 0.40.7 / build 148.
+
+**Unchanged and still true:** the SSH feature's own status. Host-key reading works (the phone
+reported the NUC's real fingerprint), generation and signing are proven, and the JSON-null fix from
+0.40.6 is what unblocks first contact. What has NOT happened is a full approved round trip that
+executes a command on the NUC.
 
 ---
 

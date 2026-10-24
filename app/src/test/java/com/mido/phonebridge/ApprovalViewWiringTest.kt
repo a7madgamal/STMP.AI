@@ -3,6 +3,9 @@ package com.mido.phonebridge
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
 /**
@@ -26,6 +29,8 @@ import java.io.File
  * is this function's source. `user.dir` is the module directory under Gradle, so the path
  * is stable; a missing tree throws rather than reporting a clean result.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ApprovalViewWiringTest {
 
     @Test

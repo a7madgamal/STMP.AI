@@ -8,6 +8,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The decision to keep a handler's reply in the audit — and the bug that proved it
@@ -24,6 +27,8 @@ import org.junit.Test
  * happily while the real dispatcher ignored that flag on one of its two paths. A test
  * that cannot fail is worse than no test.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class RouteAuditTest {
 
     /**

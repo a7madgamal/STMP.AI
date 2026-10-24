@@ -6,6 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The audit-leak guard for routes that carry FILE BYTES.
@@ -24,6 +27,8 @@ import org.junit.Test
  * copy. A test that re-declares the routes and asserts against its own declaration passes no
  * matter what the plugin does, and this project has shipped that mistake twice.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class DriveAuditFlagsTest {
 
     @Test

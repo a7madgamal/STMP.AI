@@ -6,6 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The prompt queue, tested without a device.
@@ -14,6 +17,8 @@ import org.junit.Test
  * was an ORDERING bug, and ordering is exactly the part that does not need pixels to
  * verify. Items are plain [Long]s; `keyOf` is the identity.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class NotifyQueueTest {
 
     private fun queue(maxWaiting: Int = 3) = NotifyQueue<Long>(keyOf = { it }, maxWaiting = maxWaiting)

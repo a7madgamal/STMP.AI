@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The stored-connection shape, and the rules for reading one back.
@@ -17,6 +20,8 @@ import org.junit.Test
  * The private key is deliberately NOT round-tripped through any transformation: whatever the
  * generator produced is what the connector reads back.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class SshConnectionTest {
 
     private val key = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----"

@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The misclick guard.
@@ -17,6 +20,8 @@ import org.junit.Test
  * applying it per-branch is how the two drift apart. These tests pin the boundaries, including the
  * one that matters most: the guard may only ever DELAY arming, never bring it forward.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ArmGuardTest {
 
     @Test

@@ -14,6 +14,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The record is the only thing this feature produces, so its codec is the one
@@ -21,6 +24,8 @@ import org.junit.Test
  * include the things real payloads actually contain: Unicode, newlines, quotes,
  * emoji, and a body past the cap.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class AuditCodecTest {
 
     private fun draft(path: String = "/gmail/messages/abc/modify"): AuditDraft = AuditDraft(

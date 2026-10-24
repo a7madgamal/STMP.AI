@@ -7,6 +7,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The guarantee behind "I want FUCKING DETAILS FROM THE BODY".
@@ -16,6 +19,8 @@ import org.junit.Test
  * quoting its values. No instruction fixed it. This object does not ask the model nicely; it
  * supplies the detail from the body, so the human always gets the specific thing.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class BodyDetailTest {
 
     @Test

@@ -4,6 +4,9 @@ import com.mido.phonebridge.ui.ServerStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The precedence guard for [ServerStatus].
@@ -18,6 +21,8 @@ import org.junit.Test
  * **The fail-a-start case is first on purpose.** It is the one branch that was broken, and a
  * test ordered by importance is read in the order the bugs matter.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ServerStatusTest {
 
     @Test

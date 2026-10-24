@@ -7,6 +7,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Key generation, exercised against the real JSch jar.
@@ -20,6 +23,8 @@ import org.junit.Test
  * runs here exactly as it does on the phone. The lesson is not "add a test later" — it is that the
  * one untested call was the one that could not work.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class SshKeygenTest {
 
     @Test

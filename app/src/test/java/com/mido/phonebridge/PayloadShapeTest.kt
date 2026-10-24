@@ -6,6 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The payload-shape rule behind a brokered call's summary.
@@ -20,6 +23,8 @@ import org.junit.Test
  * the logic and asserted against its own copy, so it could never fail — the exact
  * "test that cannot fail" trap. Extracting the rule made this test real.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class PayloadShapeTest {
 
     // The shape of the real request that prompted this: a Todoist batch sync adding 8 items.

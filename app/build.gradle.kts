@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 147
-        versionName = "0.40.6"
+        versionCode = 148
+        versionName = "0.40.7"
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and
@@ -87,6 +87,30 @@ android {
         warning += setOf("SetTextI18n", "HardcodedText", "UnusedResources")
         error += setOf("NewApi", "InlinedApi", "MissingApplicationIcon", "DataExtractionRules")
     }
+
+    testOptions {
+        unitTests {
+            /*
+             * Run unit tests on ROBOLECTRIC's Android runtime instead of a bare JVM.
+             *
+             * Without this, `testDebugUnitTest` executes against whatever jars the test classpath
+             * happens to hold — which is how two releases shipped green tests for code that could
+             * not run on the phone:
+             *
+             *   - reference `org.json` returns "" from optString on a JSON null, Android returns
+             *     "null". A phantom host-key mismatch, invisible to the tests.
+             *   - JSch's Multi-Release JAR resolves `META-INF/versions/15/` on a desktop JVM and
+             *     not on Android, so ed25519 generated fine in tests and threw on the device.
+             *
+             * `isIncludeAndroidResources` is on because Robolectric needs the merged resources to
+             * build its Android environment.
+             */
+            isIncludeAndroidResources = true
+            all { test ->
+                test.systemProperty("robolectric.logging", "stdout")
+            }
+        }
+    }
 }
 
 /*
@@ -139,5 +163,20 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
+    // **Robolectric, so unit tests run ANDROID's implementations, not the reference ones.**
+    //
+    // Two bugs shipped today for the same reason: the test JVM was not the device's runtime.
+    //   1. `org.json` — the reference jar returns "" from `optString` on a JSON null; Android
+    //      returns the STRING "null". That turned every unpinned SSH connection into a phantom
+    //      host-key mismatch, and the tests were green the whole time.
+    //   2. JSch's Multi-Release JAR — the desktop JVM reads `META-INF/versions/15/`, Android does
+    //      not, so ed25519 worked in tests and could not run on the phone at all.
+    //
+    // Robolectric runs the tests against real Android framework classes, which removes the first
+    // class of divergence outright. (The second is covered by `Ed25519Test` now implementing the
+    // crypto in-app: there is no library left whose packaging can differ.)
+    //
+    // `org.json:json` is deliberately GONE: keeping it would let the reference implementation win
+    // the classpath and re-open exactly the hole this is closing.
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

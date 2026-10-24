@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * ed25519 key generation, checked against the RFC's own numbers.
@@ -17,6 +20,8 @@ import org.junit.Test
  *
  * The three vectors below are TEST 1, TEST 2 and TEST 3 from that section.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class Ed25519Test {
 
     private fun hex(s: String): ByteArray =

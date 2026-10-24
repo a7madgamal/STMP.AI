@@ -3,6 +3,9 @@ package com.mido.phonebridge
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The capacity guard for [NotifCapacity].
@@ -16,6 +19,8 @@ import org.junit.Test
  * the wrong end of the list — and evicting the newest would quietly drop the notification a
  * human just received, which is a worse bug than the memory leak it was fixing.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class NotifCapacityTest {
 
     @Test

@@ -4,6 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Readiness is a decision that gates what a caller may REACH — without the model the
@@ -12,6 +15,8 @@ import org.junit.Test
  * classifier were extracted for: a security-relevant decision that cannot be exercised
  * without a device is in the wrong place.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ModelReadinessTest {
 
     private val size = 497_516_544L

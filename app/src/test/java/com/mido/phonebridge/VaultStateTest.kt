@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The guard for [VaultState] — the rule that decides whether a vault can ever open.
@@ -23,6 +26,8 @@ import org.junit.Test
  * Every reachable combination is pinned below, and the ORPHANED case is the one that only
  * becomes reachable because of this release, so it is tested first.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class VaultStateTest {
 
     @Test

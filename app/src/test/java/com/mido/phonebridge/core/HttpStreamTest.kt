@@ -3,6 +3,9 @@ package com.mido.phonebridge.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.ServerSocket
@@ -26,6 +29,8 @@ import java.util.concurrent.atomic.AtomicLong
  * a keep-alive client holds the socket open after the body, so reading to EOF deadlocks — the same
  * trap `BoundedCopy` exists to document, and it hung this test on the first run.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class HttpStreamTest {
 
     private class Recorder : AutoCloseable {
