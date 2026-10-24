@@ -17,12 +17,59 @@ class PolicyException(message: String) : Exception(message)
  */
 class Policy(
     val global: GlobalMode,
-    val rules: List<Rule> = emptyList()
+    val rules: List<Rule> = emptyList(),
+    /**
+     * Does a `SECURE` approval require a fingerprint?
+     *
+     * **A preference, not a security decision, and it is stored here anyway** (Mido,
+     * 2026-10-20: *"single file for now"*). The distinction matters for PARSING, not for
+     * location: this field defaults rather than throwing, so a garbled value can never stop
+     * the bridge the way a garbled `global` does.
+     *
+     * **Default OFF** (Mido, 2026-10-20). A fresh install approves a `SECURE` modal with a
+     * plain tap. The vault is unaffected — its key is `setUserAuthenticationRequired(true)`, so
+     * no setting can remove its fingerprint, and `lockOnLoad` still unlocks it at app start. The
+     * only thing this switches is whether the MODAL binds APPROVE to a biometric.
+     *
+     * `NOTIFY` already works this way and always has: it never touched biometrics or the vault,
+     * which is why this needs no new consent model invented for it.
+     */
+    val fingerprintForModals: Boolean = false,
+    /**
+     * Is the AI on at all?
+     *
+     * **Default OFF** (Mido, 2026-10-20: *"off means every damn AI feature completely off... free
+     * memory and just bypass any AI related function"*). When false, [AiGateway] never loads, never
+     * provisions and never summarises, and readiness is satisfied unconditionally, so no route
+     * answers `503 model_not_ready`.
+     *
+     * Also parse-lenient for the same reason as [fingerprintForModals]: a preference must not be
+     * able to refuse to start the server.
+     */
+    val aiEnabled: Boolean = false,
+    /**
+     * Preferences that were present but unreadable, for the caller to LOG.
+     *
+     * **Carried rather than logged here, and that is a purity constraint, not tidiness.**
+     * `Policy` must be JVM-testable: the suite has no `android.util.Log`, so a `Debug.log` call
+     * inside `parse` turns every preference test into `RuntimeException: Method i in
+     * android.util.Log not mocked` — which is how this shipped broken for one build. Reporting the
+     * problem as DATA keeps the decision pure and puts the side effect where Android actually
+     * exists, in [PolicyStore].
+     *
+     * Not serialized: it describes one read of one file, not a stored fact.
+     */
+    val preferenceWarnings: List<String> = emptyList()
 ) {
 
     fun toJson(): JSONObject = JSONObject()
         .put("version", VERSION)
         .put("global", global.name)
+        // Preferences, written with the security fields so one file holds the whole choice.
+        // Their ABSENCE is meaningful: a policy written before these existed parses with the
+        // defaults, which is why VERSION does not move (see [parse]).
+        .put("fingerprintForModals", fingerprintForModals)
+        .put("aiEnabled", aiEnabled)
         .put(
             "rules",
             JSONArray().apply {
@@ -46,11 +93,38 @@ class Policy(
      * they behave identically (see [Rule] and the plan's §7.5).
      */
     fun withRule(rule: Rule): Policy =
-        Policy(global, rules.filterNot { it.key == rule.key } + rule)
+        Policy(
+            global = global,
+            rules = rules.filterNot { it.key == rule.key } + rule,
+            // Both preferences carried across EXPLICITLY. `Policy(global, rules)` alone compiles
+            // fine and resets every sibling field to its default — that exact mistake is already
+            // recorded in this project (`applyGate` wiped the rule table the same way), and here
+            // it would silently turn the AI back off, or a fingerprint requirement back on, every
+            // time someone added a rule.
+            fingerprintForModals = fingerprintForModals,
+            aiEnabled = aiEnabled
+        )
 
     /** A new policy with the pair's rule removed. [verb] null removes the ANY rule. */
     fun withoutRule(plugin: String, verb: Verb?): Policy =
-        Policy(global, rules.filterNot { it.plugin == plugin && it.verb == verb })
+        Policy(
+            global = global,
+            rules = rules.filterNot { it.plugin == plugin && it.verb == verb },
+            fingerprintForModals = fingerprintForModals,
+            aiEnabled = aiEnabled
+        )
+
+    /** A new policy with the gate switch changed, preserving rules and preferences. */
+    fun withGlobal(mode: GlobalMode): Policy =
+        Policy(mode, rules, fingerprintForModals, aiEnabled)
+
+    /** A new policy with the modal-fingerprint preference changed. */
+    fun withFingerprintForModals(enabled: Boolean): Policy =
+        Policy(global, rules, enabled, aiEnabled)
+
+    /** A new policy with the AI preference changed. */
+    fun withAiEnabled(enabled: Boolean): Policy =
+        Policy(global, rules, fingerprintForModals, enabled)
 
     companion object {
         const val VERSION = 1
@@ -100,7 +174,48 @@ class Policy(
                         "exactly one rule, and last-wins would make the file order-dependent"
                 )
             }
-            return Policy(global, rules)
+            val warnings = ArrayList<String>(2)
+            val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
+            val ai = lenientFlag(o, "aiEnabled", false, warnings)
+            return Policy(
+                global = global,
+                rules = rules,
+                fingerprintForModals = fingerprint,
+                aiEnabled = ai,
+                preferenceWarnings = warnings
+            )
+        }
+
+        /**
+         * Read a PREFERENCE flag: absent means [default], garbage means [default] plus a log.
+         *
+         * **Deliberately not strict, and deliberately not silent either.** These two fields do
+         * not decide whether a human is asked, so an unreadable value must not refuse to start
+         * the bridge the way a bad `global` does — a preference is not worth a dead server. But
+         * a silent fallback would leave someone believing a toggle took effect when it did not,
+         * so a bad value is recorded loudly once, in the same ring `/debug` reports.
+         *
+         * `has()` + `isBoolean()` rather than `optBoolean`: `optBoolean` coerces a string
+         * `"yes"` to false without telling anyone, which is exactly the silent fallback this
+         * project forbids. A wrong TYPE is as much a bug as a wrong value.
+         */
+        private fun lenientFlag(
+            o: JSONObject,
+            key: String,
+            default: Boolean,
+            warnings: MutableList<String>,
+        ): Boolean {
+            if (!o.has(key)) return default
+            val value = o.opt(key)
+            if (value is Boolean) return value
+            // Pure: record the problem, do not log it. `PolicyStore` logs what it finds in
+            // `preferenceWarnings`, which is the only side effect this needs and the only place
+            // it can legally happen — `android.util.Log` does not exist on the JVM.
+            warnings.add(
+                "'$key' is not a boolean (${value?.javaClass?.simpleName ?: "null"}); " +
+                    "using default $default"
+            )
+            return default
         }
 
         private fun parseRule(o: JSONObject, index: Int): Rule {

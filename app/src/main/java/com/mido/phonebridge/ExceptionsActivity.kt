@@ -38,7 +38,7 @@ import com.mido.phonebridge.ui.Theme
  * `default | notify | secure`: `default` deletes the rule. ANY is one axis, two
  * levels — an exact rule wins over the plugin's ANY rule (see `policy.resolve`).
  */
-class SettingsActivity : Activity() {
+class ExceptionsActivity : Activity() {
 
     private lateinit var container: LinearLayout
 
@@ -48,8 +48,8 @@ class SettingsActivity : Activity() {
         val scroll = ScrollView(this)
         container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(this@SettingsActivity, 16), Theme.dp(this@SettingsActivity, 16),
-                Theme.dp(this@SettingsActivity, 16), Theme.dp(this@SettingsActivity, 32))
+            setPadding(Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 16),
+                Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 32))
             setBackgroundColor(Theme.BG)
         }
         scroll.addView(container)
@@ -135,9 +135,9 @@ class SettingsActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(Theme.dp(this@SettingsActivity, 12), Theme.dp(this@SettingsActivity, 10),
-                Theme.dp(this@SettingsActivity, 12), Theme.dp(this@SettingsActivity, 10))
-            background = Theme.outlined(this@SettingsActivity, Theme.SURFACE, Theme.RADIUS_CONTROL)
+            setPadding(Theme.dp(this@ExceptionsActivity, 12), Theme.dp(this@ExceptionsActivity, 10),
+                Theme.dp(this@ExceptionsActivity, 12), Theme.dp(this@ExceptionsActivity, 10))
+            background = Theme.outlined(this@ExceptionsActivity, Theme.SURFACE, Theme.RADIUS_CONTROL)
         }
         val label = Theme.text(
             this,
@@ -167,7 +167,7 @@ class SettingsActivity : Activity() {
         row.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@SettingsActivity, Theme.ROW_GAP_DP) }
+        ).apply { bottomMargin = Theme.dp(this@ExceptionsActivity, Theme.ROW_GAP_DP) }
         return row
     }
 

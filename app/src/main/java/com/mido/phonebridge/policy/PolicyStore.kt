@@ -41,6 +41,12 @@ class PolicyStore(private val dir: File) {
             throw PolicyException("policy file unreadable: ${e.message}")
         }
         val parsed = Policy.parse(raw)
+        // The ONE place these can be logged: `Policy.parse` is pure (it has to be, or the JVM
+        // suite cannot touch it — `android.util.Log` throws "not mocked" there). So the decision
+        // travels as data and the side effect happens here, where Android exists.
+        for (warning in parsed.preferenceWarnings) {
+            com.mido.phonebridge.Debug.log("policy: $warning")
+        }
         cached = parsed
         return parsed
     }

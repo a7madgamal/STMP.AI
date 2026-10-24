@@ -155,4 +155,24 @@ object ModelRegistry {
         return if (r.ready) "${active(ctx).id} ${r.detail}"
         else "not ready — ${r.detail} (fetching from ${MODEL_URL.substringAfterLast('/')})"
     }
+
+    /**
+     * The context window the RUNNING build was compiled with, in tokens.
+     *
+     * Exposed so `/debug` can report the real number instead of a reader trusting the source.
+     * That matters because the window is the dominant memory term, and it silently outlived the
+     * model it was chosen for: 0.31.0 raised it to 8192 while the 1.7B was live, 0.32.1 reverted
+     * the model without touching the window, and nothing on the device ever contradicted the
+     * assumption that the small model came with the small cache. A reported number can be
+     * checked against the arithmetic; a remembered one cannot.
+     */
+    fun contextTokens(): Int = LiteRtLm.CONTEXT_TOKENS
+
+    /**
+     * Whether the engine is loaded right now (resident until `release()`).
+     *
+     * A boolean rather than a byte count on purpose: the engine's size is answered by the
+     * process PSS that `/debug` also reports, and two sources for one figure is how they drift.
+     */
+    fun isEngineLoaded(): Boolean = (cached as? LiteRtLm)?.isLoaded() == true
 }

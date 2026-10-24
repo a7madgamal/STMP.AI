@@ -68,6 +68,7 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         o.put("app", appInfo())
         o.put("server", serverInfo())
         o.put("storage", storageInfo())
+        o.put("memory", memoryInfo())
         o.put("account", accountInfo())
         o.put("policy", policyInfo())
         o.put("permissions", permissionsInfo())
@@ -95,6 +96,53 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         .put("lastError", BridgeService.lastError)
         .put("notificationListener", BridgeService.listenerRef != null)
         .put("uptimeMs", System.currentTimeMillis() - processStartMs)
+
+    /**
+     * What THIS PROCESS is holding, in bytes.
+     *
+     * **`storage.memoryFreeBytes` was never the answer to "how much is the app using".** It
+     * reports the device's free RAM, which only tells you the phone has less left — never what
+     * took it. So every question about this app's footprint needed a calculation from the model
+     * constants instead of a reading, and the calculation was wrong for weeks: the KV cache sat
+     * at the 8192 window through a model revert because nothing on the device ever contradicted
+     * it. Mido, 2026-10-20: *"check memory usage"* — unanswerable, twice.
+     *
+     * Now it is a reading. `totalPss` is the honest single number (all shared pages counted
+     * once); Java and native are split out because a ~896 MiB KV cache is NATIVE and would be
+     * invisible in a heap-only view — precisely the mistake that hid this bug.
+     */
+    private fun memoryInfo(): JSONObject {
+        val o = JSONObject()
+        // The service's own process. `myPid` is the bridge process because /debug is served
+        // from it — there is no second process to confuse it with.
+        val pid = android.os.Process.myPid()
+        try {
+            val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val infos = am.getProcessMemoryInfo(intArrayOf(pid))
+            val mi = infos.firstOrNull()
+            if (mi == null) {
+                // Fail loudly rather than reporting a zero that reads as "no memory used".
+                o.put("error", "getProcessMemoryInfo returned no entry")
+            } else {
+                o.put("totalPssBytes", mi.totalPss * 1024L)
+                o.put("javaHeapBytes", mi.dalvikPss * 1024L)
+                o.put("nativeHeapBytes", mi.nativePss * 1024L)
+                o.put("otherPssBytes", mi.otherPss * 1024L)
+            }
+        } catch (e: Exception) {
+            o.put("error", e.message ?: e.javaClass.simpleName)
+        }
+        // Runtime heap: cheap, and answers "is the collector thrashing" separately from PSS.
+        val rt = Runtime.getRuntime()
+        o.put("javaUsedBytes", rt.totalMemory() - rt.freeMemory())
+        o.put("javaCommittedBytes", rt.totalMemory())
+        o.put("javaMaxBytes", rt.maxMemory())
+        // The configured context window, so the size of the KV cache can be checked against the
+        // build actually running rather than against what the source says it should be.
+        o.put("aiContextTokens", com.mido.phonebridge.ai.ModelRegistry.contextTokens())
+        o.put("aiModelResident", com.mido.phonebridge.ai.ModelRegistry.isEngineLoaded())
+        return o
+    }
 
     private fun storageInfo(): JSONObject {
         val o = JSONObject()

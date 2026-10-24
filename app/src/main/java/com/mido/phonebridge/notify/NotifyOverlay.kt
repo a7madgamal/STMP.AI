@@ -612,7 +612,7 @@ object NotifyOverlay {
         }
         Thread({
             val result = try {
-                SummaryProvider.run(entry.ctx, facts, entry.fetchCapMs)
+                com.mido.phonebridge.ai.AiGateway.summarize(entry.ctx, facts, entry.fetchCapMs)
             } catch (e: Exception) {
                 Log.w(TAG, "fetch failed for id=${entry.id}: ${e.message}")
                 null

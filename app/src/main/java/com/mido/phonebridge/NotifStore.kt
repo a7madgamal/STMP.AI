@@ -26,9 +26,32 @@ object NotifStore {
 
     private val items = LinkedHashMap<String, StatusBarNotification>()
 
+    /**
+     * Store a live notification, evicting the oldest entries when over capacity.
+     *
+     * **The eviction is the fix for an unbounded map.** This was a bare `items[key] = sbn`
+     * with no ceiling, so every notification the listener ever saw stayed resident for the
+     * life of the process — and the process is a `specialUse` foreground service the OS must
+     * try to keep. Each value carries a `Bundle` of extras and any bitmaps the posting app
+     * attached. Mido, 2026-10-20: *"my phone was DYING until I uninstalled the shit out of the
+     * app"*. The rule for WHICH keys to drop is [NotifCapacity.keysToEvict] — pure and tested,
+     * because `StatusBarNotification` cannot exist on the JVM and this bug therefore shipped
+     * with no test able to see it.
+     *
+     * `LinkedHashMap` iterates in insertion order, which is what makes `keys.first()` the
+     * oldest entry. Re-putting an existing key keeps its original insertion position — that is
+     * the correct behaviour here: a notification that is UPDATED in place does not become new.
+     */
     @Synchronized
     fun put(sbn: StatusBarNotification) {
         items[sbn.key] = sbn
+        val doomed = NotifCapacity.keysToEvict(items.keys.toList())
+        // Guard rather than assume: an empty list here is the normal case, and a loop over it
+        // costs nothing. Logging only when something actually went keeps the ring readable.
+        if (doomed.isNotEmpty()) {
+            doomed.forEach { items.remove(it) }
+            Log.i(TAG, "evicted ${doomed.size} oldest notification(s) at capacity")
+        }
     }
 
     @Synchronized
@@ -40,6 +63,14 @@ object NotifStore {
     fun seed(service: NotifListenerService) {
         items.clear()
         service.activeNotifications?.forEach { items[it.key] = it }
+        // A seed can itself exceed the cap (a busy shade on first bind), so the same rule
+        // applies. Bypassing it here would leave the one path that loads a bulk batch as the
+        // only unbounded one.
+        val doomed = NotifCapacity.keysToEvict(items.keys.toList())
+        if (doomed.isNotEmpty()) {
+            doomed.forEach { items.remove(it) }
+            Log.i(TAG, "seed: evicted ${doomed.size} oldest notification(s) at capacity")
+        }
     }
 
     @Synchronized

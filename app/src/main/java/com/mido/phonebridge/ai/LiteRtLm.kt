@@ -77,21 +77,45 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
         private const val MAX_OUTPUT_TOKENS = 128
 
         /**
-         * KV-cache size (input + output).
+         * KV-cache size (input + output). **This is the dominant memory term** — see below.
          *
-         * **Raised 1024 -> 8192 because the old value silently truncated real payloads**
-         * (Mido, 2026-10-20: *"can you just pass it the full fucking payload? All of it?"*).
-         * A representative Todoist batch body is ~4,900 chars of JSON, which tokenises at
-         * roughly 2.5 chars/token — about 2,000 tokens, plus ~285 for the system prompt. At
-         * 1024 the fact block was cut to a fraction of the real payload while the code and the
-         * UI both claimed the payload was being sent.
+         * **1024 -> 8192 -> 2048, and the middle step is the one that cost real money.**
          *
-         * 8192 holds ~7,700 tokens of facts (~19,000 chars), which covers the real bodies seen
-         * so far with headroom. The cost is KV cache: this is the dominant memory term, so a
-         * larger window is paid for in resident RAM on a 24/7 service — the trade Mido chose
-         * over describing a payload it cannot see.
+         * 0.31.0 raised it to 8192 to stop truncating a ~4.9 KB Todoist body (the old window
+         * cut the facts to a fraction of the payload while the code and UI both claimed the
+         * body was being sent). That was correct at the time — but it was chosen while the
+         * **1.7B** model was live, and 0.32.1's revert to 0.6B changed MODEL_REGISTRY only.
+         * `LiteRtLm.kt` was never touched, so the small model shipped with the big window.
+         *
+         * The KV cache is `2 * layers * kvHeads * headDim * 2 bytes` per token. For
+         * Qwen3-0.6B (28 layers, 8 KV heads, 128 head dim, fp16) that is **112 KiB/token**:
+         *
+         *     1024 tok -> ~112 MiB
+         *     8192 tok -> ~896 MiB   <- what 0.32.1 actually shipped
+         *     2048 tok -> ~224 MiB   <- this
+         *
+         * So the "revert to the small model" shrank the weights by ~650 MB and left the cache
+         * ~800 MB larger than the 0.6B had ever run with. On a 24/7 foreground service that
+         * pressure is what got Tailscale killed by the OS, which then left the bridge with no
+         * tailnet address to bind. Mido, 2026-10-20: *"something was fucked up badly it's like
+         * the server eats ALL memory"* — he was right, and the revert was the cause.
+         *
+         * **2048 holds ~1,800 tokens of facts (~4,500 chars of JSON) after the system prompt
+         * and output reserve.** That covers the ordinary single-item writes this app is asked
+         * to describe; a large batch body is truncated, and [PromptBudget] marks the cut so the
+         * model can see it happened. Correctness of the label on a huge batch is worth less than
+         * a service that stays alive.
          */
-        private const val MAX_CONTEXT_TOKENS = 8192
+        private const val MAX_CONTEXT_TOKENS = 2048
+
+        /**
+         * The context window, readable from outside this class for `/debug`.
+         *
+         * A separate public name rather than making [MAX_CONTEXT_TOKENS] public: this one is
+         * explicitly a REPORTING surface, so the next person can see that `/debug` depends on
+         * it and that changing it changes what the device reports.
+         */
+        const val CONTEXT_TOKENS = MAX_CONTEXT_TOKENS
 
         /**
          * The output contract, stated in the prompt rather than enforced by constrained
@@ -190,23 +214,31 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
      */
     fun warm(ctx: Context) {
         if (!isAvailable(ctx)) return
-        try {
-            engine ?: createEngine().also { engine = it }
-        } catch (e: Exception) {
-            lastEngineError = "engine load failed: ${e.message}"
-            Log.e(TAG, lastEngineError)
-            return
-        }
-        try {
-            runInference(engine!!, PROBE_FACTS)
-            lastEngineError = ""
-            Log.i(TAG, "warm-up: GPU proven, inference OK")
-        } catch (e: Exception) {
-            // Fail hard: no demotion to CPU, no retry on another backend. The GPU is the
-            // only accepted path, so a GPU that cannot run is a hard failure that says why.
-            lastEngineError = "GPU inference failed: ${e.message}"
-            Log.e(TAG, "$lastEngineError — no CPU fallback (fail-hard)")
-            release()
+        // **Synchronized, because `engine ?: createEngine()` is check-then-act.** Two callers
+        // arriving together (the service's warm thread plus a request's lazy load) could both
+        // see null and each build a full engine — two ~700 MiB mappings for one model, which is
+        // exactly the kind of duplicated cost that makes a phone feel like it is dying. The
+        // lock is on `this` and `release()` below takes the same one, so a release cannot race
+        // a load and leave a leaked engine behind it.
+        synchronized(this) {
+            try {
+                engine ?: createEngine().also { engine = it }
+            } catch (e: Exception) {
+                lastEngineError = "engine load failed: ${e.message}"
+                Log.e(TAG, lastEngineError)
+                return
+            }
+            try {
+                runInference(engine!!, PROBE_FACTS)
+                lastEngineError = ""
+                Log.i(TAG, "warm-up: GPU proven, inference OK")
+            } catch (e: Exception) {
+                // Fail hard: no demotion to CPU, no retry on another backend. The GPU is the
+                // only accepted path, so a GPU that cannot run is a hard failure that says why.
+                lastEngineError = "GPU inference failed: ${e.message}"
+                Log.e(TAG, "$lastEngineError — no CPU fallback (fail-hard)")
+                release()
+            }
         }
     }
 
@@ -233,11 +265,25 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
      * request, which is strictly worse than a slow one.
      */
     fun release() {
-        val e = engine ?: return
-        engine = null
-        runCatching { e.close() }
-        Log.i(TAG, "engine released")
+        // Same monitor as `warm()`: a release that lands mid-load would otherwise null a field
+        // the loader is about to assign, leaving an engine whose reference nobody holds — a
+        // leak that no later release can reach.
+        synchronized(this) {
+            val e = engine ?: return
+            engine = null
+            runCatching { e.close() }
+            Log.i(TAG, "engine released")
+        }
     }
+
+    /**
+     * Is the engine resident right now?
+     *
+     * Reported by `/debug`, where it answers a question the source cannot: whether the window a
+     * build was compiled with is actually being paid for at this moment. A loaded engine holds
+     * its KV cache for the life of the process; an unloaded one holds nothing.
+     */
+    fun isLoaded(): Boolean = engine != null
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
         if (!isAvailable(ctx)) return null

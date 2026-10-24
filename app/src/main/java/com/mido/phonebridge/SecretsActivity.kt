@@ -15,6 +15,8 @@ import android.widget.TextView
 import android.widget.Toast
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.SecretTemplate
+import com.mido.phonebridge.core.SecretTemplates
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
 
@@ -71,6 +73,16 @@ class SecretsActivity : Activity() {
         ).apply { topMargin = Theme.dp(this@SecretsActivity, 12) }
         content.addView(addBtn)
 
+        // Templates are a separate entry point, not a change to the free-form dialog: manual
+        // entry has to keep working exactly as it did, because most secrets are not on any list.
+        val templateBtn = Theme.button(this, "ADD FROM TEMPLATE", Theme.ButtonStyle.NEUTRAL) {
+            pickTemplate()
+        }
+        templateBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = Theme.dp(this@SecretsActivity, 8) }
+        content.addView(templateBtn)
+
         root.addView(scroll)
         setContentView(Theme.inset(root))
         render()
@@ -110,12 +122,49 @@ class SecretsActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 10) }
 
+            // Read the kind BEFORE deciding which controls to build: a private key must never be
+            // offered a reveal button. Mido, 2026-10-21 — the key is generated on the phone so it
+            // does not travel, and this screen is the one place that could undo that.
+            val meta = try {
+                SecretVault.meta(this, n)
+            } catch (e: Exception) {
+                SecretVault.SecretMeta()
+            }
+            val isSsh = meta.kind == SecretVault.SecretMeta.Kind.SSH
+
             rowView.addView(Theme.text(this, n, 16f))
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            buttons.addView(small("reveal") { revealValue(n) })
-            buttons.addView(small("replace") { addSecretDialog(n) })
-            buttons.addView(small("delete") { confirmDelete(n) })
+            if (isSsh) {
+                // No reveal, no replace — both would put the private key on screen or in a paste
+                // box. Deleting is still here: removing a connection is legitimate, and it destroys
+                // the key rather than exposing it.
+                buttons.addView(small("delete") { confirmDelete(n) })
+            } else {
+                buttons.addView(small("reveal") { revealValue(n) })
+                buttons.addView(small("replace") { addSecretDialog(n) })
+                buttons.addView(small("delete") { confirmDelete(n) })
+            }
             rowView.addView(buttons)
+
+            if (isSsh) {
+                // Say WHY there is no reveal, or the missing buttons read as a bug. The public key
+                // is shown instead — that is the harmless half, and it is what you paste on the
+                // server.
+                rowView.addView(
+                    Theme.text(
+                        this,
+                        "SSH key — the private half is never displayed. Manage connections on the " +
+                            "SSH screen.",
+                        12f, Theme.ON_SURFACE_VARIANT
+                    ).apply { setPadding(0, Theme.dp(this@SecretsActivity, 6), 0, 0) }
+                )
+                // Skip the links/hosts block for an SSH entry: those are HTTP-broker concepts and
+                // showing an empty "no hosts allowed — every call will be refused" would be a lie.
+                listContainer.addView(rowView)
+                // `continue`, not `return`: this is the body of a `for (n in names)` loop, so the
+                // remaining link/host block is skipped for THIS entry and the loop carries on.
+                continue
+            }
 
             // The two links (plan: docs + key issuance). Plaintext, so they are readable
             // while the vault is shut — which is when you actually want them, right after
@@ -258,21 +307,70 @@ class SecretsActivity : Activity() {
             .show()
     }
 
-    private fun addSecretDialog(existing: String? = null) {
+    /**
+     * Pick a template, then open the normal add dialog prefilled from it.
+     *
+     * Deliberately a thin chooser rather than a separate form: the save path, the validation and
+     * the vault write are all the SAME code as manual entry. A template is just five prefilled
+     * strings, so there is no second way for a secret to be created and therefore no second set
+     * of bugs.
+     */
+    private fun pickTemplate() {
         if (!SecretVault.isUnlocked()) {
             toast("vault locked — unlock the app first")
             return
         }
-        val existingLinks = try {
-            if (existing != null) SecretVault.meta(this, existing) else SecretVault.SecretMeta()
+        // A template for a name that already exists would open a "Replace" flow without saying
+        // so, and could wipe a host list the human had narrowed. Say it in the picker instead.
+        val existing = try {
+            SecretVault.names(this).toSet()
         } catch (e: Exception) {
-            SecretVault.SecretMeta()
+            emptySet()
+        }
+        val labels = SecretTemplates.ALL.map { t ->
+            if (t.name in existing) "${t.displayName} — already added" else "${t.displayName} — ${t.note}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Add from template")
+            .setItems(labels) { _, which ->
+                val t = SecretTemplates.ALL[which]
+                if (t.name in existing) {
+                    toast("'${t.name}' already exists — use replace on its row")
+                } else {
+                    addSecretDialog(template = t)
+                }
+            }
+            .setNegativeButton("cancel", null)
+            .show()
+    }
+
+    private fun addSecretDialog(existing: String? = null, template: SecretTemplate? = null) {
+        if (!SecretVault.isUnlocked()) {
+            toast("vault locked — unlock the app first")
+            return
+        }
+        val existingLinks = when {
+            // A template supplies the meta for a NEW secret. Editing an existing one always reads
+            // what is stored — a template must never overwrite a host list someone already
+            // narrowed, because that list is the security boundary.
+            template != null && existing == null ->
+                SecretVault.SecretMeta(template.docs, template.key, template.hosts)
+            existing != null -> try {
+                SecretVault.meta(this, existing)
+            } catch (e: Exception) {
+                SecretVault.SecretMeta()
+            }
+            else -> SecretVault.SecretMeta()
         }
         val nameField = EditText(this).apply {
             hint = "name (lowercase, e.g. todoist)"
             inputType = InputType.TYPE_CLASS_TEXT
-            isEnabled = existing == null
-            setText(existing ?: "")
+            // Editable only when CONFIRMING a name the human typed. A template name is fixed:
+            // the name is the plugin id, and the template's docs/hosts were chosen for that one
+            // service, so renaming it to something else would attach Todoist's hosts to a secret
+            // called "notion" and quietly mislabel the whole entry.
+            isEnabled = existing == null && template == null
+            setText(existing ?: template?.name ?: "")
         }
         val valueField = EditText(this).apply {
             hint = "secret value"
@@ -313,10 +411,16 @@ class SecretsActivity : Activity() {
             addView(hostsField)
         }
         AlertDialog.Builder(this)
-            .setTitle(if (existing == null) "Add secret" else "Replace '$existing'")
+            .setTitle(
+                when {
+                    existing != null -> "Replace '$existing'"
+                    template != null -> "Add ${template.displayName}"
+                    else -> "Add secret"
+                }
+            )
             .setView(box)
             .setPositiveButton("save") { _, _ ->
-                val n = (existing ?: nameField.text.toString()).trim()
+                val n = (existing ?: template?.name ?: nameField.text.toString()).trim()
                 val v = valueField.text.toString()
                 try {
                     SecretVault.put(

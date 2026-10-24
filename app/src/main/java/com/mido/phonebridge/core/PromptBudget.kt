@@ -16,15 +16,21 @@ package com.mido.phonebridge.core
  *
  * The numbers come from the real model configuration (`ai/LiteRtLm.kt`):
  *
- *     MAX_CONTEXT_TOKENS = 1024   (KV cache: input + output)
+ *     MAX_CONTEXT_TOKENS = 2048   (KV cache: input + output)
  *     MAX_OUTPUT_TOKENS  =  128
- *     -> input budget    =  896 tok
- *        system prompt   ~  265 tok  (1,061 chars)
- *        scaffolding     ~   30 tok
- *        -> facts        ~  601 tok  ~ 2,400 chars
+ *     -> input budget    = 1920 tok
+ *        system prompt   ~  285 tok  (1,061 chars)
+ *        scaffolding     ~   35 tok
+ *        -> facts        ~1600 tok  ~ 4,000 chars
  *
- * [MAX_TOTAL_CHARS] takes 2,000 of that ~2,400, leaving headroom for the ~4 chars/token estimate
- * being optimistic on some text (code, non-Latin scripts and JSON tokenise worse than prose).
+ * [MAX_TOTAL_CHARS] takes 4,000 of that ~4,000, leaving headroom for the ~2.5 chars/token
+ * estimate being optimistic on JSON and non-Latin scripts, which tokenise worse than prose.
+ *
+ * **These two numbers must move together with `MAX_CONTEXT_TOKENS`.** They did not, once: the
+ * window was raised to 8192 in 0.31.0 and then the model was reverted to the 0.6B without the
+ * window following it back down, so the small model ran with a ~896 MiB KV cache — the memory
+ * pressure that got Tailscale killed on the device. A budget and a window that disagree are how
+ * a "smaller model" ends up heavier than the big one.
  *
  * Pure and Context-free so the allocation is unit-testable — the same split as `isAttended` and
  * `PayloadShape`.
@@ -34,18 +40,17 @@ object PromptBudget {
     /**
      * Characters of fact rows the prompt may contain, total.
      *
-     * **Raised 2,000 -> 16,000, because the old number silently cut real payloads in half**
-     * (Mido, 2026-10-20: *"can you just pass it the full fucking payload? All of it?"*).
+     * **16,000 -> 4,000, following the context window back down to 2048.** The 16,000 figure was
+     * derived from an 8192-token window that only ever justified itself while the 1.7B model was
+     * live. Its own comment already said the budget "has to be derived from the CONTEXT WINDOW,
+     * not picked by feel" — so when the window dropped, this had to drop with it or the prompt
+     * would overflow the window and fail the request outright, since the AI is core.
      *
-     * The budget has to be derived from the CONTEXT WINDOW, not picked by feel. At
-     * `MAX_CONTEXT_TOKENS = 8192` there are ~7,700 tokens for facts; JSON tokenises at roughly
-     * 2.5 chars/token, so ~19,000 chars. 16,000 keeps a ~15% margin for a worse-than-average
-     * estimate without ever cutting a payload a human is approving.
-     *
-     * The old 2,000 was chosen against a 1024-token window and then never revisited when the
-     * window grew — which is exactly how a limit outlives the constraint that justified it.
+     * The consequence is real and deliberate: a 5 KB batch body no longer arrives whole. It is
+     * clipped and MARKED, because a label on a huge batch is worth less than a service that
+     * stays resident. `PromptBudgetTest` pins both halves of that trade.
      */
-    const val MAX_TOTAL_CHARS = 16_000
+    const val MAX_TOTAL_CHARS = 4_000
 
     /**
      * Nobody gets less than this, even when there are many rows.
@@ -58,15 +63,11 @@ object PromptBudget {
     /**
      * Nobody gets more than this, however few rows there are.
      *
-     * Raised 600 -> 12,000 alongside the total. The original cap existed so one huge row could
-     * not starve the others — still true, but 600 was cutting a 5 KB JSON body down to its first
-     * few fields, which is the very complaint that started this. 12,000 leaves room for the other
-     * rows while letting a real payload through whole.
-     *
-     * A row is still trimmed if it alone would exceed the TOTAL; the renderer drops trailing rows
-     * and says so rather than overflowing the window.
+     * 12,000 -> 4,000, matching the total. A per-row ceiling above the total is not a ceiling at
+     * all: it only ever binds when there is a single row, and then the total binds first, so the
+     * two numbers disagreeing just makes the real limit ambiguous to whoever reads this next.
      */
-    const val MAX_PER_ROW = 12_000
+    const val MAX_PER_ROW = 4_000
 
     /**
      * The per-row character allowance for [rowCount] rows.

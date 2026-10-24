@@ -267,14 +267,23 @@ object ApprovalGate {
         @Volatile var exceptionRule: Rule? = null
     ) {
         /**
-         * The longest this request can legitimately take: the fetch, then a full window.
+         * The longest this request can legitimately take: the misclick guard, the fetch, then a
+         * full window.
          *
          * Derived rather than hardcoded, so a fetch that is allowed to run long cannot
          * silently exceed the wait the server is doing on the other side of the latch.
+         *
+         * **The guard term is load-bearing, not padding.** The decision clock starts at
+         * `enabledAtMs`, which is now at least `shownAtMs + MISCLICK_GUARD_MS`. Without adding
+         * the guard here, a no-AI request would arm at +3s and then be given 60s of countdown —
+         * 63s of legitimate life against a 60s latch. The caller would see a timeout at the exact
+         * moment the human still had 3 seconds left to decide, and the UI would show a window that
+         * the server had already given up on.
          */
         fun maxWaitMs(): Long =
-            if (aiFacts == null) TIMEOUT_SECONDS * 1000L
-            else aiFetchCapMs + TIMEOUT_SECONDS * 1000L
+            ArmGuard.MISCLICK_GUARD_MS +
+                if (aiFacts == null) TIMEOUT_SECONDS * 1000L
+                else aiFetchCapMs + TIMEOUT_SECONDS * 1000L
     }
 
     @Volatile
@@ -545,7 +554,16 @@ object ApprovalGate {
         // inference, and the human's clock has not started for it either.
         if (p.aiFacts == null) {
             p.aiState = AiState.NotNeeded
-            p.enabledAtMs = p.shownAtMs
+            // THE MISCLICK GUARD (Mido, 2026-10-21: *"when AI is disabled, we need the 3 seconds
+            // protection again to avoid misclicking the dialog"*). With no summary to wait for,
+            // this used to arm at `shownAtMs` — the instant the modal appeared. A tap already in
+            // flight when the card arrives would land on APPROVE.
+            //
+            // `ArmGuard.armAt` rather than `shownAtMs + 3000` inline: the AI path below uses the
+            // same function, so the rule that decides when a human may agree to something is
+            // stated once. Applying it per-branch is how the two paths drift, and this project
+            // has paid for exactly that (the audit flag honoured on one dispatch path only).
+            p.enabledAtMs = ArmGuard.armAt(p.shownAtMs, p.shownAtMs)
         } else {
             startAiFetch(ctx, p)
         }
@@ -587,7 +605,7 @@ object ApprovalGate {
         val facts = p.aiFacts ?: return
         Thread({
             val result = try {
-                com.mido.phonebridge.ai.SummaryProvider.run(ctx, facts, p.aiFetchCapMs)
+                com.mido.phonebridge.ai.AiGateway.summarize(ctx, facts, p.aiFetchCapMs)
             } catch (e: Exception) {
                 Log.w(TAG, "summary fetch threw for id=${p.requestId}: ${e.message}")
                 null
@@ -598,10 +616,15 @@ object ApprovalGate {
             val failureDetail = com.mido.phonebridge.ai.LiteRtLm.lastEngineError
                 .ifBlank { "the model did not answer within ${p.aiFetchCapMs}ms" }
             p.aiState = if (result != null) AiState.Ready(result) else AiState.Failed(failureDetail)
-            p.enabledAtMs = System.currentTimeMillis()
+            // Same guard, applied to the moment the summary landed. A summary takes ~1.2s, so the
+            // floor usually wins and the guard costs ~1.8s; a slow one is unaffected because
+            // `armAt` only ever pushes the time LATER, never earlier.
+            val readyAt = System.currentTimeMillis()
+            p.enabledAtMs = ArmGuard.armAt(p.shownAtMs, readyAt)
             com.mido.phonebridge.Debug.log(
                 "approval[${p.requestId}] AI ${if (result != null) "ready" else "FAILED"} " +
-                    "in ${p.enabledAtMs - p.shownAtMs}ms; buttons live, clock starts"
+                    "in ${readyAt - p.shownAtMs}ms; buttons live at " +
+                    "${p.enabledAtMs - p.shownAtMs}ms; clock starts"
             )
         }, "approval-ai-${p.requestId}").apply { isDaemon = true }.start()
     }

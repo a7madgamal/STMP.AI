@@ -26,6 +26,7 @@ import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
+import com.mido.phonebridge.core.RespPayload
 import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.labelOf
@@ -121,18 +122,16 @@ class BridgeService : Service() {
         super.onCreate()
         createChannel()
         Debug.log("service onCreate")
-        // Warm the AI model as soon as the service exists (Mido, 2026-10-19: "warmed up in
-        // memory on app load"), so the first request does not pay the load. Off the main
-        // thread, and a no-op when the model is absent — readiness, not warm-up, is what
-        // decides whether the bridge may serve.
-        Thread({
-            try {
-                com.mido.phonebridge.ai.ModelRegistry.warm(applicationContext)
-                Debug.log("model warm: ${com.mido.phonebridge.ai.ModelRegistry.status(applicationContext)}")
-            } catch (e: Exception) {
-                Debug.log("model warm-up failed: ${e.message}")
-            }
-        }, "model-warm").apply { isDaemon = true }.start()
+        // The model warm-up is NOT started here. It used to be, and that was a real cost:
+        // `onCreate` runs before `onStartCommand`, so a start that immediately refuses to bind
+        // (no tailnet address, unreadable policy, bad port) still paid for loading the model
+        // AND running a throwaway GPU inference — then called `stopSelf()`. Every retry paid it
+        // again. Mido tapped START repeatedly while the bind was failing, so each tap bought a
+        // full engine load for a service that never served a request.
+        //
+        // The warm now happens in `onStartCommand` after `markRunning(true)` — see
+        // `warmModel()`. Readiness still decides whether the bridge may serve; this only
+        // decides when the loading cost is paid, and it is paid only by a server that exists.
     }
 
     /**
@@ -154,7 +153,7 @@ class BridgeService : Service() {
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        com.mido.phonebridge.ai.ModelRegistry.release()
+        com.mido.phonebridge.ai.AiGateway.release()
         Debug.log("onTrimMemory($level): model engine released")
     }
 
@@ -187,7 +186,8 @@ class BridgeService : Service() {
             val p = PolicyStore.from(applicationContext).get()
             Debug.log("policy loaded: ${p.global}")
         } catch (e: Exception) {
-            lastError = "policy unreadable: ${e.message}"
+            lastError = "The approval-gate policy file is unreadable (${e.message}). " +
+                "The server will not start on an assumption — this needs fixing on the phone."
             Debug.log("REFUSING TO START: $lastError")
             stopSelf()
             return START_NOT_STICKY
@@ -204,7 +204,11 @@ class BridgeService : Service() {
             val bind = tailnetAddress()
             if (bind == null) {
                 // S8: never silently bind all interfaces.
-                lastError = "no tailnet address found; refusing to bind 0.0.0.0"
+                // The wording is user-facing: it lands verbatim in the hero card when a start
+                // fails, so it names the CAUSE and the FIX rather than the bind decision. A
+                // user reading "refusing to bind 0.0.0.0" learns nothing they can act on.
+                lastError = "No Tailscale address on this phone. Open the Tailscale app, " +
+                    "connect it, then tap START SERVER again."
                 Debug.log("REFUSING TO START: $lastError")
                 stopSelf()
                 return START_NOT_STICKY
@@ -218,7 +222,7 @@ class BridgeService : Service() {
                 lastError = ""
                 Debug.log("HTTP server bound on $bind:$PORT")
             } catch (e: Exception) {
-                lastError = "bind: ${e.javaClass.simpleName}: ${e.message}"
+                lastError = "Could not bind port $PORT: ${e.message ?: e.javaClass.simpleName}".trim()
                 Debug.log("BIND FAILED: $lastError")
                 stopSelf()
                 return START_NOT_STICKY
@@ -227,7 +231,30 @@ class BridgeService : Service() {
             Debug.log("server already running")
         }
         markRunning(true)
+        warmModel()
         return START_STICKY
+    }
+
+    /**
+     * Load the AI model now that there is a bound server to serve.
+     *
+     * Called from [onStartCommand] only after [markRunning] — never from `onCreate`. A start
+     * that refuses and stops itself must not leave a loaded engine behind, and it must not pay
+     * the load on the way out; see the note in `onCreate` for what that cost.
+     *
+     * Off the main thread, and idempotent: `warm()` returns immediately when the model file is
+     * absent, and `LiteRtLm.warm` is synchronized, so a second call finds the engine already
+     * built rather than building another one.
+     */
+    private fun warmModel() {
+        Thread({
+            try {
+                com.mido.phonebridge.ai.AiGateway.warm(applicationContext)
+                Debug.log("ai: ${com.mido.phonebridge.ai.AiGateway.status(applicationContext)}")
+            } catch (e: Exception) {
+                Debug.log("model warm-up failed: ${e.message}")
+            }
+        }, "model-warm").apply { isDaemon = true }.start()
     }
 
     /**
@@ -244,6 +271,12 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // Give the engine back. This was the second half of the memory story: `onTrimMemory`
+        // released it, but that is a HINT the OS may never send, so a stopped service could sit
+        // on ~700 MiB indefinitely. With START_STICKY the process is also one the OS restarts,
+        // so holding an engine through a stop is doubly pointless. The model FILE is untouched —
+        // the next start reloads it.
+        com.mido.phonebridge.ai.AiGateway.release()
         // Kill any overlay still on screen. These are windows owned by the process:
         // if the service dies without removing them they are exactly the kind of
         // orphaned view that survives a stop and looks like a ghost prompt nobody can
@@ -267,6 +300,12 @@ class BridgeService : Service() {
         }
         if (PluginRegistry.get("calendar") == null) {
             PluginRegistry.register(CalendarPlugin(applicationContext))
+        }
+        if (PluginRegistry.get("ssh") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.ssh.SshPlugin(applicationContext))
+        }
+        if (PluginRegistry.get("drive") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.drive.DrivePlugin(applicationContext))
         }
         if (PluginRegistry.get("debug") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.debug.DebugPlugin(applicationContext))
@@ -303,7 +342,8 @@ class BridgeService : Service() {
             // A corrupt index must not silently hide secrets: refuse to start, same as
             // an unreadable policy. Better a bridge that will not serve than one that
             // quietly forgets a credential exists.
-            lastError = "secret index unreadable: ${e.message}"
+            lastError = "The secret index is unreadable (${e.message}), so the stored " +
+                "credentials cannot be routed. Refusing to start rather than hide them."
             Debug.log("REFUSING TO START: $lastError")
             stopSelf()
             return
@@ -432,7 +472,12 @@ class HttpServer(
             if (draft.written) throw IllegalStateException("audit record already written for this request")
             draft.markWritten()
             auditStore.append(draft.toRecord(System.currentTimeMillis()))
-            json(result.status, result.body)
+            // RECORD FIRST, THEN STREAM. For JSON this was already true; for a stream it is the
+            // only possible order — once the headers are on the wire a failure can no longer be
+            // reported as an error status. The outcome (approved, 200) is known before a byte
+            // moves, so the record is complete either way. A mid-transfer socket failure is
+            // inherently unreportable; that is a property of streaming, not of this code.
+            writeResponse(result)
         } catch (e: Exception) {
             Log.e(TAG, "audit append failed", e)
             json(
@@ -442,8 +487,20 @@ class HttpServer(
         }
     }
 
-    /** One HTTP response plus the status the audit should record for it. */
-    private class Dispatched(val status: Response.Status, val body: JSONObject)
+    /**
+     * One HTTP response plus the status the audit should record for it.
+     *
+     * [body] stays a `JSONObject` so the ~13 existing construction sites are untouched; [payload]
+     * is the streaming escape hatch. Exactly one of them is meaningful: a route that returns
+     * [RespPayload.Stream] sets `payload` and leaves `body` empty, and [writeResponse] checks
+     * `payload` FIRST. Keeping `body` non-null avoids a sealed type here that every existing call
+     * site would have to unwrap for no benefit.
+     */
+    private class Dispatched(
+        val status: Response.Status,
+        val body: JSONObject,
+        val payload: RespPayload? = null,
+    )
 
     /**
      * Resolve, describe, gate, execute — setting exactly one terminal [AuditOutcome]
@@ -483,25 +540,53 @@ class HttpServer(
             // DIAGNOSED from outside, and blocking them would make a not-ready bridge
             // undiagnosable — the dead end `/debug` exists to prevent. Read-only, and
             // neither opens a decision.
-            val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
-            if (!com.mido.phonebridge.ai.ModelReadiness.serves(modelState.ready, resolved.route.aiSummary)) {
+            //
+            // Now routed through [AiGateway], which also answers for the global OFF switch: with
+            // the AI off there is no model to be missing, so this condition is always false and
+            // `503 model_not_ready` can never be the reason a caller is refused. Putting that in
+            // the gateway rather than here is the point — one seam, not a check every call site
+            // has to remember.
+            if (!com.mido.phonebridge.ai.AiGateway.serves(ctx, resolved.route.aiSummary)) {
                 // HANDLER_FAILED, not REJECTED_INVALID: a 503 is OUR side, and the audit
                 // rule is that 5xx is never noise. Recording it as the caller's mistake
                 // would hide a not-ready bridge among typos — the exact misclassification
                 // `AuditClassify` exists to prevent.
                 draft.outcome(AuditOutcome.HANDLER_FAILED)
                 draft.error("model_not_ready")
-                val obj = err("model_not_ready", modelState.detail)
+                val obj = err(
+                    "model_not_ready",
+                    com.mido.phonebridge.ai.ModelRegistry.readiness(ctx).detail
+                )
                 draft.response(503, obj.toString())
                 return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)
             }
 
-            val rawBody = if (method == "POST") readRawBody(session) else ""
-            // Verbatim, and BEFORE the parse that can throw. A malformed body still
-            // has to leave a record: without this the log says "invalid JSON" and
-            // keeps not one byte of what was actually sent.
-            draft.requestBody(rawBody)
-            val body = if (method == "POST") parseBody(rawBody) else JSONObject()
+            // TWO INDEPENDENT DECISIONS, both from the route, both taken HERE — before a byte is
+            // read — because each one has to be answered differently on the way in:
+            //
+            //   streamsRequest  -> do NOT buffer. `readRawBody` builds the whole body into a
+            //                      String, which is fine for JSON and fatal for a 200 MB file.
+            //   auditRequestBody-> do NOT record. The audit stores bodies verbatim (capped at
+            //                      32 KiB), so a streamed upload would write the first 32 KB of
+            //                      the user's document permanently into an append-only log.
+            //
+            // They are separate flags on purpose: an upload needs both for unrelated reasons, and
+            // a route could want either alone.
+            val streamsRequest = resolved.route.streamsRequest && method == "POST"
+            val auditRequest = resolved.route.auditRequestBody
+
+            val rawBody = if (method == "POST" && !streamsRequest) readRawBody(session) else ""
+            if (auditRequest) {
+                // Verbatim, and BEFORE the parse that can throw. A malformed body still
+                // has to leave a record: without this the log says "invalid JSON" and
+                // keeps not one byte of what was actually sent.
+                draft.requestBody(rawBody)
+            } else {
+                // Marked as deliberately-not-stored rather than left empty, so "no body was
+                // recorded on purpose" stays distinguishable from "the body was empty".
+                draft.requestBodyNotStored()
+            }
+            val body = if (method == "POST" && !streamsRequest) parseBody(rawBody) else JSONObject()
 
             val req = Req(
                 method = method,
@@ -509,7 +594,11 @@ class HttpServer(
                 query = query,
                 pathParams = resolved.pathParams,
                 body = body,
-                remote = remote
+                remote = remote,
+                // The handler reads this itself; nothing parses it on its behalf, which is the
+                // point — the caller's bytes ARE the payload.
+                bodyStream = if (streamsRequest) session.inputStream else null,
+                bodyLength = session.headers["content-length"]?.toLongOrNull() ?: -1L
             )
 
             // THE VERB, resolved ONCE for this request.
@@ -596,7 +685,7 @@ class HttpServer(
                         // then shows its deterministic content and its clock starts at once.
                         // Never built for an opted-out route, so the rows are not fetched
                         // either — an opted-out route pays nothing for the AI.
-                        if (com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary))
+                        if (com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary))
                             aiFactsFor(
                                 resolved.route, verb, summary, path, body, query, remote,
                                 // The body EXACTLY as received — `rawBody` is captured before
@@ -605,7 +694,7 @@ class HttpServer(
                                 url = body.optString("url", "")
                             )
                         else null,
-                        needsAi = com.mido.phonebridge.ai.ModelReadiness.requiresAi(resolved.route.aiSummary)
+                        needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
                     )
                     when (decision) {
                         is NotifyGate.Result.Approved -> {
@@ -701,7 +790,12 @@ class HttpServer(
                         view = approvalView(
                             remote, account, resolved.route, path, body, query,
                             summary = summary,
-                            requiresBiometric = mode == Mode.SECURE,
+                            // A `SECURE` modal asks for a fingerprint only when the option says
+                            // so. The VAULT is untouched by this: its key is auth-per-use in the
+                            // Keystore and `lockOnLoad` still unlocks it at app start, so a locked
+                            // vault answers `secret_locked` exactly as it already does under
+                            // NOTIFY, which never touched biometrics either.
+                            requiresBiometric = mode == Mode.SECURE && policy.fingerprintForModals,
                             rows = rows,
                             exceptionOffer = exceptionOfferFor(
                                 globalMode, resolved.plugin.id, verb, mode
@@ -709,8 +803,8 @@ class HttpServer(
                         ),
                         // Null for a route that declares `aiSummary = false`: there is nothing
                         // to wait for, so its buttons go live at once.
-                        aiFacts = if (com.mido.phonebridge.ai.ModelReadiness
-                                .requiresAi(resolved.route.aiSummary))
+                        aiFacts = if (com.mido.phonebridge.ai.AiGateway
+                                .requiresAi(ctx, resolved.route.aiSummary))
                             factsFor(
                                 resolved.route, verb, summary, rows,
                                 rawBody = rawBody,
@@ -761,7 +855,7 @@ class HttpServer(
             // The handler call cannot be duplicated again without deleting this comment.
             val resp = runBlocking { resolved.route.handler(req) }
             recordResponse(draft, resolved.route.auditResponseBody, resp.status, resp.body)
-            Dispatched(statusOf(resp.status), resp.body)
+            Dispatched(statusOf(resp.status), resp.body, resp.payload)
         } catch (e: PluginError) {
             // Two very different failures share this type. BEFORE the gate it is the
             // caller's fault (bad input, unknown id) → 4xx, noise. AFTER the gate the
@@ -881,7 +975,17 @@ class HttpServer(
         const val TAG = "HttpServer"
 
         /** Headers that say nothing about the caller and everything about TCP. */
-        val HOP_BY_HOP = setOf("host", "content-length", "connection", "accept-encoding")
+        /**
+         * Headers the audit must never record.
+         *
+         * `authorization` was MISSING until now, which meant a caller's bearer token was written
+         * verbatim into the append-only request log — permanently, and in the clear. The rest are
+         * genuinely hop-by-hop noise; that one is a credential. Redacted rather than dropped so
+         * the record still shows that the caller DID authenticate, without storing what with.
+         */
+        val HOP_BY_HOP = setOf(
+            "host", "content-length", "connection", "accept-encoding", "authorization"
+        )
     }
 
     /**
@@ -1285,6 +1389,26 @@ class HttpServer(
 
     private fun json(status: Response.Status, obj: JSONObject): Response =
         newFixedLengthResponse(status, "application/json", obj.toString())
+
+    /**
+     * Write whatever the handler produced: JSON, or raw bytes.
+     *
+     * The stream branch uses the file's OWN content type and, when the length is known, a
+     * fixed-length response so the caller gets `Content-Length` and can detect a truncated
+     * transfer. Unknown length falls back to chunked — never to a fixed length of 0, which would
+     * silently present an empty file as a complete one.
+     */
+    private fun writeResponse(d: Dispatched): Response {
+        val payload = d.payload
+        if (payload is RespPayload.Stream) {
+            return if (payload.lengthBytes >= 0L) {
+                newFixedLengthResponse(d.status, payload.contentType, payload.input, payload.lengthBytes)
+            } else {
+                newChunkedResponse(d.status, payload.contentType, payload.input)
+            }
+        }
+        return json(d.status, d.body)
+    }
 
     private fun httpStatusFor(code: String): Response.Status =
         statusOf(com.mido.phonebridge.core.ErrorCodes.statusFor(code))

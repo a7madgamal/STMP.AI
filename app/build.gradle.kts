@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 129
-        versionName = "0.32.1"
+        versionCode = 143
+        versionName = "0.40.2"
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and
@@ -117,6 +117,16 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+    // SSH transport for the ssh gate. `com.github.mwiede:jsch` is the maintained fork of
+    // JSch (the original jcraft artifact has not been updated in a decade and carries
+    // algorithms modern OpenSSH rejects). 2.28.8 supports ed25519, which is what a key
+    // generated on a current phone should be.
+    //
+    // NOT a favourite, just the one that needs no BouncyCastle: sshj is a better-engineered
+    // library, but it pulls in bcprov, and this APK already carries a ~475 MB model — the
+    // fewer heavyweight dependencies the better. The surface used here is tiny (connect,
+    // auth with a key, exec, capture output), so the abstraction cost is low either way.
+    implementation("com.github.mwiede:jsch:2.28.8")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     // BiometricPrompt for the approval gate: STRONG biometrics or device credential.

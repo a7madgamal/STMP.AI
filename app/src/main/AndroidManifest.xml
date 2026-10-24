@@ -18,10 +18,31 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+        <!--
+          Keep config across an uninstall, without ever keeping a secret.
+
+          `hasFragileUserData` makes Android show a "keep app data?" checkbox on uninstall. If
+          the human ticks it, `filesDir` and SharedPreferences survive: the gate policy and its
+          rules, the audit log, and the account email. That is the config worth keeping.
+
+          SECRETS CANNOT SURVIVE, by construction rather than by exclusion: the vault's wrapping
+          key lives in the AndroidKeyStore, and the Keystore entry is deleted on uninstall no
+          matter what this flag says. Restoring the prefs alone therefore restores an unopenable
+          vault — which is why `VaultState.ORPHANED` had to be added in this same release. Without
+          that guard, a kept-config reinstall produced a vault that failed every unlock forever
+          and offered no reset, because `vaultKey()` quietly mints a fresh key and the old blob
+          then fails its GCM tag.
+
+          Not a backup: this keeps data on THIS phone across a reinstall, and sends nothing off
+          the device. `allowBackup` stays false, so the refresh token still never leaves.
+        -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+
+        android:hasFragileUserData="true"
+
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:supportsRtl="true"
@@ -80,7 +101,15 @@
             android:exported="false" />
 
         <activity
-            android:name=".SettingsActivity"
+            android:name=".ExceptionsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".OptionsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SshActivity"
             android:exported="false" />
 
         <!-- Secret CRUD. Sets FLAG_SECURE itself, so no screenshots of a value. -->

@@ -341,22 +341,48 @@ class ApprovalActivity : FragmentActivity() {
                     }
                 }
 
-                // The 60s clock only exists once the buttons are live.
+                // THREE phases, not two. `enabledAtMs` is now an ARM TIME that can sit in the
+                // future (the misclick guard), so "is it stamped" is no longer the same question
+                // as "may the human tap". Conflating them is what would make the guard useless:
+                // a future timestamp still reads as `> 0` and the buttons would go live instantly.
+                val now = System.currentTimeMillis()
                 val enabledAt = ApprovalGate.currentEnabledAtMs()
-                if (enabledAt == 0L) {
-                    countdown.text = "⏳ waiting for the summary…"
-                    countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
-                } else {
-                    val elapsedSec = (System.currentTimeMillis() - enabledAt) / 1000L
-                    val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
-                    val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
-                    countdown.text = "⏳ auto-deny in ${left}s"
-                    countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
-                    countdown.contentDescription = "timeout progress ${pct}%"
+                val armed = enabledAt > 0L && ArmGuard.isArmed(enabledAt, now)
+
+                when {
+                    enabledAt == 0L -> {
+                        // No arm time yet: the summary is still being fetched.
+                        countdown.text = "⏳ waiting for the summary…"
+                        countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
+                    }
+                    !armed -> {
+                        // THE GUARD WINDOW (Mido, 2026-10-21: *"when AI is disabled, we need the
+                        // 3 seconds protection again to avoid misclicking the dialog"*). Say what
+                        // it is — a silent dead modal looks broken, and a human who does not know
+                        // why the button is inert will tap harder, which is the opposite of safe.
+                        //
+                        // Deliberately NOT the auto-deny clock: the 60s window has not started,
+                        // so showing it here would claim time the human has not been given.
+                        val left = ArmGuard.remainingSeconds(enabledAt, now)
+                        countdown.text = "⏳ ready in ${left}s"
+                        countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
+                        countdown.contentDescription = "arming in ${left}s"
+                    }
+                    else -> {
+                        // Armed: now the real 60s window, measured from the arm time — so the
+                        // human gets their FULL decision time once the buttons work.
+                        val elapsedSec = (now - enabledAt) / 1000L
+                        val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
+                        val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
+                        countdown.text = "⏳ auto-deny in ${left}s"
+                        countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
+                        countdown.contentDescription = "timeout progress ${pct}%"
+                    }
                 }
 
-                // The gate's live state is the ONLY enable trigger now — no timer.
-                applyArmed(ApprovalGate.currentEnabledAtMs() > 0L)
+                // The gate's live state is the ONLY enable trigger — no timer — and the guard is
+                // part of that state, not a second condition bolted on here.
+                applyArmed(armed)
 
                 // Refresh the queue label from live state every tick, so it appears
                 // the moment a follower queues (never a value sampled once at

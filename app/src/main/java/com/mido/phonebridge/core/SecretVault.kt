@@ -101,6 +101,40 @@ object SecretVault {
     }
 
     /**
+     * The vault's state, including the two DEAD states that no unlock can fix.
+     *
+     * Reads all three facts directly, because each one is evidence the others cannot supply.
+     *
+     * **`hasAlias`, never `vaultKey()`.** `vaultKey()` GENERATES the key when the alias is
+     * missing, so calling it here would create `pb_vault_key` and then report the vault as
+     * healthy — erasing the one fact that says it is orphaned. `containsAlias` is a pure read.
+     *
+     * [VaultState.ORPHANED] becomes reachable the moment `hasFragileUserData` lets prefs survive
+     * an uninstall while the Keystore (which is always wiped) does not. See [VaultState].
+     */
+    fun state(ctx: Context): VaultState.State {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val wrapped = p.getString(F_DK_WRAPPED, null) != null
+        val iv = p.getString(F_DK_IV, null) != null
+        // Only meaningful when a vault exists; a Keystore read on first run is wasted work but
+        // harmless, and short-circuiting here would put a second copy of the precedence rule in
+        // this method. `VaultState.of` owns it.
+        return VaultState.of(wrappedExists = wrapped, ivExists = iv, keyExists = hasVaultKey())
+    }
+
+    /** Does the Keystore hold the vault key? A READ — it never generates one. */
+    fun hasVaultKey(): Boolean = try {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        ks.containsAlias(VK_ALIAS)
+    } catch (e: Exception) {
+        // A Keystore that cannot be read is a real fault. Answering `true` would send the user to
+        // a prompt that cannot succeed; answering `false` routes to the reset copy, which at
+        // least explains itself. Neither is a silent success.
+        Log.w(TAG, "could not read vault key presence: ${e.message}")
+        false
+    }
+
+    /**
      * True when a vault exists but can never be opened, because the wrap IV is missing
      * (any vault created by 0.14.x). The secrets inside are unrecoverable — this is a
      * data-loss state, not a lock, and the only honest move is a reset. Detected rather
@@ -110,6 +144,13 @@ object SecretVault {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return p.getString(F_DK_WRAPPED, null) != null && p.getString(F_DK_IV, null) == null
     }
+
+    /**
+     * True when the vault survives but its Keystore key does not — a restore onto a fresh
+     * install. The counterpart to [isUnrecoverable]: same dead end, different cause, and the
+     * message must not blame a build bug for it.
+     */
+    fun isOrphaned(ctx: Context): Boolean = state(ctx) == VaultState.State.ORPHANED
 
     // --- names and links are not secret ---------------------------------------
     //
@@ -139,8 +180,28 @@ object SecretVault {
     data class SecretMeta(
         val docs: String = "",
         val key: String = "",
-        val hosts: List<String> = emptyList()
-    )
+        val hosts: List<String> = emptyList(),
+        /**
+         * What this entry IS: an ordinary API secret, or an SSH private key.
+         *
+         * **A private key must never be rendered.** Mido, 2026-10-21: the key is generated on the
+         * phone precisely so it does not travel — and `SecretsActivity` offers a reveal button and
+         * a replace dialog for every entry, which would put it one tap from the screen and the
+         * clipboard. This field lets that screen refuse for SSH entries while keeping ONE vault and
+         * one unlock.
+         *
+         * Defaults to [Kind.SECRET] so every existing entry keeps working untouched.
+         */
+        val kind: Kind = Kind.SECRET,
+    ) {
+        enum class Kind {
+            /** A third-party API credential. Reveal and replace are allowed. */
+            SECRET,
+
+            /** An SSH private key. Never revealed, never replaced through the generic dialog. */
+            SSH,
+        }
+    }
 
     /** Secret names, sorted. Readable while locked — a name is a label, not a credential. */
     fun names(ctx: Context): List<String> = readMeta(ctx).keys.sorted()
@@ -171,7 +232,14 @@ object SecretVault {
                     m[k] = SecretMeta(
                         docs = v?.optString("docs") ?: "",
                         key = v?.optString("key") ?: "",
-                        hosts = hosts
+                        hosts = hosts,
+                        // Absent means SECRET: every entry written before this field existed is a
+                        // third-party credential. Never infer SSH from a name pattern — a secret
+                        // that happens to start with "ssh-" would silently lose its reveal button.
+                        kind = when (v?.optString("kind")) {
+                            "ssh" -> SecretMeta.Kind.SSH
+                            else -> SecretMeta.Kind.SECRET
+                        }
                     )
                 }
                 m
@@ -199,6 +267,7 @@ object SecretVault {
                     .put("docs", v.docs)
                     .put("key", v.key)
                     .put("hosts", org.json.JSONArray(v.hosts))
+                    .put("kind", if (v.kind == SecretMeta.Kind.SSH) "ssh" else "secret")
             )
         }
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -353,7 +422,9 @@ object SecretVault {
         value: String,
         docs: String = "",
         key: String = "",
-        hosts: List<String>? = null
+        hosts: List<String>? = null,
+        /** SSH entries are marked so the CRUD screen can refuse to reveal them. */
+        kind: SecretMeta.Kind = SecretMeta.Kind.SECRET,
     ) {
         requireName(name)
         if (value.isEmpty()) throw PluginError("bad_request", "secret value must not be empty")
@@ -370,7 +441,9 @@ object SecretVault {
         // blob is touched, not after, or the two would disagree.
         val existing = readMeta(ctx)
         val resolvedHosts = rules ?: existing[name]?.hosts ?: emptyList()
-        val meta = existing.toMutableMap().apply { this[name] = SecretMeta(docs, key, resolvedHosts) }
+        val meta = existing.toMutableMap().apply {
+            this[name] = SecretMeta(docs, key, resolvedHosts, kind)
+        }
         persist(ctx, next)
         writeMeta(ctx, meta)
         session = next
@@ -451,32 +524,17 @@ object SecretVault {
         lock()
     }
 
-    /** Reject names that cannot be a policy unit or a route segment. */
-    private fun requireName(name: String) {
-        if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,63}"))) {
-            throw PluginError(
-                "bad_request",
-                "secret name must be lowercase [a-z0-9_-], 1-64 chars, starting alphanumeric"
-            )
-        }
-    }
-
     /**
-     * A link is either absent or an https URL. https-only because these get opened in a
-     * browser from the CRUD screen: allowing http would let a stored link be a cleartext
-     * trip, and the two links exist to be trustworthy.
+     * The name and link rules now live in [SecretRules], a pure object.
+     *
+     * They were private methods here, which made them untestable — the only way to check a
+     * built-in template was to save it on a device with a real key. Delegating keeps ONE
+     * implementation, so "what the vault accepts" and "what the templates are validated
+     * against" cannot drift.
      */
-    private fun requireUrlOrEmpty(field: String, url: String) {
-        if (url.isEmpty()) return
-        val parsed = try {
-            java.net.URL(url)
-        } catch (e: Exception) {
-            throw PluginError("bad_request", "$field is not a valid URL: ${e.message}")
-        }
-        if (parsed.protocol != "https") {
-            throw PluginError("bad_request", "$field must be https, got '${parsed.protocol}'")
-        }
-    }
+    private fun requireName(name: String) = SecretRules.requireName(name)
+
+    private fun requireUrlOrEmpty(field: String, url: String) = SecretRules.requireUrlOrEmpty(field, url)
 
     // --- crypto ---------------------------------------------------------------
 

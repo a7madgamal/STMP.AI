@@ -1737,7 +1737,7 @@ model's failure. Guaranteeing the detail is strictly better than refusing the su
 
 165 tests green (10 new for `BodyDetail`). Version 0.32.0 / build 128.
 
-## 0.32.1 — reverted to Qwen3-0.6B (build 129) — CURRENT
+## 0.32.1 — reverted to Qwen3-0.6B (build 129)
 2026-10-20
 
 Mido: *"too slow and I think it crashed. new plan: recert to the old small one."* — and *"revert,
@@ -1773,6 +1773,626 @@ The doc comment in `ModelRegistry` was rewritten: it still argued for the 1.7B, 
 lie sitting next to the code.
 
 165 tests green. Version 0.32.1 / build 129.
+
+## 0.32.2 — a failed start says WHY (build 130)
+2026-10-20
+
+Mido: *"on server fail user should see clear error"* — after reporting *"i click start server
+nothing happens"*.
+
+He was right on both counts, and they were the same defect seen from two sides. The service
+refused to bind (no tailnet address) and called `stopSelf()`, which left `serverUp=false` and the
+reason in `lastError`. The hero card then rendered with `!serverUp` checked **before**
+`lastError`, so the branch that prints the reason was unreachable in exactly the situation that
+sets it. Tapping START looked like a dead button: the service started, refused, stopped, and the
+screen kept saying *"Tap START SERVER to begin"*. The refusal was never missing — it was
+computed, stored, and then thrown away one line before it reached the screen.
+
+**The fix is structural, not a reordered `when`.** The precedence rule now lives in
+`ui/ServerStatus.kt` — a pure object with `state`/`title`/`detail`/`checklistValue` — because an
+ordering rule that decides what a human sees cannot be tested from inside an Activity, and this
+one had no test at all. The project has paid for this shape twice before (`ResponseBody.classify`,
+`HostAllowlist`): a decision inlined in the view or the I/O path is a decision nobody can
+exercise, so the wrong branch is the one that ships. `ServerStatusTest` pins the ordering, and
+it was proven to fail — sabotaging the `FAILED` branch (`lastError.isNotBlank() && serverUp`, so
+it could never fire with the server down) turned 4 of its 8 tests red before being reverted.
+
+What the user sees now:
+
+- `● Could not start` on a **DANGER** surface, with the reason underneath in the danger colour —
+  not the muted body colour it used to share with log lines.
+- The Setup checklist row says *"not running — see the error above"* instead of "stopped", which
+  read like a contradiction under a red heading.
+- `startBridge()` clears `lastError` first, so a retry after fixing the cause cannot briefly show
+  the old reason while the new start is still binding.
+
+The error strings themselves were also rewritten to be actionable rather than diagnostic. The
+tailnet refusal — the one that fired here — now reads *"No Tailscale address on this phone. Open
+the Tailscale app, connect it, then tap START SERVER again."* It previously said *"no tailnet
+address found; refusing to bind 0.0.0.0"*, which names an internal decision the user cannot
+act on. Same treatment for the bind failure, the unreadable policy file, and the unreadable
+secret index.
+
+**Not changed: the refusal itself.** Binding to the tailnet address and refusing to fall back to
+`0.0.0.0` is a deliberate security decision (S8) and stays. A bridge that silently binds every
+interface when Tailscale is down would be reachable from any network the phone joins.
+
+173 tests green (8 new in `ServerStatusTest`). Version 0.32.2 / build 130.
+
+## 0.32.3 — four leaks that were killing the phone (build 131)
+2026-10-20
+
+Mido: *"my phone was DYING until I uninstalled the shit out of the app!"* — and he was right,
+which makes this the release where the most important bug was not the one being chased. Two
+hours went into the Tailscale path because that is what the *symptom* looked like: the bridge
+would not bind, so the server never came up. Tailscale was real, but third-order. The app was
+the disease.
+
+Four defects, all confirmed by reading the code after he uninstalled (so none of this is
+device-measured — see the honesty note at the end):
+
+**1. `NotifStore` had no cap at all.** It was `items[sbn.key] = sbn` on a `LinkedHashMap`, with
+nothing ever evicting. Every notification the listener saw stayed resident for the life of the
+process, and each value is a whole `StatusBarNotification` — a `Bundle` of extras plus whatever
+bitmaps the posting app attached. The process is a `specialUse` foreground service, i.e. one the
+OS is *obliged* to try to keep alive, so the growth had no ceiling and no pressure to stop it.
+This is the one that made a phone feel like it was dying. Now bounded at
+`NotifCapacity.MAX_ITEMS` (200), oldest-first, applied on both `put` and `seed` — `seed` because
+a busy shade on first bind is exactly the bulk path that would otherwise bypass the cap.
+
+**2. The model was never released when the service stopped.** `onTrimMemory` released it, but
+that is a HINT the OS may never send, so a stopped service could hold ~700 MiB indefinitely.
+`onDestroy` now calls `ModelRegistry.release()`. The model FILE is untouched; the next start
+reloads it.
+
+**3. The warm-up ran BEFORE the bind check, so every failed start paid for it.**
+`onCreate` spawned the warm thread, and `onCreate` runs before `onStartCommand` — so a start
+that immediately refused (no tailnet address, unreadable policy, bad port) still loaded the
+engine and ran a full throwaway GPU inference, then called `stopSelf()`. He tapped START
+repeatedly while the bind was failing, so each tap bought an engine load for a service that
+never served a request. The warm moved into `onStartCommand`, after `markRunning(true)`: only a
+server that exists pays for it.
+
+**4. `warm()` was check-then-act with no lock.** `engine ?: createEngine()` means two concurrent
+callers can each build a full engine — two ~700 MiB mappings for one model. `warm()` and
+`release()` now share the same monitor, so a release cannot race a load and leak the engine it
+was about to assign.
+
+**Why the capacity rule is a separate pure object.** `NotifStore` holds `StatusBarNotification`,
+which does not exist on the JVM — so the unbounded map shipped for dozens of releases while
+`testDebugUnitTest` stayed green, because no test *could* see it. `NotifCapacity` is the
+Android-free half and `NotifCapacityTest` pins it, asserting on the returned keys rather than
+counts: a count-only test passes when the code evicts the newest entry, which would quietly drop
+the notification a human just received — a worse bug than the leak being fixed.
+
+**Honest scope note:** these are code-reading findings. He uninstalled the app before any of it
+could be measured, so there is no `/debug` memory figure, no `/logs` trace, and no device
+confirmation that 0.32.3 behaves better. It ships as an untested-on-device fix and should be
+described that way until he confirms it.
+
+181 tests green (8 new in `NotifCapacityTest`). Version 0.32.3 / build 131.
+
+## 0.33.0 — keep the config, never the secrets (build 132)
+2026-10-20
+
+Mido: *"I didn't like losing all my config on a fresh install. can we keep everything except the
+secrets on uninstall?"*
+
+`android:hasFragileUserData="true"`. Android then shows a **"keep app data?"** checkbox on
+uninstall; ticked, `filesDir` and SharedPreferences survive — the gate policy and its rules, the
+audit log, and the account email. That is the config that was actually being lost.
+
+**Secrets cannot survive, and this is not an exclusion — it is the platform.** The vault's
+wrapping key lives in `AndroidKeyStore`, and a Keystore entry is deleted on uninstall no matter
+what this flag says. So a kept-config reinstall restores the wrapped data key and its IV while
+the key that unwraps them is gone. `allowBackup` also stays `false`: this keeps data on THIS
+phone across a reinstall and sends nothing off the device, so the refresh token still never
+leaves.
+
+**That half-state was a trap, and fixing it is the real work in this release.** Two things
+combined to make it a permanent dead end:
+
+1. `vaultKey()` **generates a key when the alias is missing**. So the act of trying to unlock
+   would mint a fresh VK, then fail to unwrap the old blob with it (GCM tag mismatch) and throw
+   `vault_unwrap_failed` — an error that reads like corruption.
+2. `isUnrecoverable()` only checked for a **missing wrap IV** (the 0.14.x bug), so this new case
+   answered `false` and went down the ordinary unlock path — which can never succeed.
+
+Result without a guard: a prompt that accepted a fingerprint and failed, every single time,
+forever, with no reset offered. The same dead end as the 0.14.x vault, reached a new way.
+
+So `VaultState` was added — a pure object over three booleans (`wrappedExists`, `ivExists`,
+`keyExists`) resolving `ABSENT` / `UNLOCKABLE` / `UNRECOVERABLE` / `ORPHANED`. `SecretVault.state`
+reads the key presence with `containsAlias`, **never** by calling `vaultKey()`, because that
+getter would create the key and erase the evidence. `lockOnLoad` routes `ORPHANED` to the reset
+dialog with its own wording, because "an old build destroyed your vault" is a lie when the truth
+is "you reinstalled and kept the config".
+
+`VaultStateTest` pins all eight combinations and was proven to fail: deleting the `ORPHANED`
+branch sent it red exactly there, then back to green.
+
+188 tests green (7 new in `VaultStateTest`). Version 0.33.0 / build 132.
+
+## 0.33.1 — the KV cache was eating the phone (build 133)
+2026-10-20
+
+Mido: *"something is definitely wrong all this shit happened after we reverted our large AI model
+with the small one, something was fucked up badly it's like the server eats ALL memory"*. He was
+right, and it took me two wrong answers to get there.
+
+**The revert was incomplete.** 0.32.1 changed exactly one source file — `ModelRegistry.kt`, four
+constants naming the 0.6B artifact. It never touched `LiteRtLm.kt`, so the context window stayed at
+the value 0.31.0 had raised it to **while the 1.7B was live**. 0.31.0's own comment said the quiet
+part: *"The cost is KV cache: this is the dominant memory term."*
+
+The arithmetic, for Qwen3-0.6B at fp16 (28 layers, 8 KV heads, 128 head dim):
+
+```
+KV bytes/token = 2 * 28 * 8 * 128 * 2 = 112 KiB
+
+ 1024 tok -> ~112 MiB
+ 8192 tok -> ~896 MiB   <- what 0.32.1 actually shipped
+ 2048 tok -> ~224 MiB   <- this release
+```
+
+So "revert to the small model" cut the weights by ~650 MB and left the cache **~800 MB larger**
+than the 0.6B had ever run with. Net heavier than the 1.7B it was meant to replace.
+
+That explains the whole afternoon, which none of the earlier fixes could: a foreground service
+holding ~1.3–1.5 GB applies memory pressure → Android's low-memory killer reaps background
+processes → **Tailscale is a background VPN and a prime victim** → the phone loses its `100.x`
+address → `tailnetAddress()` returns null → the app correctly refuses to bind → no server. Fixes
+aimed at the bind and the error message changed nothing because the bind was never the problem.
+
+**What changed:**
+
+- `MAX_CONTEXT_TOKENS` 8192 → **2048**.
+- `PromptBudget.MAX_TOTAL_CHARS` 16,000 → **4,000** and `MAX_PER_ROW` 12,000 → **4,000**. The
+  budget's own comment already said it "has to be derived from the CONTEXT WINDOW, not picked by
+  feel" — so leaving it at 16,000 against a 2,048-token window would have overflowed the window and
+  failed the request outright, since the AI is core.
+- The stale doc block in `PromptBudget` that still justified its numbers against a 1024-token
+  window is rewritten. A limit outliving the constraint that justified it is exactly how this bug
+  happened once already.
+- `PromptBudgetTest`'s "a 5 KB payload fits without clipping" was **inverted into two tests**,
+  because the trade changed deliberately: a 4.9 KB body is now clipped AND marked, while a 3.5 KB
+  body still passes whole. Both halves are asserted, so neither can drift silently.
+
+**`/debug` now reports real memory.** `storage.memoryFreeBytes` was never an answer to "how much is
+the app using" — it reports the device's free RAM, which says the phone has less left but never
+what took it. Every question about this app's footprint therefore needed a calculation from the
+model constants, and the calculation was wrong for weeks because nothing on the device contradicted
+it. The new `memory` section reports `totalPssBytes`, `javaHeapBytes`, `nativeHeapBytes`,
+`otherPssBytes`, `javaUsedBytes`/`Committed`/`Max`, plus `aiContextTokens` (the window the running
+build was compiled with) and `aiModelResident`. Native is split out on purpose: a ~896 MiB KV cache
+is native and would be invisible in a heap-only view — precisely the mistake that hid this.
+
+189 tests green. Version 0.33.1 / build 133.
+
+**Still unmeasured.** The ~896 MiB figure is arithmetic from the model configuration, not a reading
+from the device: the bridge would not come up long enough to answer `/debug` while this was being
+diagnosed. The new `memory` section is what makes the next check a measurement — 0.33.1 should show
+`totalPssBytes` dropping by roughly 670 MB against 0.33.0.
+
+## 0.34.0 — Options screen, and "off" that means off (build 134)
+2026-10-20
+
+Two preferences, one new screen, and one seam that replaces nine scattered call sites.
+
+**Rename first, so the diff stays readable.** `SettingsActivity` was the EXCEPTIONS screen and had
+been misnamed since it was created — the skill docs refer to it as "the rules author" while its
+own class comment says where exceptions are authored. It is now `ExceptionsActivity`, and the new
+screen is `OptionsActivity`. One file each, no ambiguity about which one a setting belongs to.
+
+**The two toggles, both defaulting OFF** (Mido, 2026-10-20):
+
+- **Fingerprint for approval modals.** `requiresBiometric` becomes `mode == SECURE && policy.fingerprintForModals`.
+  The secret vault is deliberately untouched: its key is `setUserAuthenticationRequired(true)`, so
+  no setting can remove its fingerprint, and `lockOnLoad` still unlocks it at app start. A locked
+  vault answers `secret_locked` exactly as it already does under NOTIFY — which never touched
+  biometrics either, and is the precedent that made this a one-line rule rather than a new consent
+  model. The first draft of this plan assumed a dilemma ("two taps, or let the modal ignore the
+  option") that did not exist; NOTIFY had already answered it.
+- **AI on/off.** Off means no model loaded, no download offered, no request described, and no
+  `503 model_not_ready` — ever.
+
+**`AiGateway` is the seam.** The root problem was `Route.aiSummary` carrying two meanings at once:
+"this route does not want a summary" AND "this route is exempt from the readiness gate". Two
+meanings in one flag is why a *global* off switch had nowhere to live — the gate consulted the
+route, callers consulted the route, and `ModelRegistry` was reached directly from six places.
+Now `AiGateway` owns readiness, warming, releasing, summarising and status. A route keeps one
+honest meaning — *does this route want a description* — and every question about whether an AI
+exists is answered in one function from one setting. `BridgeService`'s three `requiresAi` sites,
+`ApprovalGate`'s and `NotifyOverlay`'s `SummaryProvider.run` calls, and the home screen's model
+row all go through it.
+
+**The preferences live in `policy.json`, and that was a deliberate trade with a specific fix.**
+Mido: *"single file for now"*. The risk is that policy is fail-hard — an unreadable file refuses to
+start the server, which is correct for a security decision and disproportionate for a preference.
+So strictness is now split per field rather than per file: `global` and `rules` still throw,
+while `fingerprintForModals` and `aiEnabled` fall back to their default and record a warning. And
+`VERSION` did **not** move: an existing file parses unchanged, which matters because that file now
+survives a reinstall.
+
+`Policy` stays pure, and the first attempt did not. Logging a bad preference from `parse` reached
+`android.util.Log`, which throws "not mocked" on the JVM — so the preference test failed with a
+`RuntimeException` instead of an assertion. The warning now travels as `preferenceWarnings` data and
+`PolicyStore` logs it. That is the same split this project keeps rediscovering: decide in a pure
+function, act where Android exists.
+
+The carry-over trap was closed in the same pass: `withRule`, `withoutRule` and the new `withGlobal`
+/ `withFingerprintForModals` / `withAiEnabled` all pass every field explicitly, and `applyGate` now
+calls `existing.withGlobal(after)` instead of `Policy(after, existing.rules)`. A positional
+constructor is one edit away from silently resetting a toggle — which is exactly how the rule table
+was wiped once before.
+
+196 tests green (7 new). Version 0.34.0 / build 134.
+
+## 0.35.0 — secret templates, and the rules made testable (build 135)
+2026-10-21
+
+Three built-in templates (Mido, 2026-10-20: *"add github, notion only"* — plus `todoist`, which is
+the one actually in use). A new **ADD FROM TEMPLATE** button opens a picker; choosing an entry
+opens the EXISTING add dialog prefilled with name, docs, key and hosts.
+
+**The value field stays empty and required.** A template cannot create a working secret on its
+own, which is the property that makes shipping a fixed list safe — there is no credential in the
+source tree, and `SecretTemplatesTest` asserts the data class has no value-shaped field so one
+cannot appear later by accident.
+
+**Hosts are prefilled but editable** (Mido chose option 1). The concern was that a template
+would make a security decision on the human's behalf: `HostAllowlist` is what stops a stored key
+leaving the device somewhere it should not, so a wrong entry widens the blast radius permanently,
+at creation. Exact api hosts, never wildcards — `*.todoist.com` would also permit every other
+subdomain the vendor runs, which is not what "let this key call the API" means.
+
+**The real work was making the rules testable.** `requireName` and `requireUrlOrEmpty` were
+PRIVATE methods on `SecretVault`, so the only way to check a built-in template was to save it on a
+device — inside a dialog, after pasting a real API key, where a typo in a list the human was told
+to trust surfaces as a `bad_request` toast that reads like their mistake. They are now
+`SecretRules`, a pure object, with `SecretVault` delegating to it. One implementation, so "what the
+vault accepts" and "what the templates are checked against" cannot drift — the same move already
+made for `HostAllowlist`, `ResponseBody` and `VaultState`.
+
+`SecretTemplatesTest` (10 tests) checks every entry against those same objects: name legality,
+https-only links, every host passing `HostAllowlist.requireRule`, hosts being exact rather than
+wildcards, and a shared-suffix host (`evil-api.todoist.com`) still being refused. **Proven to
+fail**: changing Notion's host to `*.notion.com` turned two tests red, then back green.
+
+Two smaller decisions worth recording:
+
+- A template's NAME is read-only in the dialog. The name is the plugin id, and the docs/hosts were
+  chosen for that one service — renaming it would attach Notion's hosts to a secret called
+  `todoist`.
+- The picker refuses to start a template whose name already exists and points at the row's
+  `replace` action instead. Opening "Replace" silently could wipe a host list someone had
+  deliberately narrowed.
+
+206 tests green (10 new). Version 0.35.0 / build 135.
+
+## 0.36.0 — Drive, and the plumbing that makes bytes possible (build 136)
+2026-10-21
+
+Google Drive, with download and upload as the headline. Full `https://www.googleapis.com/auth/drive`
+scope, no picker (Mido, 2026-10-21) — so **one re-login is required** after installing this.
+
+**`drive.file` was rejected, and the reason matters.** It is the narrower scope and it cannot SEE a
+file the app did not create, so "download my document" would answer not-found for everything already
+in the account — defeating the point. The trade is stated plainly rather than buried: the token lives
+on the phone, and the approval gate is the only thing between a caller and every file in the account.
+
+**The plumbing refactor.** Every route returned `Resp(status, JSONObject)` and the server wrote
+`application/json` — there was no path for bytes at all. `RespPayload` is now a sealed variant
+(`Json` | `Stream` with its own content type and length), `Dispatched` carries it, and
+`writeResponse` checks the payload before falling back to JSON. The ~13 existing construction sites
+are untouched because `Dispatched.body` stayed a `JSONObject`.
+
+**Three leaks were closed BEFORE any byte could flow**, because "streaming is fine as long as it
+doesn't leak secrets" is a property, not a promise:
+
+1. **File bytes into the audit log.** `AuditRecord` stores request bodies verbatim, capped at 32 KiB,
+   so a streamed upload would have written the first 32 KB of the user's document permanently into an
+   append-only log. New `Route.auditRequestBody`, mirroring the existing `auditResponseBody`.
+2. **File bytes out of the audit log.** Same cap on responses; `auditResponseBody = false` on the
+   download route.
+3. **Caller credentials in the log.** `HOP_BY_HOP` filtered four harmless headers and NOT
+   `authorization`, so a caller's bearer token was written verbatim into the request log. Now
+   filtered. That one was never Drive-specific — it had been true for every route since the audit
+   existed.
+
+`auditRequestBody` and `streamsRequest` are deliberately two flags: one is about what the LOG keeps,
+the other about MEMORY (`readRawBody` buffers the whole body into a String, fatal for a large file).
+An upload needs both, for unrelated reasons.
+
+**Drive routes.** List/search, metadata, create folder, rename, move, trash, download, upload. Trash
+rather than delete: `DELETE` is permanent and unrecoverable, `trashed=true` is recoverable for 30 days,
+and a destructive action should be the recoverable one unless someone explicitly asks otherwise. The
+modal says so. Every mutating route FETCHES the file first so the card names it — an id is not
+something a human can approve — and a bad id throws `not_found` before the modal opens.
+
+**The flags live in `DriveRouteFlags`, a pure table `routes()` builds from.** The test cannot
+construct a `Context`, so `routes()` is unreachable from the JVM suite — and the tempting fix (copy
+the flags into the test) passes no matter what the plugin does, which this project has already paid
+for twice. Deriving them means the test reads the same values production uses. `DrivePlugin.route()`
+throws when a route has no flags entry, so a new route whose audit behaviour nobody decided fails at
+registration instead of inheriting a default that merely looks safe.
+
+212 tests green (6 new in `DriveAuditFlagsTest`). Version 0.36.0 / build 136.
+
+**Not done, deliberately:** the phone-path routes (save-to-Downloads, upload-from-path). Streaming
+covers caller↔Drive; those two are for "put this file on my phone" and need scoped-storage handling,
+so they are their own pass.
+
+## 0.36.1 — uploads read our own socket to death (build 137)
+2026-10-21
+
+First real device test of Drive: **download verified end-to-end, upload failed with
+`500 internal_error: Read timed out` in 10.3 s.**
+
+**The bug was `InputStream.copyTo`, and it is entirely mine.** `copyTo` reads until END OF STREAM.
+An HTTP request body does not end at end-of-stream — it ends at `Content-Length`, and a keep-alive
+client holds the socket open afterwards waiting for the response. So the first upload copied its
+20,232 bytes correctly, then blocked on a read that could never return, and died five seconds later
+inside `SocketInputStream.read`.
+
+The stack made it unambiguous: `copyTo` → `GoogleApi.putStream` → `DrivePlugin.uploadFile`. Google
+was never involved. We were waiting on our own client, which had already sent everything it was
+going to send.
+
+**Fix: `BoundedCopy.exactly`.** Copy exactly the declared length, never more, and ask only for what
+remains on the final partial read — a full-buffer read with fewer bytes left is the same hang in a
+smaller form. A stream that ends early throws `bad_request` naming how much arrived, because a
+half-file that reports success is worse than a refusal: nobody goes looking for the missing half.
+
+It is a function rather than an inline loop for the usual reason — the rule is "the body has exactly
+this many bytes", which a unit test can prove and an inline copy inside an I/O path cannot.
+`BoundedCopyTest` (7 tests) covers the stop-at-length case, the untouched remainder, the truncated
+stream, a multi-buffer payload, and the zero-length case.
+
+**What the device test proved before the failure:**
+
+- `GET /drive/files` → 200, real files, correct metadata.
+- `GET /drive/files/{id}/content` on a PDF → 200, `Content-Type: application/pdf`,
+  `Content-Length: 20232`, and the saved file was `PDF document, version 1.4, 1 page` at exactly
+  20232 bytes. **Byte-exact, no truncation** — the streaming download path works.
+
+Also confirmed by that run: the Drive API had to be enabled in the Cloud project first (403
+`accessNotConfigured`, not an auth error — a scope failure would have been 401), which is a setup
+step rather than a code issue.
+
+219 tests green (7 new). Version 0.36.1 / build 137.
+
+**Still unverified:** the upload path after this fix. The download half is measured; the upload half
+is a code-reading fix with a unit test, until a real file lands in Drive.
+
+## 0.37.0 — save a Drive file straight to the phone (build 138)
+2026-10-21
+
+`GET /drive/files/{id}/content?to=phone` saves the file to **`Downloads/PhoneBridge/`** and answers
+JSON instead of bytes. No `?to=phone` (or any other value) still streams to the caller exactly as
+before, so the existing verified download path is untouched.
+
+**One route, two sinks, and merging them was the point** (Mido, 2026-10-21: *"think about merging both
+so that i can download a file from drive to phone directly"*). Metadata lookup, MIME resolution, the
+Google-native refusal and the failure paths are identical; only where the bytes land differs. Two
+routes would have been two copies of that, drifting.
+
+**The permission question had a better answer than the one asked for.** Mido asked how to prompt for a
+missing permission on a modal. There is no permission: contributing a NEW file to a MediaStore
+collection is always allowed on API 29+, and the restriction applies to modifying files you do not
+own, which this never does. So "modern only" costs the user no dialog and no grant — which is why no
+prompt flow was built. Worth recording because the alternative (legacy
+`getExternalStoragePublicDirectory` + `WRITE_EXTERNAL_STORAGE`) would have needed one, and below API 29
+the route now REFUSES with `unsupported_storage` naming the level rather than silently writing to an
+app-private directory and calling that "saved".
+
+**Two refusals that happen BEFORE any bytes move**, because a human has already approved by then and
+an opaque `google_error` afterwards is the worst place to learn the file was never downloadable:
+
+  - **Google-native docs** (`application/vnd.google-apps.*`) have no binary payload — `alt=media`
+    answers `403 cannotDownloadFile`. Refused with a message naming the type and pointing at export.
+  - **Folders** are not files, and this release deliberately does not walk trees (Mido: *"ignore
+    folders for now"*).
+
+**The filename rule bit immediately, and the test caught it.** Drive names are arbitrary user input;
+`"2026/10 report.pdf"` is legal in Drive and an illegal MediaStore `DISPLAY_NAME`. So separators
+become `-` and NUL is stripped. But the first implementation also called `.trim()`, which silently ate
+the leading space off a real file in the account named `" Cover tmp.pdf"` — legal, and the name the
+user would search for. `PhoneSaveTest` failed on exactly that, and the fix was to strip only what is
+genuinely illegal. A blank name still falls back to `drive-<id>`, because an unnamed entry in Downloads
+is unfindable.
+
+The MediaStore insert is rolled back on a write failure: a half-written row appears in the Files app as
+a truncated file with nothing saying it was our fault.
+
+**Still out of scope, deliberately:** folder download (mirror-tree or zip — undecided), upload-from-a-
+phone-path, and lazy-load/idle-release for the AI engine.
+
+228 tests green (9 new in `PhoneSaveTest`). Version 0.37.0 / build 138.
+
+## 0.38.0 — the modal names the file properly (build 139)
+2026-10-21
+
+Mido: *"the modal needs improvements. i need full file details: full path and name, size(if possible)"*.
+
+**The bug behind the request was bigger than missing fields: the download modal showed NOTHING.**
+`GET /drive/files/{id}/content` is a GET, and `rowsFor` returned an empty list for every GET — correct
+for "list my messages", where there is no target to name, and wrong here, where the human is deciding
+about one specific file. The card was asking someone to approve an opaque request id.
+
+**`rowsFor` now lets an explicit entry win over the read default.** If a plugin DECLARED rows for a
+route, they are rendered — GET or not. Only when it did not does the read default apply. A forgotten
+entry for a WRITE still throws `internal_error`, which is the guarantee that mattered: an approval
+nobody can judge must not exist. The old rule conflated "reads have no target" with "this route is a
+read", and Drive is the first plugin where those differ.
+
+**The card now carries path, name, size and type.** A bare name cannot identify a file — two files can
+be called `report.pdf` in different folders — so `detailsOf` fetches the metadata and walks the parent
+chain to build `My Drive / Projects / 2026 / report.pdf`. Drive has no path field; the path only exists
+by resolving each ancestor, which is why the walk is real work rather than a string join. It is bounded
+at 12 levels so a malformed chain cannot spin forever inside a modal, and a missing ancestor truncates
+the path rather than failing the card — a partial path beats a bare name.
+
+**Size has its own trap, and it is tested.** Drive omits `size` for folders and Google-native docs, so
+the caller passes -1. `DriveFormat.humanSize` renders that as **`unknown`**, never `-1 B` or `0 B`:
+"unreported" and "empty" lead a human to opposite conclusions and must not look the same. Zero bytes is
+a real size and still renders as `0 B`.
+
+One formatter (`fileCard`) serves both the download and trash cards, because a card that shows the size
+on trash but not on download is the same bug in a different place.
+
+`DriveFormat.folderOf` was wrong on the first attempt: it trimmed trailing slashes instead of dropping
+the filename, so a rename card would have said the file lived in `My Drive / Projects / report.pdf`.
+`DriveFormatTest` caught it, and the fix shares one `SEPARATOR` constant with `fullPath` so the two
+cannot disagree about what a separator is.
+
+239 tests green (11 new in `DriveFormatTest`). Version 0.38.0 / build 139.
+
+## 0.39.0 — the misclick guard is back (build 140)
+2026-10-21
+
+Mido: *"when AI is disabled, we need the 3 seconds protection again to avoid misclicking the dialog"*.
+
+**The regression was a side effect of removing the AI timer.** Before 0.22.0 there was a fixed
+`DECISION_DELAY_MS` before the buttons armed. That was replaced by "arm when the summary lands",
+which is better in every way — except that with no summary to wait for there is nothing to arm on,
+so the gate stamped `enabledAtMs = shownAtMs` and the buttons were live the instant the modal
+appeared. A tap already in flight when the card arrives lands on APPROVE.
+
+**`ArmGuard` is one rule used by BOTH arm paths**, not a fix applied only to the branch that broke.
+The rule is a MINIMUM time since shown: `armAt = max(readyAt, shownAt + 3000)`. Applying it
+per-branch is exactly how these two paths drift apart, and this project has paid for that shape
+repeatedly — the audit flag honoured on one dispatch path and ignored on the other is the same bug
+with a different field.
+
+The guard can only ever DELAY arming, never bring it forward, so a slow summary is not punished
+twice: a request that took 6s to summarise arms at 6s, while one that took 1.2s waits out the
+remaining ~1.8s.
+
+**Three things had to change together, or the guard would have been cosmetic:**
+
+1. **The UI predicate.** It tested `enabledAtMs > 0`, which a FUTURE timestamp satisfies — so the
+   buttons would have gone live instantly and the guard would have done nothing. Arming is now
+   `ArmGuard.isArmed(enabledAt, now)`.
+2. **A third countdown phase.** The modal now distinguishes `waiting for the summary` (no arm time),
+   `ready in Ns` (guard window), and `auto-deny in Ns` (armed). The guard phase deliberately does
+   NOT show the auto-deny clock: the 60s window has not started yet, and showing it would claim time
+   the human has not been given. It is labelled rather than silent, because a modal with a dead
+   button and no explanation reads as broken, and a human who thinks it is broken taps harder.
+3. **`maxWaitMs()`.** The gate's latch budget did not include the guard, so a no-AI request would
+   arm at +3s and then get 60s of countdown — 63s of legitimate life against a 60s latch. The
+   caller would time out at the exact moment the human still had 3 seconds left, and the UI would
+   be showing a window the server had already abandoned. The guard term is now part of the budget.
+
+`ArmGuardTest` (7 tests) pins the boundaries, including the one that matters most — that the guard
+only ever pushes arming later. One of my own test assertions was wrong on the first run (arguments
+to `isArmed` reversed); the implementation was right and the test was corrected.
+
+246 tests green (7 new). Version 0.39.0 / build 140.
+
+## 0.40.0 — the SSH gate (build 141)
+2026-10-21
+
+Mido: *"build a generic ssh gate"* — refined over the session into: raw command string, ed25519
+keys generated on the phone, host-key verification, empty allowlist, its own screen.
+
+**It is a mechanism, not a policy.** Mido: *"the bridge offer a mechanism. the gate's role is
+showing me exactly what I'm approving, if I approved something stupid that's on me"*. So there is
+no command allowlist and no quoting: the string that arrives is the string that runs, and the card
+shows it verbatim. The safety property is that card and wire are the SAME string — not that the
+string is filtered.
+
+**A premise in the original idea was wrong, and it was the one the safety argument rested on.**
+"Send an argv array, no shell, nothing to inject" is not something SSH offers: the `exec` request
+carries one string and the server hands it to `$SHELL -c`. There is no argv transport in the
+protocol. Rather than fake it with our own quoting — which Mido rejected in favour of a raw string
+— the design leans on the card being literal and on the human being the judge. That is stated
+plainly here because the argv framing is what made the earlier draft sound safer than it was.
+
+**Keys are generated on the phone and never displayed.** `SshKeygen` produces an ed25519 keypair;
+the private half goes straight into the vault and the public half is shown once for
+`authorized_keys`. JSch 2.28.8 carries a pure-Java `KeyPairEd25519`, so no BouncyCastle dependency —
+verified by inspecting the jar, and the build confirmed D8 is happy with it.
+
+**The private key would have been one tap from the screen, and that is why `SecretMeta.kind`
+exists.** `SecretsActivity` offers reveal and replacement for every vault entry; for an SSH key
+both would render or accept the private half. Entries are now marked `SECRET` or `SSH`, and SSH
+entries show only delete plus a line saying why. One vault, one unlock, and the claim stays true.
+
+**Host keys are confirmed, never assumed** (Mido: *"I confirm first"*). The first connection to a
+host REFUSES with `ssh_host_key_unknown` and reports the fingerprint and algorithm; the caller
+repeats the call with `trustHostKey` naming it, which pins it. A later mismatch refuses with
+`ssh_host_key_changed` — the message says both readings (rebuild or impersonation) rather than
+assuming either. Implemented as a `HostKeyRepository`, so JSch aborts the handshake itself; the
+earlier draft tried to read `session.hostKey`, which does not exist in this version.
+
+**`/ssh/{name}`** takes `{"command": ..., "trustHostKey"?: ..., "timeoutMs"?: ...}`. Output is
+capped at 64 KiB with a 30s default timeout, and the session is always torn down. The command is
+stored in the audit log verbatim (Mido: *"store"*) — a remote-exec feature with no record of what
+ran would be worse than a log that might contain a secret.
+
+254 tests green (8 new in `SshConnectionTest`). Version 0.40.0 / build 141.
+
+**Not verified on device:** that ed25519 generation actually works on the S22, and that a real
+connection authenticates. Both are runtime facts. The first thing to try is creating a connection
+and reading back its public key — that proves the generator without needing a server.
+
+**Known gap, stated rather than hidden:** there is no UI to import an existing private key, so
+"generate, or use one if already generated" is currently generate-only.
+
+## 0.40.2 — the upload streams, and SSH keys generate (build 143) — CURRENT
+2026-10-24
+
+Two independent first-run failures, both reported from the device, both proven on the JVM before
+any fix was written.
+
+**A 385 MB Drive upload died at ~150 MB with a connection reset, and the reset was a lie.** The
+body was never being streamed: `HttpURLConnection` with `doOutput = true` buffers the ENTIRE body
+into a `ByteArrayOutputStream` and only opens the socket afterwards — setting a `Content-Length`
+*request property* does not change that. Against this app's 256 MB `javaMaxBytes`, a 385 MB file is
+an `OutOfMemoryError` on the request thread, and a JVM dying mid-request looks exactly like a
+network reset from the far end. Nothing in the phone's log mentioned memory, which is why the first
+diagnosis (the network) was wrong.
+
+Measured at the real size and the real heap ceiling:
+
+```
+property only:                        OOM java heap space, 128 MB sent, heapUsed 195 MB
+  at java.io.ByteArrayOutputStream.write
+  at sun.net.www.http.PosterOutputStream.write
+setFixedLengthStreamingMode(385 MB):  385 MB sent, heapUsed flat at 3 MB
+```
+
+`HttpStream.fixedLength` now owns that call, and it is made BEFORE `getOutputStream()`. It also
+emits `Content-Length`, so the explicit header is gone — two sources for one number invite a
+mismatch. `HttpStreamTest` proves the rule structurally rather than by timing: with streaming the
+server receives body bytes WHILE the client's output stream is still open; with the old code it
+receives exactly zero until the close.
+
+**`generate key` threw `UnsupportedOperationException` on the very first SSH connection.**
+`SshKeygen` called `KeyPair.writePrivateKey`, which is built on `KeyPairEdDSA.getPrivateKey` — and
+that class does not implement it. Every key this app creates is ed25519, so the failure was total:
+
+```
+Exception in thread "main" java.lang.UnsupportedOperationException
+  at com.jcraft.jsch.KeyPairEdDSA.getPrivateKey(KeyPairEdDSA.java:75)
+  at com.jcraft.jsch.KeyPair.writePrivateKey(KeyPair.java:163)
+```
+
+The fix is `writeOpenSSHv1PrivateKey(out, null)`, which encodes from `prv_array` directly and works
+for every key type; the null passphrase is the documented no-passphrase case. `SshKeygenTest` now
+covers generation, the PEM frame, the ed25519 round-trip, and that `JSch.addIdentity` accepts the
+result — the last one mattering because a key that generates but cannot be loaded would fail every
+run as `ssh_bad_key`.
+
+**Both of these were unit-testable and untested.** JSch is plain JVM code and `putStream` uses a
+JDK class, so neither needed the phone. The lesson recorded rather than implied: the one call that
+could not possibly work was the only one with no test.
+
+263 tests green (5 new in `SshKeygenTest`, 4 in `HttpStreamTest`). Version 0.40.2 / build 143.
+
+**Still not verified on device:** that the 0.40.2 APK uploads the 385 MB file, and that a real SSH
+connection authenticates. The streaming change is proven at the HTTP layer, not through Drive.
 
 ---
 

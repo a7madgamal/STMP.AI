@@ -15,6 +15,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import com.google.android.material.button.MaterialButton
+import com.mido.phonebridge.ui.ServerStatus
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
@@ -207,7 +208,13 @@ class MainActivity : FragmentActivity() {
             startActivity(Intent(this, LogActivity::class.java))
         })
         content.addView(fullWidthButton("EXCEPTIONS", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, ExceptionsActivity::class.java))
+        })
+        content.addView(fullWidthButton("OPTIONS", Theme.ButtonStyle.NEUTRAL) {
+            startActivity(Intent(this, OptionsActivity::class.java))
+        })
+        content.addView(fullWidthButton("SSH", Theme.ButtonStyle.NEUTRAL) {
+            startActivity(Intent(this, SshActivity::class.java))
         })
 
         // --- 5. Debug: collapsed by default, out of the main flow ---
@@ -291,7 +298,17 @@ class MainActivity : FragmentActivity() {
             // AES-GCM cannot be unwrapped without it. The secrets inside are gone. Say
             // so plainly and offer the only honest way forward — a reset — instead of
             // throwing a cipher error at every unlock attempt.
-            offerVaultReset()
+            offerVaultReset(iVMissing = true)
+            return
+        }
+        if (SecretVault.isOrphaned(this)) {
+            // The vault survived a reinstall but its Keystore key did not — reachable since
+            // `hasFragileUserData` began preserving prefs across an uninstall. Calling the
+            // normal unlock path here was the trap: `vaultKey()` mints a fresh key when the
+            // alias is missing, so the prompt would appear, accept a finger, and then fail to
+            // unwrap the old blob every single time, forever, with no reset on offer. Same
+            // dead end as the 0.14.x vault, different cause — so it gets its own wording.
+            offerVaultReset(iVMissing = false)
             return
         }
         if (VaultGate.hasVault(this)) {
@@ -315,21 +332,31 @@ class MainActivity : FragmentActivity() {
      * be honest that the stored secrets cannot be recovered — a silent fresh vault would
      * look like success while quietly discarding a credential.
      */
-    private fun offerVaultReset() {
+    private fun offerVaultReset(iVMissing: Boolean) {
         if (resetOffered) return
         resetOffered = true
+        // Two causes, one remedy. The copy has to name the right one: telling someone an old
+        // build destroyed their vault when the truth is "you reinstalled and kept the config"
+        // is a lie that makes them distrust the app instead of understanding it.
+        val message = if (iVMissing) {
+            "This vault was created by an earlier build that saved the key without " +
+                "the IV it needs to be reopened. The secrets inside it cannot be " +
+                "recovered — this is a bug in that build, not something you did.\n\n" +
+                "Resetting clears the vault so you can create a fresh one and re-add " +
+                "your secrets. Nothing else on the phone is affected."
+        } else {
+            "Your config was kept across the reinstall, but the vault's encryption key " +
+                "could not come with it — Android deletes app keys on uninstall, always.\n\n" +
+                "So the secrets themselves are gone. Your gate rules, audit log and account " +
+                "are all intact. Resetting clears the dead vault so you can create a fresh " +
+                "one and re-add your secrets; nothing else is touched."
+        }
         AlertDialog.Builder(this)
             .setTitle("Secret vault needs a reset")
-            .setMessage(
-                "This vault was created by an earlier build that saved the key without " +
-                    "the IV it needs to be reopened. The secrets inside it cannot be " +
-                    "recovered — this is a bug in that build, not something you did.\n\n" +
-                    "Resetting clears the vault so you can create a fresh one and re-add " +
-                    "your secrets. Nothing else on the phone is affected."
-            )
+            .setMessage(message)
             .setPositiveButton("reset vault") { _, _ ->
                 SecretVault.destroy(this)
-                Debug.log("vault reset (0.14.x unrecoverable wrap)")
+                Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
                 promptAttempted = false
                 lockOnLoad()
                 render()
@@ -355,37 +382,49 @@ class MainActivity : FragmentActivity() {
         // --- 1. HERO: one line that answers "is it working?" ---
         val listenerOk = BridgeService.listenerRef != null
         val notifOk = hasNotifPermission()
-        val healthy = BridgeService.serverUp && listenerOk && notifOk
+        // A failed start is its own state, and it must be checked BEFORE the stopped state.
+        // The precedence lives in `ServerStatus` (pure, unit-tested) rather than here: this
+        // ordering used to be inline, so nothing could fail when it was wrong. The old order
+        // checked `!serverUp` first, which made the reason a start failed unreachable — the
+        // service stops itself when it cannot bind, setting `serverUp=false` while `lastError`
+        // held the cause. Mido, 2026-10-20: *"on server fail user should see clear error"*.
+        val state = ServerStatus.state(
+            serverUp = BridgeService.serverUp,
+            listenerOk = listenerOk,
+            notifOk = notifOk,
+            lastError = BridgeService.lastError,
+        )
+        val failed = state == ServerStatus.State.FAILED
+
         // The state colour is applied ONCE, here. The old code set a background per
         // branch and then overwrote it two lines later, so the hero card was always
         // the neutral grey regardless of state.
-        val heroSurface: Int
-        when {
-            BridgeService.serverUp && healthy -> {
-                heroSurface = Theme.SUCCESS_SURFACE
-                heroTitle.text = "● Running"
-                heroTitle.setTextColor(Theme.SUCCESS)
-            }
-            BridgeService.serverUp -> {
-                heroSurface = Theme.WARNING_SURFACE
-                heroTitle.text = "● Running — needs attention"
-                heroTitle.setTextColor(Theme.WARNING)
-            }
-            else -> {
-                heroSurface = Theme.SURFACE
-                heroTitle.text = "● Stopped"
-                heroTitle.setTextColor(Theme.ON_SURFACE_VARIANT)
-            }
+        val heroSurface = when (state) {
+            ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS_SURFACE
+            ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING_SURFACE
+            ServerStatus.State.FAILED -> Theme.DANGER_SURFACE
+            ServerStatus.State.STOPPED -> Theme.SURFACE
         }
+        heroTitle.text = ServerStatus.title(state)
+        heroTitle.setTextColor(
+            when (state) {
+                ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS
+                ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING
+                ServerStatus.State.FAILED -> Theme.DANGER
+                ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
+            }
+        )
         heroCard.background = Theme.surface(this, heroSurface, Theme.RADIUS_CARD)
-        heroSub.text = when {
-            !BridgeService.serverUp -> "Tap START SERVER to begin"
-            BridgeService.lastError.isNotBlank() -> BridgeService.lastError
-            AuthManager.isLoggedIn(this) -> (AuthManager.accountEmail ?: "signed in") +
-                " · " + BridgeService.bindAddress.ifBlank { "?" } + ":" + BridgeService.PORT
-            else -> "Not signed in to Google"
-        }
-        heroSub.setTextColor(Theme.ON_SURFACE_VARIANT)
+        heroSub.text = ServerStatus.detail(
+            state = state,
+            lastError = BridgeService.lastError,
+            email = if (AuthManager.isLoggedIn(this)) (AuthManager.accountEmail ?: "signed in") else null,
+            bindAddress = BridgeService.bindAddress,
+            port = BridgeService.PORT,
+        )
+        // The reason is the one thing on this screen that must be read, so it gets the
+        // danger colour rather than the muted body colour it used to share with log lines.
+        heroSub.setTextColor(if (failed) Theme.DANGER else Theme.ON_SURFACE_VARIANT)
 
         // --- 3. CHECKLIST: compact, each row says what to do when broken ---
         // Start/Stop colour rule (user's standing rule): grey = idle/stopped,
@@ -410,9 +449,13 @@ class MainActivity : FragmentActivity() {
         statusContainer.addView(
             Theme.statusRow(
                 this, "Server",
-                if (BridgeService.serverUp) "running on ${BridgeService.bindAddress.ifBlank { "?" }}:${BridgeService.PORT}"
-                else "stopped",
-                if (BridgeService.serverUp) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT
+                ServerStatus.checklistValue(state, BridgeService.bindAddress, BridgeService.PORT),
+                when (state) {
+                    ServerStatus.State.RUNNING_HEALTHY,
+                    ServerStatus.State.RUNNING_ATTENTION -> Theme.SUCCESS
+                    ServerStatus.State.FAILED -> Theme.DANGER
+                    ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
+                }
             )
         )
         statusContainer.addView(
@@ -502,9 +545,26 @@ class MainActivity : FragmentActivity() {
         // progress (Mido, 2026-10-19). A ready model is a plain row again, so the control
         // only exists while there is something to do.
         val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
-        val downloading = com.mido.phonebridge.ai.ModelProvisioner.running
+        // Read the switch once. When the AI is off this row must NOT offer a download: the whole
+        // point of the option is that nothing is fetched and no model sits resident, so a
+        // "tap to download" button here would be advertising the exact behaviour that was turned
+        // off. The row states the fact and points at where to change it.
+        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(this)
+        val downloading = aiOn && com.mido.phonebridge.ai.ModelProvisioner.running
         val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
-        if (downloading) {
+        if (!aiOn) {
+            statusContainer.addView(
+                Theme.statusRow(
+                    this, "AI model",
+                    "off — no model loaded (Options › AI)",
+                    Theme.ON_SURFACE_VARIANT
+                ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
+            )
+        } else if (downloading) {
             val pct = progress?.percent ?: 0
             statusContainer.addView(
                 Theme.progressButton(
@@ -753,11 +813,13 @@ class MainActivity : FragmentActivity() {
 
     private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {
         try {
-            // Carry the rules across. `Policy(after)` alone would silently delete every
-            // per-pair decision on a switch flip — you would turn NOTIFY back to
-            // AUTOMATIC and find your rules gone, with nothing in the UI saying why.
+            // Carry EVERYTHING across. `Policy(after)` alone would silently delete every
+            // per-pair decision on a switch flip — you would turn NOTIFY back to AUTOMATIC and
+            // find your rules gone, with nothing in the UI saying why. The same trap now applies
+            // to the two preferences, so the wrap is explicit rather than positional: `Policy`
+            // has four fields and a positional call is one edit away from dropping the wrong two.
             val existing = store.get()
-            store.set(Policy(after, existing.rules))
+            store.set(existing.withGlobal(after))
         } catch (e: Exception) {
             Toast.makeText(this, "could not save policy: ${e.message}", Toast.LENGTH_LONG).show()
             return
@@ -906,6 +968,11 @@ class MainActivity : FragmentActivity() {
 
     private fun startBridge() {
         Debug.log("START SERVER tapped")
+        // Clear the previous failure so a retry cannot display a stale reason: the service
+        // re-sets this on the way out if it fails again, and a successful bind clears it.
+        // Without this, tapping START after fixing the cause would still show the old error
+        // for the ~1s between the tap and the bind.
+        BridgeService.lastError = ""
         if (!hasNotifPermission()) {
             Debug.log("no POST_NOTIFICATIONS yet — requesting first")
             requestNotifPermission()

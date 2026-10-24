@@ -40,6 +40,32 @@ data class Route(
      */
     val auditResponseBody: Boolean = true,
     /**
+     * Whether the audit records the REQUEST body for this route.
+     *
+     * True for everything except a route that carries a file. An upload streams arbitrary bytes
+     * and the audit stores the body verbatim (capped at 32 KiB) — so without this, the first
+     * 32 KB of the user's document would be written permanently into an append-only log. That is
+     * a content leak into a place nobody thinks to look, and Drive makes it happen with real
+     * documents rather than test payloads.
+     *
+     * The mirror of [auditResponseBody], and deliberately a SEPARATE flag: one is about bytes
+     * going out, the other about bytes coming in, and a single flag would force them to move
+     * together when only one route needs either.
+     */
+    val auditRequestBody: Boolean = true,
+    /**
+     * Whether this route receives the raw request body as a STREAM instead of parsed JSON.
+     *
+     * **Independent of [auditRequestBody] on purpose.** This one is about MEMORY: the normal path
+     * calls `readRawBody`, which buffers the entire body into a String — fine for a JSON request,
+     * fatal for a 200 MB file. This flag says "do not buffer, hand the handler the input stream".
+     * The audit flag says "do not record it". An upload wants both, for two unrelated reasons.
+     *
+     * A streaming route receives `Req.bodyStream` and an EMPTY `Req.body`; it must read from the
+     * stream. Nothing parses it for you, which is the point — the caller's bytes are the payload.
+     */
+    val streamsRequest: Boolean = false,
+    /**
      * Whether this route's approval is DESCRIBED by the on-device model.
      *
      * True for everything that asks a human to decide something, because the whole
@@ -106,18 +132,89 @@ class Req(
     val query: Map<String, String>,
     val pathParams: Map<String, String>,
     val body: JSONObject,
-    val remote: String
+    val remote: String,
+    /**
+     * The raw body, for a route that declares `streamsRequest = true`.
+     *
+     * Null on every ordinary route — those get their body parsed into [body]. A route that reads
+     * this must NOT also expect [body] to hold anything: the stream is the payload, and the JSON
+     * object stays empty by design rather than by accident.
+     */
+    val bodyStream: java.io.InputStream? = null,
+    /**
+     * The declared `Content-Length` of the request body, or -1 when absent.
+     *
+     * A streaming route needs this: Drive's resumable upload requires the exact size on the PUT,
+     * and the alternative is a `size` query parameter the caller must remember to send and keep
+     * truthful. Reading what the transport already knows is one fewer thing to get wrong — and a
+     * wrong length fails the upload rather than truncating it, which is the safe direction.
+     */
+    val bodyLength: Long = -1L
 )
 
+/**
+ * A response body: either JSON, or raw bytes with their own content type.
+ *
+ * **Why a separate type instead of overloading `JSONObject`.** Every plugin route used to return
+ * `Resp(status, JSONObject)` and the server wrote `application/json`. Drive is files, so a
+ * download has to emit the file's own bytes and content type — which cannot be expressed as an
+ * object without base64 and a 33% tax. An explicit sealed variant makes "this is a stream" a fact
+ * the compiler checks, rather than a null field someone has to remember to test.
+ */
+sealed interface RespPayload {
+    /** A JSON object. The shape every existing route returns. */
+    class Json(val body: org.json.JSONObject) : RespPayload
+
+    /**
+     * Raw bytes.
+     *
+     * @param input the bytes. The HTTP layer closes it.
+     * @param contentType the file's own type, e.g. `application/pdf`. Never guessed from the
+     *   path — Drive tells us, and a wrong type makes a document unopenable on the caller side.
+     * @param lengthBytes the exact length, or -1 when unknown (chunked). Drive reports a size for
+     *   a download, so we send it; knowing the length is what lets a caller show a progress bar
+     *   and detect a truncated transfer.
+     */
+    class Stream(
+        val input: java.io.InputStream,
+        val contentType: String,
+        val lengthBytes: Long = -1L,
+    ) : RespPayload
+}
+
 /** Response from a handler. Plugin never touches HTTP status juggling beyond this. */
-class Resp(
+class Resp private constructor(
     val status: Int,
-    val body: JSONObject
+    val payload: RespPayload,
 ) {
+    /**
+     * The JSON body, for the ordinary case.
+     *
+     * Returns an empty object for a [RespPayload.Stream]. That is deliberate and safe here only
+     * because the caller checks [isStream] first: the audit records this value, and a streaming
+     * route declares `auditResponseBody = false`, so nothing consumes it. Use [payload] when the
+     * distinction matters.
+     */
+    val body: JSONObject
+        get() = (payload as? RespPayload.Json)?.body ?: JSONObject()
+
+    /** True when the response is raw bytes rather than JSON. */
+    val isStream: Boolean get() = payload is RespPayload.Stream
+
+    constructor(status: Int, body: JSONObject) : this(status, RespPayload.Json(body))
+
     companion object {
         fun ok(body: JSONObject = JSONObject()) = Resp(200, body.put("ok", true))
         fun error(status: Int, code: String, detail: String) =
             Resp(status, JSONObject().put("ok", false).put("error", code).put("detail", detail))
+
+        /** Raw bytes with their own content type. See [RespPayload.Stream]. */
+        fun stream(
+            status: Int,
+            input: java.io.InputStream,
+            contentType: String,
+            lengthBytes: Long = -1L,
+        ): Resp = Resp(status, RespPayload.Stream(input, contentType, lengthBytes))
     }
 }
 
@@ -181,18 +278,30 @@ interface Plugin {
         writes: Map<String, (Req) -> List<ApprovalRow>>
     ): List<ApprovalRow> {
         val key = "${req.method.uppercase()} ${req.path}"
+        // AN EXPLICIT ENTRY WINS, even for a GET.
+        //
+        // A read used to carry no target at all, which was right when reads were "list my
+        // messages" — there is nothing to name. Drive broke that assumption: `GET
+        // /drive/files/{id}/content` DOWNLOADS a specific file, and the human approving it is
+        // deciding about that file, not about a listing. A card with no rows asked someone to
+        // approve an opaque id (Mido, 2026-10-21: *"i need full file details: full path and name,
+        // size"*).
+        //
+        // So the rule is now: if the plugin DECLARED rows for this route, render them. Only when
+        // it did not does the read default apply. A forgotten entry for a WRITE still throws,
+        // which is the guarantee that mattered — an approval nobody can judge must not exist.
+        val builder = writes[key]
+        if (builder != null) return builder(req)
         if (req.method.equals("GET", ignoreCase = true) || key in reads) {
-            // A read carries no target to approve. If a GET is NOT in `reads` that is
-            // still not an error here — GET routes never mutate, so empty is correct.
+            // A read with nothing declared has no target to approve. If a GET is NOT in `reads`
+            // that is still not an error — GET routes never mutate, so empty is correct.
             return emptyList()
         }
-        val builder = writes[key]
-            ?: throw PluginError(
-                "internal_error",
-                "plugin '${id}' has no approval rows for $key (read '${req.path}'? " +
-                    "add it to reads, or add a write entry)"
-            )
-        return builder(req)
+        throw PluginError(
+            "internal_error",
+            "plugin '${id}' has no approval rows for $key (read '${req.path}'? " +
+                "add it to reads, or add a write entry)"
+        )
     }
 
     /** UI status card data. */

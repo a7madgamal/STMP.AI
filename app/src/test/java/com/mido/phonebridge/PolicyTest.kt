@@ -471,4 +471,105 @@ class PolicyTest {
         assertEquals(GlobalMode.NOTIFY, PolicyStore(dir).get().global)
         assertEquals(false, File(dir, "policy.json.tmp").exists())
     }
+
+    // --- preferences (fingerprint / AI) ---
+
+    @Test
+    fun `an old file with no preference keys parses with both OFF`() {
+        // The migration-free path: `policy.json` written before these fields existed must parse
+        // unchanged, because VERSION did not move. A bump here would invalidate the file on every
+        // device that already has one — and that file now survives a reinstall, so the damage
+        // would be sticky.
+        val raw = """{"version":1,"global":"SECURE","rules":[]}"""
+        val p = Policy.parse(raw)
+        assertEquals(false, p.fingerprintForModals)
+        assertEquals(false, p.aiEnabled)
+    }
+
+    @Test
+    fun `a preference is read when present`() {
+        val raw = """{"version":1,"global":"SECURE","rules":[],""" +
+            """"fingerprintForModals":true,"aiEnabled":true}"""
+        val p = Policy.parse(raw)
+        assertEquals(true, p.fingerprintForModals)
+        assertEquals(true, p.aiEnabled)
+    }
+
+    @Test
+    fun `a NON-BOOLEAN preference falls back to the default instead of throwing`() {
+        // The whole reason these are lenient: a preference must never be able to refuse to start
+        // the server. `optBoolean` would coerce "yes" to false silently; this asserts the value
+        // is ignored AND that the file still parses, which is the contract.
+        val raw = """{"version":1,"global":"SECURE","rules":[],""" +
+            """"fingerprintForModals":"yes","aiEnabled":0}"""
+        val p = Policy.parse(raw)
+        assertEquals(false, p.fingerprintForModals)
+        assertEquals(false, p.aiEnabled)
+    }
+
+    @Test
+    fun `a preference does not weaken the STRICT fields`() {
+        // The line that must not blur: leniency was added for two preferences, not for the gate.
+        // `global` stays a hard error, or a typo would silently reattach a gate someone turned off.
+        val raw = """{"version":1,"global":"NONSENSE","rules":[],"aiEnabled":true}"""
+        assertThrows(PolicyException::class.java) { Policy.parse(raw) }
+    }
+
+    @Test
+    fun `editing a rule preserves both preferences`() {
+        // The carry-over trap: `Policy(global, rules)` compiles fine and silently resets every
+        // sibling field. Here that would turn the AI off (or a fingerprint requirement on) every
+        // time someone added a rule — with nothing in the UI saying why.
+        val base = Policy(
+            GlobalMode.AUTOMATIC,
+            listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
+            fingerprintForModals = true,
+            aiEnabled = true
+        )
+        val next = base.withRule(PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
+        assertEquals(true, next.fingerprintForModals)
+        assertEquals(true, next.aiEnabled)
+        assertEquals(2, next.rules.size)
+
+        val removed = next.withoutRule("calendar", Verb.READ)
+        assertEquals(true, removed.fingerprintForModals)
+        assertEquals(true, removed.aiEnabled)
+    }
+
+    @Test
+    fun `flipping the gate switch preserves both preferences`() {
+        // `applyGate` used to build `Policy(after, existing.rules)` and wipe the rule table; the
+        // fix was `withGlobal`. Same trap, same test.
+        val base = Policy(
+            GlobalMode.SECURE,
+            listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
+            fingerprintForModals = true,
+            aiEnabled = true
+        )
+        val next = base.withGlobal(GlobalMode.AUTOMATIC)
+        assertEquals(GlobalMode.AUTOMATIC, next.global)
+        assertEquals(true, next.fingerprintForModals)
+        assertEquals(true, next.aiEnabled)
+        // And the rules, which `Policy(after)` alone used to wipe.
+        assertEquals(1, next.rules.size)
+    }
+
+    @Test
+    fun `preferences round-trip through the file`() {
+        val dir = tmp.newFolder()
+        val store = PolicyStore(dir)
+        store.set(
+            Policy(
+                GlobalMode.AUTOMATIC,
+                listOf(gmailDelete),
+                fingerprintForModals = true,
+                aiEnabled = true
+            )
+        )
+        val reread = PolicyStore(dir).get()
+        assertEquals(true, reread.fingerprintForModals)
+        assertEquals(true, reread.aiEnabled)
+        assertEquals(1, reread.rules.size)
+        assertEquals(GlobalMode.AUTOMATIC, reread.global)
+    }
 }

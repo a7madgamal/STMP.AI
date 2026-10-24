@@ -62,6 +62,11 @@ object ErrorCodes {
         "host_not_allowed" to BAD_REQUEST,
         "redirect_refused" to BAD_REQUEST,
         "unsupported_content_type" to BAD_REQUEST,
+        // "Modern only" for saving to the phone means MediaStore Downloads, which is API 29+.
+        // Below that the route REFUSES rather than silently writing somewhere else: a caller
+        // told "saved" when the file went to an app-private dir has been lied to, and a legacy
+        // path would need a storage permission we deliberately do not ask for.
+        "unsupported_storage" to BAD_REQUEST,
         "vault_exists" to CONFLICT,
 
         // --- the target is gone or not what the caller thinks it is ---
@@ -98,6 +103,25 @@ object ErrorCodes {
         "policy_unavailable" to UNAVAILABLE,
         "calendar_zone_unavailable" to UNAVAILABLE,
         "google_error" to CONFLICT,
+        // --- SSH gate (v1) ---
+        // A stored private key that cannot be parsed is OUR data being wrong, and the human has
+        // to fix it: 409 says "your config disagrees with reality", which is exactly it.
+        "ssh_bad_key" to CONFLICT,
+        // Generating a keypair failed on this device. Our side (no CryptoMaterial), and the human
+        // cannot fix it by changing the request — 500 is the honest status.
+        "ssh_keygen_failed" to INTERNAL,
+        // First connection to a host: nothing is pinned, so nothing runs until the human confirms
+        // the fingerprint. 409 (a disagreement about state) rather than 403 (a refusal).
+        "ssh_host_key_unknown" to CONFLICT,
+        // The host key does not match the one pinned on first connect. 409 rather than 403
+        // because it is not a permission verdict — it is a DISAGREEMENT that a human must look
+        // at, and the message says so.
+        "ssh_host_key_changed" to CONFLICT,
+        // A command still running at the deadline. 503: our side gave up, not the caller's fault.
+        "ssh_timeout" to UNAVAILABLE,
+        // Auth rejected, host unreachable, algorithm mismatch. All are "the other end said no",
+        // the same shape as google_error.
+        "ssh_failed" to CONFLICT,
         "auth_error" to INTERNAL,
         "secure_storage_error" to INTERNAL,
         "email_lookup_failed" to INTERNAL,

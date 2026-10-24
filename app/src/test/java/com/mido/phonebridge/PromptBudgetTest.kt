@@ -49,13 +49,30 @@ class PromptBudgetTest {
     }
 
     @Test
-    fun `a real 5 KB payload fits without clipping`() {
-        // The complaint that raised the budget: a representative Todoist body is ~4,900 chars and
-        // was being cut to a 600-char prefix. It must now pass through whole.
-        val body = "{\"" + "k\":\"v\"," .repeat(0) // placeholder to keep the diff readable
-        val real = "x".repeat(4_931)
-        val rendered = PromptBudget.render(listOf("BODY" to real))
-        assertFalse("a 5 KB payload must not be clipped: ${rendered.length} chars", rendered.contains("…"))
+    fun `a 5 KB payload is clipped AND marked, which is the trade this release chose`() {
+        // This test used to assert the opposite. At the 8,192-token window a ~4,900-char body
+        // passed through whole; that window cost ~896 MiB of KV cache and the memory pressure
+        // got Tailscale killed on the device, which is why the window came back down to 2,048.
+        //
+        // So the honest assertion now has two halves, and BOTH matter:
+        //   1. it IS clipped  — a 4 KB budget cannot hold 4.9 KB, and pretending otherwise would
+        //      mean the prompt overflows the window and the request fails outright (AI is core)
+        //   2. the cut is MARKED — a silent truncation presents half a payload as the whole one,
+        //      which is the specific failure this budget was built to stop
+        val body = "x".repeat(4_931)
+        val rendered = PromptBudget.render(listOf("BODY" to body))
+        assertTrue("a 4.9 KB body must be clipped at a 4 KB budget", rendered.length < body.length)
+        assertTrue("the clip must be marked so the model knows", rendered.contains("…"))
+    }
+
+    @Test
+    fun `a body that fits the budget passes through whole and unmarked`() {
+        // The other side of the trade: ordinary single-item writes must NOT be degraded, because
+        // those are the requests this app is actually asked to describe.
+        val body = "x".repeat(3_500)
+        val rendered = PromptBudget.render(listOf("BODY" to body))
+        assertTrue("a 3.5 KB body must pass whole under a 4 KB budget", rendered.contains(body))
+        assertFalse("an unclipped value must not carry the mark", rendered.contains("…"))
     }
 
     @Test
