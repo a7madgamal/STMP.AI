@@ -1,0 +1,20 @@
+# build output
+build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+
+# signing material — never commit
+keystore/
+*.jks
+*.keystore
+keystore*.tmp
+*.p12
+
+# local machine config
+local.properties
+
+# build artifacts / models
+apk-out/
+*.apk
