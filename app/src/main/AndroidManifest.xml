@@ -16,6 +16,10 @@
          exactly what happened on 2026-10-25 when the phone rebooted at ~05:40 and nothing
          restarted it. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Watching for the tailnet COMING BACK. Without this the app cannot tell when a network
+         change makes a 100.x address available, so turning Tailscale back on left the bridge
+         down until someone opened the app (2026-10-25). Normal permission: granted at install. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Required for the approval haptics (alert/SoundAlerts.kt). Without it
          VibrationEffect silently does nothing - a request you were meant to FEEL
          would be silent, which is the exact failure the alerts exist to fix. -->

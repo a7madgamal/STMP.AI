@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.41.0 (build 150)**.
+Current build: **v0.41.1 (build 151)**.
 
 ---
 
@@ -2671,7 +2671,7 @@ that seems unresponsive can be told apart from one that is broken.
 291 tests green (3 new in `ArmGuardTest`, including one asserting the overlay and modal guards are
 the SAME duration so the two surfaces cannot drift). Version 0.40.8 / build 149.
 
-## 0.41.0 — auto-start after reboot, and a status label that stops lying (build 150) — CURRENT
+## 0.41.0 — auto-start after reboot, and a status label that stops lying (build 150)
 2026-10-25
 
 Two outages the same morning, both from the app never re-checking anything it claimed.
@@ -2729,6 +2729,40 @@ Version 0.41.0 / build 150.
 
 **Not device-verified yet.** The reboot path needs an actual reboot, and the unresponsive path
 needs a server that dies while the screen is on. Both are unproven until then.
+
+---
+
+## 0.41.1 — the bridge now waits for Tailscale instead of dying (build 151) — CURRENT
+2026-10-25
+
+**Found by the 0.41.0 device test itself.** Mido turned Tailscale off, got the "not running"
+notification as designed, turned it back on — and the bridge stayed down until he opened the app.
+The retry ladder had done its job and then called `stopSelf()`, which destroyed the only thing that
+could have noticed the tailnet returning. Boot and install were covered; reconnect was not.
+
+- **The ladder no longer stops the service on exhaustion.** It enters a waiting state instead:
+  the service stays alive, the notification switches to "PhoneBridge is waiting for Tailscale",
+  and it starts serving the moment a `100.x` address exists. The cost is a foreground service
+  that was already running; the cost of the old behaviour was a bridge needing a human to poke it.
+- **Two wake paths, deliberately.** `registerDefaultNetworkCallback` is the fast one — a VPN
+  connecting becomes the default network, which is exactly the event to react to. A 5s interface
+  poll backs it up, because `tailnetAddress()` reads interfaces directly and not every interface
+  change produces a `Network` object. The poll is one enumeration per tick, no network I/O.
+- **`BridgeStatusNotice` is now a pure, tested object.** The copy and the ongoing/autoCancel pair
+  used to be inline literals inside `BridgeService`, so a new state could be added while the
+  notification still described the old one — no error, no log. Three kinds now, each with a
+  distinct title, and `WAITING_FOR_TAILNET` is the one that must tell the human that doing
+  NOTHING is correct.
+- **The watchdog hands over rather than dead-ending.** A rebind with no tailnet address used to
+  post a "not running" notice and return; it now enters the same waiting state, since Tailscale
+  coming back is the only thing that resolves it.
+- `ACCESS_NETWORK_STATE` added (normal permission, granted at install).
+
+308 tests green (was 302): 6 in `BridgeStatusNoticeTest`, including that ongoing and autoCancel
+are always opposites and that the waiting copy says it recovers by itself.
+Version 0.41.1 / build 151.
+
+**Not device-verified yet.** The reconnect path needs Tailscale toggled off and back on.
 
 ---
 

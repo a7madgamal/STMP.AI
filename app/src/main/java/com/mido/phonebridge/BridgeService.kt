@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
@@ -30,6 +32,7 @@ import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.RespPayload
 import com.mido.phonebridge.core.Route
+import com.mido.phonebridge.core.BridgeStatusNotice
 import com.mido.phonebridge.core.StartupRetry
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.labelOf
@@ -141,6 +144,16 @@ class BridgeService : Service() {
          */
         const val WATCHDOG_INTERVAL_MS = 60_000L
 
+        /**
+         * How often to re-check for a tailnet address while waiting for one.
+         *
+         * The `NetworkCallback` is the fast path and covers the real case (a VPN connecting
+         * changes the default network). This is the backstop for an interface appearing without
+         * a default-network change, which is possible but rare. One interface enumeration per
+         * tick, no network I/O, so 5s costs nothing measurable while keeping recovery quick.
+         */
+        const val WAIT_POLL_MS = 5_000L
+
         fun markRunning(v: Boolean) { serverUp = v }
 
         /**
@@ -198,6 +211,21 @@ class BridgeService : Service() {
 
     /** Set once the server is bound, so a stale retry cannot fire after a successful start. */
     private var retryAttempt = 0
+
+    /**
+     * Watches for the tailnet appearing while the bridge is waiting for it.
+     *
+     * **Why a callback AND a poll.** `registerDefaultNetworkCallback` fires when the default
+     * network changes, which is what happens when Tailscale connects (it is a VPN, so it becomes
+     * the default network). That makes the common case instant. But a callback is not a promise
+     * that every interface change produces a `Network` object, and `tailnetAddress()` reads
+     * interfaces directly — so a slow poll backs it up. The poll is one interface enumeration
+     * (no network I/O), so it costs essentially nothing.
+     */
+    private var netCallback: ConnectivityManager.NetworkCallback? = null
+
+    /** True while the service is deliberately staying alive for a tailnet that does not exist yet. */
+    private var waitingForTailnet = false
 
     override fun onCreate() {
         super.onCreate()
@@ -297,7 +325,7 @@ class BridgeService : Service() {
                 Debug.log("BIND FAILED: $lastError")
                 // A port conflict is not a race: retrying it would only hide the reason. The
                 // retry budget exists for the tailnet address appearing, and nothing else.
-                postStatusNotification(final = true, attempt = 0)
+                postStatusNotification(BridgeStatusNotice.Kind.STOPPED, attempt = 0)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -308,6 +336,9 @@ class BridgeService : Service() {
         // start a second server over this one.
         retryAttempt = 0
         retryHandler.removeCallbacksAndMessages(null)
+        // And stop watching for a tailnet that is now present, or the callback would keep firing
+        // on every network change for the life of the service.
+        stopWaiting()
         cancelStatusNotification()
         markRunning(true)
         lastProbeOk = true
@@ -338,20 +369,105 @@ class BridgeService : Service() {
         lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
         val delay = StartupRetry.delayFor(retryAttempt)
         if (delay == null) {
-            Debug.log("REFUSING TO START: $lastError (retries exhausted)")
-            // Posted BEFORE stopSelf, or the reminder never lands: once the service is gone
-            // there is nothing left to post it from.
-            postStatusNotification(final = true, attempt = 0)
-            stopSelf()
-            return START_NOT_STICKY
+            // NOT stopSelf(). The service has to outlive the ladder to notice Tailscale coming
+            // back — see startWaitingForTailnet.
+            startWaitingForTailnet()
+            return START_STICKY
         }
         retryAttempt += 1
         Debug.log(
             "no tailnet address; retry $retryAttempt/${StartupRetry.maxAttempts()} in ${delay}ms"
         )
-        postStatusNotification(final = false, attempt = retryAttempt)
+        postStatusNotification(BridgeStatusNotice.Kind.RETRYING, attempt = retryAttempt)
         retryHandler.postDelayed({ startSelf() }, delay)
         return START_STICKY
+    }
+
+    /**
+     * The ladder is spent: stay alive and watch for the tailnet instead of stopping.
+     *
+     * **This replaced a `stopSelf()`, and the stop was the bug.** Once the service died there was
+     * nothing left to notice Tailscale coming back, so reconnecting the VPN left the bridge down
+     * until someone opened the app — every single time. The cost of waiting is a foreground
+     * service that is already running and a low-importance notification; the cost of stopping is
+     * a bridge that needs a human to poke it.
+     *
+     * The notification changes KIND here, not just text: [BridgeStatusNotice.Kind.WAITING_FOR_TAILNET]
+     * tells the human that doing nothing is correct, which is the opposite of what the old
+     * "not running" copy implied.
+     */
+    private fun startWaitingForTailnet() {
+        if (waitingForTailnet) return
+        waitingForTailnet = true
+        Debug.log("REFUSING TO START: $lastError (waiting for the tailnet instead of stopping)")
+        postStatusNotification(
+            BridgeStatusNotice.Kind.WAITING_FOR_TAILNET,
+            attempt = StartupRetry.maxAttempts(),
+        )
+
+        // Instant path: the default network changing is what a VPN connecting looks like.
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = checkTailnetNow("network available")
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    caps: android.net.NetworkCapabilities,
+                ) = checkTailnetNow("capabilities changed")
+            }
+            cm.registerDefaultNetworkCallback(cb)
+            netCallback = cb
+            Debug.log("watching for the tailnet: default-network callback registered")
+        } catch (e: Exception) {
+            // Not fatal: the poll below still finds it. Record it so a slow recovery is explainable.
+            Debug.log("network callback registration failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        // Backup path, and the reason this is "cheap" rather than fragile.
+        retryHandler.postDelayed(waitPoll, WAIT_POLL_MS)
+    }
+
+    /**
+     * If a tailnet address has appeared, stop waiting and start serving.
+     *
+     * Called from a callback (a binder thread) and from the poll (main looper), so the actual
+     * start is posted to the main looper — `onStartCommand` runs there and two threads racing it
+     * would be a double-bind.
+     */
+    private fun checkTailnetNow(why: String) {
+        if (!waitingForTailnet) return
+        if (tailnetAddress() == null) return
+        Debug.log("tailnet address appeared ($why) — starting")
+        retryHandler.post { startSelf() }
+    }
+
+    private val waitPoll: Runnable = object : Runnable {
+        override fun run() {
+            if (!waitingForTailnet) return
+            if (tailnetAddress() != null) {
+                Debug.log("tailnet address appeared (poll) — starting")
+                startSelf()
+                return
+            }
+            retryHandler.postDelayed(this, WAIT_POLL_MS)
+        }
+    }
+
+    /** Stop waiting: unregister the callback and drop the poll. Idempotent. */
+    private fun stopWaiting() {
+        if (!waitingForTailnet && netCallback == null) return
+        waitingForTailnet = false
+        retryHandler.removeCallbacks(waitPoll)
+        netCallback?.let { cb ->
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(cb)
+            } catch (e: Exception) {
+                // Already gone, or never registered. Nothing to repair.
+                Debug.log("network callback unregister: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+        netCallback = null
     }
 
     /** Ask the system for another start, which re-runs the address check. */
@@ -371,7 +487,15 @@ class BridgeService : Service() {
      * not having one. `final` distinguishes "still retrying" from "gave up", because those ask
      * the human for different things: wait, versus open Tailscale.
      */
-    private fun postStatusNotification(final: Boolean, attempt: Int) {
+    /**
+     * Post (or update) the status notification.
+     *
+     * Copy comes from [BridgeStatusNotice], which is pure and tested, so the three states cannot
+     * drift from what the service is actually doing. The ongoing/autoCancel pair is derived from
+     * the same enum for the same reason — a notification that is dismissible while the service is
+     * still working would let the human swipe away the only sign that it is waiting.
+     */
+    private fun postStatusNotification(kind: BridgeStatusNotice.Kind, attempt: Int) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = NotificationChannel(
             STATUS_CHANNEL_ID, "Bridge status", NotificationManager.IMPORTANCE_DEFAULT
@@ -384,22 +508,16 @@ class BridgeService : Service() {
             this, 1, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val title = if (final) "PhoneBridge is not running" else "PhoneBridge can't start yet"
-        val text = if (final) {
-            "No Tailscale address. Open the app and check Tailscale."
-        } else {
-            "No Tailscale address yet — retrying ($attempt/${StartupRetry.maxAttempts()})."
-        }
         val notif = Notification.Builder(this, STATUS_CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle(BridgeStatusNotice.title(kind))
+            .setContentText(
+                BridgeStatusNotice.text(kind, attempt, StartupRetry.maxAttempts())
+            )
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setCategory(Notification.CATEGORY_ERROR)
             .setContentIntent(pi)
-            // Ongoing while retrying (it is describing work in progress), dismissible once it
-            // has given up (the human may acknowledge it).
-            .setOngoing(!final)
-            .setAutoCancel(final)
+            .setOngoing(BridgeStatusNotice.ongoing(kind))
+            .setAutoCancel(BridgeStatusNotice.autoCancel(kind))
             .build()
         try {
             nm.notify(NOTIF_ID_STATUS, notif)
@@ -494,7 +612,10 @@ class BridgeService : Service() {
         if (bind == null) {
             lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
             Debug.log("watchdog: cannot rebind — no tailnet address")
-            postStatusNotification(final = true, attempt = 0)
+            // The watchdog cannot fix this one, so hand over to the same wait path the start
+            // ladder uses rather than posting a dead-end notice: Tailscale coming back is the
+            // only thing that resolves it, and that is exactly what the wait watches for.
+            startWaitingForTailnet()
             return
         }
         bindAddress = bind
@@ -511,7 +632,7 @@ class BridgeService : Service() {
         } catch (e: Exception) {
             lastError = "Could not bind port $PORT: ${e.message ?: e.javaClass.simpleName}".trim()
             Debug.log("watchdog: REBIND FAILED: $lastError")
-            postStatusNotification(final = true, attempt = 0)
+            postStatusNotification(BridgeStatusNotice.Kind.STOPPED, attempt = 0)
         }
     }
 
@@ -556,6 +677,9 @@ class BridgeService : Service() {
         // app side. The watchdog likewise has nothing left to watch.
         retryHandler.removeCallbacksAndMessages(null)
         watchdogHandler.removeCallbacksAndMessages(null)
+        // A waiting service that is destroyed must release the network callback, or the platform
+        // holds a registration for a dead service.
+        stopWaiting()
         retryAttempt = 0
         // Give the engine back. This was the second half of the memory story: `onTrimMemory`
         // released it, but that is a HINT the OS may never send, so a stopped service could sit
