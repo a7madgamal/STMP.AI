@@ -11,6 +11,11 @@
          in-app checklist. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Auto-start after a reboot. Without this permission the BOOT_COMPLETED receiver is
+         simply never delivered, so the bridge stays down until someone opens the app — which is
+         exactly what happened on 2026-10-25 when the phone rebooted at ~05:40 and nothing
+         restarted it. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Required for the approval haptics (alert/SoundAlerts.kt). Without it
          VibrationEffect silently does nothing - a request you were meant to FEEL
          would be silent, which is the exact failure the alerts exist to fix. -->
@@ -126,6 +131,29 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Persistent local HTTP bridge server that must stay reachable for inbound requests; it is not a sync or media job and cannot be scheduled." />
         </service>
+
+        <!--
+          Auto-start after a reboot or an app update.
+
+          `exported="true"` is REQUIRED and is not a hole: BOOT_COMPLETED and
+          MY_PACKAGE_REPLACED are protected broadcasts that only the system can send, so no
+          other app can invoke this receiver. A non-exported receiver is simply never
+          delivered these actions, which is why the bridge could not come back after the
+          2026-10-25 reboot.
+
+          No `directBootAware`: the policy file lives in credential-encrypted storage, so a
+          LOCKED_BOOT_COMPLETED start would run before it can be read. The receiver filters to
+          the two actions it can honour.
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".NotifListenerService"

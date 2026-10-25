@@ -73,6 +73,26 @@ class OptionsActivity : Activity() {
             return
         }
 
+        container.addView(Theme.sectionHeader(this, "Startup"))
+
+        // --- auto-start ---
+        container.addView(
+            toggleRow(
+                title = "Auto-start on boot",
+                state = if (policy.autoStartOnBoot) "ON" else "OFF",
+                detail = if (policy.autoStartOnBoot) {
+                    "The bridge starts itself after a reboot, after an app update, and when the " +
+                        "app opens. Tailscale can take a few seconds to come up, so it retries " +
+                        "for about 3 minutes and tells you if it gives up."
+                } else {
+                    "Nothing starts on its own. Open the app and tap START SERVER. After a " +
+                        "reboot the bridge stays down until you do."
+                },
+                colour = if (policy.autoStartOnBoot) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
+                onToggle = { save(store, policy.withAutoStartOnBoot(!policy.autoStartOnBoot)) }
+            )
+        )
+
         container.addView(Theme.sectionHeader(this, "Approval"))
 
         // --- fingerprint for SECURE modals ---

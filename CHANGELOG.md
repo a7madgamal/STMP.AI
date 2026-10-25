@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.23.2 (build 106)**.
+Current build: **v0.41.0 (build 150)**.
 
 ---
 
@@ -2634,7 +2634,7 @@ reported the NUC's real fingerprint), generation and signing are proven, and the
 0.40.6 is what unblocks first contact. What has NOT happened is a full approved round trip that
 executes a command on the NUC.
 
-## 0.40.8 — the NOTIFY card gets the same 3s guard (build 149) — CURRENT
+## 0.40.8 — the NOTIFY card gets the same 3s guard (build 149)
 2026-10-24
 
 Mido: *"add the same 3 seconds waiting period before ANY touch event on the notification works so
@@ -2670,6 +2670,65 @@ that seems unresponsive can be told apart from one that is broken.
 
 291 tests green (3 new in `ArmGuardTest`, including one asserting the overlay and modal guards are
 the SAME duration so the two surfaces cannot drift). Version 0.40.8 / build 149.
+
+## 0.41.0 — auto-start after reboot, and a status label that stops lying (build 150) — CURRENT
+2026-10-25
+
+Two outages the same morning, both from the app never re-checking anything it claimed.
+
+**1. The bridge stayed down after a reboot.** The manifest had **no `<receiver>` at all** and no
+`RECEIVE_BOOT_COMPLETED` permission, and `MainActivity.startBridge()` was the only
+`startForegroundService` call site in the codebase. `START_STICKY` keeps the service alive through
+a system process kill; it cannot survive a reboot, because after one nothing ever asks the service
+to run. The phone rebooted at ~05:40 (tailscaled logged `peer disco key changed`, which is an
+ephemeral key per tailscaled process) and the bridge stayed down until it was noticed hours later.
+
+- New `BootReceiver` on `BOOT_COMPLETED` + `MY_PACKAGE_REPLACED`, gated by a new
+  `autoStartOnBoot` preference (**default ON**, parsed with the existing `lenientFlag` so a garbled
+  value falls back rather than refusing to start).
+- `MY_PACKAGE_REPLACED` is half the value on its own: sideloading a build kills the process, so
+  without it every update left the bridge down until someone opened the app.
+- `exported="true"` is required and is not a hole — both actions are protected broadcasts that
+  only the system can send.
+- **`specialUse` is permitted from a boot receiver on Android 15.** Only `dataSync`, `camera`,
+  `mediaPlayback`, `phoneCall`, `mediaProjection` and `microphone` are banned, so the service's
+  existing type is fine. Checked against the platform docs rather than assumed.
+- **A boot start races Tailscale**, and the old code turned that race into permanent death: no
+  `100.x` address yet → `stopSelf()` → `START_NOT_STICKY`. That path is now a bounded retry ladder
+  (10s / 30s / 90s / 180s) in `core/StartupRetry.kt`, kept pure and unit-tested so the schedule can
+  be asserted without an Android runtime — the same extraction rule as `HostAllowlist` and
+  `VaultState`. Exhausting it posts a notification instead of dying silently.
+- The notification is its own channel (`bridge_status`, `IMPORTANCE_DEFAULT`) and its own id
+  (4243). Reusing the running notification's `IMPORTANCE_LOW` channel would have made the reminder
+  silent, which is the same as not having one. Posted **before** `stopSelf()` — after that there is
+  nothing left to post it from.
+- The toggle gates app-load auto-start too: **one toggle, one meaning**, "the server starts
+  itself". A setting whose OFF state still started the server on every app open would not mean off.
+
+**2. The app painted a green "Running" while every caller got `Connection refused`.** `serverUp`
+was an **assertion**: set `true` once after `start()` and `false` only in `onDestroy`, never
+re-verified. NanoHTTPD ships `isAlive()` (socket open + accept thread alive) and the app called it
+**zero times**. `ServerStatus.state()` consumed the flag as truth, and `render()` ran only on
+`onResume` plus two one-shot 600ms callbacks, so the label could be arbitrarily stale. `/debug`
+reported `up` from the same flag, so a remote caller was misled too.
+
+- New watchdog probes every 60s with `isAlive()` **plus a real TCP connect** — `isAlive()` alone
+  only proves the objects exist, not that a caller would get through. On failure it rebinds, since a
+  stale tailnet address is the likeliest cause; it notifies only when a rebind also fails.
+- `ServerStatus` gains **`UNRESPONSIVE`**, checked BEFORE the healthy/attention pair, so "up but not
+  answering" can no longer render as "Running". Its title is `● Not answering`, deliberately not
+  containing the word the state exists to retract.
+- `render()` ticks every 5s while resumed (cancelled in `onPause`). It reads the CACHED probe
+  result — a fresh connect there would be network I/O on the main thread.
+- `/debug` gains `alive`, `boundTo` and `lastProbeAtMs`, so "process up, not serving" and "process
+  dead" are distinguishable from outside.
+
+302 tests green (was 288): 5 in `StartupRetryTest`, 4 new in `ServerStatusTest` (including the
+2026-10-25 bug stated as an input), and preference coverage for the new field in `PolicyTest`.
+Version 0.41.0 / build 150.
+
+**Not device-verified yet.** The reboot path needs an actual reboot, and the unresponsive path
+needs a server that dies while the screen is on. Both are unproven until then.
 
 ---
 

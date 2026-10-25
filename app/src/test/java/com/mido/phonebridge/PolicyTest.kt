@@ -489,6 +489,54 @@ class PolicyTest {
         val p = Policy.parse(raw)
         assertEquals(false, p.fingerprintForModals)
         assertEquals(false, p.aiEnabled)
+        // Auto-start is the ONE preference that defaults ON: an install predating it should get
+        // the new behaviour without a migration, because a bridge that only runs after someone
+        // opens the app is the bug this release fixes.
+        assertEquals(true, p.autoStartOnBoot)
+    }
+
+    @Test
+    fun `auto-start can be turned OFF and survives a round trip`() {
+        val dir = tmp.newFolder()
+        val store = PolicyStore(dir)
+        store.set(Policy(GlobalMode.AUTOMATIC, emptyList(), autoStartOnBoot = false))
+        // Re-read through a NEW store, so this proves the file, not the cache.
+        assertEquals(false, PolicyStore(dir).get().autoStartOnBoot)
+    }
+
+    @Test
+    fun `a non-boolean auto-start falls back to ON instead of throwing`() {
+        // Same leniency contract as the other preferences, with a different default: the safe
+        // direction here is ON, because the failure mode is a visible running server rather than
+        // a silently dead bridge.
+        val raw = """{"version":1,"global":"SECURE","rules":[],"autoStartOnBoot":"yes"}"""
+        val p = Policy.parse(raw)
+        assertEquals(true, p.autoStartOnBoot)
+        assertTrue(p.preferenceWarnings.isNotEmpty())
+    }
+
+    @Test
+    fun `every preference survives a rule edit`() {
+        // The carry-over trap, now covering all three: each `withX` rebuilds the object
+        // positionally, so a new field that is not carried in EVERY builder silently resets.
+        val base = Policy(
+            GlobalMode.AUTOMATIC,
+            emptyList(),
+            fingerprintForModals = true,
+            aiEnabled = true,
+            autoStartOnBoot = false,
+        )
+        val afterRule = base.withRule(PolicyRule("gmail", Verb.READ, Mode.NOTIFY))
+        assertEquals(false, afterRule.autoStartOnBoot)
+        assertEquals(true, afterRule.aiEnabled)
+
+        val afterGlobal = base.withGlobal(GlobalMode.SECURE)
+        assertEquals(false, afterGlobal.autoStartOnBoot)
+        assertEquals(true, afterGlobal.fingerprintForModals)
+
+        val afterAi = base.withAiEnabled(false)
+        assertEquals(false, afterAi.autoStartOnBoot)
+        assertEquals(true, afterAi.fingerprintForModals)
     }
 
     @Test

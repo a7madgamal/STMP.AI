@@ -10,7 +10,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import com.mido.phonebridge.audit.AuditClassify
 import com.mido.phonebridge.audit.AuditDraft
@@ -28,6 +30,7 @@ import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.RespPayload
 import com.mido.phonebridge.core.Route
+import com.mido.phonebridge.core.StartupRetry
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.labelOf
 import com.mido.phonebridge.notify.NotifyGate
@@ -63,6 +66,21 @@ class BridgeService : Service() {
         const val NOTIF_ID = 4242
 
         /**
+         * A SECOND channel, and a second id, for "the bridge is not serving".
+         *
+         * The running notification above is `IMPORTANCE_LOW` on purpose — it is a permanent
+         * "I am here" dot, not something that should make noise. A reminder that the bridge is
+         * DOWN is the opposite: it exists to be noticed, so it needs its own channel at
+         * `IMPORTANCE_DEFAULT`. Sharing the low channel would make the reminder silent, which
+         * is the same as not having one.
+         *
+         * Distinct ids so the two never replace each other: 4242 is the foreground-service
+         * notification and MUST stay stable, while 4243 is transient.
+         */
+        const val STATUS_CHANNEL_ID = "bridge_status"
+        const val NOTIF_ID_STATUS = 4243
+
+        /**
          * Android-type OAuth client. Authenticates by package name + signing
          * SHA-1: no embedded secret, no redirect URI, no loopback listener.
          * Login uses Credential Manager + PKCE authorization-code flow.
@@ -96,7 +114,59 @@ class BridgeService : Service() {
         @Volatile
         var bindAddress: String = ""
 
+        /**
+         * The last LIVENESS result, as opposed to [serverUp] which is an assertion.
+         *
+         * `serverUp` records that `start()` once succeeded; this records that a socket
+         * actually connected, and how long ago. The UI reads BOTH, so "green" can mean
+         * "verified seconds ago" instead of "we said so at boot" — which is the difference
+         * between the 2026-10-25 green label and the truth.
+         */
+        @Volatile
+        var lastProbeOk = false
+
+        @Volatile
+        var lastProbeAtMs = 0L
+
+        /** How long a probe connect may take before it counts as dead. Local socket, so short. */
+        const val PROBE_TIMEOUT_MS = 1_500
+
+        /**
+         * How often the watchdog re-proves the server answers.
+         *
+         * 60s is chosen against the cost, not the symptom: a probe is one local TCP connect
+         * (microseconds) every minute, which is free, while a longer gap leaves a dead bridge
+         * undiscovered for that much longer. It is deliberately NOT tied to any request — the
+         * watchdog must work when nothing is calling in, which is exactly the outage case.
+         */
+        const val WATCHDOG_INTERVAL_MS = 60_000L
+
         fun markRunning(v: Boolean) { serverUp = v }
+
+        /**
+         * A verified liveness answer, for the UI and `/debug`.
+         *
+         * **Deliberately derived from the cached probe, not from a fresh connect.** A fresh
+         * connect on every `render()` would put blocking network I/O on the main thread, and
+         * `render()` runs on every `onResume`. The watchdog already probes every minute and
+         * records the result here; this just reads it.
+         *
+         * Returns `true` only when a probe has SUCCEEDED and is recent enough to still mean
+         * something. A stale success is treated as unknown-but-not-failed, because the
+         * alternative — painting red for a probe that simply has not run yet — would make a
+         * healthy bridge look broken right after a start.
+         */
+        fun isVerifiedAlive(): Boolean {
+            if (!serverUp) return false
+            // No probe yet (just bound): trust the bind, since the watchdog has not had a
+            // chance to run. Anything older than the probe window is not evidence either way.
+            if (lastProbeAtMs == 0L) return true
+            val age = System.currentTimeMillis() - lastProbeAtMs
+            // Stale beyond a few intervals means the watchdog itself stopped — do not claim
+            // health on evidence that old.
+            if (age > WATCHDOG_INTERVAL_MS * 3) return false
+            return lastProbeOk
+        }
 
         /**
          * Register one secret plugin at runtime, so a secret added in the CRUD screen
@@ -117,6 +187,17 @@ class BridgeService : Service() {
 
     private var server: HttpServer? = null
     private var wakeLock: WifiManager.WifiLock? = null
+
+    /** Drives the start-retry ladder. Main looper so a post from any thread lands in order. */
+    private val retryHandler = Handler(Looper.getMainLooper())
+
+    /** Drives the liveness watchdog. Separate from [retryHandler] so cancelling one is not
+     *  accidentally cancelling the other — they mean different things and have different
+     *  lifetimes (retries end at bind, the watchdog runs for as long as the service does). */
+    private val watchdogHandler = Handler(Looper.getMainLooper())
+
+    /** Set once the server is bound, so a stale retry cannot fire after a successful start. */
+    private var retryAttempt = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -202,17 +283,7 @@ class BridgeService : Service() {
 
         if (server == null) {
             val bind = tailnetAddress()
-            if (bind == null) {
-                // S8: never silently bind all interfaces.
-                // The wording is user-facing: it lands verbatim in the hero card when a start
-                // fails, so it names the CAUSE and the FIX rather than the bind decision. A
-                // user reading "refusing to bind 0.0.0.0" learns nothing they can act on.
-                lastError = "No Tailscale address on this phone. Open the Tailscale app, " +
-                    "connect it, then tap START SERVER again."
-                Debug.log("REFUSING TO START: $lastError")
-                stopSelf()
-                return START_NOT_STICKY
-            }
+            if (bind == null) return noTailnetAddress()
             bindAddress = bind
             Debug.log("binding to $bind:$PORT")
             val s = HttpServer(this, bind, PORT)
@@ -224,15 +295,224 @@ class BridgeService : Service() {
             } catch (e: Exception) {
                 lastError = "Could not bind port $PORT: ${e.message ?: e.javaClass.simpleName}".trim()
                 Debug.log("BIND FAILED: $lastError")
+                // A port conflict is not a race: retrying it would only hide the reason. The
+                // retry budget exists for the tailnet address appearing, and nothing else.
+                postStatusNotification(final = true, attempt = 0)
                 stopSelf()
                 return START_NOT_STICKY
             }
         } else {
             Debug.log("server already running")
         }
+        // Bound. Clear the ladder so a retry scheduled before this start cannot fire later and
+        // start a second server over this one.
+        retryAttempt = 0
+        retryHandler.removeCallbacksAndMessages(null)
+        cancelStatusNotification()
         markRunning(true)
+        lastProbeOk = true
+        lastProbeAtMs = System.currentTimeMillis()
+        startWatchdog()
         warmModel()
         return START_STICKY
+    }
+
+    /**
+     * No tailnet address: retry, or give up loudly.
+     *
+     * **This used to `stopSelf()` immediately, and that was the outage.** A start triggered by
+     * `BOOT_COMPLETED` happens seconds after the phone comes up, when the Tailscale app has
+     * almost certainly not established its `100.x` address yet. Dying there turned "booted a
+     * little early" into "the bridge never runs at all" — with no notification and no evidence,
+     * which is why the 2026-10-25 outage had to be diagnosed from tailscaled logs.
+     *
+     * A manual START still behaves correctly under this: the human gets the same error text, the
+     * same retries, and a notification if it never succeeds. Retrying costs nothing when the
+     * address is there, because the first attempt binds immediately.
+     */
+    private fun noTailnetAddress(): Int {
+        // S8: never silently bind all interfaces.
+        // The wording is user-facing: it lands verbatim in the hero card when a start
+        // fails, so it names the CAUSE and the FIX rather than the bind decision. A
+        // user reading "refusing to bind 0.0.0.0" learns nothing they can act on.
+        lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
+        val delay = StartupRetry.delayFor(retryAttempt)
+        if (delay == null) {
+            Debug.log("REFUSING TO START: $lastError (retries exhausted)")
+            // Posted BEFORE stopSelf, or the reminder never lands: once the service is gone
+            // there is nothing left to post it from.
+            postStatusNotification(final = true, attempt = 0)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        retryAttempt += 1
+        Debug.log(
+            "no tailnet address; retry $retryAttempt/${StartupRetry.maxAttempts()} in ${delay}ms"
+        )
+        postStatusNotification(final = false, attempt = retryAttempt)
+        retryHandler.postDelayed({ startSelf() }, delay)
+        return START_STICKY
+    }
+
+    /** Ask the system for another start, which re-runs the address check. */
+    private fun startSelf() {
+        try {
+            startForegroundService(Intent(this, BridgeService::class.java))
+        } catch (e: Exception) {
+            Debug.log("retry start failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    /**
+     * The reminder that the bridge is not serving.
+     *
+     * On its own channel at `IMPORTANCE_DEFAULT` because the running notification is
+     * `IMPORTANCE_LOW` — reusing that one would make the reminder silent, which is the same as
+     * not having one. `final` distinguishes "still retrying" from "gave up", because those ask
+     * the human for different things: wait, versus open Tailscale.
+     */
+    private fun postStatusNotification(final: Boolean, attempt: Int) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val ch = NotificationChannel(
+            STATUS_CHANNEL_ID, "Bridge status", NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Tells you when the bridge could not start."
+        }
+        nm.createNotificationChannel(ch)
+
+        val pi = PendingIntent.getActivity(
+            this, 1, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val title = if (final) "PhoneBridge is not running" else "PhoneBridge can't start yet"
+        val text = if (final) {
+            "No Tailscale address. Open the app and check Tailscale."
+        } else {
+            "No Tailscale address yet — retrying ($attempt/${StartupRetry.maxAttempts()})."
+        }
+        val notif = Notification.Builder(this, STATUS_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setCategory(Notification.CATEGORY_ERROR)
+            .setContentIntent(pi)
+            // Ongoing while retrying (it is describing work in progress), dismissible once it
+            // has given up (the human may acknowledge it).
+            .setOngoing(!final)
+            .setAutoCancel(final)
+            .build()
+        try {
+            nm.notify(NOTIF_ID_STATUS, notif)
+        } catch (e: Exception) {
+            // API 33+ needs POST_NOTIFICATIONS. If it is denied the reminder cannot appear —
+            // record that rather than pretending it was shown.
+            Debug.log("status notification failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    private fun cancelStatusNotification() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIF_ID_STATUS)
+        } catch (e: Exception) {
+            Debug.log("status notification cancel failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Prove the server is actually serving, instead of trusting the flag that says it should be.
+     *
+     * **`serverUp` is an assertion, not a check.** It is set `true` once after `start()` and
+     * `false` only in `onDestroy`, so nothing re-verifies it. That is how the app painted a
+     * green "Running" while every caller got `Connection refused` (2026-10-25): NanoHTTPD had
+     * bound an address that had since stopped routing, `start()` had succeeded, and no code ever
+     * looked again.
+     *
+     * `isAlive()` alone is not enough — it only proves the socket object and accept thread
+     * exist. A real connect is what answers "would a caller get through".
+     *
+     * Blocking network I/O, so it MUST run off the main thread.
+     */
+    private fun probe(): Boolean {
+        val s = server ?: return false
+        if (!s.isAlive) return false
+        val addr = bindAddress
+        if (addr.isBlank()) return false
+        return try {
+            java.net.Socket().use { sock ->
+                sock.connect(java.net.InetSocketAddress(addr, PORT), PROBE_TIMEOUT_MS)
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Every [WATCHDOG_INTERVAL_MS], prove the server still answers; rebind if it does not.
+     *
+     * **Rebinding is the point.** A watchdog that only complains would leave the bridge down
+     * until a human noticed, which is the failure this whole release exists to end. The one case
+     * it cannot fix is "there is no tailnet address", and that is exactly what the notification
+     * reports.
+     */
+    private fun startWatchdog() {
+        watchdogHandler.removeCallbacksAndMessages(null)
+        watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
+    }
+
+    // The explicit `: Runnable` is REQUIRED, not style: the object reschedules ITSELF, and
+    // without a declared type the compiler has to infer the type of a value that refers to
+    // itself and gives up with "recursive problem".
+    private val watchdogTick: Runnable = object : Runnable {
+        override fun run() {
+            Thread({
+                val ok = probe()
+                lastProbeOk = ok
+                lastProbeAtMs = System.currentTimeMillis()
+                if (!ok && server != null) {
+                    Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
+                    watchdogHandler.post { rebind() }
+                }
+                watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
+            }, "bridge-probe").apply { isDaemon = true }.start()
+        }
+    }
+
+    /**
+     * Tear the listener down and build it again on whatever address is current.
+     *
+     * A stale tailnet address is the case this exists for: the socket is fine, it is simply
+     * bound to an IP the tailnet no longer routes. Re-reading `tailnetAddress()` is what picks
+     * up the new one.
+     */
+    private fun rebind() {
+        server?.stop()
+        server = null
+        markRunning(false)
+        val bind = tailnetAddress()
+        if (bind == null) {
+            lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
+            Debug.log("watchdog: cannot rebind — no tailnet address")
+            postStatusNotification(final = true, attempt = 0)
+            return
+        }
+        bindAddress = bind
+        val s = HttpServer(this, bind, PORT)
+        try {
+            s.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            server = s
+            lastError = ""
+            lastProbeOk = true
+            lastProbeAtMs = System.currentTimeMillis()
+            cancelStatusNotification()
+            markRunning(true)
+            Debug.log("watchdog: rebound on $bind:$PORT")
+        } catch (e: Exception) {
+            lastError = "Could not bind port $PORT: ${e.message ?: e.javaClass.simpleName}".trim()
+            Debug.log("watchdog: REBIND FAILED: $lastError")
+            postStatusNotification(final = true, attempt = 0)
+        }
     }
 
     /**
@@ -271,6 +551,12 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // A pending retry must not outlive the service: it would start a new instance after a
+        // deliberate STOP, which is the same bug `maybeAutoStartServer` guards against on the
+        // app side. The watchdog likewise has nothing left to watch.
+        retryHandler.removeCallbacksAndMessages(null)
+        watchdogHandler.removeCallbacksAndMessages(null)
+        retryAttempt = 0
         // Give the engine back. This was the second half of the memory story: `onTrimMemory`
         // released it, but that is a HINT the OS may never send, so a stopped service could sit
         // on ~700 MiB indefinitely. With START_STICKY the process is also one the OS restarts,

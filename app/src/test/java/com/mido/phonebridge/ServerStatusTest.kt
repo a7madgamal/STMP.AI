@@ -31,6 +31,7 @@ class ServerStatusTest {
         // false) and left the reason behind. Both true at once is NORMAL, not an edge case.
         val state = ServerStatus.state(
             serverUp = false,
+            alive = false,
             listenerOk = true,
             notifOk = true,
             lastError = "No Tailscale address on this phone.",
@@ -43,17 +44,25 @@ class ServerStatusTest {
         // A refused bind says nothing about the other two, so they must not mask the failure.
         assertEquals(
             ServerStatus.State.FAILED,
-            ServerStatus.state(false, true, true, "Could not bind port 8787: bind failed"),
+            ServerStatus.state(
+                serverUp = false, alive = false, listenerOk = true, notifOk = true,
+                lastError = "Could not bind port 8787: bind failed",
+            ),
         )
         assertEquals(
             ServerStatus.State.FAILED,
-            ServerStatus.state(false, false, false, "Could not bind port 8787: bind failed"),
+            ServerStatus.state(
+                serverUp = false, alive = false, listenerOk = false, notifOk = false,
+                lastError = "Could not bind port 8787: bind failed",
+            ),
         )
     }
 
     @Test
     fun `a quiet stopped server is STOPPED and offers the tap`() {
-        val state = ServerStatus.state(false, true, true, "")
+        val state = ServerStatus.state(
+            serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = "",
+        )
         assertEquals(ServerStatus.State.STOPPED, state)
         assertEquals("Tap START SERVER to begin", ServerStatus.detail(state, "", null, "", 8787))
     }
@@ -65,32 +74,86 @@ class ServerStatusTest {
         // serving bridge look dead.
         assertEquals(
             ServerStatus.State.RUNNING_HEALTHY,
-            ServerStatus.state(true, true, true, "stale reason"),
+            ServerStatus.state(
+                serverUp = true, alive = true, listenerOk = true, notifOk = true,
+                lastError = "stale reason",
+            ),
         )
         assertEquals(
             ServerStatus.State.RUNNING_ATTENTION,
-            ServerStatus.state(true, false, true, "stale reason"),
+            ServerStatus.state(
+                serverUp = true, alive = true, listenerOk = false, notifOk = true,
+                lastError = "stale reason",
+            ),
         )
     }
 
     @Test
     fun `RUNNING_HEALTHY needs all three, and each missing one is ATTENTION`() {
-        assertEquals(ServerStatus.State.RUNNING_HEALTHY, ServerStatus.state(true, true, true, ""))
         assertEquals(
-            ServerStatus.State.RUNNING_ATTENTION,
-            ServerStatus.state(true, true, false, ""),
+            ServerStatus.State.RUNNING_HEALTHY,
+            ServerStatus.state(
+                serverUp = true, alive = true, listenerOk = true, notifOk = true, lastError = "",
+            ),
         )
         assertEquals(
             ServerStatus.State.RUNNING_ATTENTION,
-            ServerStatus.state(true, false, true, ""),
+            ServerStatus.state(
+                serverUp = true, alive = true, listenerOk = true, notifOk = false, lastError = "",
+            ),
+        )
+        assertEquals(
+            ServerStatus.State.RUNNING_ATTENTION,
+            ServerStatus.state(
+                serverUp = true, alive = true, listenerOk = false, notifOk = true, lastError = "",
+            ),
         )
     }
 
     @Test
+    fun `a server that claims up but fails a real connect is UNRESPONSIVE, not healthy`() {
+        // THE 2026-10-25 BUG, as an input. `serverUp` is an assertion set once after start();
+        // it stayed true while every caller got Connection refused, and the app painted green.
+        // Every other signal is healthy here on purpose: the listener is connected and the
+        // notification permission is granted, so only `alive` can catch it.
+        val state = ServerStatus.state(
+            serverUp = true, alive = false, listenerOk = true, notifOk = true, lastError = "",
+        )
+        assertEquals(ServerStatus.State.UNRESPONSIVE, state)
+        // Must NOT say "Running": that word is the lie being fixed.
+        assertTrue(!ServerStatus.title(state).contains("Running"))
+        assertEquals("● Not answering", ServerStatus.title(state))
+        // The checklist row must not contradict the hero above it.
+        assertTrue(!ServerStatus.checklistValue(state, "100.64.0.11", 8787).contains("running"))
+    }
+
+    @Test
+    fun `UNRESPONSIVE outranks the attention pair`() {
+        // A dead listener is not worth mentioning while the server itself is not answering:
+        // the human can only act on one thing at a time, and this is the bigger one.
+        assertEquals(
+            ServerStatus.State.UNRESPONSIVE,
+            ServerStatus.state(
+                serverUp = true, alive = false, listenerOk = false, notifOk = false, lastError = "",
+            ),
+        )
+    }
+
+    @Test
+    fun `UNRESPONSIVE detail names the address it should be answering on`() {
+        val state = ServerStatus.State.UNRESPONSIVE
+        val detail = ServerStatus.detail(state, "", null, "100.64.0.11", 8787)
+        assertTrue(detail.contains("100.64.0.11:8787"))
+        // A stale tailnet address is the likeliest cause, so say it is being handled.
+        assertTrue(detail.contains("retrying"))
+    }
+
+    @Test
     fun `the failed title and detail say what happened`() {
-        val err = "No Tailscale address on this phone. Open the Tailscale app, connect it, " +
-            "then tap START SERVER again."
-        val state = ServerStatus.state(false, true, true, err)
+        val err = "No Tailscale address on this phone. Open the Tailscale app and connect it."
+        val state = ServerStatus.state(
+            serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = err,
+        )
         assertEquals("● Could not start", ServerStatus.title(state))
         // Verbatim: the reason is the payload. Paraphrasing it would mean two strings to keep
         // in step, and the one on screen would be the one nobody tested.
@@ -101,7 +164,9 @@ class ServerStatusTest {
     fun `the checklist row does not say 'stopped' during a failure`() {
         // "stopped" under a red "Could not start" reads like a contradiction; the row points
         // at the reason instead.
-        val failed = ServerStatus.state(false, true, true, "boom")
+        val failed = ServerStatus.state(
+            serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = "boom",
+        )
         assertTrue(ServerStatus.checklistValue(failed, "", 8787).contains("error"))
         assertEquals("stopped", ServerStatus.checklistValue(ServerStatus.State.STOPPED, "", 8787))
         assertEquals(

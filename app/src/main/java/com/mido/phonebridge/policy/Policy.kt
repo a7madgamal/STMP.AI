@@ -48,6 +48,25 @@ class Policy(
      */
     val aiEnabled: Boolean = false,
     /**
+     * Does the bridge start itself — after a reboot, after an app update, and on app load?
+     *
+     * **Default ON** (Mido, 2026-10-25). The whole point of the app is a server that is
+     * reachable; a bridge that is only up because someone opened the app is not a bridge, it
+     * is a manual daemon. The phone rebooted on 2026-10-25 and nothing restarted it, which is
+     * exactly the state this default prevents.
+     *
+     * **One toggle, one meaning: "the server starts itself."** It covers BOTH entry points —
+     * the boot receiver and `MainActivity.maybeAutoStartServer()` — deliberately. A toggle
+     * that stopped the boot start but still started on every app load would be a setting whose
+     * OFF state does not mean off.
+     *
+     * Lenient like the other preferences: a garbled value falls back to ON and is logged, never
+     * a refusal to start. The failure mode of the fallback is a server that runs when the user
+     * did not ask for it — visible and harmless. The failure mode of throwing would be a dead
+     * bridge over a preference.
+     */
+    val autoStartOnBoot: Boolean = true,
+    /**
      * Preferences that were present but unreadable, for the caller to LOG.
      *
      * **Carried rather than logged here, and that is a purity constraint, not tidiness.**
@@ -70,6 +89,7 @@ class Policy(
         // defaults, which is why VERSION does not move (see [parse]).
         .put("fingerprintForModals", fingerprintForModals)
         .put("aiEnabled", aiEnabled)
+        .put("autoStartOnBoot", autoStartOnBoot)
         .put(
             "rules",
             JSONArray().apply {
@@ -96,13 +116,15 @@ class Policy(
         Policy(
             global = global,
             rules = rules.filterNot { it.key == rule.key } + rule,
-            // Both preferences carried across EXPLICITLY. `Policy(global, rules)` alone compiles
-            // fine and resets every sibling field to its default — that exact mistake is already
-            // recorded in this project (`applyGate` wiped the rule table the same way), and here
-            // it would silently turn the AI back off, or a fingerprint requirement back on, every
-            // time someone added a rule.
+            // EVERY preference carried across EXPLICITLY, and always by name. `Policy(global,
+            // rules)` alone compiles fine and resets every sibling field to its default — that
+            // exact mistake is already recorded in this project (`applyGate` wiped the rule table
+            // the same way), and here it would silently turn the AI back off, or a fingerprint
+            // requirement back on, or stop the bridge from restarting after a reboot, every time
+            // someone added a rule.
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled
+            aiEnabled = aiEnabled,
+            autoStartOnBoot = autoStartOnBoot
         )
 
     /** A new policy with the pair's rule removed. [verb] null removes the ANY rule. */
@@ -111,20 +133,49 @@ class Policy(
             global = global,
             rules = rules.filterNot { it.plugin == plugin && it.verb == verb },
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled
+            aiEnabled = aiEnabled,
+            autoStartOnBoot = autoStartOnBoot
         )
 
     /** A new policy with the gate switch changed, preserving rules and preferences. */
     fun withGlobal(mode: GlobalMode): Policy =
-        Policy(mode, rules, fingerprintForModals, aiEnabled)
+        Policy(
+            global = mode,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiEnabled = aiEnabled,
+            autoStartOnBoot = autoStartOnBoot
+        )
 
     /** A new policy with the modal-fingerprint preference changed. */
     fun withFingerprintForModals(enabled: Boolean): Policy =
-        Policy(global, rules, enabled, aiEnabled)
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = enabled,
+            aiEnabled = aiEnabled,
+            autoStartOnBoot = autoStartOnBoot
+        )
 
     /** A new policy with the AI preference changed. */
     fun withAiEnabled(enabled: Boolean): Policy =
-        Policy(global, rules, fingerprintForModals, enabled)
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiEnabled = enabled,
+            autoStartOnBoot = autoStartOnBoot
+        )
+
+    /** A new policy with the boot auto-start preference changed. */
+    fun withAutoStartOnBoot(enabled: Boolean): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiEnabled = aiEnabled,
+            autoStartOnBoot = enabled
+        )
 
     companion object {
         const val VERSION = 1
@@ -174,14 +225,18 @@ class Policy(
                         "exactly one rule, and last-wins would make the file order-dependent"
                 )
             }
-            val warnings = ArrayList<String>(2)
+            val warnings = ArrayList<String>(3)
             val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
             val ai = lenientFlag(o, "aiEnabled", false, warnings)
+            // Absent means ON. A file written before this preference existed therefore gets the
+            // new behaviour without a migration step — which is why VERSION does not move.
+            val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
             return Policy(
                 global = global,
                 rules = rules,
                 fingerprintForModals = fingerprint,
                 aiEnabled = ai,
+                autoStartOnBoot = autoStart,
                 preferenceWarnings = warnings
             )
         }

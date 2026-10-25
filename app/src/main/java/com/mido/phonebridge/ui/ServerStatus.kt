@@ -32,6 +32,20 @@ object ServerStatus {
         RUNNING_ATTENTION,
 
         /**
+         * We believe we are running, but a real connect says otherwise.
+         *
+         * **This state exists because the app once painted green while every caller got
+         * `Connection refused`** (2026-10-25). `serverUp` records that `start()` succeeded
+         * once; it is never re-verified, so it cannot distinguish "serving" from "bound to an
+         * address that stopped routing". A green label that no caller can reach is worse than
+         * a red one, because it stops anyone looking.
+         *
+         * Checked BEFORE the healthy/attention pair, since both of those assume `serverUp`
+         * means reachable.
+         */
+        UNRESPONSIVE,
+
+        /**
          * Start was attempted and refused. **Checked before [STOPPED]** — a stopped server
          * that carries an error is a failure, not an idle state, and this precedence is the
          * whole reason this object exists.
@@ -46,25 +60,37 @@ object ServerStatus {
      * Resolve the state.
      *
      * @param serverUp `BridgeService.serverUp` — true only after a successful bind.
+     * @param alive a REAL liveness result: the listener's socket is open, its accept thread is
+     *   running, and a TCP connect to the bound address succeeded. Not the same thing as
+     *   [serverUp], and that distinction is the point — see [State.UNRESPONSIVE].
      * @param listenerOk the notification listener is connected.
      * @param notifOk `POST_NOTIFICATIONS` is granted.
      * @param lastError `BridgeService.lastError` — set by every refusal path, cleared on a
      *   successful bind, and cleared by the button before a retry so a stale reason cannot
      *   outlive its cause.
      */
-    fun state(serverUp: Boolean, listenerOk: Boolean, notifOk: Boolean, lastError: String): State =
-        when {
-            serverUp && listenerOk && notifOk -> State.RUNNING_HEALTHY
-            serverUp -> State.RUNNING_ATTENTION
-            // FAILED before STOPPED. Moving these two lines re-introduces the shipped bug.
-            lastError.isNotBlank() -> State.FAILED
-            else -> State.STOPPED
-        }
+    fun state(
+        serverUp: Boolean,
+        alive: Boolean,
+        listenerOk: Boolean,
+        notifOk: Boolean,
+        lastError: String,
+    ): State = when {
+        // UNRESPONSIVE first: everything below assumes serverUp implies reachable.
+        serverUp && !alive -> State.UNRESPONSIVE
+        serverUp && listenerOk && notifOk -> State.RUNNING_HEALTHY
+        serverUp -> State.RUNNING_ATTENTION
+        // FAILED before STOPPED. Moving these two lines re-introduces the shipped bug.
+        lastError.isNotBlank() -> State.FAILED
+        else -> State.STOPPED
+    }
 
     /** The hero title for a state. */
     fun title(state: State): String = when (state) {
         State.RUNNING_HEALTHY -> "● Running"
         State.RUNNING_ATTENTION -> "● Running — needs attention"
+        // Deliberately not "Running": that word is the lie this state replaces.
+        State.UNRESPONSIVE -> "● Not answering"
         State.FAILED -> "● Could not start"
         State.STOPPED -> "● Stopped"
     }
@@ -84,6 +110,10 @@ object ServerStatus {
         port: Int,
     ): String = when (state) {
         State.FAILED -> lastError
+        // Name the address: "not answering" is only actionable if you know where it should be
+        // answering, and a stale tailnet address is the likeliest cause.
+        State.UNRESPONSIVE ->
+            "Not answering on ${bindAddress.ifBlank { "?" }}:$port — retrying automatically."
         // A running server that also carries an error is not possible (a successful bind
         // clears it), but if that state ever appears, the error is still the more useful
         // line to show than the account email. Fail toward information.
@@ -100,6 +130,8 @@ object ServerStatus {
             "running on ${bindAddress.ifBlank { "?" }}:$port"
         // "stopped" beside a red "Could not start" reads like a contradiction.
         State.FAILED -> "not running — see the error above"
+        // Never "running" here: the row would contradict the hero directly above it.
+        State.UNRESPONSIVE -> "not answering — see above"
         State.STOPPED -> "stopped"
     }
 }

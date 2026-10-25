@@ -35,6 +35,16 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
+
+        /**
+         * How often the hero re-renders while the activity is resumed.
+         *
+         * 5s is a compromise: fast enough that a dead server cannot stay green through a
+         * glance at the screen, slow enough that the repaint is invisible. It reads a CACHED
+         * probe result, so the cost is a field read — the real probe runs in the service on its
+         * own 60s schedule, off the main thread.
+         */
+        const val UI_TICK_MS = 5_000L
     }
 
     private lateinit var logView: TextView
@@ -69,6 +79,14 @@ class MainActivity : FragmentActivity() {
      * the human (Mido, 2026-10-19: *"start server on app load automatically"*).
      */
     private var autoStartAttempted = false
+
+    /**
+     * Drives the while-resumed repaint. See [onResume].
+     *
+     * Main looper because it touches views, and a plain `Handler()` would do — named explicitly
+     * so the threading is obvious to a reader rather than inferred from construction order.
+     */
+    private val uiTickHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** Guards the unrecoverable-vault reset dialog so it does not stack. */
     private var resetOffered = false
@@ -267,12 +285,29 @@ class MainActivity : FragmentActivity() {
      *    restart on every onResume would make STOP impossible to keep.
      *  - **Never over a running server.** `serverUp` covers the case where the service was
      *    already started (or survived), so this cannot double-start or disturb it.
+     *
+     * **And a third: the preference is honoured.** "Auto-start on boot" is ONE toggle meaning
+     * "the server starts itself", so it gates this entry point too. A setting whose OFF state
+     * still started the server every time the app opened would be a toggle that does not mean
+     * what it says. The service still starts on an explicit tap — that is a human asking.
      */
     private fun maybeAutoStartServer() {
         if (autoStartAttempted) return
         autoStartAttempted = true
         if (BridgeService.serverUp) {
             Debug.log("auto-start skipped: server already up")
+            return
+        }
+        val enabled = try {
+            PolicyStore.from(applicationContext).get().autoStartOnBoot
+        } catch (e: Exception) {
+            // An unreadable policy refuses the start anyway (the service checks the same file
+            // before binding), so starting here would only produce a failure to explain.
+            Debug.log("auto-start skipped: policy unreadable (${e.message})")
+            return
+        }
+        if (!enabled) {
+            Debug.log("auto-start skipped: auto-start is OFF")
             return
         }
         Debug.log("auto-start: bringing the server up on app load")
@@ -368,12 +403,40 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         render()
+        // Re-render while visible, so the hero cannot go stale under the human's eyes.
+        //
+        // **This is the other half of the 2026-10-25 bug.** `render()` used to run only on
+        // `onResume` and two one-shot 600ms callbacks, so a server that died while the screen
+        // was open kept its green label until the activity was left and re-entered. A green
+        // label nobody re-checks is how "the app says running" and "callers get refused" were
+        // both true at once.
+        //
+        // The tick reads a CACHED probe result (`isVerifiedAlive`), never a fresh connect — the
+        // service's watchdog owns the probing, because a connect here would be network I/O on
+        // the main thread. So this is cheap: a field read plus a re-render every few seconds.
+        uiTickHandler.removeCallbacksAndMessages(null)
+        uiTickHandler.postDelayed(uiTick, UI_TICK_MS)
         // If a request is still waiting, put its modal back on screen. The approval
         // lives in its OWN recents-hidden task, so returning to the app (launcher
         // icon, recents) lands on MainActivity — which knows nothing about the
         // pending request. Without this the modal stays stranded off-screen until
         // the window expires. No-op when nothing is pending (the common case).
         ApprovalGate.relaunchCurrent(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // No ticking in the background: it would repaint a screen nobody is looking at, and a
+        // resumed activity re-arms it immediately.
+        uiTickHandler.removeCallbacksAndMessages(null)
+    }
+
+    /** Repaints on a timer while the activity is resumed. See [onResume]. */
+    private val uiTick = object : Runnable {
+        override fun run() {
+            render()
+            uiTickHandler.postDelayed(this, UI_TICK_MS)
+        }
     }
 
     // --- rendering ---
@@ -390,11 +453,15 @@ class MainActivity : FragmentActivity() {
         // held the cause. Mido, 2026-10-20: *"on server fail user should see clear error"*.
         val state = ServerStatus.state(
             serverUp = BridgeService.serverUp,
+            // The REAL check, not the flag. `serverUp` only records that start() once
+            // succeeded; this records that a socket connected. See ServerStatus.UNRESPONSIVE.
+            alive = BridgeService.isVerifiedAlive(),
             listenerOk = listenerOk,
             notifOk = notifOk,
             lastError = BridgeService.lastError,
         )
-        val failed = state == ServerStatus.State.FAILED
+        val failed = state == ServerStatus.State.FAILED ||
+            state == ServerStatus.State.UNRESPONSIVE
 
         // The state colour is applied ONCE, here. The old code set a background per
         // branch and then overwrote it two lines later, so the hero card was always
@@ -402,6 +469,7 @@ class MainActivity : FragmentActivity() {
         val heroSurface = when (state) {
             ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS_SURFACE
             ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING_SURFACE
+            ServerStatus.State.UNRESPONSIVE -> Theme.DANGER_SURFACE
             ServerStatus.State.FAILED -> Theme.DANGER_SURFACE
             ServerStatus.State.STOPPED -> Theme.SURFACE
         }
@@ -410,6 +478,7 @@ class MainActivity : FragmentActivity() {
             when (state) {
                 ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS
                 ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING
+                ServerStatus.State.UNRESPONSIVE -> Theme.DANGER
                 ServerStatus.State.FAILED -> Theme.DANGER
                 ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
             }
@@ -453,6 +522,7 @@ class MainActivity : FragmentActivity() {
                 when (state) {
                     ServerStatus.State.RUNNING_HEALTHY,
                     ServerStatus.State.RUNNING_ATTENTION -> Theme.SUCCESS
+                    ServerStatus.State.UNRESPONSIVE -> Theme.DANGER
                     ServerStatus.State.FAILED -> Theme.DANGER
                     ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
                 }

@@ -91,6 +91,13 @@ class DebugPlugin(private val ctx: Context) : Plugin {
 
     private fun serverInfo(): JSONObject = JSONObject()
         .put("up", BridgeService.serverUp)
+        // `up` is an ASSERTION (start() once succeeded); `alive` is a CHECK (a real connect
+        // succeeded, recently). They are different facts and the app painted green on the
+        // first while the second was false — 2026-10-25. A remote caller needs both to tell
+        // "process up, not serving" from "process dead".
+        .put("alive", BridgeService.isVerifiedAlive())
+        .put("boundTo", BridgeService.bindAddress)
+        .put("lastProbeAtMs", BridgeService.lastProbeAtMs)
         .put("port", BridgeService.PORT)
         .put("bindAddress", BridgeService.bindAddress)
         .put("lastError", BridgeService.lastError)
