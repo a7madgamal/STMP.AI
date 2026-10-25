@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.42.0 (build 152)**.
+Current build: **v0.42.1 (build 153)**.
 
 ---
 
@@ -2766,7 +2766,7 @@ Version 0.41.1 / build 151.
 
 ---
 
-## 0.42.0 — NOTIFY runs while the phone is locked, if the vault is open (build 152) — CURRENT
+## 0.42.0 — NOTIFY runs while the phone is locked, if the vault is open (build 152)
 2026-10-25
 
 Mido, 2026-10-25: *"for notification level calls it shouldn't matter if the screen was off or the
@@ -2805,6 +2805,56 @@ that `SECURE` can never proceed unattended, and that the rule takes no Verb para
 Version 0.42.0 / build 152.
 
 **Not device-verified yet.** Needs a locked phone with the vault session open.
+
+---
+
+## 0.42.1 — restore the audit and logcat packages that git never had (build 153) — CURRENT
+2026-10-25
+
+**The tree did not compile, and no commit was responsible.** `app/.../audit/` (13 files) and
+`app/.../plugins/logs/` (1 file) were missing, so seven sources failed on unresolved
+references — `BridgeService`, `MainActivity`, `LogActivity`, `LogDetailActivity`,
+`ExceptionsActivity`, `OptionsActivity`, `DebugPlugin`. Nothing in either repository's history
+ever contained them.
+
+**Why: the ignore rules were aimed at OpenClaw's runtime data and landed on the source.**
+`~/.openclaw/.gitignore` carried bare `audit/` and `logs/` (they exist to exclude the agent's
+own audit and log directories). A bare directory pattern matches at EVERY depth, so
+`git check-ignore` resolved
+`app/src/main/java/com/mido/phonebridge/audit/AuditLog.kt` → `.gitignore:28:audit/` and
+`.../plugins/logs/LogcatPlugin.kt` → `.gitignore:16:logs/`. Those files were therefore never
+staged, in the in-tree copy or in the new repo, and deleting the in-tree copy during the move
+took them with it. The compiled output kept working, which is why nothing noticed until a
+clean build.
+
+**Recovered from the Gradle build cache, not rewritten from memory.** The last good build's
+`compileDebugKotlin` output still held all 31 classes, so the reconstruction was checked
+against real bytecode rather than recollection: every member present in the recovered classes
+is present in the restored sources, and the only difference is one private nested `Companion`
+that is now inlined. **314 tests green, unchanged** — the same suite, over the same contracts.
+
+- **The doc comments are the loss, and they were rewritten deliberately.** Bytecode carries no
+  comments, and in this project the comments are where the reasoning lives — why absence is
+  distinct from emptiness, why the id is a counter rather than a random suffix, why a 4xx after
+  an approval is signal. Each was restated from the behaviour the code actually has, so a future
+  reader still inherits the reason and not just the mechanism.
+- **`AuditRecord`/`AuditHeader`/`Decision`/`Truncation`/`AuditDay` are `data class`es again.**
+  The bytecode shows generated `copy`/`componentN`/`equals`, and `ExceptionsActivity.save` takes
+  an `AuditRecord` as a parameter type — a plain class would compile but change identity
+  semantics for no reason.
+- **`AuditLog.from` reads the version from `BuildConfig`** rather than the literals the
+  decompiler showed (`"0.42.0"`, `152`), which were that build's constants baked in. The
+  original source used `BuildConfig`, and a hardcoded pair would go stale on the next bump.
+- **`PolicyAudit` likewise** takes the version from `BuildConfig` for the same reason.
+
+**The durable fix is a `.gitignore` that cannot do this again.** The repository's own file uses
+`build/`, `.gradle/`, `keystore/`, `apk-out/` — patterns that cannot match a source directory —
+and the restored packages are now tracked, so `git status` shows them and a clean clone builds.
+The `~/.openclaw` rules are unchanged: they are correct for that repo, and the mistake was
+carrying a project inside it, which 07e94200 already ended.
+
+Version 0.42.1 / build 153. Behaviour is unchanged from 0.42.0 — this release restores source,
+it does not alter it.
 
 ---
 
