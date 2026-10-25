@@ -568,7 +568,14 @@ object NotifyOverlay {
                         // approve.
                         settle(
                             entry,
-                            if (com.mido.phonebridge.policy.isAttended(entry.ctx)) Reason.EXPIRED
+                            // Approve on silence when the vault session is open, even with
+                            // nobody at the screen — the 0.42.0 rule (Mido, 2026-10-25).
+                            // Without the vault half, a request that started attended and lost
+                            // the screen mid-window would still deny, which would make the rule
+                            // depend on WHEN the screen went off rather than on the session.
+                            if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
+                                com.mido.phonebridge.core.SecretVault.isUnlocked()
+                            ) Reason.EXPIRED
                             else Reason.UNATTENDED
                         )
                         return
@@ -598,7 +605,11 @@ object NotifyOverlay {
             if (!entry.settled) {
                 settle(
                     entry,
-                    if (com.mido.phonebridge.policy.isAttended(entry.ctx)) Reason.EXPIRED
+                    // Same rule as the tick above: the vault session is what permits an
+                    // unattended approve. See the note there.
+                    if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
+                        com.mido.phonebridge.core.SecretVault.isUnlocked()
+                    ) Reason.EXPIRED
                     else Reason.UNATTENDED
                 )
             }

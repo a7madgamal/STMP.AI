@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.41.1 (build 151)**.
+Current build: **v0.42.0 (build 152)**.
 
 ---
 
@@ -2732,7 +2732,7 @@ needs a server that dies while the screen is on. Both are unproven until then.
 
 ---
 
-## 0.41.1 — the bridge now waits for Tailscale instead of dying (build 151) — CURRENT
+## 0.41.1 — the bridge now waits for Tailscale instead of dying (build 151)
 2026-10-25
 
 **Found by the 0.41.0 device test itself.** Mido turned Tailscale off, got the "not running"
@@ -2763,6 +2763,48 @@ are always opposites and that the waiting copy says it recovers by itself.
 Version 0.41.1 / build 151.
 
 **Not device-verified yet.** The reconnect path needs Tailscale toggled off and back on.
+
+---
+
+## 0.42.0 — NOTIFY runs while the phone is locked, if the vault is open (build 152) — CURRENT
+2026-10-25
+
+Mido, 2026-10-25: *"for notification level calls it shouldn't matter if the screen was off or the
+phone locked or not, as long as the app was unlocked once for storage unlock"* — and, asked whether
+it should be reads-only: *"regardless of verb"*.
+
+**This reverses the original attendance rule, and the reversal is the feature.** Before it, an
+unattended request was denied in EVERY mode: `isAttended()` ran pre-gate for all requests, so
+`debug/READ` answered `403 denied: gate unavailable: screen off or device locked` while the phone
+sat in a pocket. Reads could not run overnight at all.
+
+**The consequence, stated plainly rather than buried:** `NOTIFY` approves on SILENCE. A dark screen
+guarantees silence, so this is unattended approval — not "the card was ignored" but "the card was
+never legible". The consent model is now *unlocked once, trusted after*, not *someone saw this*.
+That is the accepted trade.
+
+- **The bound is the vault session.** `SecretVault.isUnlocked()` is `dataKey != null` — a live
+  session, not a stored flag. It dies with the process (restart, reboot, system kill) and on
+  `lock()`. So the trust window is exactly "since you last unlocked this app, while this process
+  is alive". A cold-booted phone is back to denied, which is what keeps this defensible.
+- **`unattendedAllowed(mode, vaultUnlocked)` is pure and tested.** `NOTIFY` → the vault decides.
+  `SECURE` → always false, whatever the vault says. A vault session is NOT a substitute for a
+  present human, and if that ever returned true the fingerprint gate would be silently off.
+- **Unattended requests do not draw a card.** Drawing one would report "shown" for something that
+  was never readable. The NOTIFY branch approves, holds the window, and records
+  `detail = "unattended"` so the log never reads like an observed decision.
+- **The overlay's expiry re-check had to change too**, or the rule would depend on WHEN the screen
+  went off: a request that started attended and lost the screen mid-window would still have
+  settled `UNATTENDED`. Both the tick and the backstop now accept an open vault.
+- **Verb-agnostic by explicit instruction.** The blast radius is bounded by POLICY instead: only a
+  route someone marked `NOTIFY` behaves this way, and `NOTIFY` is a deliberate, audited per
+  `plugin × verb` choice.
+
+314 tests green (was 308): 6 in `AttendanceTest`, covering the bound (locked vault still denies),
+that `SECURE` can never proceed unattended, and that the rule takes no Verb parameter.
+Version 0.42.0 / build 152.
+
+**Not device-verified yet.** Needs a locked phone with the vault session open.
 
 ---
 

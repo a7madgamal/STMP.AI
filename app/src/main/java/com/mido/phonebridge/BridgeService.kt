@@ -31,6 +31,7 @@ import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.RespPayload
+import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.BridgeStatusNotice
 import com.mido.phonebridge.core.StartupRetry
@@ -50,6 +51,7 @@ import com.mido.phonebridge.policy.Rule
 import com.mido.phonebridge.policy.exceptionModeFor
 import com.mido.phonebridge.policy.isAttended
 import com.mido.phonebridge.policy.resolve
+import com.mido.phonebridge.policy.unattendedAllowed
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -1059,12 +1061,20 @@ class HttpServer(
             val mode = resolvedPolicy.mode
             val globalMode = policy.global
 
-            // ATTENDANCE. A request that cannot be shown to an attending human is
-            // DENIED. There is no exempt mode any more: 0.12.0 removed the `OFF` switch,
-            // so no request can run without a human present, in any mode. Checked here,
-            // after validation, so a malformed request still gets its honest 400 and
-            // never a misleading `denied`. NOTIFY re-checks at approve time (NotifyGate).
-            if (!isAttended(ctx)) {
+            // ATTENDANCE. A request that cannot be shown to an attending human is DENIED —
+            // with one exception, and it is a deliberate reversal of the original rule.
+            //
+            // Mido, 2026-10-25: *"for notification level calls it shouldn't matter if the screen
+            // was off or the phone locked or not, as long as the app was unlocked once for
+            // storage unlock"*. So a NOTIFY request may proceed with nobody at the screen while
+            // the vault session is open. The rule lives in `unattendedAllowed`, pure and tested,
+            // because it decides whether a request runs with no human looking.
+            //
+            // The consequence is stated where the rule is defined, not hidden here: NOTIFY
+            // approves on silence, a dark screen guarantees silence, so this is unattended
+            // approval — "unlocked once, trusted after", not "someone saw this".
+            val attended = isAttended(ctx)
+            if (!attended && !unattendedAllowed(mode, SecretVault.isUnlocked())) {
                 draft.decision(
                     Decision(
                         mode.name, decisionSource(resolvedPolicy.source),
@@ -1078,108 +1088,129 @@ class HttpServer(
                 draft.response(403, obj.toString())
                 return Dispatched(Response.Status.FORBIDDEN, obj)
             }
+            // Unattended but permitted: the human is not there, so a card cannot be read and
+            // must not be drawn. Recorded as its own fact — an approval nobody could see is
+            // not the same evidence as one that was on screen.
+            val unattendedProceed = !attended
 
             when (mode) {
                 Mode.NOTIFY -> {
-                    // A small overlay card, not a notification: the draw permission
-                    // this app already holds makes the prompt ours, so it appears
-                    // above whatever the human is looking at instead of fighting the
-                    // shade. The card fetches the AI summary FIRST, then starts its 5s
-                    // clock; silence approves, a tap approves-and-skips, the ✕ rejects.
-                    val decision = NotifyGate.await(
-                        ctx,
-                        summary,
-                        labelOf(resolved.plugin.id, verb),
-                        verb,
-                        // Null facts for a route that declares `aiSummary = false`: the card
-                        // then shows its deterministic content and its clock starts at once.
-                        // Never built for an opted-out route, so the rows are not fetched
-                        // either — an opted-out route pays nothing for the AI.
-                        if (com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary))
-                            aiFactsFor(
-                                resolved.route, verb, summary, path, body, query, remote,
-                                // The body EXACTLY as received — `rawBody` is captured before
-                                // parsing, so this is byte-for-byte what the caller sent.
-                                rawBody = rawBody,
-                                url = body.optString("url", "")
+                    if (unattendedProceed) {
+                        // Nobody is at the screen, so a card cannot be read and must not be
+                        // drawn. Drawing one would be the dishonest version: it would report
+                        // "shown" for something that was never legible.
+                        //
+                        // This is the unattended approval the rule permits. It is recorded with
+                        // its own detail so the log never reads like an observed decision.
+                        draft.decision(
+                            Decision(
+                                mode.name, decisionSource(resolvedPolicy.source),
+                                globalMode.name, resolvedPolicy.ruleKey,
+                                null, null, System.currentTimeMillis(), 0
                             )
-                        else null,
-                        needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
-                    )
-                    when (decision) {
-                        is NotifyGate.Result.Approved -> {
-                            draft.decision(
-                                Decision(
-                                    mode.name, decisionSource(resolvedPolicy.source),
-                                    globalMode.name, resolvedPolicy.ruleKey,
-                                    null, decision.shownAt, decision.decidedAt, 0
+                        )
+                        draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                        draft.error("unattended")
+                    } else {
+                        // A small overlay card, not a notification: the draw permission
+                        // this app already holds makes the prompt ours, so it appears
+                        // above whatever the human is looking at instead of fighting the
+                        // shade. The card fetches the AI summary FIRST, then starts its 5s
+                        // clock; silence approves, a tap approves-and-skips, the ✕ rejects.
+                        val decision = NotifyGate.await(
+                            ctx,
+                            summary,
+                            labelOf(resolved.plugin.id, verb),
+                            verb,
+                            // Null facts for a route that declares `aiSummary = false`: the card
+                            // then shows its deterministic content and its clock starts at once.
+                            // Never built for an opted-out route, so the rows are not fetched
+                            // either — an opted-out route pays nothing for the AI.
+                            if (com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary))
+                                aiFactsFor(
+                                    resolved.route, verb, summary, path, body, query, remote,
+                                    // The body EXACTLY as received — `rawBody` is captured before
+                                    // parsing, so this is byte-for-byte what the caller sent.
+                                    rawBody = rawBody,
+                                    url = body.optString("url", "")
                                 )
-                            )
-                            draft.outcome(AuditOutcome.NOTIFY_APPROVED)
-                        }
-                        is NotifyGate.Result.Tapped -> {
-                            // A deliberate tap-approve: recorded as NOTIFY_APPROVED
-                            // (the outcome set is closed) but the decision block's
-                            // decidedAt is the tap instant, and the detail carries the
-                            // distinction so the log can tell a tap from silence.
-                            draft.decision(
-                                Decision(
-                                    mode.name, decisionSource(resolvedPolicy.source),
-                                    globalMode.name, resolvedPolicy.ruleKey,
-                                    null, decision.shownAt, decision.decidedAt, 0
+                            else null,
+                            needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
+                        )
+                        when (decision) {
+                            is NotifyGate.Result.Approved -> {
+                                draft.decision(
+                                    Decision(
+                                        mode.name, decisionSource(resolvedPolicy.source),
+                                        globalMode.name, resolvedPolicy.ruleKey,
+                                        null, decision.shownAt, decision.decidedAt, 0
+                                    )
                                 )
-                            )
-                            draft.outcome(AuditOutcome.NOTIFY_APPROVED)
-                            draft.error("tapped")
-                        }
-                        is NotifyGate.Result.Rejected -> {
-                            draft.decision(
-                                Decision(
-                                    mode.name, decisionSource(resolvedPolicy.source),
-                                    globalMode.name, resolvedPolicy.ruleKey,
-                                    null, decision.shownAt, decision.decidedAt, 0
+                                draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                            }
+                            is NotifyGate.Result.Tapped -> {
+                                // A deliberate tap-approve: recorded as NOTIFY_APPROVED
+                                // (the outcome set is closed) but the decision block's
+                                // decidedAt is the tap instant, and the detail carries the
+                                // distinction so the log can tell a tap from silence.
+                                draft.decision(
+                                    Decision(
+                                        mode.name, decisionSource(resolvedPolicy.source),
+                                        globalMode.name, resolvedPolicy.ruleKey,
+                                        null, decision.shownAt, decision.decidedAt, 0
+                                    )
                                 )
-                            )
-                            draft.outcome(AuditOutcome.NOTIFY_REJECTED)
-                            draft.error("denied")
-                            draft.response(403, null)
-                            return Dispatched(
-                                Response.Status.FORBIDDEN,
-                                err("denied", "request denied by user")
-                            )
-                        }
-                        is NotifyGate.Result.AiFailed -> {
-                            // The card could not be described, so it was withdrawn without a
-                            // decision. The AI is core (Mido, 2026-10-19): this is a fault on
-                            // our side, answered as a coded error — NEVER as an approval, and
-                            // never as a deny either, because no human said no.
-                            draft.outcome(AuditOutcome.HANDLER_FAILED)
-                            draft.error("ai_unavailable")
-                            val obj = err("ai_unavailable", decision.detail)
-                            draft.response(500, obj.toString())
-                            return Dispatched(Response.Status.INTERNAL_ERROR, obj)
-                        }
-                        is NotifyGate.Result.Unavailable -> {
-                            // Could not be shown: no permission, evicted, or the screen
-                            // went away mid-window. Deny, and say which. Approving
-                            // because we failed to draw something would be the one
-                            // failure mode this whole mode must never have.
-                            draft.decision(
-                                Decision(
-                                    mode.name, decisionSource(resolvedPolicy.source),
-                                    globalMode.name, resolvedPolicy.ruleKey,
-                                    null, decision.shownAt, decision.decidedAt, 0
+                                draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                                draft.error("tapped")
+                            }
+                            is NotifyGate.Result.Rejected -> {
+                                draft.decision(
+                                    Decision(
+                                        mode.name, decisionSource(resolvedPolicy.source),
+                                        globalMode.name, resolvedPolicy.ruleKey,
+                                        null, decision.shownAt, decision.decidedAt, 0
+                                    )
                                 )
-                            )
-                            draft.outcome(AuditOutcome.DENIED_UNATTENDED)
-                            draft.error("denied")
-                            val obj = err("denied", "gate unavailable: ${decision.detail}")
-                            draft.response(403, obj.toString())
-                            return Dispatched(Response.Status.FORBIDDEN, obj)
+                                draft.outcome(AuditOutcome.NOTIFY_REJECTED)
+                                draft.error("denied")
+                                draft.response(403, null)
+                                return Dispatched(
+                                    Response.Status.FORBIDDEN,
+                                    err("denied", "request denied by user")
+                                )
+                            }
+                            is NotifyGate.Result.AiFailed -> {
+                                // The card could not be described, so it was withdrawn without a
+                                // decision. The AI is core (Mido, 2026-10-19): this is a fault on
+                                // our side, answered as a coded error — NEVER as an approval, and
+                                // never as a deny either, because no human said no.
+                                draft.outcome(AuditOutcome.HANDLER_FAILED)
+                                draft.error("ai_unavailable")
+                                val obj = err("ai_unavailable", decision.detail)
+                                draft.response(500, obj.toString())
+                                return Dispatched(Response.Status.INTERNAL_ERROR, obj)
+                            }
+                            is NotifyGate.Result.Unavailable -> {
+                                // Could not be shown: no permission, evicted, or the screen
+                                // went away mid-window. Deny, and say which. Approving
+                                // because we failed to draw something would be the one
+                                // failure mode this whole mode must never have.
+                                draft.decision(
+                                    Decision(
+                                        mode.name, decisionSource(resolvedPolicy.source),
+                                        globalMode.name, resolvedPolicy.ruleKey,
+                                        null, decision.shownAt, decision.decidedAt, 0
+                                    )
+                                )
+                                draft.outcome(AuditOutcome.DENIED_UNATTENDED)
+                                draft.error("denied")
+                                val obj = err("denied", "gate unavailable: ${decision.detail}")
+                                draft.response(403, obj.toString())
+                                return Dispatched(Response.Status.FORBIDDEN, obj)
+                            }
                         }
                     }
                 }
-
                 Mode.SECURE -> {
                     // Central gate: describe the concrete call, then wait for the human.
                     //
