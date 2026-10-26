@@ -16,7 +16,7 @@ android {
      */
     signingConfigs {
         create("stable") {
-            storeFile = file("../keystore/phonebridge.jks")
+            storeFile = file("../keystore/stmp.jks")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
@@ -27,8 +27,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 166
-        versionName = "0.43.12"
+        versionCode = 167
+        versionName = "0.43.13"
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and

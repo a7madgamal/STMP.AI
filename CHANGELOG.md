@@ -3134,7 +3134,7 @@ Version 0.43.11 / build 165.
 
 ---
 
-## 0.43.12 — the last visible "PhoneBridge" is gone (build 166) — CURRENT
+## 0.43.12 — the last visible "PhoneBridge" is gone (build 166)
 2026-10-26
 
 The notification-listener service still advertised itself to Android as "PhoneBridge
@@ -3147,6 +3147,50 @@ not a copy change: a new application id is a different app to Android, which res
 permission grant and the notification-listener binding.
 
 Version 0.43.12 / build 166.
+
+---
+
+## 0.43.13 — SSH: keep the tail, bound stderr, return partial output, and detach jobs (build 167) — CURRENT
+2026-10-26
+
+Four fixes to the SSH route, all found by using it for real work rather than by reading it.
+
+**A timeout no longer discards what the command said.** The read loop filled a buffer and then
+threw `ssh_timeout` at the deadline, which dropped every byte captured so far. A timeout was
+therefore indistinguishable from a command that printed nothing — the caller could not tell "slow"
+from "silent", and an answer that had already been produced was thrown away with the error. Now
+the result comes back with `timedOut: true` and whatever output arrived, and `exitCode: -1`
+(JSch's own "no status") rather than a fake `0`. Proven against a real run that printed its answer
+and then hung: the text is now visible instead of being replaced by an error.
+
+**Truncation keeps the tail, not the head.** At the 64 KiB cap the old code answered with the
+FIRST 64 KiB — for a build log or a test run, exactly the part that does not contain the error.
+`SshTail` is a ring buffer that retains the LAST 64 KiB and reports `truncated: true`.
+
+**The reader always drains, so much output cannot become a timeout.** The old loop stopped reading
+once the cap was hit, leaving the remote command blocked on a full pipe until the deadline — so
+"too much output" surfaced as a timeout. A ring has nothing to lose by continuing to read.
+
+**stderr is bounded.** stdout was capped at 64 KiB while stderr was a plain `ByteArrayOutputStream`
+with no limit at all. A command that keeps warning (`curl` retrying, a failing `ssh`) could grow it
+until the OS killed the app. Both streams now use the same capped tail, and `truncated` reflects
+either one. This asymmetry was an oversight, not a decision.
+
+**Detached jobs: `POST /ssh/{name}/detach` and `GET /ssh/job/{id}`.** A synchronous call is capped
+at 300s and torn down at the deadline, so a build, a clone or an agent run either fits or dies with
+no exit code; the workaround was composing `nohup … & echo $!` by hand and polling with `tail` in
+separate calls. The route starts the command and returns a job id immediately, and the poll route
+returns the retained output so far. Bounded on every axis: at most 4 running jobs
+(`ssh_job_limit`), a capped tail per job, and finished jobs expire after 30 minutes
+(`ssh_job_not_found`). The table is in memory and does not survive a process restart — a job dies
+with the app, which is the honest contract rather than pretending a restart kept a socket.
+
+**A detached command may not use sudo, and the route refuses it pre-gate.** The dispatcher wipes
+the sudo password the instant the handler returns, and the job runs after that — so it would either
+prompt into a closed stdin or keep a live password in a thread nobody is watching. Refused before
+the modal, so it costs no tap.
+
+Version 0.43.13 / build 167.
 
 ---
 

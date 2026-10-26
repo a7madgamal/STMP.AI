@@ -43,6 +43,21 @@ class SshPlugin(private val ctx: Context) : Plugin {
      */
     override val scopes: List<String> = emptyList()
 
+    private companion object {
+        /** Default ceiling for a detached job. Long enough for a build or an agent run. */
+        const val DETACHED_TIMEOUT_MS = 900_000L
+
+        /**
+         * Hard ceiling for a detached job.
+         *
+         * Larger than the 300s synchronous ceiling because the whole point of detaching is work
+         * that cannot finish in one request — but still bounded, because a job nobody stops holds
+         * an open session on a phone. Fifteen minutes covers a build; anything longer should be a
+         * service.
+         */
+        const val MAX_DETACHED_TIMEOUT_MS = 900_000L
+    }
+
     override fun routes(): List<Route> = listOf(
         Route(
             "POST", "/ssh/{name}", "RUN COMMAND OVER SSH", Verb.EXECUTE,
@@ -62,7 +77,34 @@ class SshPlugin(private val ctx: Context) : Plugin {
             // because the same route runs both kinds and the dispatcher has to force the
             // mode floor BEFORE the modal opens.
             needsPassword = { r -> SudoCommand.invokes(r.body.optString("command")) }
-        ) { run(it) }
+        ) { run(it) },
+        Route(
+            "POST", "/ssh/{name}/detach", "START A DETACHED COMMAND OVER SSH", Verb.EXECUTE,
+            validate = { r ->
+                val cmd = r.body.optString("command")
+                if (cmd.isBlank()) {
+                    throw PluginError("bad_request", "missing required 'command'")
+                }
+                // A detached command cannot carry a password. The service wipes `secretInput`
+                // the instant the handler returns, and the job runs AFTER that — so a sudo here
+                // would either prompt into a closed stdin or keep a live password in a thread
+                // nobody is watching. Refused pre-gate, so it costs no tap.
+                if (SudoCommand.invokes(cmd)) {
+                    throw PluginError(
+                        "bad_request",
+                        "a detached command cannot use sudo: the password is wiped when the " +
+                            "request ends. Run it in the foreground, or scope a NOPASSWD rule."
+                    )
+                }
+            },
+            // No password field: see the refusal above. Decided from the payload, pre-gate.
+            needsPassword = { false }
+        ) { runDetach(it) },
+        Route(
+            // Distinct 3-segment shape from `/ssh/{name}/detach` so the two can never be confused
+            // for one another, and a connection literally named "job" cannot shadow the route.
+            "GET", "/ssh/job/{id}", "READ A DETACHED SSH JOB", Verb.READ
+        ) { pollJob(it) }
     )
 
     /**
@@ -122,6 +164,32 @@ class SshPlugin(private val ctx: Context) : Plugin {
                         )
                     }
                 }
+            },
+            "POST /ssh/{name}/detach" to { r ->
+                val name = requireName(r.pathParams["name"])
+                val command = r.body.optString("command")
+                if (command.isBlank()) throw PluginError("bad_request", "missing required 'command'")
+                val conn = loadConnection(name)
+                    ?: throw PluginError("not_found", "no SSH connection named '$name'")
+                buildList {
+                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.WARN))
+                    // The command verbatim, exactly as the synchronous route shows it: detaching
+                    // changes WHEN it runs, never WHAT runs.
+                    add(ApprovalRow("COMMAND", command, ApprovalRow.Style.LONG))
+                    // Said plainly, because "detached" is the one fact that changes what the
+                    // human is agreeing to: this outlives the request and keeps running.
+                    add(
+                        ApprovalRow(
+                            "MODE",
+                            "detached — keeps running after this request returns; poll /ssh/job/{id}",
+                            ApprovalRow.Style.WARN
+                        )
+                    )
+                    val trust = r.body.optString("trustHostKey").trim()
+                    if (trust.isNotBlank()) {
+                        add(ApprovalRow("TRUST HOST KEY", trust, ApprovalRow.Style.MONO))
+                    }
+                }
             }
         )
     )
@@ -163,6 +231,7 @@ class SshPlugin(private val ctx: Context) : Plugin {
                 .put("stdout", result.stdout)
                 .put("stderr", result.stderr)
                 .put("truncated", result.truncated)
+                .put("timedOut", result.timedOut)
                 .put("durationMs", result.durationMs)
                 .put("hostKeyFingerprint", result.hostKeyFingerprint)
                 .put("hostKeyType", result.hostKeyType)
@@ -213,6 +282,40 @@ class SshPlugin(private val ctx: Context) : Plugin {
     }
 
     private fun vaultNameFor(name: String): String = "ssh-$name"
+
+    private suspend fun runDetach(req: Req): Resp {
+        val name = requireName(req.pathParams["name"])
+        val command = req.body.optString("command")
+        if (command.isBlank()) throw PluginError("bad_request", "missing required 'command'")
+        val trust = req.body.optString("trustHostKey").trim().takeUnless { it.isBlank() }
+        // A detached job may outlive any single request, so the ceiling is the LONGEST run the
+        // app will supervise rather than a per-call window. Still bounded: an unbounded job is a
+        // leaked session on a phone.
+        val timeout = req.body.optLong("timeoutMs", DETACHED_TIMEOUT_MS)
+            .coerceIn(1_000L, MAX_DETACHED_TIMEOUT_MS)
+
+        val conn = loadConnection(name)
+            ?: throw PluginError("not_found", "no SSH connection named '$name'")
+
+        // No stdin: the route refuses sudo pre-gate, because the password is wiped when this
+        // handler returns and the job starts after that.
+        val job = SshJobs.start(conn, name, command, timeout, trust, stdin = null)
+
+        return Resp.ok(
+            JSONObject()
+                .put("jobId", job.id)
+                .put("done", false)
+                .put("poll", "GET /ssh/job/${job.id}")
+                .put("startedAtMs", job.startedAtMs)
+                .put("timeoutMs", timeout)
+        )
+    }
+
+    private suspend fun pollJob(req: Req): Resp {
+        val id = req.pathParams["id"]?.trim().orEmpty()
+        if (id.isBlank()) throw PluginError("bad_request", "missing job id")
+        return Resp.ok(SshJobs.get(id).snapshot())
+    }
 
     private fun requireName(raw: String?): String {
         val v = raw?.trim().orEmpty()

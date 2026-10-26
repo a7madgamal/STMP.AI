@@ -7,7 +7,6 @@ import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.UserInfo
 import com.mido.phonebridge.core.PluginError
-import java.io.ByteArrayOutputStream
 
 /**
  * Host keys are CONFIRMED, never auto-accepted.
@@ -112,8 +111,18 @@ object SshExec {
         val exitCode: Int,
         val stdout: String,
         val stderr: String,
-        /** True when stdout hit [MAX_OUTPUT_BYTES] and the text is a prefix. */
+        /** True when the capture cap was hit, so [stdout] is only the tail of what was written. */
         val truncated: Boolean,
+        /**
+         * True when the deadline stopped the command.
+         *
+         * **The output is still returned.** Throwing away everything captured before the deadline
+         * made a timeout indistinguishable from a command that printed nothing, so the caller had
+         * no way to tell "it is slow" from "it is silent" — and the answer that had already been
+         * produced was discarded with the error. A timeout is a fact about the run, not a reason to
+         * hide what it managed to say.
+         */
+        val timedOut: Boolean = false,
         val durationMs: Long,
         /** The fingerprint the server presented, so a first run can be confirmed and pinned. */
         val hostKeyFingerprint: String,
@@ -150,6 +159,12 @@ object SshExec {
          * command the human approved.
          */
         stdin: CharArray? = null,
+        /**
+         * Where stdout is collected. Supplying one lets a caller read output WHILE the command
+         * runs, which is what makes a detached job pollable instead of a black box that only
+         * reports at the end.
+         */
+        sink: SshTail? = null,
     ): Result {
         if (command.isBlank()) {
             // An empty command opens an interactive shell on most servers, which would hang until
@@ -184,9 +199,12 @@ object SshExec {
             session.serverAliveInterval = 10_000
             session.connect(CONNECT_TIMEOUT_MS)
 
-            val out = ByteArrayOutputStream()
-            val err = ByteArrayOutputStream()
-            var truncated = false
+            // Both streams keep the TAIL and both are capped. stderr used to be an unbounded
+            // ByteArrayOutputStream while stdout was capped — an asymmetry that let a chatty
+            // command grow the app until the OS killed it.
+            val out = sink ?: SshTail(MAX_OUTPUT_BYTES)
+            val err = TailOutputStream(MAX_OUTPUT_BYTES)
+            var timedOut = false
 
             val channel = session.openChannel("exec") as ChannelExec
             // VERBATIM. No quoting, no rewriting — the card showed this exact string.
@@ -225,23 +243,17 @@ object SshExec {
                     val available = input.available()
                     if (available > 0) {
                         val n = input.read(buf, 0, minOf(buf.size, available))
-                        if (n > 0) {
-                            if (out.size() + n > MAX_OUTPUT_BYTES) {
-                                val room = MAX_OUTPUT_BYTES - out.size()
-                                if (room > 0) out.write(buf, 0, room)
-                                truncated = true
-                                break
-                            }
-                            out.write(buf, 0, n)
-                        }
+                        // Keep DRAINING even once the cap is hit. The old code stopped reading,
+                        // which left the command blocked on a full pipe until the deadline and
+                        // turned "too much output" into a timeout. The ring keeps the tail, so
+                        // there is nothing to gain from refusing to read.
+                        if (n > 0) out.write(buf, 0, n)
                     } else if (channel.isClosed) {
                         break
                     } else {
                         if (System.currentTimeMillis() > deadline) {
-                            throw PluginError(
-                                "ssh_timeout",
-                                "the command was still running after ${timeoutMs}ms and was stopped"
-                            )
+                            timedOut = true
+                            break
                         }
                         Thread.sleep(50)
                     }
@@ -251,11 +263,14 @@ object SshExec {
             }
 
             return Result(
-                exitCode = channel.exitStatus,
-                stdout = out.toString(Charsets.UTF_8.name()),
-                stderr = err.toString(Charsets.UTF_8.name()),
-                truncated = truncated,
+                // A command stopped at the deadline never reported a status; -1 is JSch's own
+                // "no exit status", so the caller sees "unknown" rather than a fake 0.
+                exitCode = if (timedOut) -1 else channel.exitStatus,
+                stdout = out.text(),
+                stderr = err.text(),
+                truncated = out.truncated || err.truncated(),
                 durationMs = System.currentTimeMillis() - started,
+                timedOut = timedOut,
                 hostKeyFingerprint = repo.seenFingerprint ?: "",
                 hostKeyType = repo.seenKeyType ?: "",
             )

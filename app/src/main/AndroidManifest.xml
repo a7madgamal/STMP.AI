@@ -55,7 +55,7 @@
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PhoneBridge">
+        android:theme="@style/Theme.STMP">
 
         <!--
           GPU acceleration for LiteRT-LM REQUIRES these declarations (verified on device
@@ -94,7 +94,7 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:showOnLockScreen="true"
-            android:theme="@style/Theme.PhoneBridge.Approval" />
+            android:theme="@style/Theme.STMP.Approval" />
 
         <activity
             android:name=".GoogleLoginActivity"

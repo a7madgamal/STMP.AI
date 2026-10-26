@@ -5,12 +5,12 @@
       parent. Everything else (colours, metrics) is owned by `ui/Theme.kt`, so this
       file stays a thin wrapper — one place to change the base, not two.
     -->
-    <style name="Theme.PhoneBridge" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.STMP" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/pb_bg</item>
         <item name="colorPrimary">@color/pb_accent</item>
     </style>
 
-    <style name="Theme.PhoneBridge.Approval" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.STMP.Approval" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:backgroundDimEnabled">true</item>
         <item name="android:windowBackground">@color/pb_bg</item>

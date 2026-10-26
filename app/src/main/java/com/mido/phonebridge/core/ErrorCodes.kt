@@ -127,6 +127,12 @@ object ErrorCodes {
         "ssh_host_key_refused" to CONFLICT,
         // A command still running at the deadline. 503: our side gave up, not the caller's fault.
         "ssh_timeout" to UNAVAILABLE,
+        // A detached job that is not in the table: unknown id, or a finished job whose output
+        // expired. The caller's mistake — the id is theirs to keep.
+        "ssh_job_not_found" to NOT_FOUND,
+        // Too many detached jobs already running. 503: the app is at its limit right now and the
+        // same request may succeed once one finishes. Not the caller's fault.
+        "ssh_job_limit" to UNAVAILABLE,
         // Auth rejected, host unreachable, algorithm mismatch. All are "the other end said no",
         // the same shape as google_error.
         "ssh_failed" to CONFLICT,

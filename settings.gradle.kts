@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "PhoneBridge"
+rootProject.name = "STMP"
 include(":app")
