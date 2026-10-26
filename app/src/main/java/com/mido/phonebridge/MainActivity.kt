@@ -768,7 +768,7 @@ class MainActivity : FragmentActivity() {
             GlobalMode.SECURE -> {
                 gateCard.background = Theme.surface(this, Theme.SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "SECURE"
-                gateSub.text = "Every request asks you first. Biometric required."
+                gateSub.text = "Every request needs your stamp. Biometric required."
             }
             GlobalMode.NOTIFY -> {
                 // Amber, not red: the gate still exists, it is just quiet and fast.
@@ -832,7 +832,7 @@ class MainActivity : FragmentActivity() {
         val p = PolicyStore.from(applicationContext).get()
         val n = p.rules.size
         when (n) {
-            0 -> "Per-pair rules decide. No rules set, so every request asks you."
+            0 -> "Per-pair rules decide. No rules yet, so everything waits for your stamp."
             1 -> "Per-pair rules decide. 1 rule set."
             else -> "Per-pair rules decide. $n rules set."
         }

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.3 (build 157)**.
+Current build: **v0.43.4 (build 158)**.
 
 ---
 
@@ -2994,7 +2994,7 @@ Version 0.43.2 / build 156.
 
 ---
 
-## 0.43.3 — STMP rebrand: paper skin, stamp animation, smaller controls (build 157) — CURRENT
+## 0.43.3 — STMP rebrand: paper skin, stamp animation, smaller controls (build 157)
 2026-10-26
 
 **The app is being rebranded to STMP.** Warm paper/ink palette, Handlee handwriting font, a
@@ -3011,6 +3011,17 @@ longer labels stop overflowing.
 - **Font size**: buttons reduced (small 12f, full 14f) so longer labels fit.
 
 Version 0.43.3 / build 157.
+
+---
+
+## 0.43.4 — stamp voice in the approval copy (build 158) — CURRENT
+2026-10-26
+
+**Copy pass, subtle:** the approval header now reads "awaiting your stamp" instead of the flat
+"APPROVE?", and the gate/hero sub-lines carry the same stamp voice ("needs your stamp", "waits for
+your stamp"). Wording only — no layout, no behaviour.
+
+Version 0.43.4 / build 158.
 
 ---
 

@@ -137,7 +137,7 @@ class ApprovalActivity : FragmentActivity() {
                 setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             }
 
-        content.addView(label("🔐 APPROVE?", 20f))
+        content.addView(label("🔐 awaiting your stamp", 20f))
 
         // --- AI: LIVE, because the summary arrives AFTER this view is built. ---
         // The modal now appears immediately and the model answers in the background (Mido,
