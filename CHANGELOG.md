@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.4 (build 158)**.
+Current build: **v0.43.5 (build 159)**.
 
 ---
 
@@ -3014,7 +3014,7 @@ Version 0.43.3 / build 157.
 
 ---
 
-## 0.43.4 — stamp voice in the approval copy (build 158) — CURRENT
+## 0.43.4 — stamp voice in the approval copy (build 158)
 2026-10-26
 
 **Copy pass, subtle:** the approval header now reads "awaiting your stamp" instead of the flat
@@ -3022,6 +3022,17 @@ Version 0.43.3 / build 157.
 your stamp"). Wording only — no layout, no behaviour.
 
 Version 0.43.4 / build 158.
+
+---
+
+## 0.43.5 — hand-drawn ink underline on section headers (build 159) — CURRENT
+2026-10-26
+
+**Drawn-accent pass, first piece.** Section headers now carry a hand-drawn ink underline (a
+two-tone translucent `GradientDrawable` stroke under the label) so group labels read as ink on
+paper rather than a printed hairline. Pure vector, no raster asset.
+
+Version 0.43.5 / build 159.
 
 ---
 

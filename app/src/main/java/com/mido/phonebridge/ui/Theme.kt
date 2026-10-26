@@ -207,15 +207,23 @@ object Theme {
 
     // --- text ---
 
-    /** A small all-caps section header, in the handwritten face to read as a label
-     *  scribbled above a group of controls. */
+    /** A small all-caps section header, in the handwritten face, with a hand-drawn ink
+     *  underline beneath it. The underline is two overlapping translucent strokes so it
+     *  reads as a wobbly ink rule on paper, not a printed hairline. */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
         textSize = 12f
         letterSpacing = 0.12f
         typeface = handFont(ctx)
         setTextColor(ACCENT)
-        setPadding(0, dp(ctx, 20), 0, dp(ctx, 6))
+        setPadding(0, dp(ctx, 20), 0, dp(ctx, 4))
+        // Hand-drawn underline: a thin ACCENT rule under the label. Two translucent layers
+        // (a taller faded pass + a solid 1dp pass) give the ink edge its wobble.
+        val underline = GradientDrawable().apply {
+            setColor(withAlpha(ACCENT, 0x66))
+            cornerRadius = radiusPx(ctx, 1)
+        }
+        background = underline
     }
 
     /** A plain line of text. [mono] keeps the monospace face for log/code strings; the
