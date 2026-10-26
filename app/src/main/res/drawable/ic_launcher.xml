@@ -2,14 +2,15 @@
 <!--
   STMP launcher icon: a rubber-stamp mark.
 
-  Rewritten with ONLY universally-safe path data (absolute M / L / C, no arcs, no
-  relative m/q shorthands) because the first hand-drawn version used arc/quadratic
-  syntax that some Android vector parsers reject at inflate time — which is what
-  made the install report "corrupt" and the icon blank.
+  Path data is restricted to absolute M / L / C only — no arcs, no relative shorthands.
+  The first version used `m-29,0a29,29...` arc syntax, which the Android vector parser
+  rejects at inflate time; the launcher then cannot draw the icon and the package manager
+  reports the whole install as corrupt.
 
-  Design: warm paper square, a deep red circular ink stamp, and the letters "STMP"
-  built from simple rectangles (no font dependency at icon time). Two flat circles
-  read as the inked rim without any arc path tricks.
+  Design: warm paper square, a deep red ink disc, a paper-coloured inner rim, and the
+  letters S T / M P stacked inside it. The letters are STROKED paths rather than filled
+  rectangles: a stroke follows the drawn centreline, so each glyph reads as a letter at
+  48dp on a home screen instead of as a block of pixels.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -22,31 +23,54 @@
         android:fillColor="#FFF5EEDF"
         android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 
-    <!-- Ink stamp disc: a filled circle approximated with four cubic curves.
-         Centred at (54,54), radius 30. -->
+    <!-- Ink disc: filled circle as four cubic curves, centre (54,54), r=30. -->
     <path
         android:fillColor="#FFB23A2F"
         android:pathData="M54,24 C70.57,24 84,37.43 84,54 C84,70.57 70.57,84 54,84 C37.43,84 24,70.57 24,54 C24,37.43 37.43,24 54,24 Z" />
 
-    <!-- Scraped inner rim: a paper-coloured ring, radius ~22, drawn as a stroke so the
-         ink reads as a stamp rather than a solid disc. -->
+    <!-- Inner rim: paper-coloured stroke, r≈22, so the disc reads as a stamp face. -->
     <path
         android:strokeColor="#FFF5EEDF"
-        android:strokeWidth="3"
+        android:strokeWidth="2.5"
         android:fillColor="#00000000"
         android:pathData="M54,32 C66.15,32 76,41.85 76,54 C76,66.15 66.15,76 54,76 C41.85,76 32,66.15 32,54 C32,41.85 41.85,32 54,32 Z" />
 
-    <!-- STMP letterforms, paper-coloured, built from plain rectangles.
-         S -->
-    <path android:fillColor="#FFF5EEDF"
-        android:pathData="M39,46 L51,46 L51,49 L42,49 L42,52 L48,52 L49,52 L49,55 L41,55 L41,53 L47,53 L47,52 L46,52 L42,52 L42,58 L51,58 L51,55 L51,52 L51,49 L51,46 Z" />
+    <!-- Letters, drawn as strokes in paper colour.
+         Row 1: S T   Row 2: M P -->
+
+    <!-- S -->
+    <path
+        android:strokeColor="#FFF5EEDF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M51.5,41 C49,38.6 43,38.8 43,43 C43,47 51.5,45.5 51.5,50 C51.5,54.2 45,54.4 42.5,52" />
+
     <!-- T -->
-    <path android:fillColor="#FFF5EEDF"
-        android:pathData="M55,46 L70,46 L70,49 L64,49 L64,58 L61,58 L61,49 L55,49 Z" />
+    <path
+        android:strokeColor="#FFF5EEDF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M56.5,39.5 L66.5,39.5 M61.5,39.5 L61.5,53" />
+
     <!-- M -->
-    <path android:fillColor="#FFF5EEDF"
-        android:pathData="M39,64 L42,64 L44,69 L46,64 L48,64 L48,70 L46,70 L46,67 L45,70 L43,70 L42,67 L42,70 L39,70 Z" />
+    <path
+        android:strokeColor="#FFF5EEDF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M42.5,66.5 L42.5,57.5 L47.2,63 L52,57.5 L52,66.5" />
+
     <!-- P -->
-    <path android:fillColor="#FFF5EEDF"
-        android:pathData="M51,64 L54,64 L54,70 L51,70 Z" />
+    <path
+        android:strokeColor="#FFF5EEDF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M56.5,66.5 L56.5,57.5 L62,57.5 C65,57.5 65,63 62,63 L56.5,63" />
 </vector>

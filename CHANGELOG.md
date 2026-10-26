@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.9 (build 163)**.
+Current build: **v0.43.10 (build 164)**.
 
 ---
 
@@ -3085,7 +3085,7 @@ Version 0.43.8 / build 162.
 
 ---
 
-## 0.43.9 — the stamp mark is set in Handlee (build 163) — CURRENT
+## 0.43.9 — the stamp mark is set in Handlee (build 163)
 2026-10-26
 
 The APPROVED / DENIED word inside the stamp overlay was drawn in
@@ -3094,6 +3094,21 @@ prominent moment was the one place the rebrand did not reach. It now uses `Theme
 same Handlee the rest of the app is set in.
 
 Version 0.43.9 / build 163.
+
+---
+
+## 0.43.10 — the icon's letters are letters, not blocks (build 164) — CURRENT
+2026-10-26
+
+The launcher icon's "STMP" was built from filled rectangles after the arc-syntax rewrite, and the
+`S` path in particular was malformed — a block of pixels that only read as a letter if you already
+knew the word.
+
+The glyphs are now STROKED paths (`strokeLineCap`/`Join` round): a stroke follows the drawn
+centreline, so S, T, M and P each read as a letter at 48dp on a home screen. Path data stays
+absolute M/L/C only, which is the constraint that keeps the vector inflating on every device.
+
+Version 0.43.10 / build 164.
 
 ---
 
