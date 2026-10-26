@@ -156,7 +156,7 @@ class StampOverlay(context: Context) : View(context) {
         val label = word
         val textSize = r * 1.18f / maxOf(label.length, 1)
         glyphPaint.textSize = textSize
-        glyphPaint.typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+        glyphPaint.typeface = Theme.handFont(context)
         glyphPaint.textAlign = Paint.Align.CENTER
         glyphPaint.letterSpacing = 0.04f
         val baseline = cy - (glyphPaint.descent() + glyphPaint.ascent()) / 2f

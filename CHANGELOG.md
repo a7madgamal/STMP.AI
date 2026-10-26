@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.8 (build 162)**.
+Current build: **v0.43.9 (build 163)**.
 
 ---
 
@@ -3068,7 +3068,7 @@ Version 0.43.7 / build 161.
 
 ---
 
-## 0.43.8 — torn cards, drawn as the card's own outline (build 162) — CURRENT
+## 0.43.8 — torn cards, drawn as the card's own outline (build 162)
 2026-10-26
 
 **The torn edge is back, built the way it has to work.** 0.43.6 tried to layer a 24dp
@@ -3082,6 +3082,18 @@ random tear would re-roll on every repaint and the card would visibly crawl. The
 per bounds, so repaints cost one draw call.
 
 Version 0.43.8 / build 162.
+
+---
+
+## 0.43.9 — the stamp mark is set in Handlee (build 163) — CURRENT
+2026-10-26
+
+The APPROVED / DENIED word inside the stamp overlay was drawn in
+`Typeface.create("sans-serif-condensed", BOLD)` — a system face, so the app's single most
+prominent moment was the one place the rebrand did not reach. It now uses `Theme.handFont`, the
+same Handlee the rest of the app is set in.
+
+Version 0.43.9 / build 163.
 
 ---
 
