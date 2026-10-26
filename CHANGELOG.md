@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.42.1 (build 153)**.
+Current build: **v0.43.0 (build 154)**.
 
 ---
 
@@ -2808,7 +2808,7 @@ Version 0.42.0 / build 152.
 
 ---
 
-## 0.42.1 — restore the audit and logcat packages that git never had (build 153) — CURRENT
+## 0.42.1 — restore the audit and logcat packages that git never had (build 153)
 2026-10-25
 
 **The tree did not compile, and no commit was responsible.** `app/.../audit/` (13 files) and
@@ -2855,6 +2855,68 @@ carrying a project inside it, which 07e94200 already ended.
 
 Version 0.42.1 / build 153. Behaviour is unchanged from 0.42.0 — this release restores source,
 it does not alter it.
+
+---
+
+## 0.43.0 — a sudo password typed at the modal, never sent over HTTP (build 154) — CURRENT
+2026-10-26
+
+**The password does not exist on the wire.** It is typed on the phone, held only in the
+Activity and the gate, and written to `sudo -S`'s stdin. A caller cannot supply it, because
+there is no request field for it — which is the whole design. A credential the API accepted
+would be a credential in transit, and that is the thing this feature exists to avoid.
+
+**Why this shape rather than `NOPASSWD`.** The alternative — a dedicated `bridge` user with a
+scoped `NOPASSWD` line — gives the same root with a smaller blast radius, and I argued for it.
+Mido chose this one. Both were verified safe; this is the shape that was picked, so this is what
+ships, and the reasoning below is what makes it safe rather than merely chosen.
+
+**Detection is a parser, not `contains("sudo")`, because a false positive is a LEAK.** The
+password goes to the command's stdin. If the predicate said "yes" for a command that is not
+sudo, that password would be handed to whatever it really is — and `cat` would print it into
+the HTTP response. So [SudoCommand] tokenizes with quotes and operators honoured, and only the
+HEAD of each segment can match: `echo sudo hi` is not sudo, `echo 'x; sudo id'` is not two
+commands, `/var/lib/sudo` is not sudo. A false NEGATIVE is harmless by comparison — sudo
+refuses for lack of a terminal — and the asymmetry is why the tests are lopsided on purpose.
+
+- **`sudo` must carry `-S`, and that is checked PRE-GATE.** Verified on this host:
+  `printf 'x\n' | sudo -k true` answers *"A terminal is required to authenticate"*, while the
+  same with `-S` reaches the password check. A sudo command without it can never succeed, so
+  refusing it as `sudo_needs_stdin` (400, noise) costs the human no tap. We do not add the flag
+  ourselves — that would rewrite a command the card promised to show verbatim.
+- **The floor is enforced in the dispatcher, not in `resolve()`.** A password request is forced
+  to `SECURE`. `NOTIFY` approves on five seconds of silence from an overlay card with no
+  Activity and no biometric: there is nowhere to type, so a NOTIFY rule must not be able to
+  reach such a request. `resolve()` sees only plugin + verb and cannot express this, which is
+  why the override sits where the route is known.
+- **`CharArray`, never `String`, end to end.** `String` cannot be wiped. The Activity reads the
+  chars out of the `Editable` directly, the gate copies them, `SshExec` encodes through a
+  `CharsetEncoder` over a `CharBuffer`, and every copy is zeroed — including in a `finally`, so
+  a throwing handler cannot leave one alive. The audit records THAT a password was supplied (one
+  clause in the summary), never the value: nothing to redact, no schema change.
+- **The field cannot be harvested.** `FLAG_SECURE` (recents thumbnails, screen recorders),
+  `TYPE_TEXT_VARIATION_PASSWORD` with `IME_FLAG_NO_PERSONALIZED_LEARNING` (the keyboard's
+  dictionary), `setSaveEnabled(false)` (rotation), autofill excluded, and the copy/cut selection
+  menu disabled. APPROVE stays disabled while the field is empty, so an empty password is never
+  submitted and rejected three seconds later by sudo.
+- **The card states the elevation twice.** A `ELEVATION` row in the target block (a `sudo`
+  mid-command is easy to miss at a glance) and one line under the field saying the password goes
+  to stdin on this device, not over the network. Without that sentence the field reads as a
+  credential harvest, which is exactly what it must not look like.
+
+**335 tests green (was 314): 21 in `SudoCommandTest`.** Most of them pin negatives — that a
+quoted `sudo`, a path containing `sudo`, and a mid-command `sudo` are NOT treated as elevation —
+because those are the cases where a wrong answer would have handed the password to the wrong
+process.
+
+**Known limit, stated rather than hidden:** `bash -c 'sudo rm -rf /'` is not detected, because
+`bash` is the segment head. It fails safe (sudo refuses without a terminal) and it cannot leak
+the password, since nothing here would have supplied one.
+
+**Not device-verified.** Needs a real phone, a real sudo prompt, and a command whose output would
+visibly differ between root and non-root.
+
+Version 0.43.0 / build 154.
 
 ---
 

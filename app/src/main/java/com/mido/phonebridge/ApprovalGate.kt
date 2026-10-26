@@ -59,6 +59,22 @@ object ApprovalGate {
         ) : GateResult()
 
         /**
+         * The human approved AND typed the password this request needs.
+         *
+         * Distinct from [Approved] because the caller has one more thing to do: feed the
+         * password to the command's stdin. It is carried on the result rather than read
+         * from the pending request so the dispatcher can zero it at the single place that
+         * consumes it — a value with two owners is a value that never gets wiped.
+         */
+        data class ApprovedWithPassword(
+            val password: CharArray,
+            val enqueuedAt: Long,
+            val shownAt: Long,
+            val decidedAt: Long,
+            val queueDepth: Int
+        ) : GateResult()
+
+        /**
          * The human tapped the exception button: the request is approved AND an exception
          * was written for its pair.
          *
@@ -206,6 +222,15 @@ object ApprovalGate {
          * be offering a tap that changes nothing.
          */
         val exceptionOffer: ExceptionOffer? = null,
+        /**
+         * True when the modal must collect a password from the human.
+         *
+         * Decided by the GATE, rendered by the Activity — same split as
+         * [requiresBiometric]. A route that needs a password is forced to `SECURE` by
+         * the dispatcher, so this is never true on a `NOTIFY` card: there is no Activity
+         * there and a five-second silence cannot type a password.
+         */
+        val needsPassword: Boolean = false,
         /** Seconds until auto-deny, for the countdown UI. */
         val timeoutSeconds: Long = TIMEOUT_SECONDS
         // NOTE: there are no AI fields here any more. The summary arrives AFTER this view is
@@ -264,7 +289,25 @@ object ApprovalGate {
          * the caller, which is the ONLY place policy is written. Non-null implies
          * [approved] is true — the tap approves and writes in one gesture.
          */
-        @Volatile var exceptionRule: Rule? = null
+        @Volatile var exceptionRule: Rule? = null,
+
+        /**
+         * True when this request cannot proceed without a password the human types.
+         *
+         * Distinct from [requiresBiometric]: a fingerprint proves presence, a password
+         * proves knowledge, and this request needs the second one because sudo does.
+         */
+        val needsPassword: Boolean = false,
+
+        /**
+         * The typed password, or null.
+         *
+         * A `CharArray` because a `String` cannot be wiped: it would sit in the heap
+         * until the collector got round to it. The Activity fills this on approve, the
+         * dispatcher reads it once and zeroes it, and nothing else may touch it — it is
+         * never logged, never audited and never sent over HTTP.
+         */
+        @Volatile var password: CharArray? = null
     ) {
         /**
          * The longest this request can legitimately take: the misclick guard, the fetch, then a
@@ -390,6 +433,29 @@ object ApprovalGate {
     }
 
     /**
+     * Called by ApprovalActivity when the human approves a request that needs a password.
+     *
+     * **The password is copied and the caller's array is wiped immediately.** The Activity
+     * holds the chars only long enough to hand them over; keeping them there would leave a
+     * second live copy in a finishing Activity's memory. The gate owns the copy from here
+     * until [await] hands it to the dispatcher, which wipes it again after the handler runs.
+     *
+     * Refuses when the request does not actually need a password — a mismatch here would
+     * mean the modal collected one for a request that never asked, and silently attaching
+     * it would feed a secret to a command that does not use sudo.
+     */
+    fun resolveWithPassword(requestId: Long, password: CharArray): Boolean {
+        val p = current ?: return false
+        if (p.requestId != requestId) return false
+        if (!p.needsPassword) return false
+        p.password = password.copyOf()
+        p.approved = true
+        p.decidedAtMs = System.currentTimeMillis()
+        p.latch.countDown()
+        return true
+    }
+
+    /**
      * Block until the human approves/denies. Throws on deny/timeout.
      */
     fun await(
@@ -408,7 +474,14 @@ object ApprovalGate {
          * actually becomes the one on screen.
          */
         aiFacts: com.mido.phonebridge.ai.RequestFacts? = null,
-        aiFetchCapMs: Long = com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS
+        aiFetchCapMs: Long = com.mido.phonebridge.ai.SummaryProvider.SECURE_BUDGET_MS,
+        /**
+         * True when this request cannot proceed without a password typed at the modal.
+         *
+         * Passed by the dispatcher, which forces such a request to `SECURE` — a `NOTIFY`
+         * card has no Activity to collect a keystroke in.
+         */
+        needsPassword: Boolean = false
     ): GateResult {
         val id = seq.incrementAndGet()
         val behind = synchronized(this) { (queue.size).coerceAtLeast(0) }
@@ -423,7 +496,8 @@ object ApprovalGate {
             account = account,
             queueDepthAtEnqueue = behind,
             aiFacts = aiFacts,
-            aiFetchCapMs = aiFetchCapMs
+            aiFetchCapMs = aiFetchCapMs,
+            needsPassword = needsPassword
         )
 
         // Enqueue, then wait for OUR turn. A second concurrent request no longer
@@ -456,6 +530,17 @@ object ApprovalGate {
                 // The exception tap is checked FIRST: it also sets approved = true, so
                 // testing `approved` first would silently downgrade it to a plain approval
                 // and lose the rule the human asked for.
+                // The password is checked BEFORE the plain approval for the same reason
+                // the exception is: both also set `approved = true`, so testing that first
+                // would silently downgrade the result and lose the secret the human typed.
+                pending.approved == true && pending.password != null ->
+                    GateResult.ApprovedWithPassword(
+                        password = pending.password!!,
+                        enqueuedAt = pending.createdAtMs,
+                        shownAt = pending.shownAtMs,
+                        decidedAt = decidedAt,
+                        queueDepth = pending.queueDepthAtEnqueue
+                    )
                 pending.approved == true && pending.exceptionRule != null ->
                     GateResult.ApprovedWithException(
                         rule = pending.exceptionRule!!,

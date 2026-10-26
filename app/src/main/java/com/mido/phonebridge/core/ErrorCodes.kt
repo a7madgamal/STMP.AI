@@ -55,6 +55,10 @@ object ErrorCodes {
         "bad_timezone" to BAD_REQUEST,
         "bad_max" to BAD_REQUEST,
         "bad_lines" to BAD_REQUEST,
+        // A sudo command that cannot read stdin can never succeed from here — sudo
+        // answers "a terminal is required to authenticate". The caller's mistake, and
+        // refused pre-gate, so it is noise like every other bad request.
+        "sudo_needs_stdin" to BAD_REQUEST,
         "unsupported_action" to BAD_REQUEST,
         "missing_reply_text" to BAD_REQUEST,
         "decode_error" to BAD_REQUEST,

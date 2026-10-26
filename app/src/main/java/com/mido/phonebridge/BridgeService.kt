@@ -1058,7 +1058,23 @@ class HttpServer(
                 draft.response(503, obj.toString())
                 return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)
             }
-            val mode = resolvedPolicy.mode
+            val resolvedPolicyMode = resolvedPolicy.mode
+
+            // THE FLOOR. A request that needs a password the human types at the modal can
+            // only be gated by SECURE.
+            //
+            // NOTIFY approves on five seconds of silence from an overlay card that has no
+            // Activity and no biometric — there is nowhere to type a password, and a
+            // silent timeout cannot type one either. Letting a NOTIFY rule reach such a
+            // request would mean approving it with no password and then running sudo
+            // without one, which fails closed only by accident (sudo refuses without a
+            // terminal). So the mode is raised HERE, where the route is known — `resolve()`
+            // sees only plugin + verb and cannot express this.
+            //
+            // Computed before the attendance check, because attendance is judged against
+            // the mode that will actually gate the request, not the one policy suggested.
+            val needsPassword = resolved.route.needsPassword?.invoke(req) == true
+            val mode = if (needsPassword) Mode.SECURE else resolvedPolicyMode
             val globalMode = policy.global
 
             // ATTENDANCE. A request that cannot be shown to an attending human is DENIED —
@@ -1240,7 +1256,10 @@ class HttpServer(
                             rows = rows,
                             exceptionOffer = exceptionOfferFor(
                                 globalMode, resolved.plugin.id, verb, mode
-                            )
+                            ),
+                            // The gate needs this to render the field and to refuse a
+                            // resolve that arrives without one.
+                            needsPassword = needsPassword
                         ),
                         // Null for a route that declares `aiSummary = false`: there is nothing
                         // to wait for, so its buttons go live at once.
@@ -1282,6 +1301,19 @@ class HttpServer(
                             draft.outcome(AuditOutcome.APPROVED)
                             writeException(gate.rule)
                         }
+                        is ApprovalGate.GateResult.ApprovedWithPassword -> {
+                            // The human approved AND typed the password sudo needs. The
+                            // secret is attached to the request here — the ONE place that
+                            // knows both the approval and the Req — and wiped immediately
+                            // after the handler returns, in the finally below.
+                            //
+                            // The audit records THAT a password was supplied, never the
+                            // value: the summary gains one word, so no schema change and
+                            // nothing to redact.
+                            draft.outcome(AuditOutcome.APPROVED)
+                            draft.summary("$summary (sudo password supplied)")
+                            req.secretInput = gate.password
+                        }
                         is ApprovalGate.GateResult.Approved ->
                             draft.outcome(AuditOutcome.APPROVED)
                     }
@@ -1294,7 +1326,16 @@ class HttpServer(
             // the other, and /debug stored its entire body whenever the gate was off
             // (measured on device: ~13.7 KB per record, against ~1 KB under SECURE).
             // The handler call cannot be duplicated again without deleting this comment.
-            val resp = runBlocking { resolved.route.handler(req) }
+            //
+            // The password — when the human typed one — is wiped in a `finally` so it
+            // cannot survive a handler that throws. A secret with a cleanup path only on
+            // the happy path is a secret that leaks on every failure.
+            val resp = try {
+                runBlocking { resolved.route.handler(req) }
+            } finally {
+                req.secretInput?.fill('\u0000')
+                req.secretInput = null
+            }
             recordResponse(draft, resolved.route.auditResponseBody, resp.status, resp.body)
             Dispatched(statusOf(resp.status), resp.body, resp.payload)
         } catch (e: PluginError) {
@@ -1328,6 +1369,12 @@ class HttpServer(
         val ruleKey = resolved.ruleKey
         return when (g) {
             is ApprovalGate.GateResult.Approved -> Decision(
+                mode, source, globalMode.name, ruleKey,
+                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+            )
+            // A password approval is an approval: the human decided, and the extra fact
+            // (that a secret was supplied) is stated in the SUMMARY, never as the value.
+            is ApprovalGate.GateResult.ApprovedWithPassword -> Decision(
                 mode, source, globalMode.name, ruleKey,
                 g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
             )
@@ -1455,7 +1502,15 @@ class HttpServer(
          */
         rows: List<Pair<String, String>>,
         /** The exception the modal may offer, or null. See [exceptionOfferFor]. */
-        exceptionOffer: ApprovalGate.ExceptionOffer? = null
+        exceptionOffer: ApprovalGate.ExceptionOffer? = null,
+        /**
+         * True when the modal must collect a sudo password.
+         *
+         * Passed in rather than read from the route here, because the decision is made
+         * from the REQUEST (`SudoCommand.invokes(command)`) and this function only sees
+         * the body as a JSONObject it should not be re-deriving policy from.
+         */
+        needsPassword: Boolean = false
     ): ApprovalGate.ApprovalView {
         val routePath = route.path
 
@@ -1506,7 +1561,8 @@ class HttpServer(
                 options = otherActions,
                 destructive = rows,
                 requiresBiometric = requiresBiometric,
-                exceptionOffer = exceptionOffer
+                exceptionOffer = exceptionOffer,
+                needsPassword = needsPassword
             )
         }
 
@@ -1532,7 +1588,8 @@ class HttpServer(
                 replyText = null,
                 destructive = rows,
                 requiresBiometric = requiresBiometric,
-                exceptionOffer = exceptionOffer
+                exceptionOffer = exceptionOffer,
+                needsPassword = needsPassword
             )
         }
 
@@ -1572,7 +1629,8 @@ class HttpServer(
             // silently renders a modal with no third button — no error, no log, just a
             // feature that is absent on exactly the routes that use this path (calendar,
             // gmail). Every `return ApprovalView(...)` in this function must pass it.
-            exceptionOffer = exceptionOffer
+            exceptionOffer = exceptionOffer,
+            needsPassword = needsPassword
         )
     }
 

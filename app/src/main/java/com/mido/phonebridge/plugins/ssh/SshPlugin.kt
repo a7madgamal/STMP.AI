@@ -49,10 +49,19 @@ class SshPlugin(private val ctx: Context) : Plugin {
             // The command is required, and a blank one would open an interactive shell (which
             // hangs). Checked pre-gate so a malformed request costs no tap.
             validate = { r ->
-                if (r.body.optString("command").isBlank()) {
+                val cmd = r.body.optString("command")
+                if (cmd.isBlank()) {
                     throw PluginError("bad_request", "missing required 'command'")
                 }
-            }
+                // A sudo command that cannot read stdin can only fail — sudo answers
+                // "a terminal is required to authenticate" — so refuse it here rather
+                // than spend the human's tap on a guaranteed error.
+                SudoCommand.requireFeedable(cmd)
+            },
+            // Only a sudo command needs a password. Decided from the payload, pre-gate,
+            // because the same route runs both kinds and the dispatcher has to force the
+            // mode floor BEFORE the modal opens.
+            needsPassword = { r -> SudoCommand.invokes(r.body.optString("command")) }
         ) { run(it) }
     )
 
@@ -84,6 +93,18 @@ class SshPlugin(private val ctx: Context) : Plugin {
                     // modal: a long command that is silently clipped is exactly the "you approved
                     // something you could not read" failure this design must avoid.
                     add(ApprovalRow("COMMAND", command, ApprovalRow.Style.LONG))
+                    // Elevation is stated as its own row, never folded into the command text.
+                    // A `sudo` buried mid-string is easy to miss on a glance, and "this runs as
+                    // root" is the single fact most worth seeing before a tap.
+                    if (SudoCommand.invokes(command)) {
+                        add(
+                            ApprovalRow(
+                                "ELEVATION",
+                                "runs as root — sudo, with the password you type below",
+                                ApprovalRow.Style.WARN
+                            )
+                        )
+                    }
                     val trust = r.body.optString("trustHostKey").trim()
                     if (trust.isNotBlank()) {
                         // Trusting a key is part of what is being approved, so it is on the card.
@@ -116,7 +137,12 @@ class SshPlugin(private val ctx: Context) : Plugin {
         val conn = loadConnection(name)
             ?: throw PluginError("not_found", "no SSH connection named '$name'")
 
-        val result = SshExec.run(conn, command, timeout, trustFingerprint = trust)
+        // The password, if the human typed one. Read from the request rather than a
+        // parameter because that is where the dispatcher attaches it — and it is wiped
+        // there, at the single site that knows the handler is done, never here.
+        val stdin = req.secretInput
+
+        val result = SshExec.run(conn, command, timeout, trustFingerprint = trust, stdin = stdin)
 
         // PIN IT NOW. This only happens on a run that succeeded, which means the fingerprint was
         // either already stored or was the one the human just named — so writing it here cannot

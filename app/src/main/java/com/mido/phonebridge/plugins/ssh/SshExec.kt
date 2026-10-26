@@ -135,6 +135,21 @@ object SshExec {
         command: String,
         timeoutMs: Long = DEFAULT_TIMEOUT_MS,
         trustFingerprint: String? = null,
+        /**
+         * The sudo password, or null when the command needs none.
+         *
+         * **Written to the command's stdin and nowhere else.** It never becomes an
+         * argument (world-readable in `/proc/PID/cmdline`), never an environment
+         * variable, and never part of [command] — because `command` is shown verbatim on
+         * the approval card AND recorded in the audit body. It is consumed here and the
+         * caller wipes its copy.
+         *
+         * `sudo -S` reads exactly one line from stdin, which is why the trailing newline
+         * is added. A command that prompts again later (apt-get without `-y`) gets EOF —
+         * that is the documented limit, and appending `-y` here would be rewriting the
+         * command the human approved.
+         */
+        stdin: CharArray? = null,
     ): Result {
         if (command.isBlank()) {
             // An empty command opens an interactive shell on most servers, which would hang until
@@ -176,10 +191,32 @@ object SshExec {
             val channel = session.openChannel("exec") as ChannelExec
             // VERBATIM. No quoting, no rewriting — the card showed this exact string.
             channel.setCommand(command)
-            channel.setInputStream(null)
+            // stdin carries the password when there is one, and is CLOSED otherwise.
+            //
+            // Closing matters: with an open-but-empty stdin, a command that reads (or a
+            // sudo that fails to authenticate and re-prompts) would wait for input that
+            // never comes, burning the whole timeout instead of failing.
+            //
+            // Encoding goes through a CharsetEncoder over a CharBuffer, never through
+            // String: a String cannot be wiped, and building one here would leave an
+            // unremovable copy of the password in the heap.
+            val stdinBytes: ByteArray? = stdin?.let { chars ->
+                val enc = Charsets.UTF_8.newEncoder()
+                val buf = enc.encode(java.nio.CharBuffer.wrap(chars))
+                val outBytes = ByteArray(buf.remaining() + 1)
+                buf.get(outBytes, 0, buf.remaining())
+                outBytes[outBytes.size - 1] = '\n'.code.toByte()
+                // The intermediate buffer is ours alone; wipe it before it can be seen.
+                if (buf.hasArray()) java.util.Arrays.fill(buf.array(), 0.toByte())
+                outBytes
+            }
+            channel.setInputStream(stdinBytes?.let { java.io.ByteArrayInputStream(it) })
             channel.setErrStream(err)
             val input = channel.inputStream
             channel.connect(CONNECT_TIMEOUT_MS)
+
+            // The bytes are on the wire now, so the local copy has done its job.
+            stdinBytes?.fill(0)
 
             val deadline = System.currentTimeMillis() + timeoutMs
             val buf = ByteArray(8 * 1024)

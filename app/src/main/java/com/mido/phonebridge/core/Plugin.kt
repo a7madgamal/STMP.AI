@@ -114,6 +114,23 @@ data class Route(
      * cannot disagree about what the request was.
      */
     val verbFor: ((Req) -> Verb)? = null,
+    /**
+     * Whether this request needs a password the human types at the modal.
+     *
+     * **The password never arrives over HTTP.** It is typed on the phone, held only in the
+     * modal and the gate, and handed to the handler in memory. There is deliberately no
+     * request field for it: a caller that could supply it would make it a credential in
+     * transit, which is the exact thing this design exists to avoid.
+     *
+     * Dynamic like [verbFor], and for the same reason — one route can need a password for
+     * some requests and not others. `POST /ssh/{name}` runs any command, so whether a
+     * password is needed depends on whether the command invokes `sudo`, which is a property
+     * of the payload, not the path.
+     *
+     * **Called pre-gate**, next to [validate], so the policy floor is decided before the
+     * modal opens. Null means "never", which is right for every route but SSH.
+     */
+    val needsPassword: ((Req) -> Boolean)? = null,
     val handler: suspend (Req) -> Resp
 ) {
     /**
@@ -150,7 +167,21 @@ class Req(
      * wrong length fails the upload rather than truncating it, which is the safe direction.
      */
     val bodyLength: Long = -1L
-)
+) {
+    /**
+     * The sudo password the human typed at the modal, or null.
+     *
+     * Set by the dispatcher immediately before the handler runs, and ZEROED immediately
+     * after — see `BridgeService`'s single handler call site. A `CharArray` rather than a
+     * `String` because a String cannot be wiped: it lives until the GC decides otherwise,
+     * and its contents survive in the heap meanwhile.
+     *
+     * Mutable for one reason: the value does not exist when this request object is built.
+     * The body is parsed and the gate opens AFTER construction, so the password arrives
+     * later and is attached here rather than in a second Req.
+     */
+    var secretInput: CharArray? = null
+}
 
 /**
  * A response body: either JSON, or raw bytes with their own content type.

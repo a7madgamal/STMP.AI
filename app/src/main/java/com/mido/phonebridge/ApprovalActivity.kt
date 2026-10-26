@@ -11,6 +11,9 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.EditText
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -25,6 +28,18 @@ import com.mido.phonebridge.ui.Theme
  * blocks until the human chooses approve/deny.
  */
 class ApprovalActivity : FragmentActivity() {
+
+    /**
+     * The password field, when this request needs one; null otherwise.
+     *
+     * A FIELD rather than a local because [approveNow] is a method and has to read it —
+     * the locals in [onCreate] are not in scope there. Cleared in [onDestroy] so a
+     * finishing Activity does not keep a reference to a view holding a secret.
+     */
+    private var passwordField: EditText? = null
+
+    /** Whether this request needs a sudo password. Read once, from the gate's view. */
+    private var needsPassword = false
 
     companion object {
         const val EXTRA_ID = "id"
@@ -71,6 +86,15 @@ class ApprovalActivity : FragmentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        // FLAG_SECURE whenever this modal can hold a password: without it the typed
+        // password appears in the recents thumbnail and is capturable by a screen
+        // recorder. Set unconditionally for a password request — the flag cannot be
+        // added later without re-creating the window.
+        val wantsPassword = ApprovalGate.currentView()?.needsPassword == true
+        if (wantsPassword) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         val remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?"
         val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
@@ -90,6 +114,9 @@ class ApprovalActivity : FragmentActivity() {
         // The exception offer, or null. Read once, like requiresBiometric: the gate
         // decided whether the modal may offer it (only under AUTOMATIC).
         val offer = view?.exceptionOffer
+        // The gate decided whether this request cannot proceed without a password.
+        // Read once, like the other two: the UI renders decisions, it does not make them.
+        needsPassword = view?.needsPassword == true
 
         val pad = Theme.dp(this, 24)
 
@@ -266,6 +293,12 @@ class ApprovalActivity : FragmentActivity() {
         // `fun` so the tick above can call it without a forward reference, and so there is
         // exactly ONE place that decides whether the controls are live.
         var applyArmed: (Boolean) -> Unit = {}
+        // The password field is a field on the Activity (see its declaration), not a
+        // local: approveNow() runs from a button callback and reads it from there.
+        /** Whether APPROVE may be tapped. True unless a password is required and empty. */
+        var passwordReady: () -> Boolean = { true }
+        /** The last arm state, so a keystroke can re-evaluate it without guessing. */
+        var lastArmed = false
 
         /**
          * Paint APPROVE with a risk colour — assigned once the button exists.
@@ -456,10 +489,15 @@ class ApprovalActivity : FragmentActivity() {
             // dismissed prompt leaves the request PENDING with APPROVE still live,
             // so tapping again gives another attempt — the countdown keeps running
             // underneath and is the only limit. Reads approve on a plain tap.
+            //
+            // A password request does BOTH, in this order: the fingerprint proves the
+            // human is present, then the chars are read from the field. Order matters —
+            // collecting the password first would leave it held in memory across an
+            // asynchronous prompt that may never complete.
             if (requiresBiometric) {
-                promptBiometric { finishWith(id, approved = true) }
+                promptBiometric { approveNow(id) }
             } else {
-                finishWith(id, approved = true)
+                approveNow(id)
             }
         }.apply {
             isEnabled = false
@@ -541,11 +579,16 @@ class ApprovalActivity : FragmentActivity() {
             // to `return@` from, and the guard reads the same anyway.
             if (!isFinishing) {
                 armBar.visibility = if (armed) ViewGroup.GONE else ViewGroup.VISIBLE
+                lastArmed = armed
                 deny.isEnabled = true
                 deny.alpha = 1f
                 if (armed && !biometricBlocked) {
-                    allow.isEnabled = true
-                    allow.alpha = 1f
+                    // A password request is not approvable on an empty field: tapping
+                    // APPROVE would then resolve, and sudo would reject seconds later
+                    // with a message about a terminal rather than about the typo.
+                    val ready = passwordReady()
+                    allow.isEnabled = ready
+                    allow.alpha = if (ready) 1f else 0.4f
                     // The exception button approves a request, so it arms on the SAME
                     // signal APPROVE does — never earlier, or a tap could land before the
                     // summary the human is meant to read.
@@ -578,6 +621,63 @@ class ApprovalActivity : FragmentActivity() {
         // Start in the loading state: buttons disabled, indicator visible. The tick flips
         // this the moment the gate reports the request is enabled.
         applyArmed(false)
+
+        // --- SUDO PASSWORD ---
+        // Only when the gate says this request cannot proceed without one. The field is
+        // REQUIRED to approve, so it lives in the pinned block directly above the buttons
+        // and can never scroll out of reach.
+        val passwordSection: View? = if (needsPassword) {
+            val field = EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                // Never learn it: the keyboard's personalised dictionary is not a place
+                // a root password may live.
+                imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                isSingleLine = true
+                hint = "sudo password"
+                // Not saved into instance state: a rotation must not preserve it.
+                setSaveEnabled(false)
+                isSaveFromParentEnabled = false
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                setPadding(
+                    Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12),
+                    Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12)
+                )
+                setBackgroundColor(Theme.SURFACE_VARIANT)
+                setTextColor(Theme.ON_SURFACE)
+                // No copy/cut. A long-press menu that can lift the password into the
+                // clipboard is a leak with a friendly face.
+                customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
+                    override fun onCreateActionMode(m: android.view.ActionMode?, menu: android.view.Menu?) = false
+                    override fun onPrepareActionMode(m: android.view.ActionMode?, menu: android.view.Menu?) = false
+                    override fun onActionItemClicked(m: android.view.ActionMode?, item: android.view.MenuItem?) = false
+                    override fun onDestroyActionMode(m: android.view.ActionMode?) {}
+                }
+            }
+            passwordField = field
+            passwordReady = { field.text.isNotEmpty() }
+            field.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    // Re-evaluate so APPROVE lights up the instant the field is non-empty,
+                    // without needing a second tap or a tick.
+                    applyArmed(lastArmed)
+                }
+            })
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, Theme.dp(this@ApprovalActivity, 10), 0, Theme.dp(this@ApprovalActivity, 10))
+                addView(Theme.sectionHeader(this@ApprovalActivity, "SUDO PASSWORD"))
+                addView(field)
+                addView(
+                    label(
+                        "runs as root — the password goes to sudo's stdin on this device, " +
+                            "not over the network",
+                        11f, Theme.ON_SURFACE_VARIANT
+                    )
+                )
+            }
+        } else null
         // A gap between the two decisions, so APPROVE and DENY are never one fat-finger
         // apart (Mido, 2026-10-19: *"add margins between the buttons"*).
         btnRow.addView(deny, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -618,6 +718,14 @@ class ApprovalActivity : FragmentActivity() {
                 ).apply { topMargin = Theme.dp(this@ApprovalActivity, 10) }
             )
         }
+        if (passwordSection != null) {
+            pinned.addView(
+                passwordSection,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
         pinned.addView(btnRow)
 
         val outer = LinearLayout(this).apply {
@@ -646,6 +754,45 @@ class ApprovalActivity : FragmentActivity() {
         val resolved = ApprovalGate.resolve(id, approved)
         if (!resolved) Log.w("ApprovalActivity", "request $id already resolved/expired")
         finish()
+    }
+
+    /**
+     * Approve, taking the password path when this request needs one.
+     *
+     * Reads the chars straight out of the `Editable` rather than through
+     * `text.toString()`: a String cannot be wiped, and going through one would leave an
+     * unremovable copy of the password in the heap for no benefit.
+     */
+    private fun approveNow(id: Long) {
+        val field = passwordField
+        if (!needsPassword || field == null) {
+            finishWith(id, approved = true)
+            return
+        }
+        val chars = CharArray(field.length())
+        field.text.getChars(0, field.length(), chars, 0)
+        finishWithPassword(id, chars)
+    }
+
+    /**
+     * Approve a request that needed a password, handing the chars to the gate.
+     *
+     * **The caller's array is wiped immediately after the hand-off.** The gate keeps its
+     * own copy, so this one has no reason to survive — and an Activity that is finishing
+     * is exactly the kind of object whose memory sits around afterwards.
+     *
+     * The chars are read straight out of the `Editable` rather than through
+     * `text.toString()`: a String cannot be wiped, and going through one would leave an
+     * unremovable copy of the password in the heap for no benefit.
+     */
+    private fun finishWithPassword(id: Long, password: CharArray) {
+        try {
+            val resolved = ApprovalGate.resolveWithPassword(id, password)
+            if (!resolved) Log.w("ApprovalActivity", "request $id does not need a password, or expired")
+        } finally {
+            password.fill('\u0000')
+            finish()
+        }
     }
 
     /**
@@ -793,5 +940,19 @@ class ApprovalActivity : FragmentActivity() {
         // Back == deny. Never leave a request dangling open by accident.
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         finishWith(id, approved = false)
+    }
+
+    /**
+     * Drop the reference to the password field, and wipe whatever it still holds.
+     *
+     * A finishing Activity is exactly the kind of object whose memory sits around
+     * afterwards, and this one may be holding a root password. Clearing the `Editable`
+     * first means the chars are gone even if a view reference survives somewhere; dropping
+     * the field then removes the last easy path to them.
+     */
+    override fun onDestroy() {
+        passwordField?.text?.clear()
+        passwordField = null
+        super.onDestroy()
     }
 }
