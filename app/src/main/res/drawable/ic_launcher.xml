@@ -1,20 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Simple placeholder launcher icon: a key in a rounded square. -->
+<!--
+  STMP launcher icon: a rubber-stamp mark, drawn rather than perfect.
+
+  A warm paper square with a circular ink stamp on top. The stamp ring is a
+  scraped, slightly-irregular ink circle (two offset circles for the uneven
+  "inked by hand" edge), and the letterforms are punched out of the ink so the
+  paper shows through as the negative space — exactly how a real rubber stamp
+  reads. Pure vector: crisp at every dpi, no rasters.
+
+  Palette matches Theme.BG / Theme.ACCENT (paper + stamp red) so the launcher
+  and the app feel like one thing.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Paper background (slightly warm, not pure white). -->
     <path
-        android:fillColor="#1B5E20"
+        android:fillColor="#FFF5EEDF"
         android:pathData="M0,0h108v108h-108z" />
+
+    <!-- Ink stamp: main circle, off-centre on purpose so it reads as placed by hand. -->
     <path
-        android:fillColor="#FFD54F"
-        android:pathData="M54,26a16,16 0 1,0 0,32a16,16 0 0,0 0,-32zM54,34a8,8 0 1,1 0,16a8,8 0 0,1 0,-16z" />
+        android:fillColor="#FFB23A2F"
+        android:pathData="M54,55m-29,0a29,29 0 1,1 58,0a29,29 0 1,1 -58,0" />
+
+    <!-- Scraped edge: a second, slightly rotated/offset circle to de-perfect the rim. -->
     <path
-        android:fillColor="#FFD54F"
-        android:pathData="M46,54h6v28h-6z" />
+        android:fillColor="#00000000"
+        android:pathData="M54,55m-26,0a26,26 0 1,1 52,0a26,26 0 1,1 -52,0"
+        android:strokeColor="#FFB23A2F"
+        android:strokeWidth="3" />
+
+    <!-- Letterforms punched through the ink (paper shows as the glyphs).
+         "STMP" stacked as a block; drawn with plain rects rather than a font
+         so the mark never depends on a bundled typeface at icon time. -->
+    <!-- S -->
     <path
-        android:fillColor="#FFD54F"
-        android:pathData="M52,68h12v6h-12z" />
+        android:fillColor="#FFF5EEDF"
+        android:pathData="M41,42h12v3h-9v3h7q4,0 4,4v2q0,4 -4,4h-10v-3h10v-3q-2,0 -3,-1t-1,-2v-4q0,-3 2,-4t2,-1z" />
+    <!-- T -->
+    <path
+        android:fillColor="#FFF5EEDF"
+        android:pathData="M59,42h12v3h-4v13h-3v-13h-5z" />
+    <!-- M -->
+    <path
+        android:fillColor="#FFF5EEDF"
+        android:pathData="M56,70h3l2,6l2,-6h3v-11h-3v6l-2,-4h-1l-2,4v-6h-3z" />
+    <!-- P -->
+    <path
+        android:fillColor="#FFF5EEDF"
+        android:pathData="M68,59h3v10h-3z" />
 </vector>

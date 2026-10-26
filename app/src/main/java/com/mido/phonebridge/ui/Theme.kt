@@ -2,6 +2,7 @@ package com.mido.phonebridge.ui
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -12,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
@@ -40,32 +42,44 @@ import com.mido.phonebridge.R
  */
 object Theme {
 
-    // --- palette (dark, restrained: one accent, three semantic states) ---
+    // --- palette (warm paper + ink: one stamp accent, three semantic states) ---
+    //
+    // STMP rebrand (2026-10-26). The old palette was a cold, near-black dark UI with a
+    // single blue accent. The new identity is "ink on paper": a warm cream paper base,
+    // near-black brown ink for text, and one deep stamp-red accent that is the ONLY
+    // saturated hit of colour on the screen. Success/warning/danger keep their meaning
+    // but are re-tinted as ink analogues (green ink, amber ink, red ink) so the risk
+    // semantics the approval flow depends on survive unchanged.
 
-    /** App background. Deliberately near-black, not pure black. */
-    const val BG = 0xFF0F1115.toInt()
+    /** Paper background: warm cream, not white, not grey. */
+    const val BG = 0xFFF5EEDF.toInt()
 
-    /** Cards and raised surfaces. */
-    const val SURFACE = 0xFF171A21.toInt()
+    /** Raised paper: slightly darker kraft, like a card sitting on the desk. */
+    const val SURFACE = 0xFFEDE3CB.toInt()
 
-    /** Secondary surface: chips, secondary buttons, inset blocks. */
-    const val SURFACE_VARIANT = 0xFF1F242E.toInt()
+    /** Secondary paper: chips, secondary buttons, inset blocks. */
+    const val SURFACE_VARIANT = 0xFFE3D6B8.toInt()
 
-    /** Hairline borders. The main tool for separating without shouting. */
-    const val BORDER = 0xFF2A303B.toInt()
+    /** Ink line: hairline borders, drawn separators. */
+    const val BORDER = 0xFFC9B98F.toInt()
 
-    const val ON_SURFACE = 0xFFE6E9EF.toInt()
-    const val ON_SURFACE_VARIANT = 0xFF9AA4B2.toInt()
+    /** Primary ink: near-black brown, never pure black. */
+    const val ON_SURFACE = 0xFF2B2318.toInt()
 
-    /** The one accent: used for primary action and focus. */
-    const val ACCENT = 0xFF5B7CFA.toInt()
+    /** Faded ink: secondary text, captions. */
+    const val ON_SURFACE_VARIANT = 0xFF7A6B52.toInt()
 
-    const val SUCCESS = 0xFF2EA043.toInt()
-    const val SUCCESS_SURFACE = 0xFF12331C.toInt()
-    const val WARNING = 0xFFD29922.toInt()
-    const val WARNING_SURFACE = 0xFF3A2E0B.toInt()
-    const val DANGER = 0xFFE5534B.toInt()
-    const val DANGER_SURFACE = 0xFF3D1A18.toInt()
+    /** The one stamp accent: deep rubber-stamp red. */
+    const val ACCENT = 0xFFB23A2F.toInt()
+
+    // Ink re-tints for the existing semantic states. Deliberately muted so they read as
+    // ink, not as neon over paper.
+    const val SUCCESS = 0xFF2F7D4F.toInt()
+    const val SUCCESS_SURFACE = 0xFFDCEBD7.toInt()
+    const val WARNING = 0xFFB07A1F.toInt()
+    const val WARNING_SURFACE = 0xFFF0E4C8.toInt()
+    const val DANGER = 0xFFB23A2F.toInt()
+    const val DANGER_SURFACE = 0xFFF1D9D0.toInt()
 
     /**
      * How a RISK bucket looks, in one place.
@@ -86,24 +100,46 @@ object Theme {
         com.mido.phonebridge.ai.Risk.HIGH -> DANGER
     }
 
-    /** Text/icons on a filled coloured control. */
-    const val ON_COLOR = 0xFFFFFFFF.toInt()
+    /** Text/icons on a filled coloured control. On paper the only filled controls are the
+     *  stamp red and the ink-tinted semantic buttons, so this stays cream-white for legibility. */
+    const val ON_COLOR = 0xFFFBF6EA.toInt()
 
     // --- metrics ---
 
-    const val RADIUS_CARD = 16
-    const val RADIUS_CONTROL = 12
-    const val RADIUS_CHIP = 10
+    const val RADIUS_CARD = 12
+    const val RADIUS_CONTROL = 10
+    const val RADIUS_CHIP = 8
 
     /** Minimum touch target. Below this a tap is a coin flip. */
     const val MIN_TARGET_DP = 48
 
-    /** Ripple colour for controls on a dark surface. */
-    private const val RIPPLE = 0x33FFFFFF
+    /** Ripple colour for controls on paper. A translucent ink tint, not the old white ripple. */
+    private const val RIPPLE = 0x332B2318
 
     fun dp(ctx: Context, v: Int): Int = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics
     ).toInt()
+
+    /**
+     * The STMP handwritten face, loaded once. Cached because `ResourcesCompat.getFont`
+     * re-inflates and multi-font documents would otherwise be re-read on every TextView;
+     * a cache keeps the cost to a single font load per process.
+     *
+     * Never null in practice (the font ships with the APK), but a missing resource must
+     * fail loudly rather than silently fall back to a system face that would quietly undo
+     * the whole handwritten look. See [handFont].
+     */
+    @Volatile private var handleeCache: Typeface? = null
+
+    /** The display face for headings and labels. [Handlee] under the SIL OFL 1.1. */
+    fun handFont(ctx: Context): Typeface = handleeCache ?: synchronized(this) {
+        handleeCache ?: run {
+            val f = androidx.core.content.res.ResourcesCompat.getFont(ctx, R.font.handlee)
+                ?: error("STMP font missing: R.font.handlee not found in APK")
+            handleeCache = f
+            f
+        }
+    }
 
     private fun radiusPx(ctx: Context, radiusDp: Int): Float = dp(ctx, radiusDp).toFloat()
 
@@ -171,27 +207,30 @@ object Theme {
 
     // --- text ---
 
-    /** A small all-caps section header. */
+    /** A small all-caps section header, in the handwritten face to read as a label
+     *  scribbled above a group of controls. */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
-        textSize = 11f
-        letterSpacing = 0.15f
-        setTextColor(ON_SURFACE_VARIANT)
+        textSize = 12f
+        letterSpacing = 0.12f
+        typeface = handFont(ctx)
+        setTextColor(ACCENT)
         setPadding(0, dp(ctx, 20), 0, dp(ctx, 6))
     }
 
-    /** A plain line of text. */
+    /** A plain line of text. [mono] keeps the monospace face for log/code strings; the
+     *  default face is the handwritten (STMP) face so body copy reads as a note. */
     fun text(
         ctx: Context,
         text: String,
-        size: Float = 14f,
+        size: Float = 15f,
         color: Int = ON_SURFACE,
         mono: Boolean = false
     ): TextView = TextView(ctx).apply {
         this.text = text
         textSize = size
         setTextColor(color)
-        if (mono) typeface = android.graphics.Typeface.MONOSPACE
+        typeface = if (mono) android.graphics.Typeface.MONOSPACE else handFont(ctx)
         setLineSpacing(0f, 1.15f)
     }
 
@@ -225,8 +264,9 @@ object Theme {
         val h = if (small) dp(ctx, 40) else dp(ctx, MIN_TARGET_DP)
         return MaterialButton(ctx).apply {
             text = label
-            textSize = if (small) 12f else 14f
+            textSize = if (small) 13f else 15f
             isAllCaps = false
+            typeface = handFont(ctx)
             minHeight = h
             minimumHeight = h
             setTextColor(fg)
@@ -300,8 +340,9 @@ object Theme {
         val layered = LayerDrawable(arrayOf(track, fill))
         return MaterialButton(ctx).apply {
             text = label
-            textSize = 14f
+            textSize = 15f
             isAllCaps = false
+            typeface = handFont(ctx)
             minHeight = h
             minimumHeight = h
             setTextColor(fg)

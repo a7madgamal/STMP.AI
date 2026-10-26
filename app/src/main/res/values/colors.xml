@@ -5,6 +5,6 @@
   cannot reference a Kotlin constant. Keep them in sync with Theme.BG / Theme.ACCENT.
 -->
 <resources>
-    <color name="pb_bg">#FF0F1115</color>
-    <color name="pb_accent">#FF5B7CFA</color>
+    <color name="pb_bg">#FFF5EEDF</color>
+    <color name="pb_accent">#FFB23A2F</color>
 </resources>
