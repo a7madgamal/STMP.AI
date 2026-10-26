@@ -59,6 +59,19 @@ android {
         }
     }
 
+    // APK filename: `stmp-vX.Y.Z.apk` and NOTHING else (Mido, 2026-10-26).
+    // Old default was `app-debug.apk` — wrong name. Set once here, drawn from the
+    // one versionName in defaultConfig, so the name is never a thing a build step
+    // has to "remember".
+    val apkVersionName = android.defaultConfig.versionName
+    applicationVariants.all {
+        outputs.all {
+            (this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl)?.let { out ->
+                out.outputFileName = "stmp-v${apkVersionName}.apk"
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
