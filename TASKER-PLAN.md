@@ -1,189 +1,229 @@
-# Tasker — findings and decision
+# Tasker — findings and decision (v2)
 
-Investigation only (the todo's deliverable is *"a findings list of what PhoneBridge can drive on the
-phone through Tasker … and a recommended subset to expose as bridge routes"*). Researched
-2026-10-26 from Tasker's own documentation (tasker.joaoapps.com) and the 6.2 release notes. Nothing
-below is inferred from a third-party summary where a primary source existed.
+Investigation only. Researched 2026-10-26 from Tasker's own documentation and source
+(tasker.joaoapps.com), not from third-party summaries.
 
-**Decision in one line: the integration is worth building, but NOT as "expose Tasker's actions" —
-it should be a thin `tasker` plugin with three routes (run task, list tasks, state) that lets the
-phone's existing automation become a verb the caller can invoke. The capability surface is Tasker's
-own tasks, not Tasker's 400 actions.**
+**v1 of this doc answered the wrong question.** It recommended "run the user's saved tasks" and
+declared inline action construction unbuildable/unreviewable. Mido corrected the goal: *"i wanted to
+be able to use tasker's capabilities not run my tasks"*. That is a different — and better — target,
+and it **is** reachable. This version supersedes v1 entirely.
 
----
-
-## 1. Three ways in, and only one fits PhoneBridge
-
-Tasker exposes three distinct interfaces. They are not interchangeable, and picking the wrong one
-decides the whole design.
-
-### (a) Broadcast intents — run a task (`PERMISSION_RUN_TASKS`)
-
-The documented, first-class path. An app declares
-`net.dinglisch.android.tasker.PERMISSION_RUN_TASKS` in its manifest and broadcasts a `TaskerIntent`
-naming a task; Tasker runs it asynchronously. Parameters arrive as `%par1`, `%par2`…; arbitrary
-lower-case variables can be attached with `addVariable`.
-
-- **Fire-and-forget by default.** `sendBroadcast` returns immediately. Completion is observable only
-  by registering a receiver on `i.getCompletionFilter()` and reading `EXTRA_SUCCESS_FLAG` — one
-  receiver per task, so it is a real callback, not a broadcast you can share.
-- **Requires a user preference.** *Misc / Allow External Access* must be enabled in Tasker's UI.
-  This is a deliberate second gate: the app cannot grant it to itself.
-- **Status is queryable before sending:** `NotInstalled`, `NoPermission`, `NotEnabled`,
-  `AccessBlocked`, `NoReceiver`. That maps cleanly onto bridge error codes instead of a generic
-  failure.
-
-**This is the one to build on.** It is the interface Tasker documents for exactly this purpose, it
-carries parameters, and it reports completion.
-
-### (b) HTTP Request event — Tasker runs a server
-
-From 6.2. If a profile has an *HTTP Request* event, **Tasker itself starts an HTTP server** on the
-configured port, matching on port, method and path, and answers via a Quick Response field or the
-*HTTP Response* action keyed by `%http_request_id`.
-
-**This looks like the obvious fit and is the wrong choice.** Two reasons:
-
-- **It inverts the direction.** PhoneBridge is the server; making Tasker a second server on the
-  same device means two ports, two auth stories, and two things to keep alive. The caller would have
-  to know which of the two to talk to, and PhoneBridge's gate would not see Tasker's requests at
-  all — so a Tasker-side action would bypass the approval gate entirely.
-- **Its access control is network position, not the gate.** Tasker's server has no per-request
-  approval. Whatever the network can reach, it obeys. That is precisely the property this project
-  exists to avoid.
-
-Worth knowing it exists, and it is the right tool for the *reverse* direction (Tasker calling out),
-not for exposing capability to the caller.
-
-### (c) Plugin interface — Tasker calls *you*
-
-Tasker's plugin API lets an app appear as an action inside a Tasker task. This is how AutoApps etc.
-work. It is the recommended path in Tasker's own docs *for plugins*, and it is the opposite
-direction from what this todo asks for: it lets Tasker drive PhoneBridge, not PhoneBridge drive
-Tasker. Not this task, but it is the natural answer to "let my automations call the bridge".
+**Decision in one line: build a curated inline-action catalogue. PhoneBridge constructs an
+ephemeral action list and broadcasts it, so no saved task is needed — the blocker is not the
+mechanism, it is that Tasker never published an argument schema, so each exposed action must be
+verified empirically and shipped as a typed route.**
 
 ---
 
-## 2. Task discovery is supported, which is what makes a good route
+## 1. Inline actions are real — the mechanism
 
-`content://net.dinglisch.android.tasker/tasks` returns `name` and `project_name` for every task,
-alphabetically. `content://net.dinglisch.android.tasker/prefs` returns `enabled` and `ext_access`.
+`TaskerIntent` (v1.3.3, Tasker's own published source) has two constructors:
 
-This matters more than it looks: it means the bridge can **enumerate what is runnable** and report
-whether external access is actually on, instead of failing at call time with a Tasker-side error the
-caller cannot interpret. A `GET /tasker/tasks` route that lists real task names is the difference
-between a discoverable API and a magic string the caller has to be told out-of-band.
+```java
+public TaskerIntent() { super(ACTION_TASK); setRandomData(); putMetaExtras(getRandomString()); }
+public TaskerIntent(String taskName) { ... putMetaExtras(taskName); }
+```
 
-**Requires `<queries><package android:name="net.dinglisch.android.taskerm" /></queries>`** in the
-manifest because the app targets SDK 35 (package-visibility filtering since API 30). Confirmed
-`targetSdk = 35` in `app/build.gradle.kts`.
+**The no-arg constructor names the task with a random string.** That is the whole trick: the intent
+carries its own actions and the name is throwaway, so nothing has to exist in Tasker's task list.
 
----
+```java
+TaskerIntent i = new TaskerIntent();          // random name, no saved task
+i.addAction(ActionCodes.VIBRATE).addArg(500); // one action, one typed arg
+sendBroadcast(i);
+```
 
-## 3. What PhoneBridge could drive — the honest list
+`addAction(int code)` stores a Bundle with `ACTION_CODE = code`; `addArg` fills `arg:1`, `arg:2`…
+as String, int, boolean, or a `pkg,cls` app pair. Tasker's own docs describe this as *"performs a
+task which is constructed within the TaskerIntent object"* — i.e. explicitly ephemeral.
 
-The todo asks for a capability list. The important finding is that **the list is not Tasker's action
-catalogue; it is whatever tasks the user has already written.** Tasker can do ~400 things, but the
-bridge should not model them — that would mean reimplementing Tasker's UI as JSON, and every Tasker
-release would break it.
+So **the capability surface is genuinely available**, and my v1 claim that it was off the table was
+wrong. The real obstacles are below, and they are narrower than v1 implied.
 
-What the bridge can genuinely reach, in ascending order of risk:
+### What the obstacles actually are
 
-| Capability | Mechanism | Risk |
-|---|---|---|
-| List tasks / check Tasker state | ContentProvider | none (read-only) |
-| Run a named task, no params | `TaskerIntent(name)` | low — bounded by the task's own content |
-| Run with parameters | `addParameter` → `%par1`… | low, but caller-controlled data reaches the task |
-| Run with named variables | `addVariable("%name", v)` | same, and variable injection is a real concern |
-| Arbitrary actions without a saved task | `addAction(ActionCodes.…)` | **high — do not expose** |
+**1. There is no published argument schema.** This is the real blocker. `ActionCodes` gives integers
+(`TORCH = 511`, `VIBRATE = 61`, `SAY = 559`) but not argument order, count, or types. Tasker's docs
+say only: *"You can find a list of the available actions are their arguments in the Tasker UI."*
 
-That last row is the trap. Tasker's docs show constructing a task inline from action codes, which
-would let a caller invoke any Tasker action directly. It is strictly more powerful than "run my
-saved task" and strictly less reviewable: the human approving the request sees an action code and an
-argument list, not a task they wrote and understand. **Recommendation: never expose it.** The saved
-task is the unit of approval precisely because the human wrote it and its name is meaningful.
+The argument order is therefore **not documented anywhere**, and the prose A-Z help pages do not
+reliably imply it. Worked example: `SAY`'s help page lists Text, Engine:Voice, Stream/File, Network,
+Continue Task Immediately — five described fields — while Tasker's own sample code passes **six**
+args (`"Finished!"`, `"com.google.android.tts:eng-gbr"`, `0`, `5`, `5`, `false`). Doc prose does not
+map 1:1 onto argv positions.
 
----
+**2. `MAX_NO_ARGS = 10`.** A hard cap per action. Any action with more fields than that cannot be
+driven inline at all.
 
-## 4. Recommended subset, as routes
+**3. Silent misfires, not errors.** Wrong arg order does not fail cleanly — `addArg("500")` vs
+`addArg(500)` differ in type, and a misplaced arg makes the action do something wrong rather than
+return an error. This is the property that makes an unverified schema dangerous.
 
-Three routes, mirroring the existing plugin shape:
+**4. `ActionCodes` is sample code, not a library.** Same as `TaskerIntent`: it is published as a
+`.java` file to copy into your project and re-package. So we vendor it, and we own its drift.
 
-- `GET /tasker/tasks` — READ. Lists `project_name/name` plus `enabled`/`ext_access`. This is the
-  route that makes everything else usable, and it is pure read.
-- `GET /tasker/state` — READ. Whether Tasker is installed, enabled, and whether external access is
-  on. Distinguishes the five `TaskerIntent.Status` values so the caller gets *why*, not just *no*.
-- `POST /tasker/tasks/{name}/run` — EXECUTE. Body carries optional `params` (array → `%par1`…) and
-  `variables` (object). Returns after the completion broadcast, or times out.
-
-**Verb mapping is the design decision worth stating.** Running a task is `EXECUTE`, not `WRITE`: it
-is not a data mutation the bridge can describe, it is a side effect the user defined. `EXECUTE` is
-already the verb used for `/ssh/{name}`, which is the same shape — "run something the user
-pre-authored, whose effects the bridge cannot enumerate". Consistent, and it keeps Tasker tasks off
-the auto-approvable paths.
+**5. A bug in the published helper.** `validatePriority` reads
+`(pri >= MIN_PRIORITY) || (pri <= MAX_PRIORITY)` — `||` where `&&` was meant, so it always returns
+true and never validates. Harmless if we never set priority; worth knowing before trusting that
+file.
 
 ---
 
-## 5. Concerns, named rather than buried
+## 2. The reviewability objection — and why it does not survive contact
 
-**Approval is weaker than it looks, and that is the main caveat.** The modal can show the task name
-and the parameters, but *not what the task does*. `/ssh` has the same property, so this is
-consistent with the existing design — but it should be stated on the card, not discovered later.
-A task named `Backup` may `rm -rf` something; the human approving sees only "Backup".
+v1 said inline actions are "strictly less reviewable" than a saved task, and used that to reject
+them. That reasoning was wrong, and it is worth saying exactly why, because it is the crux.
 
-**Parameters are caller-controlled data entering a user's automation.** `%par1` may be used in a
-shell action, a URL, or a file path. The bridge must not sanitise (it cannot know the semantics) but
-it must not present parameters as safe either. Parameters should be visible on the approval card.
+The objection only holds for a **raw passthrough** — a route where the caller sends
+`{"code": 511, "args": []}` and PhoneBridge relays it. In that shape the approval card can only show
+a number.
 
-**Completion is asynchronous and Tasker's queue can be full.** A timeout is mandatory, and "sent" is
-not "ran". The route must not claim success on the broadcast alone — the same rule already learned
-from `tailscale file cp` exiting 0.
+But **if we own the schema, we own the rendering.** The catalogue is ours, so the card can say:
 
-**`Allow External Access` is a user gate the app cannot flip.** If it is off, every run fails with
-`AccessBlocked`. This is correct behaviour (a deliberate second gate) and should be reported as its
-own error code with a hint, not as a generic failure.
+```
+Tasker · Vibrate 500ms            [EXECUTE]
+```
 
-**Tasker is a paid third-party app and may not be installed.** `NotInstalled` is a normal state, not
-an error. The plugin should register but report unavailable, like a plugin whose secret is missing.
+instead of `61 / arg:1=500`. A curated catalogue is *more* reviewable than a saved task, because the
+task name is a label the human chose long ago and may have forgotten, while the action card states
+the concrete operation and its parameters at approval time.
 
-**Variable injection.** `addVariable("%name", value)` lets the caller name a variable. Lower-case
-only, but a caller could shadow a variable the task expects. Restricting variable names to a known
-prefix, or dropping `variables` support in v1 and shipping `params` only, is the safer first cut.
+**That inverts the v1 conclusion.** Inline actions, curated, are the reviewable option. Saved tasks
+are the opaque one. So the ranking is: curated inline > saved task > raw passthrough.
 
 ---
 
-## 6. Decision
+## 3. How to actually recover the argument schema
 
-**Build it, as a `tasker` plugin with the three routes above, `params`-only in v1.**
+Not from documentation — empirically, per action. The procedure:
 
-The reasoning, stated plainly: the capability is real (Tasker already holds a large amount of
-device automation the user built), the interface is documented and stable, and the route shape is
-identical to `/ssh/{name}` — run something pre-authored, verb `EXECUTE`, approval shows the command
-but not its effects. That last property is the known cost, and it is the same cost already accepted
-for SSH.
+1. In Tasker's UI, build the action with known distinct values (e.g. Vibrate 500ms).
+2. Export the task (Tasker → task → menu → Export) and read the XML. Tasker writes each action with
+   its `<code>` and `<arg>`/`<Int>`/`<Str>` elements **in positional order**.
+3. That gives the exact arg count, order and type for that action.
+4. Repeat for the curated set only — not all ~400.
 
-What makes it worth doing rather than just "more surface": **`GET /tasker/tasks` makes it
-discoverable.** Most integrations fail because the caller must be told a magic string. Here the
-bridge can say what exists.
+This is archaeology, but it is bounded, one-time per action, and verifiable. It is also the only
+honest route: guessing from prose is how you ship a feature that vibrates for 5 seconds when asked
+for 500ms.
 
-What should NOT be built: inline action construction (`ActionCodes`), and any auto-approve path for
-`/tasker/*`. The saved task is the reviewable unit; an action code is not.
+**Cost that must be stated: each exposed action is a small research task.** That is why the
+catalogue is curated rather than complete, and why it should grow on demand.
 
-**Not built yet — this doc is the deliverable.** Next step, if approved: add the manifest
-permission + `<queries>`, a `TaskerIntent`-equivalent broadcaster (the convenience classes are
-sample code, not a library — the package name must be changed and the class vendored), the
-ContentProvider reader, and the three routes with the five status values mapped to error codes.
+---
+
+## 4. Recommended curated catalogue (v1 of the feature)
+
+Chosen because they are the actions a caller plausibly wants, they are low-arg (so schema recovery
+is cheap and the 10-arg cap is a non-issue), and none of them are irreversible.
+
+| Action | Code | Args | Why it earns a slot |
+|---|---|---|---|
+| Vibrate | 61 | 1 (ms) | Cheapest possible proof of the whole mechanism |
+| Torch | 511 | 0 | Zero args — validates the pipeline with no schema risk |
+| Say | 559 | ~6 | The flagship: arbitrary speech from the caller |
+| Flash | 548 | 1 (text) | On-screen text, cheaper than a scene |
+| Volume (per stream) | 303–311 | 2 | Concrete device state |
+| WiFi status | 425 | 1 | Toggle-class, needs care |
+| Bluetooth status | 294 | 1 | Same |
+| Media control | 443 | 1 | Play/pause/next |
+| Load app | 20 | 1 (pkg) | App launch |
+| Beep | 171 | ~2 | Trivial, useful for signalling |
+
+**Deliberately excluded:** file operations, shell (`RUN_SHELL` 123), scene manipulation, anything
+with a `*` in its doc warning, and every action whose arg count exceeds the cap. `RUN_SHELL` in
+particular would make this a remote-code route wearing a Tasker costume — if a caller wants shell,
+`/ssh/{name}` already exists and is honest about it.
+
+---
+
+## 5. Routes
+
+- `GET /tasker/actions` — READ. The catalogue: for each exposed action, its name, its typed
+  parameters, and its verb. This is what makes the feature discoverable rather than magic.
+- `GET /tasker/state` — READ. Installed / enabled / `ext_access`, mapped from the five
+  `TaskerIntent.Status` values, so a failure says *why*.
+- `POST /tasker/actions/{name}` — EXECUTE. Body is the named parameters, e.g.
+  `{"action":"vibrate","ms":500}`. Validated against the schema before the gate.
+
+**Verb `EXECUTE`** for the same reason as `/ssh/{name}`: a side effect the bridge cannot describe in
+data terms. Keeps Tasker actions off auto-approvable paths.
+
+**Validation is the safety property, not the gate.** Because parameters are typed and schema-checked
+*before* the card is shown, the card can display exactly what will run. An unvalidated passthrough
+would have to show a code, which is the shape we rejected.
+
+---
+
+## 6. Concerns, named
+
+**Argument order is unverifiable from documentation, so it must be verified on device.** Every action
+in the catalogue needs one round-trip: fire it, confirm the effect. Until that is done for an action,
+it is not shipped.
+
+**Wrong args misfire silently.** A schema error does not throw; it makes the phone do the wrong
+thing. So the schema is the critical artifact, and it deserves a test per action.
+
+**`ActionCodes` and `TaskerIntent` are vendored sample code.** They will drift with Tasker releases,
+and `validatePriority` already ships with a `||`/`&&` bug. Vendor them, fix what we rely on, and
+never assume they are maintained.
+
+**`MAX_NO_ARGS = 10`** caps which actions are drivable. Some useful ones are simply out.
+
+**`Allow External Access` is a user gate we cannot flip.** Report `AccessBlocked` as its own code
+with a hint, not a generic failure.
+
+**Completion is asynchronous.** `sendBroadcast` returns immediately; only the per-task completion
+receiver proves the task ran. A timeout is mandatory, and "broadcast sent" is not "it worked" — the
+same rule learned from `tailscale file cp` exiting 0.
+
+**Tasker may not be installed, and it is paid.** `NotInstalled` is a normal state: register the
+plugin, report unavailable.
+
+---
+
+## 7. What was wrong in v1, recorded so it is not repeated
+
+- **Wrong goal.** v1 optimised for "safely wrap what exists" when the ask was "reach the capability
+  surface". The saved-task design was safe and beside the point.
+- **Wrong claim.** "Never expose inline `ActionCodes`" was justified by unreviewability. That holds
+  only for raw passthrough. A curated catalogue is *more* reviewable than a saved task.
+- **Wrong blocker.** v1 implied the mechanism was unavailable. It is available; the missing piece is
+  an argument schema, which is recoverable per action by reading Tasker's own export.
+
+The one thing v1 got right and still stands: **raw passthrough of arbitrary codes must not ship.**
+Not because it is unreviewable in principle, but because we cannot validate arguments we have no
+schema for, and a silent misfire is worse than a refusal.
+
+---
+
+## 8. Decision
+
+**Build the curated inline-action catalogue.** Start with the table in §4, three routes, typed
+parameters validated pre-gate, one device verification per action before it ships.
+
+**Not built yet — this doc is the deliverable.** Next step if approved: vendor `TaskerIntent` +
+`ActionCodes` (re-packaged, `validatePriority` fixed or removed), add the manifest permission and
+`<queries>`, recover the arg schema for the first 3–4 actions from a Tasker export, and ship those
+routes.
 
 ---
 
 ## Sources
 
-- `https://tasker.joaoapps.com/invoketasks.html` — broadcast interface, `PERMISSION_RUN_TASKS`,
-  status values, parameters, completion receiver, the `Allow External Access` preference.
-- `https://tasker.joaoapps.com/contentprovider.html` — task list and prefs providers, the
-  `<queries>` requirement for API 30+.
-- `https://tasker.joaoapps.com/userguide/en/help/eh_http_request.html` — the HTTP Request event,
-  Quick Response, `%http_request_id`, and the same-port-and-path collision note.
-- `https://tasker.joaoapps.com/userguide/en/intents.html` — intent send/receive semantics, extra
-  name mangling into variables, and the limitations on what Tasker can receive.
-- `https://joaoapps.com/tasker-6-2/` — the 6.2 release introducing the HTTP server.
+- `https://tasker.joaoapps.com/code/TaskerIntent.java` — v1.3.3. The no-arg constructor with a random
+  task name, `addAction`/`addArg`/`addParameter`, `MAX_NO_ARGS = 10`, the five `Status` values, the
+  `validatePriority` `||` bug, and the completion-receiver protocol.
+- `https://tasker.joaoapps.com/code/ActionCodes.java` — the integer codes (`TORCH = 511`,
+  `VIBRATE = 61`, `SAY = 559`, …). No argument information.
+- `https://tasker.joaoapps.com/invoketasks.html` — `PERMISSION_RUN_TASKS`, the inline-construction
+  example, and the sentence that argument lists live only in the Tasker UI.
+- `https://tasker.joaoapps.com/userguide/en/help/ah_index.html` — Action A-Z prose. Field
+  descriptions, not positional argv.
+- `https://tasker.joaoapps.com/userguide/en/help/ah_say.html`,
+  `…/ah_torch.html`, `…/ah_vibrate.html` — used to show prose does not map 1:1 onto arg positions
+  (Say describes 5 fields; sample code passes 6 args).
+- `https://tasker.joaoapps.com/contentprovider.html` — task/prefs providers and the `<queries>`
+  requirement for API 30+.
+- `https://tasker.joaoapps.com/userguide/en/help/eh_http_request.html` — the 6.2 HTTP server, still
+  rejected: access is network position, not the gate.
