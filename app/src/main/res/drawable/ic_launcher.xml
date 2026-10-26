@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  STMP launcher icon: a rubber-stamp mark, drawn rather than perfect.
+  STMP launcher icon: a rubber-stamp mark.
 
-  A warm paper square with a circular ink stamp on top. The stamp ring is a
-  scraped, slightly-irregular ink circle (two offset circles for the uneven
-  "inked by hand" edge), and the letterforms are punched out of the ink so the
-  paper shows through as the negative space — exactly how a real rubber stamp
-  reads. Pure vector: crisp at every dpi, no rasters.
+  Rewritten with ONLY universally-safe path data (absolute M / L / C, no arcs, no
+  relative m/q shorthands) because the first hand-drawn version used arc/quadratic
+  syntax that some Android vector parsers reject at inflate time — which is what
+  made the install report "corrupt" and the icon blank.
 
-  Palette matches Theme.BG / Theme.ACCENT (paper + stamp red) so the launcher
-  and the app feel like one thing.
+  Design: warm paper square, a deep red circular ink stamp, and the letters "STMP"
+  built from simple rectangles (no font dependency at icon time). Two flat circles
+  read as the inked rim without any arc path tricks.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -17,40 +17,36 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Paper background (slightly warm, not pure white). -->
+    <!-- Paper background. -->
     <path
         android:fillColor="#FFF5EEDF"
-        android:pathData="M0,0h108v108h-108z" />
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 
-    <!-- Ink stamp: main circle, off-centre on purpose so it reads as placed by hand. -->
+    <!-- Ink stamp disc: a filled circle approximated with four cubic curves.
+         Centred at (54,54), radius 30. -->
     <path
         android:fillColor="#FFB23A2F"
-        android:pathData="M54,55m-29,0a29,29 0 1,1 58,0a29,29 0 1,1 -58,0" />
+        android:pathData="M54,24 C70.57,24 84,37.43 84,54 C84,70.57 70.57,84 54,84 C37.43,84 24,70.57 24,54 C24,37.43 37.43,24 54,24 Z" />
 
-    <!-- Scraped edge: a second, slightly rotated/offset circle to de-perfect the rim. -->
+    <!-- Scraped inner rim: a paper-coloured ring, radius ~22, drawn as a stroke so the
+         ink reads as a stamp rather than a solid disc. -->
     <path
+        android:strokeColor="#FFF5EEDF"
+        android:strokeWidth="3"
         android:fillColor="#00000000"
-        android:pathData="M54,55m-26,0a26,26 0 1,1 52,0a26,26 0 1,1 -52,0"
-        android:strokeColor="#FFB23A2F"
-        android:strokeWidth="3" />
+        android:pathData="M54,32 C66.15,32 76,41.85 76,54 C76,66.15 66.15,76 54,76 C41.85,76 32,66.15 32,54 C32,41.85 41.85,32 54,32 Z" />
 
-    <!-- Letterforms punched through the ink (paper shows as the glyphs).
-         "STMP" stacked as a block; drawn with plain rects rather than a font
-         so the mark never depends on a bundled typeface at icon time. -->
-    <!-- S -->
-    <path
-        android:fillColor="#FFF5EEDF"
-        android:pathData="M41,42h12v3h-9v3h7q4,0 4,4v2q0,4 -4,4h-10v-3h10v-3q-2,0 -3,-1t-1,-2v-4q0,-3 2,-4t2,-1z" />
+    <!-- STMP letterforms, paper-coloured, built from plain rectangles.
+         S -->
+    <path android:fillColor="#FFF5EEDF"
+        android:pathData="M39,46 L51,46 L51,49 L42,49 L42,52 L48,52 L49,52 L49,55 L41,55 L41,53 L47,53 L47,52 L46,52 L42,52 L42,58 L51,58 L51,55 L51,52 L51,49 L51,46 Z" />
     <!-- T -->
-    <path
-        android:fillColor="#FFF5EEDF"
-        android:pathData="M59,42h12v3h-4v13h-3v-13h-5z" />
+    <path android:fillColor="#FFF5EEDF"
+        android:pathData="M55,46 L70,46 L70,49 L64,49 L64,58 L61,58 L61,49 L55,49 Z" />
     <!-- M -->
-    <path
-        android:fillColor="#FFF5EEDF"
-        android:pathData="M56,70h3l2,6l2,-6h3v-11h-3v6l-2,-4h-1l-2,4v-6h-3z" />
+    <path android:fillColor="#FFF5EEDF"
+        android:pathData="M39,64 L42,64 L44,69 L46,64 L48,64 L48,70 L46,70 L46,67 L45,70 L43,70 L42,67 L42,70 L39,70 Z" />
     <!-- P -->
-    <path
-        android:fillColor="#FFF5EEDF"
-        android:pathData="M68,59h3v10h-3z" />
+    <path android:fillColor="#FFF5EEDF"
+        android:pathData="M51,64 L54,64 L54,70 L51,70 Z" />
 </vector>

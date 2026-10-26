@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.2 (build 156)**.
+Current build: **v0.43.3 (build 157)**.
 
 ---
 
@@ -2959,7 +2959,7 @@ Version 0.43.1 / build 155.
 
 ---
 
-## 0.43.2 — a touch can no longer act while the card still looks dimmed (build 156) — CURRENT
+## 0.43.2 — a touch can no longer act while the card still looks dimmed (build 156)
 2026-10-26
 
 **Reported on device within a minute of 0.43.1 shipping:** *"wait, I can still dismiss in cool
@@ -2991,6 +2991,26 @@ contract the bug violated, and it fails if someone removes the undim.
 339 tests green (was 336).
 
 Version 0.43.2 / build 156.
+
+---
+
+## 0.43.3 — STMP rebrand: paper skin, stamp animation, smaller controls (build 157) — CURRENT
+2026-10-26
+
+**The app is being rebranded to STMP.** Warm paper/ink palette, Handlee handwriting font, a
+rubber-stamp launcher icon, a full-screen stamp animation on approve/deny, and the homepage's
+four loose nav buttons collapsed into a Tools row. This build additionally shrinks button text so
+longer labels stop overflowing.
+
+- **Palette**: cold near-black/blue toned to warm cream paper + ink, one stamp-red accent.
+- **Typography**: Handlee (SIL OFL 1.1) wired into `Theme.text/sectionHeader/button`.
+- **Icon**: rubber-stamp vector (absolute `M/L/C` path only — the first arc/quadratic attempt
+  failed inflate and made the install report "corrupt" with no icon).
+- **Stamp animation**: fires on both APPROVED and DENIED, with a physical thud + haptic.
+- **Homepage**: `Tools` row replaces four full-width nav buttons; audit banner moved beside log.
+- **Font size**: buttons reduced (small 12f, full 14f) so longer labels fit.
+
+Version 0.43.3 / build 157.
 
 ---
 

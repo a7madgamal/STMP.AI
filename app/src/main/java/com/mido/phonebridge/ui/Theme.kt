@@ -264,7 +264,7 @@ object Theme {
         val h = if (small) dp(ctx, 40) else dp(ctx, MIN_TARGET_DP)
         return MaterialButton(ctx).apply {
             text = label
-            textSize = if (small) 13f else 15f
+            textSize = if (small) 12f else 14f
             isAllCaps = false
             typeface = handFont(ctx)
             minHeight = h
@@ -340,7 +340,7 @@ object Theme {
         val layered = LayerDrawable(arrayOf(track, fill))
         return MaterialButton(ctx).apply {
             text = label
-            textSize = 15f
+            textSize = 14f
             isAllCaps = false
             typeface = handFont(ctx)
             minHeight = h
