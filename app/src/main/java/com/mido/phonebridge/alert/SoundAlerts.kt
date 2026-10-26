@@ -49,6 +49,41 @@ object SoundAlerts {
     }
 
     /**
+     * The rubber-stamp feedback: one firm, physical thud + a single strong haptic
+     * bump. Deliberately NOT a beep and NOT a game sting — a stamp has weight, and
+     * the sound is the weight. Built on [ToneGenerator]'s lowest DTMF-ish tone at
+     * low volume so it stays short and dull rather than chirpy.
+     *
+     * The tone stream here is STREAM_SYSTEM rather than STREAM_NOTIFICATION: this
+     * is feedback for an action the user has ALREADY taken (their finger just
+     * approved/denied), not an inbound event, so it must not be swallowed by the
+     * ringer switch the way an incoming-request chime would be.
+     */
+    fun stamp(ctx: Context) {
+        stampThud(ctx)
+        vibrate(ctx, longArrayOf(0, 40), amplitudes = intArrayOf(0, 160))
+    }
+
+    private fun stampThud(ctx: Context) {
+        var tg: ToneGenerator? = null
+        try {
+            tg = ToneGenerator(AudioManager.STREAM_SYSTEM, 70)
+            // TONE_CDMA_ALERT_CALL_GUARD is a short, low, dull knock — the closest
+            // the platform's built-in set gets to a rubber stamp on wood.
+            tg.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 90)
+        } catch (e: Exception) {
+            Log.w(TAG, "stamp thud unavailable: ${e.message}")
+        } finally {
+            val toRelease = tg
+            if (toRelease != null) {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try { toRelease.release() } catch (e: Exception) { Log.w(TAG, "tone release failed: ${e.message}") }
+                }, 200L)
+            }
+        }
+    }
+
+    /**
      * Play one short notification beep. `STREAM_NOTIFICATION` is the right stream:
      * it is the one the ringer/silent switch governs, which is exactly the
      * "notification-class, respects silent" behaviour that was chosen.

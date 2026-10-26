@@ -22,6 +22,8 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.StampOverlay
+import com.mido.phonebridge.alert.SoundAlerts
 
 /**
  * Full-screen approval UI. Shows every detail of the pending request and
@@ -753,7 +755,32 @@ class ApprovalActivity : FragmentActivity() {
     private fun finishWith(id: Long, approved: Boolean) {
         val resolved = ApprovalGate.resolve(id, approved)
         if (!resolved) Log.w("ApprovalActivity", "request $id already resolved/expired")
-        finish()
+        // The stamp fires on the human's decision — both approve AND deny — not on
+        // arrival. One firm rubber-stamp thud + the red ink mark, then the request
+        // resolves and the modal leaves. See StampOverlay.
+        showStamp(approved)
+    }
+
+    /**
+     * The full-screen rubber-stamp moment, on every decision.
+     *
+     * [StampOverlay] draws the red ink mark over a dimmed scrim, plays the physical
+     * thud + haptic (via [SoundAlerts.stamp]), and only then finishes the Activity on
+     * its [StampOverlay.onFinished]. The gate is already resolved above, so the only
+     * thing this delays is the modal's disappearance — never the decision itself.
+     */
+    private fun showStamp(approved: Boolean) {
+        val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
+        val overlay = StampOverlay(this).apply {
+            val verdict = if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED
+            onFinished = { finish() }
+        }
+        // Full-screen, on top of everything in this window (the modal).
+        root.addView(overlay, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        SoundAlerts.stamp(this)
+        overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
     }
 
     /**
