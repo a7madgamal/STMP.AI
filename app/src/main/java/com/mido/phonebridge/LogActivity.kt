@@ -46,7 +46,7 @@ class LogActivity : Activity() {
         }
 
         root.addView(Theme.text(this, "Request log", 22f).apply {
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@LogActivity)
         })
 
         summaryLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {

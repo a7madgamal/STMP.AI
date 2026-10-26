@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.10 (build 164)**.
+Current build: **v0.43.11 (build 165)**.
 
 ---
 
@@ -3097,7 +3097,7 @@ Version 0.43.9 / build 163.
 
 ---
 
-## 0.43.10 — the icon's letters are letters, not blocks (build 164) — CURRENT
+## 0.43.10 — the icon's letters are letters, not blocks (build 164)
 2026-10-26
 
 The launcher icon's "STMP" was built from filled rectangles after the arc-syntax rewrite, and the
@@ -3109,6 +3109,28 @@ centreline, so S, T, M and P each read as a letter at 48dp on a home screen. Pat
 absolute M/L/C only, which is the constraint that keeps the vector inflating on every device.
 
 Version 0.43.10 / build 164.
+
+---
+
+## 0.43.11 — rebrand reaches every screen (build 165) — CURRENT
+2026-10-26
+
+The rebrand had stopped at the home screen. Two surfaces still carried the old identity:
+
+**The NOTIFY overlay was still dark.** Its private palette (`BG`, `TEXT`, `MUTED`, the three verb
+badge colours) was the pre-rebrand near-black set, so the one card that appears while you are in
+another app was the only screen that did not look like the app. Repalletted to the same paper/ink
+tokens; the badge fills are now the light paper-tinted variants with dark ink text, which is the
+correct polarity on a light card.
+
+**Every remaining `DEFAULT_BOLD` heading is now Handlee** — the home hero and gate titles, and the
+title rows on EXCEPTIONS, OPTIONS, the request log and its detail screen. A system bold face next
+to Handlee body copy reads as two apps stitched together, and the headings are exactly where the
+eye lands first.
+
+Compile-verified only. Not device-verified.
+
+Version 0.43.11 / build 165.
 
 ---
 

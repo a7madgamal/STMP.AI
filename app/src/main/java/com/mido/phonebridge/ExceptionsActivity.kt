@@ -62,7 +62,7 @@ class ExceptionsActivity : Activity() {
         container.removeAllViews()
 
         container.addView(Theme.text(this, "EXCEPTIONS", 20f).apply {
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@ExceptionsActivity)
         })
 
         val policy = try {

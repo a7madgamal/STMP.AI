@@ -80,7 +80,7 @@ class LogDetailActivity : Activity() {
 
         val outcome = o.optString("outcome")
         content.addView(Theme.text(this, "$outcome   ${o.optString("label").ifBlank { "—" }}", 20f).apply {
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@LogDetailActivity)
         })
         content.addView(Theme.text(
             this,

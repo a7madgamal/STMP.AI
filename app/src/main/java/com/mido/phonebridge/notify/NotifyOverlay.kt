@@ -316,7 +316,7 @@ object NotifyOverlay {
             text = verbShort(entry.verb)
             textSize = 9f
             setTextColor(BADGE_TEXT)
-            setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD))
+            setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 setColor(verbColor(entry.verb))
@@ -340,7 +340,7 @@ object NotifyOverlay {
             setTextColor(TEXT)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL))
+            setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
         }
         row.addView(summaryView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
 
@@ -960,19 +960,19 @@ object NotifyOverlay {
 
     // Muted on purpose: this must never look like an alarm. The ✕ and the draining
     // background carry the interaction; the text carries the fact.
-    private const val BG = 0xF0222427.toInt()
+    private const val BG = 0xF5F5EEDF.toInt()
 
     /** ~30% alpha: clearly visible as motion, still quiet as a colour. */
-    private const val ACCENT_FILL = 0x4D8AB4F8.toInt()
-    private const val TEXT = 0xFFECEDEE.toInt()
-    private const val MUTED = 0xFF9AA0A6.toInt()
+    private const val ACCENT_FILL = 0x4DB23A2F.toInt()
+    private const val TEXT = 0xFF2B2318.toInt()
+    private const val MUTED = 0xFF7A6B52.toInt()
 
     // Badge palette. Light fills with near-black text, because the card is dark: a dark
     // badge on a dark card is unreadable, which defeats the point of colour-coding.
-    private const val VERB_READ = 0xFF81C784.toInt()
-    private const val VERB_WRITE = 0xFFFFD54F.toInt()
-    private const val VERB_DEL = 0xFFE57373.toInt()
-    private const val BADGE_TEXT = 0xFF1A1A1A.toInt()
+    private const val VERB_READ = 0xFFDCEBD7.toInt()
+    private const val VERB_WRITE = 0xFFF0E4C8.toInt()
+    private const val VERB_DEL = 0xFFF1D9D0.toInt()
+    private const val BADGE_TEXT = 0xFF2B2318.toInt()
 
 
     private const val CARD_WIDTH_DP = 216

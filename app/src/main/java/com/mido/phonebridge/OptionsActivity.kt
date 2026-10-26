@@ -55,7 +55,7 @@ class OptionsActivity : Activity() {
         container.removeAllViews()
 
         container.addView(Theme.text(this, "OPTIONS", 20f).apply {
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@OptionsActivity)
         })
 
         val store = PolicyStore.from(applicationContext)
@@ -173,7 +173,7 @@ class OptionsActivity : Activity() {
         }
         header.addView(
             Theme.text(this, title, 15f, Theme.ON_SURFACE).apply {
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                typeface = Theme.handFont(this@OptionsActivity)
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 )

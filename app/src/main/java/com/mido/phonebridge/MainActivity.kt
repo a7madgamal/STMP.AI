@@ -126,7 +126,7 @@ class MainActivity : FragmentActivity() {
         }
         heroTitle = TextView(this).apply {
             textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@MainActivity)
             setTextColor(Theme.ON_SURFACE)
         }
         heroSub = TextView(this).apply {
@@ -191,7 +191,7 @@ class MainActivity : FragmentActivity() {
         }
         gateTitle = TextView(this).apply {
             textSize = 17f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Theme.handFont(this@MainActivity)
             setTextColor(Theme.ON_SURFACE)
         }
         gateSub = TextView(this).apply {
