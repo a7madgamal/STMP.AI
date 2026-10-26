@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.11 (build 165)**.
+Current build: **v0.43.12 (build 166)**.
 
 ---
 
@@ -3112,7 +3112,7 @@ Version 0.43.10 / build 164.
 
 ---
 
-## 0.43.11 — rebrand reaches every screen (build 165) — CURRENT
+## 0.43.11 — rebrand reaches every screen (build 165)
 2026-10-26
 
 The rebrand had stopped at the home screen. Two surfaces still carried the old identity:
@@ -3131,6 +3131,22 @@ eye lands first.
 Compile-verified only. Not device-verified.
 
 Version 0.43.11 / build 165.
+
+---
+
+## 0.43.12 — the last visible "PhoneBridge" is gone (build 166) — CURRENT
+2026-10-26
+
+The notification-listener service still advertised itself to Android as "PhoneBridge
+Notifications", so the name a user sees in Settings › Notification access was the one place the
+old brand survived. Now "STMP Notifications".
+
+The remaining `PhoneBridge` occurrences are the application id, the package name and the theme
+style names — identifiers, not user-visible strings. Renaming those is the parked pre-launch task,
+not a copy change: a new application id is a different app to Android, which resets every runtime
+permission grant and the notification-listener binding.
+
+Version 0.43.12 / build 166.
 
 ---
 

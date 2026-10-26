@@ -162,7 +162,7 @@
         <service
             android:name=".NotifListenerService"
             android:exported="true"
-            android:label="PhoneBridge Notifications"
+            android:label="STMP Notifications"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
