@@ -144,4 +144,49 @@ class ArmGuardTest {
         val overlayAllowsAt = shown + ArmGuard.MISCLICK_GUARD_MS
         assertEquals(modalArmedAt, overlayAllowsAt)
     }
+
+    @Test
+    fun `a decision is never allowed while the card still renders dimmed`() {
+        // The device bug this pins (2026-10-26: *"wait, I can still dismiss in cool down"*).
+        //
+        // The tick repaints every ~33ms, but only on the next frame. A touch landing just after
+        // the guard expired but before that frame was ALLOWED, while the card still displayed the
+        // unarmed alpha — live control behind a locked-looking surface. The fix is that every
+        // touch path recomputes the alpha before it decides, so the two can never disagree.
+        //
+        // The contract that makes that true, stated so it fails if someone removes the undim:
+        // at the instant a decision is permitted, the alpha the card WOULD render is full.
+        val shown = 10_000L
+        val justArmed = shown + ArmGuard.MISCLICK_GUARD_MS
+
+        assertTrue("the guard must be over for this case to be meaningful",
+            ArmGuard.decisionsAllowed(shown, justArmed))
+        // Anything a touch is allowed to decide at must also be fully opaque — that is the
+        // invariant the device bug violated.
+        assertEquals(1f, ArmGuard.cardAlpha(shown, justArmed, 180L), 0.0001f)
+        // ...and one millisecond earlier nothing is decided, so the dim is free to show.
+        assertFalse(ArmGuard.decisionsAllowed(shown, justArmed - 1))
+        assertEquals(ArmGuard.UNARMED_ALPHA, ArmGuard.cardAlpha(shown, justArmed - 1, 180L), 0.0001f)
+    }
+
+    @Test
+    fun `the unarmed card is visibly dimmer, not merely disabled`() {
+        // A guard that is invisible is the failure the dim exists to fix: the card used to refuse
+        // taps at FULL opacity, which reads as broken rather than careful. Pinned as a number so
+        // "make it dimmer" and "make it lighter" are both deliberate edits.
+        assertEquals(0.45f, ArmGuard.UNARMED_ALPHA, 0.0001f)
+        assertTrue("dim must be clearly below full", ArmGuard.UNARMED_ALPHA < 0.7f)
+        assertTrue("dim must stay readable, not hidden", ArmGuard.UNARMED_ALPHA > 0.25f)
+    }
+
+    @Test
+    fun `the fade still applies while unarmed`() {
+        // The dim multiplies the fade rather than replacing it, so a card one frame in is nearly
+        // invisible rather than jumping straight to 0.45. Otherwise the guard would erase the
+        // fade-in it happens to overlap with.
+        val shown = 1_000L
+        assertEquals(0f, ArmGuard.cardAlpha(shown, shown, 180L), 0.0001f)
+        val midFade = ArmGuard.cardAlpha(shown, shown + 90L, 180L)
+        assertTrue("halfway through the fade it is dim AND half-faded", midFade < ArmGuard.UNARMED_ALPHA)
+    }
 }

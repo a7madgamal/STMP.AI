@@ -92,6 +92,35 @@ object ArmGuard {
     }
 
     /**
+     * How opaque an unarmed surface is.
+     *
+     * Lives here, beside the guard, because the dim and the guard are ONE mechanism: a disabled
+     * control that looks enabled is what turns a short guard into a misclick. Low enough to read as
+     * "not yet" at a glance, high enough that the summary stays legible — the point is to say WAIT,
+     * not to hide the request.
+     */
+    const val UNARMED_ALPHA = 0.45f
+
+    /**
+     * The opacity a card should render at, combining the fade-in with the unarmed dim.
+     *
+     * **The ONE function that answers "what should this look like"**, for the same reason
+     * [decisionsAllowed] is the one answer to "may this be tapped". The tick and the touch paths
+     * both call it, so the picture and the permission cannot disagree — which they did on device
+     * (2026-10-26: *"wait, I can still dismiss in cool down"*). The tick only repaints on the next
+     * frame, so a touch landing in that gap was decided against a card that still LOOKED unarmed.
+     * Recomputing here, at the moment of the decision, closes the gap.
+     *
+     * Multiplied rather than chosen between: the fade is about appearing, the dim is about being
+     * live, and a card still fading in is also still unarmed.
+     */
+    fun cardAlpha(shownAtMs: Long, nowMs: Long, fadeInMs: Long): Float {
+        val elapsed = nowMs - shownAtMs
+        val fadeIn = if (fadeInMs <= 0L) 1f else (elapsed.toFloat() / fadeInMs).coerceIn(0f, 1f)
+        return fadeIn * (if (decisionsAllowed(shownAtMs, nowMs)) 1f else UNARMED_ALPHA)
+    }
+
+    /**
      * How much of the guard is left, for the countdown line. Zero once armed, so a caller can
      * render it unconditionally.
      */

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.1 (build 155)**.
+Current build: **v0.43.2 (build 156)**.
 
 ---
 
@@ -2920,7 +2920,7 @@ Version 0.43.0 / build 154.
 
 ---
 
-## 0.43.1 — the misclick guard is 1s, and the card dims while it waits (build 155) — CURRENT
+## 0.43.1 — the misclick guard is 1s, and the card dims while it waits (build 155)
 2026-10-26
 
 **One second instead of three**, on Mido's instruction. The guard was never really about a number
@@ -2956,6 +2956,41 @@ lines now say "misclick guard" — a log that names a duration it no longer has 
 336 tests green (was 335).
 
 Version 0.43.1 / build 155.
+
+---
+
+## 0.43.2 — a touch can no longer act while the card still looks dimmed (build 156) — CURRENT
+2026-10-26
+
+**Reported on device within a minute of 0.43.1 shipping:** *"wait, I can still dismiss in cool
+down"*. The dim and the guard had drifted apart by one frame.
+
+**The bug, exactly.** The tick repaints the card every 33ms, but it only runs on the main thread's
+next frame. The touch handler checked `ArmGuard.decisionsAllowed` against the REAL clock. So a touch
+landing in the gap between the guard expiring and the next paint was **allowed while the card still
+displayed the unarmed alpha** — live control behind a locked-looking surface.
+
+**The log proved it, which is why this was fixable rather than arguable:**
+`notify[5013] settle reason=TAPPED shownMs=1023 alpha=0.45`. Tapped 23ms *past* a 1s guard, on a
+card rendering at 45% opacity. Behaviour had unlocked; the picture had not caught up.
+
+- **One function now answers "what should this look like"**, `ArmGuard.cardAlpha`, exactly as
+  `decisionsAllowed` answers "may this be tapped". The tick and every touch path call the same one,
+  so they cannot disagree.
+- **Every touch path recomputes the alpha BEFORE it decides.** The gap is closed in the only
+  direction that matters: the picture is brought up to date before the decision it gates is taken.
+  Both the tap-to-approve and the ✕ dismiss, since both answer the request.
+- **Only ever raises alpha.** The guard cannot un-expire, so no touch should ever make a card dimmer.
+
+**Worth stating plainly: the 0.43.1 tests passed while this bug was live.** They pinned the pure
+predicate, and the predicate was right — the defect was in the WIRING between predicate and paint.
+A unit test on a pure function cannot see a frame boundary. The new test pins the invariant instead:
+*at any instant a decision is permitted, the alpha the card would render is full*. That is the
+contract the bug violated, and it fails if someone removes the undim.
+
+339 tests green (was 336).
+
+Version 0.43.2 / build 156.
 
 ---
 

@@ -466,6 +466,15 @@ object NotifyOverlay {
                         // under a finger already travelling, and a tap here MEANS APPROVE — so the
                         // first second must not decide anything. Nothing is lost by refusing the
                         // tap: the card simply stays, dimmed, until the guard expires.
+                        //
+                        // Undim FIRST, then decide. The tick repaints every 33ms, but it only runs
+                        // on the next frame, so a tap landing in the gap between the guard expiring
+                        // and the next paint used to be allowed while the card still LOOKED
+                        // dimmed — live control behind a locked-looking surface (reported on
+                        // device 2026-10-26: "I can still dismiss in cool down"). Painting here
+                        // closes the gap in the only direction that matters: the picture is
+                        // brought up to date before the decision it gates is taken.
+                        undim(entry)
                         if (ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
                             settle(entry, Reason.APPROVED)
                         } else {
@@ -490,9 +499,13 @@ object NotifyOverlay {
         // "doesn't even dismiss on x click").
         close.setOnClickListener {
             // Same guard as the tap-to-approve: dismissing is also a decision about the request
-            // (it answers REJECTED), so a stray touch in the first 3s must not perform it either.
-            // Mido, 2026-10-24: "before ANY touch event on the notification works so that I don't
-            // approve or cancel by mistake".
+            // (it answers REJECTED), so a stray touch in the first second must not perform it
+            // either. Mido, 2026-10-24: "before ANY touch event on the notification works so that
+            // I don't approve or cancel by mistake".
+            //
+            // Same undim-before-decide as the tap path: a dismiss that lands in the unpainted gap
+            // must not act while the card still reads as unarmed.
+            undim(entry)
             if (!ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
                 com.mido.phonebridge.Debug.log(
                     "notify[${entry.id}] dismiss ignored: still in the misclick guard"
@@ -557,15 +570,10 @@ object NotifyOverlay {
                 val fadeIn = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
                 // DIM WHILE UNARMED. The guard is only safe if a card that refuses taps LOOKS
                 // like it refuses taps — otherwise a short guard reads as a broken card, and a
-                // long one as a frozen app. Driven from the SAME predicate the touch handler
-                // uses ([ArmGuard.decisionsAllowed]) rather than a second timer, so the picture
-                // and the behaviour cannot disagree about when the card went live.
-                //
-                // Multiplied into the fade rather than replacing it: the fade is about
-                // appearing, the dim is about being live, and a card that is still fading in is
-                // also still unarmed.
-                val armed = ArmGuard.decisionsAllowed(entry.shownAt, now)
-                card.alpha = fadeIn * (if (armed) 1f else DIM_ALPHA)
+                // long one as a frozen app. Computed by [ArmGuard.cardAlpha], the SAME function
+                // the touch paths call, so the picture and the behaviour cannot disagree about
+                // when the card went live.
+                card.alpha = ArmGuard.cardAlpha(entry.shownAt, now, FADE_IN_MS)
                 card.translationY = dp(8) * (1f - fadeIn)
 
                 if (entry.decisionStartAt == 0L) {
@@ -728,6 +736,26 @@ object NotifyOverlay {
      * Report a card's outcome, then fade it out and remove it. Removal is GUARANTEED, not
      * merely attempted — see [teardown] for why that distinction cost a stuck card.
      */
+    /**
+     * Bring the card's appearance up to date with the guard, right now.
+     *
+     * The tick already does this every [TICK_MS], but it only runs on the next frame. A touch
+     * that lands in the gap between the guard expiring and that frame would otherwise be decided
+     * against a card that still LOOKS unarmed — the human sees a greyed card and it answers, which
+     * is the exact opposite of what the dim promises. So every touch path calls this before it
+     * decides anything, and the two can no longer disagree by even one frame.
+     *
+     * Only ever raises the alpha to full. The guard cannot un-expire, so there is no case where a
+     * touch should make the card dimmer.
+     */
+    private fun undim(entry: Entry) {
+        if (entry.settled) return
+        val card = entry.root ?: return
+        // Same function the tick uses, so this cannot drift from what the card would have shown
+        // had the next frame arrived first.
+        card.alpha = ArmGuard.cardAlpha(entry.shownAt, System.currentTimeMillis(), FADE_IN_MS)
+    }
+
     private fun settle(entry: Entry, reason: Reason, detail: String = "") {
         if (entry.settled) return
         entry.settled = true
@@ -958,15 +986,6 @@ object NotifyOverlay {
      */
     private const val DRAG_SLOP_DP = 16
     private const val FADE_IN_MS = 180L
-
-    /**
-     * How opaque the card is while the misclick guard has not expired.
-     *
-     * Low enough to read as "not yet" at a glance, high enough that the summary is still
-     * legible — the point is to say WAIT, not to hide the request. It snaps to full opacity at
-     * the arm time, and that snap is itself the signal: the card becomes live and looks it.
-     */
-    private const val DIM_ALPHA = 0.45f
     private const val FADE_OUT_MS = 200L
 
     /**
