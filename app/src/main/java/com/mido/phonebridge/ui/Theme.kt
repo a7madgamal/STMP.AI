@@ -205,25 +205,66 @@ object Theme {
             null
         )
 
+    /**
+     * A short hand-inked rule that sits under a section label.
+     *
+     * Drawn as a [Drawable] that paints ONLY a thin strip at its own bottom edge — the
+     * whole point. The first attempt used a `GradientDrawable` as the TextView's
+     * background, which fills the entire view and turned every section header into a solid
+     * salmon bar (caught on device 2026-10-26). A background drawable has no concept of
+     * "just the bottom", so the shape has to be painted, not stretched.
+     *
+     * Two strokes, one slightly shorter and fainter, give the line the uneven edge of ink
+     * rather than a printed hairline.
+     */
+    private class InkUnderline(
+        private val color: Int,
+        private val thicknessPx: Int
+    ) : android.graphics.drawable.Drawable() {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+        override fun draw(canvas: android.graphics.Canvas) {
+            val b = bounds
+            if (b.isEmpty) return
+            // The rule spans ~60% of the header width: long enough to read as an underline,
+            // short enough to look drawn by hand rather than set by a layout.
+            val right = b.left + (b.width() * 0.60f)
+            val baseY = b.bottom - thicknessPx
+
+            paint.color = color
+            canvas.drawRect(b.left.toFloat(), baseY.toFloat(), right, b.bottom.toFloat(), paint)
+
+            // A faint second pass, offset up by half a stroke and ending sooner, so the ink
+            // edge is uneven instead of a rectangle.
+            paint.color = withAlpha(color, 0x55)
+            canvas.drawRect(
+                b.left.toFloat(),
+                baseY - thicknessPx / 2f,
+                right - thicknessPx * 2f,
+                baseY.toFloat(),
+                paint
+            )
+        }
+
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
+        @Deprecated("Deprecated in the framework; required by the Drawable contract")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
     // --- text ---
 
-    /** A small all-caps section header, in the handwritten face, with a hand-drawn ink
-     *  underline beneath it. The underline is two overlapping translucent strokes so it
-     *  reads as a wobbly ink rule on paper, not a printed hairline. */
+    /** A small all-caps section header in the handwritten face, with a short hand-inked
+     *  rule drawn under it (see [InkUnderline] for why it is a painted shape, not a
+     *  background). */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
         textSize = 12f
         letterSpacing = 0.12f
         typeface = handFont(ctx)
         setTextColor(ACCENT)
-        setPadding(0, dp(ctx, 20), 0, dp(ctx, 4))
-        // Hand-drawn underline: a thin ACCENT rule under the label. Two translucent layers
-        // (a taller faded pass + a solid 1dp pass) give the ink edge its wobble.
-        val underline = GradientDrawable().apply {
-            setColor(withAlpha(ACCENT, 0x66))
-            cornerRadius = radiusPx(ctx, 1)
-        }
-        background = underline
+        setPadding(0, dp(ctx, 20), 0, dp(ctx, 6))
+        background = InkUnderline(ACCENT, dp(ctx, 2))
     }
 
     /** A plain line of text. [mono] keeps the monospace face for log/code strings; the

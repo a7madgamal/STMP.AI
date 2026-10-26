@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.5 (build 159)**.
+Current build: **v0.43.7 (build 161)**.
 
 ---
 
@@ -3025,7 +3025,7 @@ Version 0.43.4 / build 158.
 
 ---
 
-## 0.43.5 — hand-drawn ink underline on section headers (build 159) — CURRENT
+## 0.43.5 — hand-drawn ink underline on section headers (build 159)
 2026-10-26
 
 **Drawn-accent pass, first piece.** Section headers now carry a hand-drawn ink underline (a
@@ -3033,6 +3033,38 @@ two-tone translucent `GradientDrawable` stroke under the label) so group labels 
 paper rather than a printed hairline. Pure vector, no raster asset.
 
 Version 0.43.5 / build 159.
+
+---
+
+## 0.43.6 — torn-note card corners (build 160)
+2026-10-26
+
+**Drawn-accent pass, second piece.** The hero and gate cards now use `Theme.tornCard`, which
+layers a hand-torn paper edge (`R.drawable.torn_edge`, a tintable vector with absolute M/L path
+commands — no arcs, same constraint that fixed the launcher icon) over the standard surface, so
+cards read as notes torn out of a pad rather than rounded rectangles.
+
+Version 0.43.6 / build 160.
+
+---
+
+## 0.43.7 — the section header is a rule again, not a red bar (build 161) — CURRENT
+2026-10-26
+
+**Two defects caught on device, both from 0.43.5/0.43.6.**
+
+**The red bar.** 0.43.5 set a `GradientDrawable` as the section header's *background*, so it
+filled the whole TextView — every section label ("SETUP", "ACCOUNT", ...) sat on a solid salmon
+block. A background drawable has no concept of "just the bottom edge", so the shape has to be
+painted. `Theme.InkUnderline` is a small `Drawable` that draws a ~60%-width rule at its own
+bottom, plus a fainter offset second pass for an uneven ink edge.
+
+**The torn card was a no-op.** 0.43.6 layered a 24dp `torn_edge` vector into a `LayerDrawable`
+under a card surface — but a tile stretched to card size, drawn in paper colour on paper, is
+invisible. It changed nothing on screen. Removed rather than shipped as decoration, along with
+`R.drawable.torn_edge`; a torn edge needs to be part of the card shape itself, not an overlay.
+
+Version 0.43.7 / build 161.
 
 ---
 
