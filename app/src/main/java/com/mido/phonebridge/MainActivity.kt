@@ -58,6 +58,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var secretsButton: MaterialButton
     private lateinit var pluginContainer: LinearLayout
     private lateinit var loginButton: MaterialButton
+    private lateinit var toolsContainer: LinearLayout
     private lateinit var accountBanner: TextView
     private lateinit var heroCard: LinearLayout
     private lateinit var heroTitle: TextView
@@ -211,8 +212,25 @@ class MainActivity : FragmentActivity() {
         pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(pluginContainer)
 
-        // --- 4. AUDIT LOG: one entry point, and the degraded banner above it ---
-        content.addView(Theme.sectionHeader(this, "Request log"))
+        // --- 4. TOOLS: the scattered nav, collapsed into one tidy row. ---
+        //
+        // Before this, four loose buttons — OPEN REQUEST LOG, EXCEPTIONS, OPTIONS, SSH —
+        // sat dumped at the bottom of the scroll, mixed in with the audit banner and the
+        // debug toggle, all reading the same "NEUTRAL full-width button" visually. That is
+        // "options and labels mixed together": not one ugly value, but no place grouping the
+        // things that are destinations rather than live state. These four are all
+        // DESTINATIONS (open another screen), so they belong under one section, compact, and
+        // the audit-degraded banner lives NEXT TO the log button it explains instead of
+        // floating above the group.
+        content.addView(Theme.sectionHeader(this, "Tools"))
+        toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        content.addView(toolsContainer)
+        toolsContainer.addView(toolButton("REQUEST LOG") { startActivity(Intent(this, LogActivity::class.java)) })
+        toolsContainer.addView(toolButton("EXCEPTIONS") { startActivity(Intent(this, ExceptionsActivity::class.java)) })
+        toolsContainer.addView(toolButton("OPTIONS") { startActivity(Intent(this, OptionsActivity::class.java)) })
+        toolsContainer.addView(toolButton("SSH") { startActivity(Intent(this, SshActivity::class.java)) })
+
+        // --- 4b. AUDIT BANNER: sits with the log button it explains, not mid-list ---
         auditBanner = TextView(this).apply {
             textSize = 14f
             setTextColor(Theme.ON_COLOR)
@@ -222,18 +240,6 @@ class MainActivity : FragmentActivity() {
             visibility = TextView.GONE
         }
         content.addView(auditBanner)
-        content.addView(fullWidthButton("OPEN REQUEST LOG", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this, LogActivity::class.java))
-        })
-        content.addView(fullWidthButton("EXCEPTIONS", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this, ExceptionsActivity::class.java))
-        })
-        content.addView(fullWidthButton("OPTIONS", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this, OptionsActivity::class.java))
-        })
-        content.addView(fullWidthButton("SSH", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this, SshActivity::class.java))
-        })
 
         // --- 5. Debug: collapsed by default, out of the main flow ---
         content.addView(Theme.sectionHeader(this, "Debug"))
@@ -913,6 +919,20 @@ class MainActivity : FragmentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = Theme.dp(this@MainActivity, 6) }
     }
+
+    /**
+     * A compact destination chip for the "Tools" row. The four loose nav buttons used to
+     * each be a full-width NEUTRAL button — visually identical to every other button, which
+     * is what made the bottom of the home screen read as "labels mixed together". A tool is
+     * a DESTINATION, not live state, so it gets a small chip and a shared spot in [toolsContainer]
+     * rather than a full-width row of its own.
+     */
+    private fun toolButton(label: String, onClick: () -> Unit): MaterialButton =
+        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true, onClick = onClick).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { marginEnd = Theme.dp(this@MainActivity, 6) }
+        }
 
     // --- actions ---
 
