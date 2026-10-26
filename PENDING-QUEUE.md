@@ -28,6 +28,18 @@ bridge is down.
   loading words + looping dots; 60s clock starts at enable; AI failure unlocks the modal and
   names the cause.
 
+## Before launch — the one parked task
+
+- [ ] **Rename the application id `com.mido.phonebridge` → `com.mido.stmp`.** Deliberately NOT done
+  during the rebrand (Mido, 2026-10-26: *"skip the package rename for now, keep it as a todo before
+  launch"*). Every user-visible name is already STMP; what is left is identifiers only — the
+  application id, the Kotlin package, and the `Theme.PhoneBridge*` style names. This cannot be a
+  copy change: a new application id is a **different app to Android**, so it resets every runtime
+  permission grant (`POST_NOTIFICATIONS`, full-screen intent, draw-over-apps, battery exemption)
+  and the notification-listener binding. The vault also cannot follow it — Keystore entries are
+  per-app and are deleted on uninstall — so the stored secrets must be re-added by hand. Do it once,
+  before the first real install, and budget the re-granting pass.
+
 ## New findings from the 2026-10-19 sweep (queued, not yet built)
 
 - [ ] **`/debug` does not expose the policy RULES — only `global` + `readable`.** So the ANY
