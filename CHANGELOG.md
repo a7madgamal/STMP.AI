@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.7 (build 161)**.
+Current build: **v0.43.8 (build 162)**.
 
 ---
 
@@ -3048,7 +3048,7 @@ Version 0.43.6 / build 160.
 
 ---
 
-## 0.43.7 — the section header is a rule again, not a red bar (build 161) — CURRENT
+## 0.43.7 — the section header is a rule again, not a red bar (build 161)
 2026-10-26
 
 **Two defects caught on device, both from 0.43.5/0.43.6.**
@@ -3065,6 +3065,23 @@ invisible. It changed nothing on screen. Removed rather than shipped as decorati
 `R.drawable.torn_edge`; a torn edge needs to be part of the card shape itself, not an overlay.
 
 Version 0.43.7 / build 161.
+
+---
+
+## 0.43.8 — torn cards, drawn as the card's own outline (build 162) — CURRENT
+2026-10-26
+
+**The torn edge is back, built the way it has to work.** 0.43.6 tried to layer a 24dp
+`torn_edge` vector over a card surface: a tile stretched to card size, in paper colour on paper,
+is invisible, so it changed nothing and was removed in 0.43.7.
+
+A torn edge is a property of the SHAPE, not an overlay. `Theme.TornPaper` is a `Drawable` that
+builds a rounded path whose bottom edge steps through a fixed jagged pattern, so the hero and
+gate cards are torn paper themselves. The pattern is a constant array rather than `Random`: a
+random tear would re-roll on every repaint and the card would visibly crawl. The path is cached
+per bounds, so repaints cost one draw call.
+
+Version 0.43.8 / build 162.
 
 ---
 

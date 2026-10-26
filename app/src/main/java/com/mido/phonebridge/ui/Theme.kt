@@ -252,6 +252,117 @@ object Theme {
         override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
+    /**
+     * A card whose own OUTLINE is torn paper — the note ripped off a pad.
+     *
+     * The first attempt (0.43.6) layered a 24dp `torn_edge` vector over a card surface.
+     * That cannot work: a tile stretched to card size, drawn in paper colour on paper, is
+     * invisible — it changed nothing on screen. A torn edge is a property of the SHAPE, so
+     * this drawable paints a rounded body whose bottom edge is a deterministic jagged line.
+     *
+     * The tear pattern is a fixed array, not `Random`: a random tear would re-roll on every
+     * redraw and the card would visibly crawl each time it repainted. Same shape, every frame.
+     */
+    private class TornPaper(
+        private val fill: Int,
+        private val edge: Int,
+        private val cornerPx: Float,
+        private val tearPx: Float
+    ) : android.graphics.drawable.Drawable() {
+
+        private val path = android.graphics.Path()
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val builtFor = android.graphics.Rect()
+        private var built = false
+        private var alphaMul = 255
+
+        /** Fixed jaggedness, as a fraction of [tearPx]. Deterministic by construction. */
+        private val tearPattern = floatArrayOf(
+            0.05f, 0.70f, 0.20f, 1.00f, 0.35f, 0.85f, 0.10f, 0.60f, 0.25f
+        )
+
+        override fun draw(canvas: android.graphics.Canvas) {
+            val b = bounds
+            if (b.isEmpty) return
+            if (!built || builtFor != b) {
+                build(b)
+                builtFor.set(b)
+                built = true
+            }
+
+            paint.style = android.graphics.Paint.Style.FILL
+            paint.color = scaled(fill)
+            canvas.drawPath(path, paint)
+
+            // A hairline on the torn edge so the paper reads as having thickness.
+            paint.style = android.graphics.Paint.Style.STROKE
+            paint.strokeWidth = tearPx / 4f
+            paint.color = scaled(edge)
+            canvas.drawPath(path, paint)
+        }
+
+        private fun build(b: android.graphics.Rect) {
+            path.reset()
+            val r = cornerPx.coerceAtMost(minOf(b.width(), b.height()) / 2f)
+            val left = b.left.toFloat()
+            val right = b.right.toFloat()
+            val top = b.top.toFloat()
+            val bottom = b.bottom.toFloat()
+
+            // Top edge, left -> right, with rounded top corners.
+            path.moveTo(left + r, top)
+            path.lineTo(right - r, top)
+            path.quadTo(right, top, right, top + r)
+
+            // Right edge down.
+            path.lineTo(right, bottom - r)
+            path.quadTo(right, bottom, right - r, bottom)
+
+            // The tear: right -> left along the bottom, each step lifted by a fixed amount.
+            val segments = tearPattern.size
+            val span = (right - r) - (left + r)
+            for (i in 1..segments) {
+                val x = right - r - span * (i.toFloat() / segments)
+                val jag = tearPattern[i - 1] * tearPx
+                path.lineTo(x, bottom - jag)
+            }
+
+            // Left edge back up, rounded bottom-left corner first.
+            path.quadTo(left, bottom, left, bottom - r)
+            path.lineTo(left, top + r)
+            path.quadTo(left, top, left + r, top)
+            path.close()
+        }
+
+        private fun scaled(color: Int): Int {
+            val a = (android.graphics.Color.alpha(color) * alphaMul / 255f).toInt()
+            return (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
+        }
+
+        override fun setAlpha(alpha: Int) {
+            alphaMul = alpha.coerceIn(0, 255)
+            invalidateSelf()
+        }
+
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
+
+        @Deprecated("Deprecated in the framework; required by the Drawable contract")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
+    /** A card with a genuinely torn bottom edge. See [TornPaper]. */
+    fun tornCard(
+        ctx: Context,
+        color: Int = SURFACE,
+        radiusDp: Int = RADIUS_CARD,
+        tearDp: Int = 6
+    ): android.graphics.drawable.Drawable = TornPaper(
+        fill = color,
+        edge = withAlpha(ON_SURFACE, 0x2E),
+        cornerPx = radiusPx(ctx, radiusDp),
+        tearPx = dp(ctx, tearDp).toFloat()
+    )
+
     // --- text ---
 
     /** A small all-caps section header in the handwritten face, with a short hand-inked

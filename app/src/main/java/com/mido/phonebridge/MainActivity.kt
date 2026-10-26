@@ -122,7 +122,7 @@ class MainActivity : FragmentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(Theme.dp(this@MainActivity, 16), Theme.dp(this@MainActivity, 14),
                 Theme.dp(this@MainActivity, 16), Theme.dp(this@MainActivity, 14))
-            background = Theme.surface(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         heroTitle = TextView(this).apply {
             textSize = 20f
@@ -187,7 +187,7 @@ class MainActivity : FragmentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(Theme.dp(this@MainActivity, 14), Theme.dp(this@MainActivity, 12),
                 Theme.dp(this@MainActivity, 14), Theme.dp(this@MainActivity, 12))
-            background = Theme.surface(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(this@MainActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         gateTitle = TextView(this).apply {
             textSize = 17f
