@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.0 (build 154)**.
+Current build: **v0.43.1 (build 155)**.
 
 ---
 
@@ -2858,7 +2858,7 @@ it does not alter it.
 
 ---
 
-## 0.43.0 — a sudo password typed at the modal, never sent over HTTP (build 154) — CURRENT
+## 0.43.0 — a sudo password typed at the modal, never sent over HTTP (build 154)
 2026-10-26
 
 **The password does not exist on the wire.** It is typed on the phone, held only in the
@@ -2917,6 +2917,45 @@ the password, since nothing here would have supplied one.
 visibly differ between root and non-root.
 
 Version 0.43.0 / build 154.
+
+---
+
+## 0.43.1 — the misclick guard is 1s, and the card dims while it waits (build 155) — CURRENT
+2026-10-26
+
+**One second instead of three**, on Mido's instruction. The guard was never really about a number
+of seconds: it exists so a tap already travelling when a card appears cannot approve something
+nobody has read. A deliberate tap is ~100ms, so 1s still catches the case; the extra two seconds
+were charged to every human for a risk the guard already bounded.
+
+**The reason 1s is safe is the DIM, not the clock.** A disabled control that LOOKS enabled is what
+turns a short guard into a misclick. The NOTIFY card previously refused taps in silence — it sat at
+full opacity and simply ignored them, which reads as a broken card rather than a careful one. It now
+renders at 45% opacity until the guard expires and snaps to full, and that snap is itself the
+signal: the card became live and looks like it.
+
+- **Driven from the same predicate the touch handler uses** (`ArmGuard.decisionsAllowed`), not a
+  second timer. The picture and the behaviour cannot disagree about when the card went live — the
+  same one-source-of-truth rule this project has paid for repeatedly.
+- **Multiplied into the fade, not replacing it.** The fade is about appearing; the dim is about
+  being live. A card still fading in is also still unarmed, so the two compose cleanly.
+- **The modal already had this.** `ApprovalActivity` dims APPROVE to 0.4 alpha while unarmed and
+  shows "ready in Xs", so only the overlay was missing the cue. The two surfaces now agree, which
+  is what `ArmGuardTest` asserts.
+
+**A consequence worth recording rather than discovering later: lowering the guard does not make an
+AI-on modal answerable in 1s.** The measured summary latency is ~1.2s, so the FETCH is now the
+binding constraint in the ordinary case — it used to be hidden underneath the 3s guard. That is not
+a regression (the guard was never meant to mask the model), but it means the visible wait with AI
+enabled is unchanged. A dedicated test now pins this so a future "why is it still ~1.2s" lands on
+the explanation instead of a bisect.
+
+`ArmGuardTest` went red on the old 3s assumption exactly as it should, and the stale "3s guard" log
+lines now say "misclick guard" — a log that names a duration it no longer has is a log that lies.
+
+336 tests green (was 335).
+
+Version 0.43.1 / build 155.
 
 ---
 

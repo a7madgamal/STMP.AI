@@ -320,7 +320,7 @@ object ApprovalGate {
          * `enabledAtMs`, which is now at least `shownAtMs + MISCLICK_GUARD_MS`. Without adding
          * the guard here, a no-AI request would arm at +3s and then be given 60s of countdown —
          * 63s of legitimate life against a 60s latch. The caller would see a timeout at the exact
-         * moment the human still had 3 seconds left to decide, and the UI would show a window that
+         * moment the human still had the guard left to decide, and the UI would show a window that
          * the server had already given up on.
          */
         fun maxWaitMs(): Long =
@@ -644,8 +644,9 @@ object ApprovalGate {
             // this used to arm at `shownAtMs` — the instant the modal appeared. A tap already in
             // flight when the card arrives would land on APPROVE.
             //
-            // `ArmGuard.armAt` rather than `shownAtMs + 3000` inline: the AI path below uses the
-            // same function, so the rule that decides when a human may agree to something is
+            // `ArmGuard.armAt` rather than `shownAtMs + MISCLICK_GUARD_MS` inline: the AI path
+            // below uses the same function, so the rule that decides when a human may agree to
+            // something is
             // stated once. Applying it per-branch is how the two paths drift, and this project
             // has paid for exactly that (the audit flag honoured on one dispatch path only).
             p.enabledAtMs = ArmGuard.armAt(p.shownAtMs, p.shownAtMs)

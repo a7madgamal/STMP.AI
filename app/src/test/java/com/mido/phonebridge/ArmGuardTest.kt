@@ -36,11 +36,28 @@ class ArmGuardTest {
 
     @Test
     fun `a fast summary still waits for the guard`() {
-        // ~1.2s is the measured summary latency. The guard must win, or the AI path would be
-        // immune to the protection simply by being quick.
+        // A summary faster than the guard does not buy an earlier tap: the guard is a MINIMUM.
+        //
+        // The original version of this test used a ~1.2s summary against a 3s guard, which was
+        // the measured latency at the time. With the guard at 1s that case now flips — the summary
+        // is the slower of the two — so the test uses a summary that is genuinely inside the
+        // guard. The flip is itself the interesting fact: see `a summary slower than the guard`
+        // below, which is now the COMMON case rather than an edge.
+        val shown = 5_000L
+        val ready = shown + 400L
+        assertEquals(shown + ArmGuard.MISCLICK_GUARD_MS, ArmGuard.armAt(shown, ready))
+    }
+
+    @Test
+    fun `a summary slower than the guard sets the arm time`() {
+        // The measured summary latency is ~1.2s, so with a 1s guard the FETCH is now what the
+        // human waits for in the ordinary AI-on case. This is not a regression — the guard was
+        // never meant to hide the model, only to stop a travelling tap — but it means lowering
+        // the guard does NOT make an AI-on modal answerable in 1s, and a future "why is it still
+        // ~1.2s" should land here rather than in a bisect.
         val shown = 5_000L
         val ready = shown + 1_200L
-        assertEquals(shown + ArmGuard.MISCLICK_GUARD_MS, ArmGuard.armAt(shown, ready))
+        assertEquals(ready, ArmGuard.armAt(shown, ready))
     }
 
     @Test
@@ -83,22 +100,30 @@ class ArmGuardTest {
     }
 
     @Test
-    fun `the guard is the agreed three seconds`() {
-        assertEquals(3_000L, ArmGuard.MISCLICK_GUARD_MS)
+    fun `the guard is the agreed one second`() {
+        // Lowered from 3s on 2026-10-26 (Mido), paired with the dim on both surfaces. The
+        // value is pinned here so a future change is a deliberate act with a failing test,
+        // not a quiet edit to a constant nobody was watching.
+        assertEquals(1_000L, ArmGuard.MISCLICK_GUARD_MS)
     }
 
     // --- the NOTIFY overlay's decision gate ---
 
     @Test
-    fun `a notify card refuses decisions for the first three seconds`() {
+    fun `a notify card refuses decisions for the first second`() {
         // Mido, 2026-10-24: "add the same 3 seconds waiting period before ANY touch event on the
         // notification works so that I don't approve or cancel by mistake". The overlay approves on
         // a plain tap and had NO guard, unlike the modal — so a card arriving under a moving finger
         // could approve a request nobody read.
+        //
+        // The duration is now 1s (2026-10-26). What the guard actually buys is "not the tap that
+        // was already travelling", which 1s covers; the extra two seconds were charging every
+        // human for that, and the card now DIMS while unarmed so the wait is visible rather than
+        // mysterious.
         val shown = 5_000_000L
         assertFalse("a tap at t=0 must not decide", ArmGuard.decisionsAllowed(shown, shown))
-        assertFalse(ArmGuard.decisionsAllowed(shown, shown + 2_999L))
-        assertTrue("the guard expires exactly at 3s", ArmGuard.decisionsAllowed(shown, shown + 3_000L))
+        assertFalse(ArmGuard.decisionsAllowed(shown, shown + 999L))
+        assertTrue("the guard expires exactly at 1s", ArmGuard.decisionsAllowed(shown, shown + 1_000L))
         assertTrue(ArmGuard.decisionsAllowed(shown, shown + 10_000L))
     }
 

@@ -9,6 +9,11 @@ package com.mido.phonebridge
  * 2026-10-21: *"when AI is disabled, we need the 3 seconds protection again to avoid misclicking
  * the dialog"*.
  *
+ * **The duration was later lowered to 1s (2026-10-26)**, paired with a visual dim on both surfaces.
+ * The guard was never really about the number of seconds — it is about a human not being able to
+ * approve something they had not yet seen, and a greyed-out card conveys that far more directly
+ * than a clock does. See [MISCLICK_GUARD_MS] for the full argument.
+ *
  * **One rule for both paths, deliberately.** It would be easy to apply this only to the no-AI
  * branch, since that is the one that regressed. But "how soon can a human accidentally agree to
  * something" is a property of the MODAL, not of whether a summary happened to be written. Applying
@@ -29,11 +34,20 @@ object ArmGuard {
     /**
      * The minimum time between a modal appearing and its buttons accepting a tap.
      *
-     * Three seconds: long enough to see that SOMETHING appeared and stop a tap already travelling,
-     * short enough not to feel like a hang. Chosen by Mido, who had this behaviour before the AI
-     * arm-on-fetch change replaced it.
+     * **One second, lowered from three on Mido's instruction (2026-10-26).** The original 3s was
+     * chosen to stop a tap already travelling when the modal appears; 1s still does that, because
+     * a deliberate tap is ~100ms and a finger already in flight lands inside the first frame or
+     * two. What it no longer does is make a human wait three seconds to answer a request they had
+     * already read — which was the cost the 3s was paying for a risk that is bounded by the guard
+     * itself.
+     *
+     * **The reason this is safe to lower is the DIM, not the clock.** A disabled control that looks
+     * enabled is what turns a short guard into a misclick; a visibly greyed card tells the human
+     * "not yet" without needing a countdown to enforce it. That is why [NotifyOverlay] and the
+     * modal both dim while unarmed — the visual and the guard are one mechanism, and shortening
+     * one without the other would be the mistake.
      */
-    const val MISCLICK_GUARD_MS = 3_000L
+    const val MISCLICK_GUARD_MS = 1_000L
 
     /**
      * When the buttons may go live.

@@ -462,15 +462,15 @@ object NotifyOverlay {
                         // Settle only: this card is meant to fade out normally, and the
                         // settle backstop guarantees its removal.
                         //
-                        // **Gated by the same 3s guard as the modal.** A card can appear under a
-                        // finger already travelling, and a tap here MEANS APPROVE — so the first
-                        // three seconds must not decide anything. Nothing is lost by refusing the
-                        // tap: the card simply stays, fully visible, until the guard expires.
+                        // **Gated by the same misclick guard as the modal.** A card can appear
+                        // under a finger already travelling, and a tap here MEANS APPROVE — so the
+                        // first second must not decide anything. Nothing is lost by refusing the
+                        // tap: the card simply stays, dimmed, until the guard expires.
                         if (ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
                             settle(entry, Reason.APPROVED)
                         } else {
                             com.mido.phonebridge.Debug.log(
-                                "notify[${entry.id}] tap ignored: still in the 3s guard"
+                                "notify[${entry.id}] tap ignored: still in the misclick guard"
                             )
                         }
                     }
@@ -495,7 +495,7 @@ object NotifyOverlay {
             // approve or cancel by mistake".
             if (!ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
                 com.mido.phonebridge.Debug.log(
-                    "notify[${entry.id}] dismiss ignored: still in the 3s guard"
+                    "notify[${entry.id}] dismiss ignored: still in the misclick guard"
                 )
                 return@setOnClickListener
             }
@@ -554,8 +554,19 @@ object NotifyOverlay {
 
                 // fade in
                 val elapsed = now - entry.shownAt
-                card.alpha = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
-                card.translationY = dp(8) * (1f - card.alpha)
+                val fadeIn = (elapsed.toFloat() / FADE_IN_MS).coerceIn(0f, 1f)
+                // DIM WHILE UNARMED. The guard is only safe if a card that refuses taps LOOKS
+                // like it refuses taps — otherwise a short guard reads as a broken card, and a
+                // long one as a frozen app. Driven from the SAME predicate the touch handler
+                // uses ([ArmGuard.decisionsAllowed]) rather than a second timer, so the picture
+                // and the behaviour cannot disagree about when the card went live.
+                //
+                // Multiplied into the fade rather than replacing it: the fade is about
+                // appearing, the dim is about being live, and a card that is still fading in is
+                // also still unarmed.
+                val armed = ArmGuard.decisionsAllowed(entry.shownAt, now)
+                card.alpha = fadeIn * (if (armed) 1f else DIM_ALPHA)
+                card.translationY = dp(8) * (1f - fadeIn)
 
                 if (entry.decisionStartAt == 0L) {
                     // Still fetching: the bar waits at full and the clock has not begun.
@@ -947,6 +958,15 @@ object NotifyOverlay {
      */
     private const val DRAG_SLOP_DP = 16
     private const val FADE_IN_MS = 180L
+
+    /**
+     * How opaque the card is while the misclick guard has not expired.
+     *
+     * Low enough to read as "not yet" at a glance, high enough that the summary is still
+     * legible — the point is to say WAIT, not to hide the request. It snaps to full opacity at
+     * the arm time, and that snap is itself the signal: the card becomes live and looks it.
+     */
+    private const val DIM_ALPHA = 0.45f
     private const val FADE_OUT_MS = 200L
 
     /**
