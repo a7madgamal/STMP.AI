@@ -3596,7 +3596,7 @@ Version 0.43.28 / build 182.
 
 ---
 
-## 0.43.29 — the stamp is actually drawn (build 183) — CURRENT
+## 0.43.29 — the stamp is actually drawn (build 183)
 2026-10-27
 
 Mido, 2026-10-27: *"I saw nothing, just a slightly dimmed modal"*. Correct, and the cause is one
@@ -3615,6 +3615,32 @@ for *whether it ran* instead of *whether it drew anything visible*. A pixel asse
 caught all four.
 
 Version 0.43.29 / build 183.
+
+---
+
+## 0.43.30 — green approve, see-through grainy ink, snappier slam (build 184) — CURRENT
+2026-10-27
+
+The stamp finally works, so this is the first release that could be about how it FEELS rather than
+whether it appears. Mido, 2026-10-27: *"make it a little transparent and grainy / and make approved
+green not red, keep reject red / snappier animation"*.
+
+**Green for approve, red for deny.** `ink` is now derived from the verdict and reuses
+`Theme.SUCCESS` / `Theme.DANGER`, so the stamp agrees with the button the human just pressed instead
+of contradicting it.
+
+**Slightly transparent.** Overall ink opacity is 0.88, applied once in the `a255` conversion. A real
+stamp on paper is uneven and lets the sheet through; a fully opaque disc reads as a sticker.
+
+**Grainy.** The shared `PaperGrain` tile is clipped to the ink disc and painted over it. This is the
+same texture as every surface, which is the point — the stamp is ink ON that paper, so it should
+carry the same fibre.
+
+**Snappier.** Slam 220→150ms, fade-in 60→45, tilt 340→220, bleed 420→260 (delay 200→130), settle
+500→260 (delay 320→230), fade-out 260→180 (delay 820→560). Total ~1.5s → ~1.0s: the thunk lands
+sooner and the whole gesture clears before it can feel like a wait.
+
+Version 0.43.30 / build 184.
 
 ---
 

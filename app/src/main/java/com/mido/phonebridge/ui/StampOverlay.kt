@@ -72,9 +72,29 @@ class StampOverlay(
     /** Animated: -55° (tilted away, above the paper) to 0° (flat on the paper). */
     private var tilt = 0f
 
-    private val ink = 0xFFB23A2F.toInt()
+    /**
+     * Ink colour, chosen by the DECISION.
+     *
+     * Approve is green, deny stays stamp-red (Mido, 2026-10-27: *"make approved green not red, keep
+     * reject red"*). Both are ink analogues of `Theme.SUCCESS` / `Theme.DANGER`, so the stamp
+     * agrees with the button colour the human just pressed instead of contradicting it.
+     */
+    private val ink: Int
+        get() = when (word) {
+            Verdict.APPROVED.word -> Theme.SUCCESS
+            else -> Theme.DANGER
+        }
     private val paper = 0xFFF5EEDF.toInt()
     private val scrimDim = (scrimAlpha.coerceIn(0, 255) shl 24) // caller-controlled; 0 = no dim
+
+    /**
+     * Overall ink opacity.
+     *
+     * Not fully opaque: a real stamp on paper is uneven and you see the sheet through it (Mido,
+     * 2026-10-27: *"make it a little transparent and grainy"*). 0.88 reads as ink with a little
+     * paper showing, without looking washed out.
+     */
+    private val inkOpacity = 0.88f
 
     private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val inkSoftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -142,7 +162,7 @@ class StampOverlay(
         // Slam: scale from 2.2x down to 1.0 with a slight overshoot (the thunk), while the
         // stamp rotates flat out of the screen.
         val slam = ObjectAnimator.ofFloat(this, "stampScale", 2.2f, 0.92f, 1.0f).apply {
-            duration = 220
+            duration = 150
             interpolator = DecelerateInterpolator()
         }
         // The stamp must be OPAQUE before the tilt is worth watching. The first version faded in
@@ -150,29 +170,29 @@ class StampOverlay(
         // already flat, and the 3D happened entirely during the transparent phase. Fade faster
         // than the tilt, and run the tilt long enough to be seen as motion.
         val fadeIn = ObjectAnimator.ofFloat(this, "stampAlpha", 0f, 1f).apply {
-            duration = 60
+            duration = 45
             interpolator = LinearInterpolator()
         }
         val flatten = ObjectAnimator.ofFloat(this, "tilt", -55f, 0f).apply {
-            duration = 340
+            duration = 220
             interpolator = DecelerateInterpolator()
         }
         // Ink bleed: after the thunk, the edge spreads for a beat.
         val bleedAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 420
-            startDelay = 200
+            duration = 260
+            startDelay = 130
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener { bleed = it.animatedValue as Float }
         }
         // Settle + out.
         val settle = ObjectAnimator.ofFloat(this, "stampScale", 1.0f, 0.98f).apply {
-            duration = 500
-            startDelay = 320
+            duration = 260
+            startDelay = 230
             interpolator = AccelerateDecelerateInterpolator()
         }
         val fadeOut = ObjectAnimator.ofFloat(this, "stampAlpha", 1f, 0f).apply {
-            duration = 260
-            startDelay = 820
+            duration = 180
+            startDelay = 560
             interpolator = AccelerateDecelerateInterpolator()
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: android.animation.Animator) {
@@ -221,7 +241,7 @@ class StampOverlay(
         // 1, i.e. an invisible disc. The scrim uses a fixed constant, so the screen dimmed and no
         // stamp ever appeared (Mido, 2026-10-27: *"I saw nothing, just a slightly dimmed modal"*).
         // Every alpha below goes through this one conversion.
-        val a255 = (stampAlpha.coerceIn(0f, 1f) * 255f).toInt()
+        val a255 = (stampAlpha.coerceIn(0f, 1f) * inkOpacity * 255f).toInt()
 
         // Pass 1: the soft, slightly-offset "bleed" halo behind the stamp — the ink soaking
         // into the paper. Alpha follows bleed; radius expands slightly.
@@ -238,6 +258,15 @@ class StampOverlay(
         // Pass 3: the main ink disc.
         inkPaint.color = colorWithAlpha(ink, a255)
         canvas.drawCircle(cx, cy, r, inkPaint)
+
+        // Pass 3b: GRAIN inside the ink. A stamp on paper is never a flat fill — the rubber is
+        // uneven and the sheet shows through, so a perfectly smooth disc reads as a sticker.
+        // The shared paper grain is clipped to the disc and multiplied over the ink.
+        canvas.save()
+        val disc = android.graphics.Path().apply { addCircle(cx, cy, r, android.graphics.Path.Direction.CW) }
+        canvas.clipPath(disc)
+        canvas.drawPaint(PaperGrain.paint())
+        canvas.restore()
 
         // Pass 4: the word, punched out (paper colour on ink). Two-line stacked centre text.
         val label = word
