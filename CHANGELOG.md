@@ -3316,7 +3316,7 @@ Version 0.43.17 / build 171.
 
 ---
 
-## 0.43.18 — every card, button and rule drawn by hand (build 172) — CURRENT
+## 0.43.18 — every card, button and rule drawn by hand (build 172)
 2026-10-27
 
 Straight edges were the last thing making the app look like software instead of paper. Every surface
@@ -3351,6 +3351,34 @@ scanned only OUTSIDE `ui/`, which was wrong: `Theme` is the only place either ca
 scan found nothing and its own empty-result guard fired — the test caught its own blindness.
 
 Version 0.43.18 / build 172.
+
+---
+
+## 0.43.19 — the 3D stamp is actually visible (build 173) — CURRENT
+2026-10-27
+
+The 3D slam shipped in 0.43.14 and could not be seen. Three separate bugs, all mine, each enough on
+its own to hide the effect.
+
+**The scrim tilted with the stamp.** `rotationX` was set on the View, and the overlay is
+`MATCH_PARENT` — so the full-screen dim rotated too and the whole thing read as the screen leaning
+rather than an object pressing down. The transform now goes through an `android.graphics.Camera`
+applied to the CANVAS around the stamp's own centre, so the scrim stays flat and only the stamp has
+perspective.
+
+**The tilt finished before the stamp was opaque.** Fade-in was 80ms while the tilt ran 180ms, and
+the stamp starts at 2.2x scale — so by the time any ink was visible the face was already flat, and
+the entire 3D happened during the transparent phase. Fade is now 60ms and the tilt 340ms: the stamp
+is visible for most of the descent.
+
+**The animation started before layout.** `radius` comes from `width`/`height`, which are 0 until the
+view is measured, so the opening frames drew nothing. It now starts from `post`, after layout.
+
+`camera.setLocation(0, 0, -12dp)`: a negative Z pulls the camera toward the viewer, which is what
+produces foreshortening. At 0 there is no perspective and `rotateX` degenerates into a vertical
+squash.
+
+Version 0.43.19 / build 173.
 
 ---
 

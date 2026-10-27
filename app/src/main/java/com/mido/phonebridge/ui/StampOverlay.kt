@@ -42,13 +42,20 @@ class StampOverlay(context: Context) : View(context) {
     }
 
     /**
-     * The stamp comes DOWN out of the screen, so it needs a real perspective.
+     * The stamp comes DOWN out of the screen, so it needs real perspective.
      *
-     * `rotationX` alone is a flat skew; `cameraDistance` is what makes the near edge bigger than
-     * the far one. A large distance flattens the effect to nothing, a small one warps it into a
-     * fisheye — this value is the range where it reads as "a hand pressing down".
+     * **This is a Canvas-level [android.graphics.Camera], not `View.rotationX`.** Rotating the View
+     * was the first attempt and it was wrong: the overlay is `MATCH_PARENT`, so `rotationX` tilted
+     * the SCRIM along with the stamp and the effect read as the whole screen leaning, not as an
+     * object descending onto paper. A Camera transform applied around the stamp's own centre
+     * leaves the scrim flat and gives the stamp true perspective.
      */
-    private val cameraDistancePx: Float = 8000f * resources.displayMetrics.density
+    private val camera = android.graphics.Camera().apply {
+        // Negative Z pulls the camera toward the viewer, which is what produces foreshortening.
+        // At 0 there is no perspective at all and rotateX degenerates into a vertical squash.
+        setLocation(0f, 0f, -12f * resources.displayMetrics.density)
+    }
+    private val tiltMatrix = android.graphics.Matrix()
 
     /** Animated: -55° (tilted away, above the paper) to 0° (flat on the paper). */
     private var tilt = 0f
@@ -90,31 +97,34 @@ class StampOverlay(context: Context) : View(context) {
         stampAlpha = 0f
         bleed = 0f
         tilt = -55f
+        // **Start after the first layout pass, not immediately.** `radius` is derived from
+        // `width`/`height`, which are 0 until the view is measured — so animating straight after
+        // `addView` spends its opening frames drawing nothing, and the visible part is whatever is
+        // left. `post` runs after layout, so frame one has real dimensions.
+        //
         // A round stamp that is bigger than the available ring gets the word pushed out of
         // bounds, so ADAPT the glyph size to the word length at layout time — here only.
-        buildAnimations()
+        post { buildAnimations() }
     }
 
     private fun buildAnimations() {
-        // 3D: set the camera ONCE, then animate the X rotation. Doing it per-frame would
-        // rebuild the matrix every draw and the perspective would jitter.
-        cameraDistance = cameraDistancePx
-
         // Slam: scale from 2.2x down to 1.0 with a slight overshoot (the thunk), while the
         // stamp rotates flat out of the screen.
         val slam = ObjectAnimator.ofFloat(this, "stampScale", 2.2f, 0.92f, 1.0f).apply {
             duration = 220
             interpolator = DecelerateInterpolator()
         }
-        // The tilt lands slightly BEFORE the scale settles, so the face is flat when the ink
-        // hits — a stamp that is still angled at contact reads as a hovering sticker.
-        val flatten = ObjectAnimator.ofFloat(this, "tilt", -55f, 0f).apply {
-            duration = 180
-            interpolator = DecelerateInterpolator()
-        }
+        // The stamp must be OPAQUE before the tilt is worth watching. The first version faded in
+        // over 80ms while the tilt finished in 180ms — so by the time the ink was visible it was
+        // already flat, and the 3D happened entirely during the transparent phase. Fade faster
+        // than the tilt, and run the tilt long enough to be seen as motion.
         val fadeIn = ObjectAnimator.ofFloat(this, "stampAlpha", 0f, 1f).apply {
-            duration = 80
+            duration = 60
             interpolator = LinearInterpolator()
+        }
+        val flatten = ObjectAnimator.ofFloat(this, "tilt", -55f, 0f).apply {
+            duration = 340
+            interpolator = DecelerateInterpolator()
         }
         // Ink bleed: after the thunk, the edge spreads for a beat.
         val bleedAnim = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -152,13 +162,27 @@ class StampOverlay(context: Context) : View(context) {
         super.onDraw(canvas)
         if (stampAlpha <= 0f) return
 
-        // Scrim.
+        // Scrim stays FLAT. It is drawn before the camera transform so the dim does not lean with
+        // the stamp — a tilting scrim looks like the screen falling over.
         canvas.drawColor(scrimDim)
 
         val cx = centerX
         val cy = centerY
         val r = radius * stampScale
         if (r <= 0f) return
+
+        // Everything below is drawn THROUGH the 3D transform, pivoted on the stamp's own centre.
+        canvas.save()
+        if (tilt != 0f) {
+            camera.save()
+            camera.rotateX(tilt)
+            camera.getMatrix(tiltMatrix)
+            camera.restore()
+            // Camera works in its own space; move the pivot to the stamp centre and back.
+            tiltMatrix.preTranslate(-cx, -cy)
+            tiltMatrix.postTranslate(cx, cy)
+            canvas.concat(tiltMatrix)
+        }
 
         // Pass 1: the soft, slightly-offset "bleed" halo behind the stamp — the ink soaking
         // into the paper. Alpha follows bleed; radius expands slightly.
@@ -192,6 +216,8 @@ class StampOverlay(context: Context) : View(context) {
         glyphPaint.color = colorWithAlpha(paper, (stampAlpha * 0.5f).toInt())
         canvas.drawCircle(cx, cy, r * 0.85f, glyphPaint)
         glyphPaint.style = Paint.Style.FILL
+
+        canvas.restore()
     }
 
     private fun colorWithAlpha(color: Int, alpha: Int): Int =
@@ -202,13 +228,13 @@ class StampOverlay(context: Context) : View(context) {
     fun setStampAlpha(v: Float) { stampAlpha = v; invalidate() }
 
     /**
-     * The 3D descent.
+     * The 3D descent angle, in degrees.
      *
-     * Set on the VIEW, not the canvas: `Canvas` has no X-axis rotation, and faking it with a
-     * matrix would bypass the camera that makes the perspective correct. `rotationX` plus
-     * `cameraDistance` is the platform's own 3D path and costs one matrix per frame.
+     * Applied to the CANVAS through [camera] inside `onDraw`, not to the View. `View.rotationX`
+     * would tilt the full-screen scrim along with the stamp, which reads as the whole screen
+     * leaning rather than an object pressing down.
      */
-    fun setTilt(v: Float) { tilt = v; rotationX = v; invalidate() }
+    fun setTilt(v: Float) { tilt = v; invalidate() }
 
     // Scrim gradient not used; kept simple with a flat dim for a paper feel.
 }
