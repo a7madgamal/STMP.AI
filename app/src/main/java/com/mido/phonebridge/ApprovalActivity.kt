@@ -634,14 +634,11 @@ class ApprovalActivity : FragmentActivity() {
         // and can never scroll out of reach.
         val passwordSection: View? = if (needsPassword) {
             val field = EditText(this).apply {
+                // **Masking is applied at the END of this block, on purpose.**
+                // `setInputType` internally re-derives the transformation from the type, so an
+                // explicit `transformationMethod` set BEFORE it is silently cleared. That is why
+                // the mask kept disappearing.
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                // **Belt and braces, because `inputType` alone was not enough.** The variation
-                // flag is supposed to mask the text, but the field rendered in clear on device
-                // (Mido, 2026-10-27: *"sudo password should be a password field"*). Setting the
-                // transformation explicitly is the one thing the framework cannot reinterpret —
-                // it is the same call `inputType` makes internally, made where nothing else can
-                // override it.
-                transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
                 // Never learn it: the keyboard's personalised dictionary is not a place
                 // a root password may live.
                 imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
@@ -650,7 +647,14 @@ class ApprovalActivity : FragmentActivity() {
                 // Not saved into instance state: a rotation must not preserve it.
                 setSaveEnabled(false)
                 isSaveFromParentEnabled = false
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                // **NO, not NO_EXCLUDE_DESCENDANTS.** The old value was inverted: that constant
+                // means "this view is unimportant, but do not exclude its descendants", i.e. it
+                // PERMITS autofill. Password managers read it as "go ahead" and offered to save
+                // the root password (Mido, 2026-10-27: *"stop password managers from suggesting to
+                // save it"*). `IMPORTANT_FOR_AUTOFILL_NO` is the one that opts this view out.
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+                // `autofillHints` is a read-only property on TextView, so it cannot be cleared
+                // here; the flag above is the one the AutofillManager actually consults.
                 setPadding(
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12),
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12)
@@ -665,6 +669,8 @@ class ApprovalActivity : FragmentActivity() {
                     override fun onActionItemClicked(m: android.view.ActionMode?, item: android.view.MenuItem?) = false
                     override fun onDestroyActionMode(m: android.view.ActionMode?) {}
                 }
+                // THE MASK, last: nothing above can clear it now.
+                transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             }
             passwordField = field
             passwordReady = { field.text.isNotEmpty() }

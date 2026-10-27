@@ -3407,7 +3407,7 @@ Version 0.43.20 / build 174.
 
 ---
 
-## 0.43.21 — no scrim on the card, and a masked sudo field (build 175) — CURRENT
+## 0.43.21 — no scrim on the card, and a masked sudo field (build 175)
 2026-10-27
 
 Two reports from the same test pass.
@@ -3425,6 +3425,34 @@ internally, made where nothing can reinterpret it. The field also keeps its exis
 no personalised learning, not saved to instance state, no copy/cut menu.
 
 Version 0.43.21 / build 175.
+
+---
+
+## 0.43.22 — the sudo password actually reaches the gate, and the field really masks (build 176) — CURRENT
+2026-10-27
+
+Two bugs that both looked like "the password field is broken", and they were unrelated.
+
+**The gate never learned the request needed a password.** `ApprovalGate.await` takes its own
+`needsPassword` parameter, separate from the `ApprovalView.needsPassword` that decides what the modal
+DRAWS. The dispatcher passed the view field and never passed the gate one, so
+`Pending.needsPassword` kept its default `false`. The result: the field rendered, the human typed
+into it, and `resolveWithPassword` refused the password every time — logging *"request 1001 does not
+need a password, or expired"* and letting the call time out. Mido, 2026-10-27: *"it didn't timeout I
+entered the password and accepted"* — exactly right, and the log proved the tap landed. The gate now
+receives `needsPassword` too.
+
+**The mask was being cleared after it was set.** `setInputType` internally re-derives the
+transformation from the type, so the explicit `PasswordTransformationMethod` assigned BEFORE it was
+silently wiped — which is why the text stayed readable. The transformation is now the last statement
+in the field's `apply` block, where nothing above can undo it.
+
+**Password managers no longer offer to save it.** `importantForAutofill` was set to
+`IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS`, which reads like "no autofill" and means the
+opposite: it permits autofill on this view and only excludes descendants. It is now
+`IMPORTANT_FOR_AUTOFILL_NO`.
+
+Version 0.43.22 / build 176.
 
 ---
 

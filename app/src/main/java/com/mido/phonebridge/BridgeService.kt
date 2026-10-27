@@ -1261,6 +1261,15 @@ class HttpServer(
                             // resolve that arrives without one.
                             needsPassword = needsPassword
                         ),
+                        // **THE GATE'S OWN COPY, not just the view's.** The view above only
+                        // decides what the modal DRAWS; `await` decides whether
+                        // `resolveWithPassword` will accept the typed password. Omitting this
+                        // left `Pending.needsPassword` at its default `false`, so every
+                        // password was rejected with "does not need a password, or expired"
+                        // even though the field had rendered and the human had typed into it
+                        // (Mido, 2026-10-27: *"I entered the password and accepted"* → the
+                        // call still timed out).
+                        needsPassword = needsPassword,
                         // Null for a route that declares `aiSummary = false`: there is nothing
                         // to wait for, so its buttons go live at once.
                         aiFacts = if (com.mido.phonebridge.ai.AiGateway
