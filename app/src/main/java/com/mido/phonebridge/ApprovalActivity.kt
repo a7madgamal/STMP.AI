@@ -146,7 +146,26 @@ class ApprovalActivity : FragmentActivity() {
                 setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             }
 
-        content.addView(label("🔐 awaiting your stamp", 20f))
+        // The header is the app icon plus the title, not a lock emoji (Mido, 2026-10-27:
+        // *"replace lock emoji in modal with the icon"*). The icon is the app's own mark, so the
+        // modal is visibly STMP's rather than a generic system prompt.
+        content.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
+                addView(
+                    android.widget.ImageView(this@ApprovalActivity).apply {
+                        setImageResource(R.drawable.ic_launcher)
+                        layoutParams = LinearLayout.LayoutParams(
+                            Theme.dp(this@ApprovalActivity, 40),
+                            Theme.dp(this@ApprovalActivity, 40)
+                        ).apply { marginEnd = Theme.dp(this@ApprovalActivity, 12) }
+                    }
+                )
+                addView(Theme.text(this@ApprovalActivity, "awaiting your stamp", 20f))
+            }
+        )
 
         // --- AI: LIVE, because the summary arrives AFTER this view is built. ---
         // The modal now appears immediately and the model answers in the background (Mido,
@@ -484,20 +503,6 @@ class ApprovalActivity : FragmentActivity() {
             ).apply { bottomMargin = Theme.dp(this@ApprovalActivity, 10) }
         }
 
-        val iconRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, pad / 2)
-        }
-        val icon = android.widget.ImageView(this).apply {
-            setImageResource(R.drawable.ic_launcher)
-            layoutParams = LinearLayout.LayoutParams(
-                Theme.dp(this@ApprovalActivity, 56),
-                Theme.dp(this@ApprovalActivity, 56)
-            )
-        }
-        iconRow.addView(icon)
-
         val deny = Theme.button(this, "DENY", Theme.ButtonStyle.NEUTRAL) {
             finishWith(id, approved = false)
         }.apply {
@@ -742,7 +747,8 @@ class ApprovalActivity : FragmentActivity() {
                 label("⚠ APPROVE unavailable — set up a fingerprint/PIN (strong) to approve", 14f, Theme.DANGER)
             )
         }
-        pinned.addView(iconRow)
+        // The icon moved to the header, so the duplicate row here is gone (Mido, 2026-10-27:
+        // *"and remove it from down"*).
         pinned.addView(armBar)
         if (exceptionRow != null) {
             pinned.addView(

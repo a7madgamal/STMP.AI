@@ -3665,7 +3665,7 @@ Version 0.43.31 / build 185.
 
 ---
 
-## 0.43.32 — the stamp is the supplied artwork (build 186) — CURRENT
+## 0.43.32 — the stamp is the supplied artwork (build 186)
 2026-10-27
 
 Mido supplied two finished stamps (2026-10-27: *"use those pngs instead for the stamp, keep animations
@@ -3685,6 +3685,20 @@ fade in/out, the ink opacity and the thud all still apply — only the drawn geo
 REJECTED mark both sit correctly.
 
 Version 0.43.32 / build 186.
+
+---
+
+## 0.43.33 — the modal wears the app icon, once (build 187) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"replace lock emoji in modal with the icon and remove it from down"*.
+
+The header read `🔐 awaiting your stamp` while a separate 56dp launcher icon sat in the pinned
+bottom block — the same identity in two places, one of them an emoji. The header is now a 40dp app
+icon beside "awaiting your stamp", and the bottom row is gone. The unused `iconRow`/`icon` locals
+were deleted rather than left to trip `-Werror`.
+
+Version 0.43.33 / build 187.
 
 ---
 
