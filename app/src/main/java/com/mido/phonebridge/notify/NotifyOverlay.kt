@@ -960,23 +960,34 @@ object NotifyOverlay {
             PixelFormat.TRANSLUCENT
         )
         overlay.onFinished = {
-            runCatching { wm(ctx).removeView(overlay) }
-                .onFailure { Log.w(TAG, "stamp overlay remove failed: ${it.message}") }
+            // A failure here would strand the overlay on screen forever, so it is reported loudly
+            // rather than swallowed — but teardown still runs, because a stuck card is worse.
+            try {
+                wm(ctx).removeView(overlay)
+            } catch (e: Exception) {
+                Log.e(TAG, "STAMP OVERLAY REMOVE FAILED: ${e.message}", e)
+            }
             // The stamp is the exit. Only now does the card go away.
             teardown(entry)
         }
         try {
             wm(ctx).addView(overlay, lp)
-            com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
+            // Reported, not substituted: no beep, no silence-by-accident.
+            try {
+                com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
+            } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
+                Log.e(TAG, "STAMP SOUND FAILED: ${e.message}", e)
+            }
             overlay.stamp(
                 if (approved) com.mido.phonebridge.ui.StampOverlay.Verdict.APPROVED
                 else com.mido.phonebridge.ui.StampOverlay.Verdict.DENIED
             )
         } catch (e: Exception) {
-            // The decision is already recorded. A stamp that cannot be drawn must never fail
-            // the request or leave the card stranded — so tear the card down now, since the
-            // normal fade/backstop were skipped for this reason.
-            Log.w(TAG, "stamp overlay failed: ${e.message}")
+            // The decision is already recorded. A stamp that cannot be drawn must never fail the
+            // request or leave the card stranded — so tear the card down now, since the normal
+            // fade/backstop were skipped for this reason. Logged as an ERROR, not a warning: this
+            // is the line that would have named the 1ms-flash bug immediately.
+            Log.e(TAG, "STAMP OVERLAY FAILED: ${e.message}", e)
             teardown(entry)
         }
     }

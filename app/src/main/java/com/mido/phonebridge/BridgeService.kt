@@ -233,6 +233,10 @@ class BridgeService : Service() {
         super.onCreate()
         createChannel()
         Debug.log("service onCreate")
+        // Decode the stamp sample NOW, so the first decision after a cold start already has it.
+        // Without this the very first stamp would fail with SoundUnavailable — which is the honest
+        // outcome, but a pointless one when the decode could have happened at startup.
+        com.mido.phonebridge.alert.SoundAlerts.preload(this)
         // The model warm-up is NOT started here. It used to be, and that was a real cost:
         // `onCreate` runs before `onStartCommand`, so a start that immediately refuses to bind
         // (no tailnet address, unreadable policy, bad port) still paid for loading the model

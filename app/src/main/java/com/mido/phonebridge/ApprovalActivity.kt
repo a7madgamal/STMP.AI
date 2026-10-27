@@ -830,7 +830,16 @@ class ApprovalActivity : FragmentActivity() {
         root.addView(overlay, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        SoundAlerts.stamp(this)
+        // A missing sound is REPORTED, never substituted and never swallowed. The animation is
+        // the primary signal, so a sound failure must not cancel it — but it must be visible.
+        try {
+            SoundAlerts.stamp(this)
+        } catch (e: SoundAlerts.SoundUnavailable) {
+            Log.e("ApprovalActivity", "STAMP SOUND FAILED: ${e.message}", e)
+            android.widget.Toast.makeText(
+                this, "Stamp sound failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
     }
 

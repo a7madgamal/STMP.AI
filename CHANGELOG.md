@@ -3521,7 +3521,7 @@ Version 0.43.25 / build 179.
 
 ---
 
-## 0.43.26 — the stamp animates, and the loader stays gone (build 180) — CURRENT
+## 0.43.26 — the stamp animates, and the loader stays gone (build 180)
 2026-10-27
 
 Mido, 2026-10-27: *"i saw a fucking 1ms flash of the stamp"* and *"don't show loading after
@@ -3541,6 +3541,32 @@ decision it can only do harm), and `showStamp` hides the bar outright. `armBar` 
 field for that; it was a local in `onCreate`.
 
 Version 0.43.26 / build 180.
+
+---
+
+## 0.43.27 — the stamp sound stops being a beep, and nothing fails silently (build 181) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"the sound is back to a fucking peep"* then *"i said a million times no fucking
+silent fucking fallbacks / remove all now you fuck and fail hard"*.
+
+**Why it beeped.** `SoundAlerts` fell back to a `ToneGenerator` knock whenever the sample was not
+decoded. That fallback was not rare — it was EVERY time, because `setOnLoadCompleteListener` was
+registered AFTER `load()`. `load` is asynchronous and could complete before the listener existed, so
+`stampLoaded` stayed false forever and every stamp took the beep path. The listener is now registered
+first.
+
+**The fallback is gone, and so is the silence.** Both were the same mistake: substituting a different
+outcome for the real one. `SoundAlerts` now throws `SoundUnavailable` when the pool cannot be built,
+the sample will not decode, `load` returns 0, `play` returns 0, or there is no vibrator. Nothing is
+caught and dropped inside the file. `preload()` runs from `BridgeService.onCreate`, so the sample is
+decoded long before the first decision.
+
+**Failures are visible now.** Both stamp call sites catch `SoundUnavailable`, log it at ERROR with
+the cause, and the modal shows a toast. The overlay's own failure was logged as a WARNING and is now
+an ERROR — that is the line that would have named the 1ms-flash bug the first time it happened.
+
+Version 0.43.27 / build 181.
 
 ---
 
