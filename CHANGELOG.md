@@ -3499,7 +3499,7 @@ Version 0.43.24 / build 178.
 
 ---
 
-## 0.43.25 — the stdin buffer was wiped while JSch was still reading it (build 179) — CURRENT
+## 0.43.25 — the stdin buffer was wiped while JSch was still reading it (build 179)
 2026-10-27
 
 Mido, 2026-10-27: *"the password is right"* — while sudo kept rejecting it. Both were true.
@@ -3518,6 +3518,29 @@ from the outside — both answer "Authentication failed". 0.43.24 added a length
 the log so the difference is visible; this release fixes the cause that diagnostic was added to find.
 
 Version 0.43.25 / build 179.
+
+---
+
+## 0.43.26 — the stamp animates, and the loader stays gone (build 180) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"i saw a fucking 1ms flash of the stamp"* and *"don't show loading after
+clicking the button just the animation"*. Both were real.
+
+**The stamp ran with no geometry.** `stamp()` started the animation from `post {}`, which is not a
+layout callback — it runs after the next traversal, which can happen before this view has been
+measured. `radius` is derived from `width`/`height`, so it evaluated to its `1f` floor, the overlay
+drew nothing visible, and the whole animation completed in a few milliseconds. That is the flash.
+It now starts from `onSizeChanged`, which only fires when real dimensions exist, with an immediate
+start if the view is already laid out.
+
+**The loader came back behind the stamp.** The 120ms tick kept running after the decision and called
+`applyArmed(false)`, which re-showed the indeterminate bar — so the animation played over a
+"loading" indicator. Two changes: the tick now stops entirely once `stamping` is set (after a
+decision it can only do harm), and `showStamp` hides the bar outright. `armBar` had to become a
+field for that; it was a local in `onCreate`.
+
+Version 0.43.26 / build 180.
 
 ---
 

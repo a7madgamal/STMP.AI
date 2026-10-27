@@ -102,21 +102,40 @@ class StampOverlay(
     private val radius: Float
         get() = maxOf(minOf(width, height) * 0.42f, 1f)
 
-    /** Begin a stamp for [verdict]; calls [onFinished] when done. */
+    /** True once [stamp] has been called; the animation starts on the first real layout. */
+    private var pending = false
+
+    /**
+     * Begin a stamp for [verdict]; calls [onFinished] when done.
+     *
+     * **The animation starts from [onSizeChanged], not from here.** `radius` is derived from
+     * `width`/`height`, which are 0 until the view is laid out. `post {}` was the first attempt and
+     * it is NOT a layout callback — it runs after the next traversal, which may be before this view
+     * has been measured. The animation then ran with `radius = 1f`, drew nothing visible, and
+     * completed in a few milliseconds: the "1ms flash" (Mido, 2026-10-27). `onSizeChanged` fires
+     * only when real dimensions exist, so the first animated frame is guaranteed to have geometry.
+     */
     fun stamp(verdict: Verdict) {
         word = verdict.word
         stampScale = 0f
         stampAlpha = 0f
         bleed = 0f
         tilt = -55f
-        // **Start after the first layout pass, not immediately.** `radius` is derived from
-        // `width`/`height`, which are 0 until the view is measured — so animating straight after
-        // `addView` spends its opening frames drawing nothing, and the visible part is whatever is
-        // left. `post` runs after layout, so frame one has real dimensions.
-        //
-        // A round stamp that is bigger than the available ring gets the word pushed out of
-        // bounds, so ADAPT the glyph size to the word length at layout time — here only.
-        post { buildAnimations() }
+        pending = true
+        // If we are ALREADY laid out (re-stamp on a visible view), start immediately.
+        if (width > 0 && height > 0) {
+            pending = false
+            buildAnimations()
+        }
+        invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (pending && w > 0 && h > 0) {
+            pending = false
+            buildAnimations()
+        }
     }
 
     private fun buildAnimations() {

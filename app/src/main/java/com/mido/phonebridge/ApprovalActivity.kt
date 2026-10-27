@@ -43,6 +43,15 @@ class ApprovalActivity : FragmentActivity() {
     /** Whether this request needs a sudo password. Read once, from the gate's view. */
     private var needsPassword = false
 
+    /**
+     * The indeterminate fetch indicator, held as a FIELD so the stamp can hide it.
+     *
+     * It was a local until the stamp needed to dismiss it: after a decision the tick used to call
+     * `applyArmed(false)` and bring this bar back, so the animation played over a "loading"
+     * indicator (Mido, 2026-10-27).
+     */
+    private lateinit var armBar: com.google.android.material.progressindicator.LinearProgressIndicator
+
     companion object {
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
@@ -431,10 +440,16 @@ class ApprovalActivity : FragmentActivity() {
 
                 // Keep ticking while the modal is live. A loading modal has no countdown to
                 // expire on, so the tick — not a timer — is what ends it.
-                if (!isFinishing) {
+                // STOP once the stamp starts. The tick's whole job is to keep the modal's
+                // controls honest while a decision is still possible; after the decision it can
+                // only do harm — and it did: `applyArmed(false)` re-showed the progress bar
+                // BEHIND the stamp, so the animation played over a "loading" indicator (Mido,
+                // 2026-10-27: *"don't show loading after clicking the button just the
+                // animation"*).
+                if (!isFinishing && !stamping) {
                     if (ApprovalGate.isCurrent(id)) {
                         handler.postDelayed(this, 120L)
-                    } else if (!stamping) {
+                    } else {
                         // The gate gave up (window expired) or the request was replaced.
                         // Close the modal rather than leaving a dead prompt on screen: the
                         // server has already answered, so a modal still asking is a lie.
@@ -458,7 +473,7 @@ class ApprovalActivity : FragmentActivity() {
         // no token stream, so any determinate fill would be a number we made up. It is shown
         // only while the summary is being fetched and hidden the instant the buttons go live
         // (Mido, 2026-10-19 — the buttons enable on the fetch, not on a fixed timer).
-        val armBar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
+        armBar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
             isIndeterminate = true
             trackThickness = Theme.dp(this@ApprovalActivity, 3)
             trackCornerRadius = Theme.dp(this@ApprovalActivity, 2)
@@ -801,8 +816,11 @@ class ApprovalActivity : FragmentActivity() {
      */
     private fun showStamp(approved: Boolean) {
         // Set BEFORE the overlay is added, so the tick loop cannot finish the Activity between
-        // these two statements.
+        // these two statements — and so the tick stops instead of re-arming the controls.
         stamping = true
+        // Hide the fetch indicator for good. It belongs to "a decision is still possible"; once
+        // the human has decided, it must not reappear behind the stamp.
+        armBar.visibility = ViewGroup.GONE
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
         val overlay = StampOverlay(this).apply {
             val verdict = if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED
