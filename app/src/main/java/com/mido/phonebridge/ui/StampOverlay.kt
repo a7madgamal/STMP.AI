@@ -33,7 +33,19 @@ import android.view.animation.OvershootInterpolator
  * Deliberately NOT a game sting: no bounce-around, no sparkle. One firm stamp, one thud,
  * one beat of settle, done.
  */
-class StampOverlay(context: Context) : View(context) {
+class StampOverlay(
+    context: Context,
+    /**
+     * How much to dim the whole screen behind the stamp.
+     *
+     * **Not always wanted.** On the modal path the Activity is leaving, so a scrim reads as the
+     * exit. On the NOTIFY path the card STAYS on screen for the whole ~1.1s animation, and a
+     * full-screen dim there is just the screen going dark for no reason (Mido, 2026-10-27:
+     * *"clicking the hint results a full screen dim for a few seconds"*). So the caller decides,
+     * and the card path passes 0.
+     */
+    private val scrimAlpha: Int = 0x66,
+) : View(context) {
 
     /** Where the stamp lands and what it says. */
     enum class Verdict(val word: String) {
@@ -62,7 +74,7 @@ class StampOverlay(context: Context) : View(context) {
 
     private val ink = 0xFFB23A2F.toInt()
     private val paper = 0xFFF5EEDF.toInt()
-    private val scrimDim = 0x66_000000 // faint darkening so the stamp pops against any screen
+    private val scrimDim = (scrimAlpha.coerceIn(0, 255) shl 24) // caller-controlled; 0 = no dim
 
     private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val inkSoftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -164,7 +176,7 @@ class StampOverlay(context: Context) : View(context) {
 
         // Scrim stays FLAT. It is drawn before the camera transform so the dim does not lean with
         // the stamp — a tilting scrim looks like the screen falling over.
-        canvas.drawColor(scrimDim)
+        if (scrimAlpha > 0) canvas.drawColor(scrimDim)
 
         val cx = centerX
         val cy = centerY

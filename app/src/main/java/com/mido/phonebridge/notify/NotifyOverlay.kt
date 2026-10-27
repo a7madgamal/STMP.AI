@@ -948,7 +948,9 @@ object NotifyOverlay {
      */
     private fun stampDecision(entry: Entry, approved: Boolean) {
         val ctx = entry.ctx
-        val overlay = com.mido.phonebridge.ui.StampOverlay(ctx)
+        // No scrim: the card stays visible underneath for the whole animation, so dimming the
+        // screen would just make it go dark for a second.
+        val overlay = com.mido.phonebridge.ui.StampOverlay(ctx, scrimAlpha = 0)
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,

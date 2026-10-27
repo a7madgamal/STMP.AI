@@ -635,6 +635,13 @@ class ApprovalActivity : FragmentActivity() {
         val passwordSection: View? = if (needsPassword) {
             val field = EditText(this).apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                // **Belt and braces, because `inputType` alone was not enough.** The variation
+                // flag is supposed to mask the text, but the field rendered in clear on device
+                // (Mido, 2026-10-27: *"sudo password should be a password field"*). Setting the
+                // transformation explicitly is the one thing the framework cannot reinterpret —
+                // it is the same call `inputType` makes internally, made where nothing else can
+                // override it.
+                transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
                 // Never learn it: the keyboard's personalised dictionary is not a place
                 // a root password may live.
                 imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING

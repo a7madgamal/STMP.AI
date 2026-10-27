@@ -3382,7 +3382,7 @@ Version 0.43.19 / build 173.
 
 ---
 
-## 0.43.20 — the stamp gets to finish (build 174) — CURRENT
+## 0.43.20 — the stamp gets to finish (build 174)
 2026-10-27
 
 The stamp was being destroyed on its first frame. Two independent teardown races, one per surface.
@@ -3404,6 +3404,27 @@ Both paths keep a real exit: the backstop still runs for every reason that has n
 (`EXPIRED`, `UNATTENDED`, `UNAVAILABLE`, `TAPPED`-as-dismiss), and `dismissAll` is untouched.
 
 Version 0.43.20 / build 174.
+
+---
+
+## 0.43.21 — no scrim on the card, and a masked sudo field (build 175) — CURRENT
+2026-10-27
+
+Two reports from the same test pass.
+
+**The card dimmed the whole screen.** `StampOverlay` always painted a scrim, which is right on the
+modal path — the Activity is leaving and the dim reads as the exit. On the NOTIFY path the card
+STAYS on screen for the whole ~1.1s animation, so a full-screen dim was just the screen going dark
+for a second with nothing to explain it (Mido, 2026-10-27: *"clicking the hint results a full screen
+dim for a few seconds"*). The scrim is now a constructor parameter and the card path passes 0.
+
+**The sudo field rendered in clear.** It already set
+`TYPE_CLASS_TEXT or TYPE_TEXT_VARIATION_PASSWORD`, which is supposed to mask, and it did not on
+device. `PasswordTransformationMethod` is now set explicitly: it is the same call `inputType` makes
+internally, made where nothing can reinterpret it. The field also keeps its existing protections —
+no personalised learning, not saved to instance state, no copy/cut menu.
+
+Version 0.43.21 / build 175.
 
 ---
 
