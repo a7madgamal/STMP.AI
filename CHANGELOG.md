@@ -3475,7 +3475,7 @@ Version 0.43.23 / build 177.
 
 ---
 
-## 0.43.24 — the password path is measurable from the log (build 178) — CURRENT
+## 0.43.24 — the password path is measurable from the log (build 178)
 2026-10-27
 
 Two changes, both about stopping the guesswork.
@@ -3496,6 +3496,28 @@ That is the actual lesson from this session: compiles and a Taildrop exit code s
 what the phone did, and three rounds were spent patching what a single log line would have named.
 
 Version 0.43.24 / build 178.
+
+---
+
+## 0.43.25 — the stdin buffer was wiped while JSch was still reading it (build 179) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"the password is right"* — while sudo kept rejecting it. Both were true.
+
+`SshExec` wiped the password bytes immediately after `channel.connect()` returned, on the assumption
+that the data was already on the wire. It is not: JSch copies stdin to the remote side on its OWN IO
+thread, which `connect()` merely starts. So the array was zeroed while JSch was still reading from it,
+and sudo received NULs where the password should have been — which fails authentication for a
+password that was typed perfectly.
+
+The stream reference is now kept alive for the whole command and the wipe happens in the `finally`,
+AFTER `channel.disconnect()` stops JSch reading. Safe and correct, in that order.
+
+**Why this took several rounds.** A rejected password and a mangled password are indistinguishable
+from the outside — both answer "Authentication failed". 0.43.24 added a length + SHA-256 prefix to
+the log so the difference is visible; this release fixes the cause that diagnostic was added to find.
+
+Version 0.43.25 / build 179.
 
 ---
 

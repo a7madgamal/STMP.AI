@@ -228,13 +228,20 @@ object SshExec {
                 if (buf.hasArray()) java.util.Arrays.fill(buf.array(), 0.toByte())
                 outBytes
             }
-            channel.setInputStream(stdinBytes?.let { java.io.ByteArrayInputStream(it) })
+            // **The stream must outlive `connect()`.** JSch copies stdin to the remote side on its
+            // OWN IO thread, started by `connect()` — so wiping the array immediately after
+            // `connect()` returns zeroes the bytes while JSch is still reading them. The remote
+            // sudo then receives NULs, and answers "Authentication failed" for a password that was
+            // typed correctly (Mido, 2026-10-27: *"the password is right"* while sudo rejected it).
+            //
+            // Keeping the reference alive until the channel closes, then wiping, is what makes the
+            // wipe both safe and correct. The array is ours; the ByteArrayInputStream holds no
+            // copy of its own.
+            val stdinStream = stdinBytes?.let { java.io.ByteArrayInputStream(it) }
+            channel.setInputStream(stdinStream)
             channel.setErrStream(err)
             val input = channel.inputStream
             channel.connect(CONNECT_TIMEOUT_MS)
-
-            // The bytes are on the wire now, so the local copy has done its job.
-            stdinBytes?.fill(0)
 
             val deadline = System.currentTimeMillis() + timeoutMs
             val buf = ByteArray(8 * 1024)
@@ -259,7 +266,11 @@ object SshExec {
                     }
                 }
             } finally {
+                // Disconnect FIRST so JSch stops reading, then wipe. Doing this before the
+                // disconnect is the race this block exists to avoid.
                 channel.disconnect()
+                stdinBytes?.fill(0)
+                try { stdinStream?.close() } catch (ignored: Exception) { /* already closed */ }
             }
 
             return Result(
