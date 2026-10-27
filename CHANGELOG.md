@@ -3298,7 +3298,7 @@ Version 0.43.16 / build 170.
 
 ---
 
-## 0.43.17 — the real stamp sample, first 2 seconds (build 171) — CURRENT
+## 0.43.17 — the real stamp sample, first 2 seconds (build 171)
 2026-10-27
 
 The synthesised knock was a guess at what a stamp sounds like. Mido supplied an actual recorded
@@ -3313,6 +3313,44 @@ Re-encoded to Ogg Vorbis (~20 KB) so the APK does not grow by a megabyte for one
 is unchanged: `SoundPool`, decoded once, fired on the same frame as the overlay.
 
 Version 0.43.17 / build 171.
+
+---
+
+## 0.43.18 — every card, button and rule drawn by hand (build 172) — CURRENT
+2026-10-27
+
+Straight edges were the last thing making the app look like software instead of paper. Every surface
+now has a wobbling outline.
+
+**Why not `DiscretePathEffect`.** It is the obvious answer and it is wrong twice: it chops a path
+into segments with a RANDOM deviation, so the border re-rolls on every draw and visibly crawls — the
+same trap `TornPaper` already documents — and the result is a shaky straight line rather than a
+drawn one. A wobble is a shape, so `SquiggleBorder` builds it as a shape: each straight edge is
+subdivided and each segment is a cubic Bézier whose control points alternate above and below the
+ideal line. That gives the S-curve of a pen dragged by hand, one bump up and one down, instead of
+noise. The deviation comes from a fixed array, so a given width always draws the same wobble.
+
+**Corners stay true quarter-arcs.** A wobbly corner on a 12dp radius reads as damage, not as
+handwriting. Only the straight runs wobble.
+
+**Buttons keep their ripple.** The drawn edge goes in `foreground`, not `background`. Replacing the
+background would drop `backgroundTintList`, the ripple and the disabled state — the exact regression
+`Theme.kt`'s header exists to prevent.
+
+**Separators and section rules are drawn too.** `InkUnderline` is gone; `SquiggleRule` replaces it
+and is also what a plain rule uses. Its amplitude is clamped to a third of its own height, because a
+1dp view with a 1.5dp wave would draw outside its bounds and get clipped into a straight line by
+accident — the failure would look like the feature never shipped.
+
+**Amplitude is 1.5dp.** Below ~1dp it is invisible at phone density; above ~3dp a 40dp button starts
+looking like a doodle rather than a control.
+
+**`SquiggleCoverageTest` enforces it.** It scans the whole source tree for `MaterialButton(` and
+`setStroke(` and allowlists the sanctioned `Theme` sites by file plus code prefix. The first version
+scanned only OUTSIDE `ui/`, which was wrong: `Theme` is the only place either call appears, so the
+scan found nothing and its own empty-result guard fired — the test caught its own blindness.
+
+Version 0.43.18 / build 172.
 
 ---
 

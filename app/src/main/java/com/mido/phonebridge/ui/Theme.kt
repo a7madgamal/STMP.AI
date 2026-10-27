@@ -110,6 +110,17 @@ object Theme {
     const val RADIUS_CONTROL = 10
     const val RADIUS_CHIP = 8
 
+    /**
+     * How far a drawn line wanders from true, in dp.
+     *
+     * 1.5dp reads as ink dragged by hand. Below ~1dp it is invisible at phone density; above ~3dp
+     * a 40dp button starts looking like a doodle instead of a control.
+     */
+    const val SQUIGGLE_DP = 1.5f
+
+    /** The pen width of a drawn outline, in dp. Hairline but not invisible. */
+    const val SQUIGGLE_STROKE_DP = 1.2f
+
     /** Minimum touch target. Below this a tap is a coin flip. */
     const val MIN_TARGET_DP = 48
 
@@ -187,31 +198,43 @@ object Theme {
      * while the code claimed paper. `GrainCoverageTest` scans the source and fails the build on
      * any raw background assignment outside this file, so this is enforced, not remembered.
      */
-    fun sheet(color: Int, radiusPx: Float = 0f): android.graphics.drawable.Drawable {
+    fun sheet(color: Int, radiusPx: Float = 0f, squigglePx: Float = 0f): android.graphics.drawable.Drawable {
         val base = GradientDrawable().apply {
             setColor(color)
             if (radiusPx > 0f) cornerRadius = radiusPx
         }
-        return LayerDrawable(arrayOf(base, GrainOverlay(radiusPx)))
-    }
-
-    /** Convenience: [sheet] sized in dp. */
-    fun sheetDp(ctx: Context, color: Int, radiusDp: Int = 0): android.graphics.drawable.Drawable =
-        sheet(color, if (radiusDp > 0) radiusPx(ctx, radiusDp) else 0f)
-
-    /** A filled, rounded surface (card / block / badge), with paper grain on top. */
-    fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable {
-        val base = GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = radiusPx(ctx, radiusDp)
+        val layers = mutableListOf<android.graphics.drawable.Drawable>(base, GrainOverlay(radiusPx))
+        // A drawn edge only makes sense on a bounded surface. A full-bleed sheet has no outline
+        // to wobble, so it stays fill + grain.
+        if (radiusPx > 0f && squigglePx > 0f) {
+            layers += SquiggleBorder(
+                color = BORDER,
+                strokePx = squigglePx * (SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
+                radiusPx = radiusPx,
+                amplitudePx = squigglePx,
+            )
         }
-        // Grain is a LAYER, not a wrapper: the base keeps being a plain GradientDrawable so
-        // nothing that inspects it changes, and the texture is one extra drawable clipped to
-        // the same radius.
-        return LayerDrawable(arrayOf(base, GrainOverlay(radiusPx(ctx, radiusDp))))
+        return LayerDrawable(layers.toTypedArray())
     }
 
-    /** A filled surface with a hairline border — the standard card look, grain included. */
+    /** Convenience: [sheet] sized in dp, with the standard hand-drawn edge. */
+    fun sheetDp(ctx: Context, color: Int, radiusDp: Int = 0): android.graphics.drawable.Drawable =
+        if (radiusDp > 0) {
+            sheet(color, radiusPx(ctx, radiusDp), dpF(ctx, SQUIGGLE_DP))
+        } else {
+            sheet(color)
+        }
+
+    /** dp as a Float — the drawn-edge constructors work in pixels. */
+    fun dpF(ctx: Context, v: Float): Float = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP, v, ctx.resources.displayMetrics
+    )
+
+    /** A filled, rounded surface (card / block / badge), with paper grain and a drawn edge. */
+    fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable =
+        sheet(color, radiusPx(ctx, radiusDp), dpF(ctx, SQUIGGLE_DP))
+
+    /** A filled surface with a hairline border — the standard card look, grain and drawn edge. */
     fun outlined(
         ctx: Context,
         color: Int = SURFACE,
@@ -223,9 +246,22 @@ object Theme {
         val base = GradientDrawable().apply {
             setColor(color)
             cornerRadius = r
-            setStroke(dp(ctx, strokeDp), strokeColor)
+            // No `setStroke` here: the drawn SquiggleBorder IS the border. Two strokes would
+            // disagree about where the edge is, and the straight one would show through the
+            // wobble at every peak.
         }
-        return LayerDrawable(arrayOf(base, GrainOverlay(r)))
+        return LayerDrawable(
+            arrayOf(
+                base,
+                GrainOverlay(r),
+                SquiggleBorder(
+                    color = strokeColor,
+                    strokePx = dpF(ctx, strokeDp.toFloat() * SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
+                    radiusPx = r,
+                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                )
+            )
+        )
     }
 
     /** A filled surface that ripples when tapped (for tappable rows). */
@@ -248,40 +284,6 @@ object Theme {
      * Two strokes, one slightly shorter and fainter, give the line the uneven edge of ink
      * rather than a printed hairline.
      */
-    private class InkUnderline(
-        private val color: Int,
-        private val thicknessPx: Int
-    ) : android.graphics.drawable.Drawable() {
-        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-
-        override fun draw(canvas: android.graphics.Canvas) {
-            val b = bounds
-            if (b.isEmpty) return
-            // The rule spans ~60% of the header width: long enough to read as an underline,
-            // short enough to look drawn by hand rather than set by a layout.
-            val right = b.left + (b.width() * 0.60f)
-            val baseY = b.bottom - thicknessPx
-
-            paint.color = color
-            canvas.drawRect(b.left.toFloat(), baseY.toFloat(), right, b.bottom.toFloat(), paint)
-
-            // A faint second pass, offset up by half a stroke and ending sooner, so the ink
-            // edge is uneven instead of a rectangle.
-            paint.color = withAlpha(color, 0x55)
-            canvas.drawRect(
-                b.left.toFloat(),
-                baseY - thicknessPx / 2f,
-                right - thicknessPx * 2f,
-                baseY.toFloat(),
-                paint
-            )
-        }
-
-        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-        override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
-        @Deprecated("Deprecated in the framework; required by the Drawable contract")
-        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
-    }
 
     /**
      * A card whose own OUTLINE is torn paper — the note ripped off a pad.
@@ -395,18 +397,34 @@ object Theme {
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
         tearDp: Int = 6
-    ): android.graphics.drawable.Drawable = TornPaper(
-        fill = color,
-        edge = withAlpha(ON_SURFACE, 0x2E),
-        cornerPx = radiusPx(ctx, radiusDp),
-        tearPx = dp(ctx, tearDp).toFloat()
-    )
+    ): android.graphics.drawable.Drawable {
+        val r = radiusPx(ctx, radiusDp)
+        return LayerDrawable(
+            arrayOf(
+                TornPaper(
+                    fill = color,
+                    edge = withAlpha(ON_SURFACE, 0x2E),
+                    cornerPx = r,
+                    tearPx = dp(ctx, tearDp).toFloat()
+                ),
+                // A drawn edge over the torn shape. The tear is the silhouette; the wobble is the
+                // pen. Two separate ideas, so two layers rather than one drawable doing both.
+                SquiggleBorder(
+                    color = withAlpha(ON_SURFACE, 0x3A),
+                    strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
+                    radiusPx = r,
+                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                )
+            )
+        )
+    }
 
     // --- text ---
 
-    /** A small all-caps section header in the handwritten face, with a short hand-inked
-     *  rule drawn under it (see [InkUnderline] for why it is a painted shape, not a
-     *  background). */
+    /** A small all-caps section header in the handwritten face, with a drawn rule under it.
+     *  The rule is a painted [SquiggleRule], not a background fill: a background has no concept
+     *  of "just the bottom edge", and the first attempt at that turned every header into a solid
+     *  salmon bar. */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
         textSize = 12f
@@ -414,7 +432,14 @@ object Theme {
         typeface = handFont(ctx)
         setTextColor(ACCENT)
         setPadding(0, dp(ctx, 20), 0, dp(ctx, 6))
-        background = InkUnderline(ACCENT, dp(ctx, 2))
+        // A drawn rule, not a printed one. 60% span so it reads as underlined by hand rather
+        // than set by a layout engine.
+        background = SquiggleRule(
+            color = ACCENT,
+            strokePx = dpF(ctx, 2f),
+            amplitudePx = dpF(ctx, SQUIGGLE_DP),
+            spanFraction = 0.60f,
+        )
     }
 
     /** A plain line of text. [mono] keeps the monospace face for log/code strings; the
@@ -479,6 +504,16 @@ object Theme {
                 strokeWidth = dp(ctx, 1)
                 strokeColor = ColorStateList.valueOf(ACCENT)
             }
+            // The drawn edge goes in FOREGROUND, not background: replacing the background would
+            // drop the tint list, the ripple and the disabled state — the exact regression this
+            // file's header exists to prevent. A foreground layer draws over the ripple and
+            // leaves every one of those intact.
+            foreground = SquiggleBorder(
+                color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
+                strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
+                radiusPx = radiusPx(ctx, RADIUS_CONTROL),
+                amplitudePx = dpF(ctx, SQUIGGLE_DP),
+            )
             setOnClickListener { onClick() }
         }
     }

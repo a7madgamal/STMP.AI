@@ -644,7 +644,7 @@ class ApprovalActivity : FragmentActivity() {
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12),
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12)
                 )
-                background = Theme.sheet(Theme.SURFACE_VARIANT)
+                background = Theme.sheetDp(this@ApprovalActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
                 setTextColor(Theme.ON_SURFACE)
                 // No copy/cut. A long-press menu that can lift the password into the
                 // clipboard is a leak with a friendly face.
