@@ -80,3 +80,40 @@ under the PhoneBridge parent (`6hp83cg6Q5764fwM`) once the bridge is back.
   Needs: a reachability check, a timeout, a fail-closed behaviour when the endpoint is down, and
   the prompt sent over the wire must not leak a secret (the broker scrubs its own response, not
   our request to a model server).
+
+## New backlog (2026-10-27) — feature requests from device testing
+
+Requested by Mido while testing the paper/stamp builds. Recorded here first; file to the Todoist
+**PhoneBridge** parent (`6hp83cg6Q5764fwM`) when the bridge is reachable.
+
+- [ ] **Audio plugins — let an agent play a sound on the phone.** A route that plays a short sound
+  so a request can get attention without a notification. Ships with a small fixed set (a few
+  distinct cues, not arbitrary audio): the point is a recognisable "come look" signal, not a media
+  player. Decide the set before building, and whether a sound is one-shot or repeats until
+  acknowledged. Must respect the existing gate — a sound is a write to the user's attention, so it
+  belongs on the approval card with the sound named.
+
+- [ ] **TTS plugin — say text aloud.** A route that speaks a string through the device's TTS engine.
+  The hard parts are not the call: text length needs a cap (a caller can otherwise speak a novel),
+  the utterance must be interruptible and must stop when the app stops, and the text is spoken
+  content that the approval card should show verbatim like a shell command. Decide whether audio
+  routes to the media stream or notification stream — this one is an inbound event, so unlike the
+  stamp it *should* respect silent.
+
+- [ ] **Plugin control — enable/disable plugins.** A route (and an Options row) to turn a plugin off
+  so its routes stop existing. Needs: what happens to an in-flight request when its plugin is
+  disabled; whether disabling revokes the vault entries or just hides the routes; and whether the
+  switch is persisted per-plugin or globally. The gate must keep describing routes for disabled
+  plugins as absent, not as denied — a 404 and a 403 mean different things to a caller.
+
+- [ ] **Phone contacts plugin — must allow search.** Read contacts with a search that matches name
+  and number. Search is the requirement, not a listing: a full contact dump is both a privacy
+  problem and useless at scale. Needs a query minimum length, a result cap, and a decision on
+  whether a result carries the phone number or only the display name until the human approves a
+  second, narrower call.
+
+- [ ] **The hint card should remember its last position.** The NOTIFY card can be dragged, and the
+  position resets to the default corner on every new card. It should reopen where the user last put
+  it. Needs: persist per-orientation (a landscape anchor is wrong for portrait), clamp to the
+  current screen on restore so a position from a wider display cannot land off-screen, and a way to
+  reset to default.
