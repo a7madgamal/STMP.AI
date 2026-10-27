@@ -215,20 +215,28 @@ class StampOverlay(
             canvas.concat(tiltMatrix)
         }
 
+        // **`stampAlpha` is a Float 0..1 and `colorWithAlpha` wants 0..255.**
+        //
+        // Passing it straight in — `colorWithAlpha(ink, stampAlpha.toInt())` — produced alpha 0 or
+        // 1, i.e. an invisible disc. The scrim uses a fixed constant, so the screen dimmed and no
+        // stamp ever appeared (Mido, 2026-10-27: *"I saw nothing, just a slightly dimmed modal"*).
+        // Every alpha below goes through this one conversion.
+        val a255 = (stampAlpha.coerceIn(0f, 1f) * 255f).toInt()
+
         // Pass 1: the soft, slightly-offset "bleed" halo behind the stamp — the ink soaking
         // into the paper. Alpha follows bleed; radius expands slightly.
         val bleedR = r * (1f + 0.10f * bleed)
-        inkSoftPaint.color = colorWithAlpha(ink, (stampAlpha * 0.35f * (1f - bleed)).toInt())
+        inkSoftPaint.color = colorWithAlpha(ink, (a255 * 0.35f * (1f - bleed)).toInt())
         canvas.drawCircle(cx, cy, bleedR, inkSoftPaint)
 
         // Pass 2: the scraped imperfect edge — a solid circle slightly offset from centre,
         // then the crisp main circle on top. Together they read as an inked rim, not a
         // vector perfect circle.
-        edgePaint.color = colorWithAlpha(ink, (stampAlpha * 0.8f).toInt())
+        edgePaint.color = colorWithAlpha(ink, (a255 * 0.8f).toInt())
         canvas.drawCircle(cx - r * 0.015f, cy + r * 0.02f, r * 0.97f, edgePaint)
 
         // Pass 3: the main ink disc.
-        inkPaint.color = colorWithAlpha(ink, (stampAlpha).toInt())
+        inkPaint.color = colorWithAlpha(ink, a255)
         canvas.drawCircle(cx, cy, r, inkPaint)
 
         // Pass 4: the word, punched out (paper colour on ink). Two-line stacked centre text.
@@ -239,12 +247,14 @@ class StampOverlay(
         glyphPaint.textAlign = Paint.Align.CENTER
         glyphPaint.letterSpacing = 0.04f
         val baseline = cy - (glyphPaint.descent() + glyphPaint.ascent()) / 2f
+        // Opaque paper: the word is punched OUT of the ink, so it must not fade with the ink.
+        glyphPaint.color = paper
         canvas.drawText(label, cx, baseline, glyphPaint)
 
         // A faint paper ring just inside the ink rim, so the letters read as stamped-through.
         glyphPaint.style = Paint.Style.STROKE
         glyphPaint.strokeWidth = r * 0.02f
-        glyphPaint.color = colorWithAlpha(paper, (stampAlpha * 0.5f).toInt())
+        glyphPaint.color = colorWithAlpha(paper, (a255 * 0.5f).toInt())
         canvas.drawCircle(cx, cy, r * 0.85f, glyphPaint)
         glyphPaint.style = Paint.Style.FILL
 

@@ -3570,7 +3570,7 @@ Version 0.43.27 / build 181.
 
 ---
 
-## 0.43.28 — grain reaches the buttons (build 182) — CURRENT
+## 0.43.28 — grain reaches the buttons (build 182)
 2026-10-27
 
 Mido, 2026-10-27: *"some ui buttons and elements still dont have the grain texture / EVERY FUCKING
@@ -3593,6 +3593,28 @@ remaining exemption with its reason: a 3dp risk strip, a 10dp oval dot, the prog
 (both under the grain layer), and the three tint assignments (grain is in their foreground).
 
 Version 0.43.28 / build 182.
+
+---
+
+## 0.43.29 — the stamp is actually drawn (build 183) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"I saw nothing, just a slightly dimmed modal"*. Correct, and the cause is one
+line.
+
+**A 0..1 value was passed where 0..255 was expected.** `stampAlpha` is a Float in 0..1;
+`colorWithAlpha` takes an Int in 0..255. So `colorWithAlpha(ink, stampAlpha.toInt())` produced alpha
+0 or 1 — a fully transparent disc. The scrim is a fixed constant, which is why the screen dimmed
+while no ink appeared. Every alpha in `onDraw` now goes through a single `a255` conversion, and the
+verdict word is drawn in opaque paper so it reads as punched out of the ink rather than fading with
+it.
+
+This is the fourth distinct bug in this one animation (teardown race, layout timing, loader
+overdraw, and now alpha scale), which is the real lesson: an effect that "does not show" was checked
+for *whether it ran* instead of *whether it drew anything visible*. A pixel assertion would have
+caught all four.
+
+Version 0.43.29 / build 183.
 
 ---
 
