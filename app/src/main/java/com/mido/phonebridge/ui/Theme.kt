@@ -177,6 +177,28 @@ object Theme {
 
     // --- surfaces ---
 
+    /**
+     * THE ONE WAY TO PAINT A BACKGROUND. Use this for every screen root, card, block and
+     * panel — `Theme.sheet(Theme.BG)` for a full sheet, `Theme.sheet(Theme.SURFACE, r)` for a
+     * rounded card.
+     *
+     * **Do not call `setBackgroundColor` on a view.** That is a flat fill with no grain, and a
+     * flat fill next to a textured one is exactly how the homepage ended up looking unchanged
+     * while the code claimed paper. `GrainCoverageTest` scans the source and fails the build on
+     * any raw background assignment outside this file, so this is enforced, not remembered.
+     */
+    fun sheet(color: Int, radiusPx: Float = 0f): android.graphics.drawable.Drawable {
+        val base = GradientDrawable().apply {
+            setColor(color)
+            if (radiusPx > 0f) cornerRadius = radiusPx
+        }
+        return LayerDrawable(arrayOf(base, GrainOverlay(radiusPx)))
+    }
+
+    /** Convenience: [sheet] sized in dp. */
+    fun sheetDp(ctx: Context, color: Int, radiusDp: Int = 0): android.graphics.drawable.Drawable =
+        sheet(color, if (radiusDp > 0) radiusPx(ctx, radiusDp) else 0f)
+
     /** A filled, rounded surface (card / block / badge), with paper grain on top. */
     fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable {
         val base = GradientDrawable().apply {
@@ -189,17 +211,21 @@ object Theme {
         return LayerDrawable(arrayOf(base, GrainOverlay(radiusPx(ctx, radiusDp))))
     }
 
-    /** A filled surface with a hairline border — the standard card look. */
+    /** A filled surface with a hairline border — the standard card look, grain included. */
     fun outlined(
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
         strokeColor: Int = BORDER,
         strokeDp: Int = 1
-    ): GradientDrawable = GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = radiusPx(ctx, radiusDp)
-        setStroke(dp(ctx, strokeDp), strokeColor)
+    ): android.graphics.drawable.Drawable {
+        val r = radiusPx(ctx, radiusDp)
+        val base = GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = r
+            setStroke(dp(ctx, strokeDp), strokeColor)
+        }
+        return LayerDrawable(arrayOf(base, GrainOverlay(r)))
     }
 
     /** A filled surface that ripples when tapped (for tappable rows). */

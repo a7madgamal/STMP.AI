@@ -273,7 +273,15 @@ object NotifyOverlay {
             // clips to NOTHING. A card that is invisible for its whole window is not
             // cosmetic: silence means APPROVE in this mode, so a prompt nobody can see
             // approves the very request it was meant to ask about.
-            background = LayerDrawable(arrayOf(cardBg, drain))
+            background = LayerDrawable(
+                arrayOf(
+                    cardBg,
+                    drain,
+                    // Grain on the NOTIFY card too. Without this the one surface a user actually
+                    // touches in AUTOMATIC mode was the only untextured thing on screen.
+                    com.mido.phonebridge.ui.GrainOverlay(radius)
+                )
+            )
             isClickable = true
         }
         entry.cardBg = cardBg
@@ -318,10 +326,7 @@ object NotifyOverlay {
             setTextColor(BADGE_TEXT)
             setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
             gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                setColor(verbColor(entry.verb))
-                cornerRadius = dp(4).toFloat()
-            }
+            background = com.mido.phonebridge.ui.Theme.sheetDp(ctx, verbColor(entry.verb), 4)
             setPadding(dp(5), dp(1), dp(5), dp(1))
         }
         row.addView(

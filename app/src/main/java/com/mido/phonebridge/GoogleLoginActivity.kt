@@ -27,7 +27,7 @@ class GoogleLoginActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
 
         root.addView(Theme.text(this, "Login with Google", 22f))

@@ -3235,7 +3235,7 @@ Version 0.43.14 / build 168.
 
 ---
 
-## 0.43.15 — the grain reaches the homepage (build 169) — CURRENT
+## 0.43.15 — the grain reaches the homepage (build 169)
 2026-10-27
 
 0.43.14 added paper grain and the homepage still looked identical. Three reasons, all mine.
@@ -3258,6 +3258,43 @@ The lesson worth keeping: a visual change is verified on the screen that was com
 the helper that looked like the right one.
 
 Version 0.43.15 / build 169.
+
+---
+
+## 0.43.16 — one way to paint a background, enforced by a test (build 170) — CURRENT
+2026-10-27
+
+Grain reached the approval gate and the screen root and nothing else, because it lived in two
+helpers that some screens use and some do not. A rule that depends on which helper a screen happened
+to call is not a rule.
+
+**`Theme.sheet(color, radiusPx)` is now the only way to paint a background.** It returns the base
+fill with grain layered over it, and `Theme.sheetDp(ctx, color, radiusDp)` is the dp convenience.
+`surface()` and `outlined()` now route through the same two layers, so the three constructors cannot
+drift apart.
+
+**Every raw background in the activities is gone.** Eight `setBackgroundColor(Theme.BG)` calls —
+Approval, Secrets, SSH, Log, LogDetail, Options, Exceptions, GoogleLogin — now assign
+`Theme.sheet(Theme.BG)`. The NOTIFY card, its verb badge and its risk strip were the remaining flat
+surfaces, and the card now carries a third `GrainOverlay` layer.
+
+**`GrainCoverageTest` fails the build on a bypass.** It scans `src/main/java` for
+`setBackgroundColor(`, `GradientDrawable()` and `ColorDrawable(` outside the `ui` package, and
+asserts every hit is either absent or explicitly allowed with a stated reason. The allowlist is
+three entries, each saying why it cannot carry grain: a 3dp tint strip, the countdown drain that
+draws *under* the card's grain, and the card's own base fill which the risk tint recolours at
+runtime.
+
+Two details in that test worth keeping:
+
+- **It guards the guard.** An empty scan fails, because a scanner that finds nothing has broken, not
+  a codebase that is clean.
+- **Allowlist entries match on file plus a code prefix, never a line number.** The first version
+  keyed on `file:line:code`, and every entry stopped matching as soon as anything above it shifted
+  — the allowlist failed open, which is the worst way for one to fail. It caught this itself on the
+  first run by reporting three "unexplained" sites that were in fact its own allowlist entries.
+
+Version 0.43.16 / build 170.
 
 ---
 

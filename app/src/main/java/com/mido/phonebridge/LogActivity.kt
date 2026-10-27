@@ -42,7 +42,7 @@ class LogActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
 
         root.addView(Theme.text(this, "Request log", 22f).apply {

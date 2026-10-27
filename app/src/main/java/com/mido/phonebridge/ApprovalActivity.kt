@@ -129,7 +129,7 @@ class ApprovalActivity : FragmentActivity() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
 
         fun label(t: String, size: Float, color: Int = Theme.ON_SURFACE): TextView =
@@ -644,7 +644,7 @@ class ApprovalActivity : FragmentActivity() {
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12),
                     Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12)
                 )
-                setBackgroundColor(Theme.SURFACE_VARIANT)
+                background = Theme.sheet(Theme.SURFACE_VARIANT)
                 setTextColor(Theme.ON_SURFACE)
                 // No copy/cut. A long-press menu that can lift the password into the
                 // clipboard is a leak with a friendly face.
@@ -699,7 +699,7 @@ class ApprovalActivity : FragmentActivity() {
         val pinned = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, 0, pad, pad)
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
         pinned.addView(detailToggle)
         pinned.addView(detailScroll)
@@ -732,7 +732,7 @@ class ApprovalActivity : FragmentActivity() {
 
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
             addView(scroll, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))

@@ -41,7 +41,7 @@ class OptionsActivity : Activity() {
                 Theme.dp(this@OptionsActivity, 16), Theme.dp(this@OptionsActivity, 16),
                 Theme.dp(this@OptionsActivity, 16), Theme.dp(this@OptionsActivity, 32)
             )
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
         scroll.addView(container)
         // Edge-to-edge: without this the first row renders under the status bar. Same call as

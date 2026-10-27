@@ -50,7 +50,7 @@ class ExceptionsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 16),
                 Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 32))
-            setBackgroundColor(Theme.BG)
+            background = Theme.sheet(Theme.BG)
         }
         scroll.addView(container)
         setContentView(Theme.inset(scroll))
