@@ -14,12 +14,34 @@ android {
      * resets those grants. Pinning one project keystore keeps the identity stable,
      * so an update preserves permissions and data.
      */
+    /*
+     * Signing, with a fallback so a fresh clone BUILDS.
+     *
+     * The project's own keystore is gitignored (it is the app's identity, and committing it would
+     * let anyone ship an update as this app). But pointing `storeFile` at a file that does not
+     * exist makes `assembleDebug` fail before a single line of code is compiled — which is the
+     * worst possible first experience for someone opening the repo. So: use the project keystore
+     * when it is present, otherwise fall back to the standard debug keystore that the Android SDK
+     * generates on first use.
+     *
+     * The two are NOT equivalent, and the difference matters: a different signing key is a
+     * different app to Android, so an APK signed with the fallback will not install over one
+     * signed with the project key. That is why this is a fallback for building, not for shipping.
+     */
     signingConfigs {
         create("stable") {
-            storeFile = file("../keystore/stmp.jks")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val projectKeystore = file("../keystore/stmp.jks")
+            if (projectKeystore.exists()) {
+                storeFile = projectKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            } else {
+                storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
