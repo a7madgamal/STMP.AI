@@ -91,6 +91,23 @@ class StampOverlay(
      */
     private val inkOpacity = 0.88f
 
+    /**
+     * How far the stamp is tilted, in degrees.
+     *
+     * Small on purpose: -6° reads as hand-placed, -20° reads as a mistake. Negative because a stamp
+     * is usually pressed with a slight anticlockwise roll.
+     */
+    private val STAMP_ROTATION_DEG = -6f
+
+    /**
+     * The multiply colour used to darken the artwork.
+     *
+     * A neutral grey multiply darkens without shifting hue: white (255) leaves a pixel untouched,
+     * 200 takes ~22% of its brightness. The alpha channel is left at 255 so it does not re-key the
+     * transparent background the images were cut with.
+     */
+    private val DARKEN = 0xFFC8C8C8.toInt()
+
     /** The supplied stamp artwork, keyed to transparency. Loaded once per verdict. */
     private var bitmap: android.graphics.Bitmap? = null
 
@@ -247,11 +264,14 @@ class StampOverlay(
         val art = bitmap ?: return
         if (art.width <= 0 || art.height <= 0) return
 
-        // Fit inside the view with a margin, then apply the slam scale. Using the bitmap's own
-        // aspect ratio means the wide APPROVED mark and the tall REJECTED mark both sit correctly.
+        // Fit inside the view, then apply the slam scale. Using the bitmap's own aspect ratio
+        // means the wide APPROVED mark and the tall REJECTED mark both sit correctly.
+        //
+        // 0.82 / 0.42 -> 0.94 / 0.50: the stamp was too small to read as a stamp (Mido,
+        // 2026-10-27: *"make stamp slightly larger"*).
         val fit = minOf(
-            (width * 0.82f) / art.width,
-            (height * 0.42f) / art.height
+            (width * 0.94f) / art.width,
+            (height * 0.50f) / art.height
         ) * stampScale
         if (fit <= 0f) return
 
@@ -259,10 +279,26 @@ class StampOverlay(
         val h = art.height * fit
         dst.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
 
+        // **A slight rotation, because nobody stamps perfectly straight.** Mido, 2026-10-27:
+        // *"slightly rotated"*. The REJECTED artwork is already tilted in the source; APPROVED is
+        // dead level, so the angle is applied to the canvas rather than baked into the images —
+        // that way both verdicts get the same hand-placed feel.
+        //
+        // Pivoted on the stamp's own centre so the rotation does not walk it off-screen.
+        canvas.save()
+        canvas.rotate(STAMP_ROTATION_DEG, cx, cy)
+
         // `stampAlpha` is 0..1; a Paint alpha is 0..255. Passing the raw float was the bug that
         // made the drawn stamp invisible for four releases.
         stampPaint.alpha = (stampAlpha.coerceIn(0f, 1f) * inkOpacity * 255f).toInt()
+        // **Darkened by multiply, not by alpha.** Lowering alpha made the stamp see-through; the
+        // ask was darker ink (Mido, 2026-10-27). A multiply colour filter darkens every pixel while
+        // keeping the artwork's own grain and edge falloff intact.
+        stampPaint.colorFilter = android.graphics.PorterDuffColorFilter(
+            DARKEN, android.graphics.PorterDuff.Mode.MULTIPLY
+        )
         canvas.drawBitmap(art, null, dst, stampPaint)
+        stampPaint.colorFilter = null
 
         canvas.restore()
     }

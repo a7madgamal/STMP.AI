@@ -3688,7 +3688,7 @@ Version 0.43.32 / build 186.
 
 ---
 
-## 0.43.33 — the modal wears the app icon, once (build 187) — CURRENT
+## 0.43.33 — the modal wears the app icon, once (build 187)
 2026-10-27
 
 Mido, 2026-10-27: *"replace lock emoji in modal with the icon and remove it from down"*.
@@ -3699,6 +3699,28 @@ icon beside "awaiting your stamp", and the bottom row is gone. The unused `iconR
 were deleted rather than left to trip `-Werror`.
 
 Version 0.43.33 / build 187.
+
+---
+
+## 0.43.34 — a bigger, tilted, darker stamp (build 188) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"make stamp slightly larger, slightly rotated and darker"*.
+
+**Larger.** The fit went from 0.82 x 0.42 of the view to 0.94 x 0.50. At the old size the artwork
+read as a badge rather than a stamp.
+
+**Rotated.** -6 degrees, applied to the canvas and pivoted on the stamp's own centre so it cannot
+walk off-screen. Done in the canvas rather than baked into the PNGs because the REJECTED artwork is
+already tilted in the source and APPROVED is dead level — the angle gives both the same hand-placed
+feel.
+
+**Darker, by multiply not by alpha.** Lowering alpha would have made the stamp see-through, which is
+the opposite of darker. A `PorterDuffColorFilter` in MULTIPLY mode with a neutral grey (0xC8) takes
+about 22% of the brightness from every pixel while leaving the artwork's grain and edge falloff
+intact. The filter's alpha stays at 255 so it does not re-key the transparent background.
+
+Version 0.43.34 / build 188.
 
 ---
 
