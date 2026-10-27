@@ -846,13 +846,24 @@ class ApprovalActivity : FragmentActivity() {
      * unremovable copy of the password in the heap for no benefit.
      */
     private fun finishWithPassword(id: Long, password: CharArray) {
-        try {
-            val resolved = ApprovalGate.resolveWithPassword(id, password)
-            if (!resolved) Log.w("ApprovalActivity", "request $id does not need a password, or expired")
+        val resolved = try {
+            ApprovalGate.resolveWithPassword(id, password)
         } finally {
+            // Wipe first, before anything can throw or delay.
             password.fill('\u0000')
-            finish()
         }
+        if (!resolved) {
+            Log.w("ApprovalActivity", "request $id does not need a password, or expired")
+            // Nothing was approved, so there is no decision to stamp. Leave the modal up so the
+            // human can retry rather than dismissing on a silent failure.
+            return
+        }
+        // **The stamp fires here too.** This path used to call `finish()` directly, which is why
+        // the sudo modal dismissed instantly with no stamp and no sound — the password approve
+        // was the ONLY decision that skipped the animation entirely (Mido, 2026-10-27: *"no
+        // fucking stamp sound and immediately dismissed"*). Every other approve/deny goes through
+        // `finishWith`, which stamps; this one has to match.
+        showStamp(approved = true)
     }
 
     /**

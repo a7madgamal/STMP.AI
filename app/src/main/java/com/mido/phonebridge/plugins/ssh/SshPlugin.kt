@@ -210,6 +210,29 @@ class SshPlugin(private val ctx: Context) : Plugin {
         // there, at the single site that knows the handler is done, never here.
         val stdin = req.secretInput
 
+        // **Diagnostic, never the value.** A rejected password is indistinguishable from a mangled
+        // one without knowing what actually arrived: length and a checksum settle it, and neither
+        // can be turned back into the secret. This is the line that answers "is the password
+        // reaching sudo intact" from the device's own log instead of by asking the human to
+        // re-type it and guess (Mido, 2026-10-27: *"the password is right"* while sudo said
+        // otherwise).
+        if (stdin != null) {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            // Hash the CHARS as UTF-8 bytes without ever building a String.
+            val enc = Charsets.UTF_8.newEncoder()
+            val buf = enc.encode(java.nio.CharBuffer.wrap(stdin))
+            val bytes = ByteArray(buf.remaining())
+            buf.get(bytes)
+            val sha = digest.digest(bytes)
+            bytes.fill(0)
+            if (buf.hasArray()) java.util.Arrays.fill(buf.array(), 0.toByte())
+            com.mido.phonebridge.Debug.log(
+                "ssh: password received len=${stdin.size} sha256=${sha.take(4).joinToString("") { "%02x".format(it) }}"
+            )
+        } else {
+            com.mido.phonebridge.Debug.log("ssh: no password attached to this request")
+        }
+
         val result = SshExec.run(conn, command, timeout, trustFingerprint = trust, stdin = stdin)
 
         // PIN IT NOW. This only happens on a run that succeeded, which means the fingerprint was

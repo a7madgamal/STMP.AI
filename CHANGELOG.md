@@ -3428,7 +3428,7 @@ Version 0.43.21 / build 175.
 
 ---
 
-## 0.43.22 — the sudo password actually reaches the gate, and the field really masks (build 176) — CURRENT
+## 0.43.22 — the sudo password actually reaches the gate, and the field really masks (build 176)
 2026-10-27
 
 Two bugs that both looked like "the password field is broken", and they were unrelated.
@@ -3453,6 +3453,49 @@ opposite: it permits autofill on this view and only excludes descendants. It is 
 `IMPORTANT_FOR_AUTOFILL_NO`.
 
 Version 0.43.22 / build 176.
+
+---
+
+## 0.43.23 — the password approve stamps too (build 177)
+2026-10-27
+
+The sudo modal was the ONE decision that skipped the stamp. `finishWithPassword` called `finish()`
+directly instead of going through `showStamp`, so approving with a password dismissed the modal
+instantly with no ink mark and no thud — while every other approve and deny animated.
+
+Mido, 2026-10-27: *"no fucking stamp sound and immediately dismissed"* — accurate on both counts,
+and it had been true since the password path was written.
+
+It now resolves, wipes the password, and then calls `showStamp(approved = true)` like the other
+paths. A resolve that FAILS no longer finishes the Activity either: nothing was approved, so there
+is no decision to stamp, and leaving the modal up lets the human retry instead of dismissing on a
+silent failure.
+
+Version 0.43.23 / build 177.
+
+---
+
+## 0.43.24 — the password path is measurable from the log (build 178) — CURRENT
+2026-10-27
+
+Two changes, both about stopping the guesswork.
+
+**The password approve now stamps.** `finishWithPassword` called `finish()` directly instead of
+`showStamp`, so the sudo modal was the ONE decision that dismissed instantly with no ink mark and no
+thud (Mido, 2026-10-27: *"no fucking stamp sound and immediately dismissed"*). It now resolves,
+wipes the password, and calls `showStamp(approved = true)` like every other path. A resolve that
+fails no longer finishes the Activity either — nothing was approved, so there is nothing to stamp,
+and the modal stays up for a retry.
+
+**The password is now measurable instead of arguable.** A rejected password and a mangled password
+look identical from the outside. `SshPlugin` now logs the LENGTH and a SHA-256 prefix of the chars it
+received — never the value, and the digest cannot be turned back into the secret. One line in
+`/logs` answers "did the right password arrive" without asking the human to re-type it and guess.
+
+That is the actual lesson from this session: compiles and a Taildrop exit code say nothing about
+what the phone did, and three rounds were spent patching what a single log line would have named.
+
+Version 0.43.24 / build 178.
 
 ---
 
