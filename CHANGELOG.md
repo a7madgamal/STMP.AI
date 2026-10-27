@@ -3354,7 +3354,7 @@ Version 0.43.18 / build 172.
 
 ---
 
-## 0.43.19 — the 3D stamp is actually visible (build 173) — CURRENT
+## 0.43.19 — the 3D stamp is actually visible (build 173)
 2026-10-27
 
 The 3D slam shipped in 0.43.14 and could not be seen. Three separate bugs, all mine, each enough on
@@ -3379,6 +3379,31 @@ produces foreshortening. At 0 there is no perspective and `rotateX` degenerates 
 squash.
 
 Version 0.43.19 / build 173.
+
+---
+
+## 0.43.20 — the stamp gets to finish (build 174) — CURRENT
+2026-10-27
+
+The stamp was being destroyed on its first frame. Two independent teardown races, one per surface.
+
+**The modal killed its own Activity.** `ApprovalActivity` runs a 120ms tick that calls `finish()`
+the moment `ApprovalGate.isCurrent(id)` goes false — and `finishWith` resolves the request *before*
+it shows the stamp. So the window was already being torn down while the overlay was starting. A
+`stamping` flag now suppresses that finish: the stamp IS the exit, and the overlay calls `finish()`
+itself from `onFinished`.
+
+**The NOTIFY card faded out underneath it.** The card's fade-out is 200ms while the stamp runs
+~1.1s (slam + bleed + settle + fade), so most of the animation played over empty space. For
+`APPROVED`/`TAPPED` the settle now returns before scheduling the fade and the backstop; the teardown
+is driven by the overlay's `onFinished` instead. If the overlay cannot start at all — no
+draw-over-apps permission — it tears the card down immediately, so a missing permission can never
+strand a card.
+
+Both paths keep a real exit: the backstop still runs for every reason that has no stamp
+(`EXPIRED`, `UNATTENDED`, `UNAVAILABLE`, `TAPPED`-as-dismiss), and `dismissAll` is untouched.
+
+Version 0.43.20 / build 174.
 
 ---
 

@@ -434,10 +434,14 @@ class ApprovalActivity : FragmentActivity() {
                 if (!isFinishing) {
                     if (ApprovalGate.isCurrent(id)) {
                         handler.postDelayed(this, 120L)
-                    } else {
+                    } else if (!stamping) {
                         // The gate gave up (window expired) or the request was replaced.
                         // Close the modal rather than leaving a dead prompt on screen: the
                         // server has already answered, so a modal still asking is a lie.
+                        //
+                        // NOT while a stamp is playing: a resolved request is exactly what
+                        // starts the stamp, so finishing here would kill the animation on its
+                        // first frame. The overlay finishes the Activity itself via onFinished.
                         finish()
                     }
                 }
@@ -752,6 +756,19 @@ class ApprovalActivity : FragmentActivity() {
         setContentView(outer)
     }
 
+    /**
+     * True from the moment a decision is taken until the stamp has finished.
+     *
+     * The 120ms tick loop calls `finish()` as soon as `ApprovalGate.isCurrent(id)` is false —
+     * which is the INSTANT `finishWith` resolves the request, i.e. before the stamp has drawn a
+     * single frame. So the overlay was added to a window that was already being torn down, and
+     * the animation died after a frame or two (Mido, 2026-10-27: *"it dismisses too fast to see
+     * the animation"*).
+     *
+     * The tick must not decide the modal is dead while a stamp is playing: the stamp IS the exit.
+     */
+    private var stamping = false
+
     private fun finishWith(id: Long, approved: Boolean) {
         val resolved = ApprovalGate.resolve(id, approved)
         if (!resolved) Log.w("ApprovalActivity", "request $id already resolved/expired")
@@ -770,6 +787,9 @@ class ApprovalActivity : FragmentActivity() {
      * thing this delays is the modal's disappearance — never the decision itself.
      */
     private fun showStamp(approved: Boolean) {
+        // Set BEFORE the overlay is added, so the tick loop cannot finish the Activity between
+        // these two statements.
+        stamping = true
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
         val overlay = StampOverlay(this).apply {
             val verdict = if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED

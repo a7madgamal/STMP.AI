@@ -793,6 +793,16 @@ object NotifyOverlay {
         // would make a small card grow to fit the stamp.
         if (reason == Reason.APPROVED || reason == Reason.TAPPED) {
             stampDecision(entry, approved = reason == Reason.APPROVED)
+            // The stamp is ~1.1s (slam + bleed + settle + fade) and the card's own fade-out is
+            // 200ms — so tearing the card down on its normal schedule left the stamp drawing over
+            // empty space for most of its life, and on a fast device it looked like nothing
+            // happened at all. The card stays put until the stamp reports it is done.
+            //
+            // The backstop and the fade are SKIPPED for these two reasons; `stampDecision`
+            // schedules the teardown from `onFinished`, and `dismissAll`/service shutdown still
+            // have their own paths. If the overlay fails to start (no draw-over permission), it
+            // tears down immediately so the card can never be stranded.
+            return
         }
 
         // THE BACKSTOP, and it is the point of this method. The fade below is a chain of
@@ -950,6 +960,8 @@ object NotifyOverlay {
         overlay.onFinished = {
             runCatching { wm(ctx).removeView(overlay) }
                 .onFailure { Log.w(TAG, "stamp overlay remove failed: ${it.message}") }
+            // The stamp is the exit. Only now does the card go away.
+            teardown(entry)
         }
         try {
             wm(ctx).addView(overlay, lp)
@@ -960,8 +972,10 @@ object NotifyOverlay {
             )
         } catch (e: Exception) {
             // The decision is already recorded. A stamp that cannot be drawn must never fail
-            // the request or leave the card stranded.
+            // the request or leave the card stranded — so tear the card down now, since the
+            // normal fade/backstop were skipped for this reason.
             Log.w(TAG, "stamp overlay failed: ${e.message}")
+            teardown(entry)
         }
     }
 
