@@ -3644,7 +3644,7 @@ Version 0.43.30 / build 184.
 
 ---
 
-## 0.43.31 — paper creases when the modal arrives (build 185) — CURRENT
+## 0.43.31 — paper creases when the modal arrives (build 185)
 2026-10-27
 
 Mido supplied a recorded paper-creasing sample and was explicit about where it belongs:
@@ -3662,6 +3662,29 @@ Fail hard, unchanged: `modalAppear` throws `SoundUnavailable` if the sample is n
 not play, and the caller logs it at ERROR. No substitution, no silence by accident.
 
 Version 0.43.31 / build 185.
+
+---
+
+## 0.43.32 — the stamp is the supplied artwork (build 186) — CURRENT
+2026-10-27
+
+Mido supplied two finished stamps (2026-10-27: *"use those pngs instead for the stamp, keep animations
+and 3d and sounds just remove old text or material and use those"*). The hand-drawn ink disc and the
+punched-out lettering are gone; the pixels are his.
+
+**Keying the black.** The source files are JPEG, which has no alpha and never stores true black — the
+background sits around 5-25, not 0. The first key treated anything above zero as opaque, which left
+55% of the APPROVED image at near-zero alpha: it would have looked washed out. The key is now a ramp
+from 28 (fully transparent) to 70 (fully opaque), with the colour rescaled so a keyed pixel keeps its
+hue at full opacity. Verified by compositing both over the app's paper colour: no halo, no black box,
+ink detail intact. 60% transparent / 38% opaque on APPROVED, 80% / 19% on REJECTED.
+
+**Everything else is unchanged.** The slam scale, the 3D tilt through `android.graphics.Camera`, the
+fade in/out, the ink opacity and the thud all still apply — only the drawn geometry was replaced by
+`canvas.drawBitmap`. Each stamp fits to its own aspect ratio, so the wide APPROVED mark and the tall
+REJECTED mark both sit correctly.
+
+Version 0.43.32 / build 186.
 
 ---
 

@@ -16,6 +16,7 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
+import com.mido.phonebridge.R
 
 /**
  * The STMP rubber-stamp approval animation — the one viral moment.
@@ -79,30 +80,25 @@ class StampOverlay(
      * reject red"*). Both are ink analogues of `Theme.SUCCESS` / `Theme.DANGER`, so the stamp
      * agrees with the button colour the human just pressed instead of contradicting it.
      */
-    private val ink: Int
-        get() = when (word) {
-            Verdict.APPROVED.word -> Theme.SUCCESS
-            else -> Theme.DANGER
-        }
-    private val paper = 0xFFF5EEDF.toInt()
     private val scrimDim = (scrimAlpha.coerceIn(0, 255) shl 24) // caller-controlled; 0 = no dim
 
     /**
-     * Overall ink opacity.
+     * Overall opacity of the stamp art.
      *
-     * Not fully opaque: a real stamp on paper is uneven and you see the sheet through it (Mido,
-     * 2026-10-27: *"make it a little transparent and grainy"*). 0.88 reads as ink with a little
-     * paper showing, without looking washed out.
+     * Not fully opaque: a real stamp on paper lets the sheet through. Mido, 2026-10-27: *"make it a
+     * little transparent and grainy"* — the grain is baked into the supplied artwork, so only the
+     * opacity is applied here.
      */
     private val inkOpacity = 0.88f
 
-    private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val inkSoftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = paper
-        style = Paint.Style.FILL
+    /** The supplied stamp artwork, keyed to transparency. Loaded once per verdict. */
+    private var bitmap: android.graphics.Bitmap? = null
+
+    private val stampPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = true
+        isDither = true
     }
+    private val dst = RectF()
 
     // Stamp geometry, animated.
     private var stampScale = 0f
@@ -141,6 +137,13 @@ class StampOverlay(
         stampAlpha = 0f
         bleed = 0f
         tilt = -55f
+        // The supplied artwork, keyed to transparency. Decoded once per stamp; both are small
+        // enough (151 KB / 622 KB) that re-decoding is not worth a cache.
+        val res = when (verdict) {
+            Verdict.APPROVED -> R.drawable.stamp_approved
+            Verdict.DENIED -> R.drawable.stamp_rejected
+        }
+        bitmap = android.graphics.BitmapFactory.decodeResource(resources, res)
         pending = true
         // If we are ALREADY laid out (re-stamp on a visible view), start immediately.
         if (width > 0 && height > 0) {
@@ -235,63 +238,34 @@ class StampOverlay(
             canvas.concat(tiltMatrix)
         }
 
-        // **`stampAlpha` is a Float 0..1 and `colorWithAlpha` wants 0..255.**
+        // **The stamp is the supplied artwork, not a drawn disc.**
         //
-        // Passing it straight in — `colorWithAlpha(ink, stampAlpha.toInt())` — produced alpha 0 or
-        // 1, i.e. an invisible disc. The scrim uses a fixed constant, so the screen dimmed and no
-        // stamp ever appeared (Mido, 2026-10-27: *"I saw nothing, just a slightly dimmed modal"*).
-        // Every alpha below goes through this one conversion.
-        val a255 = (stampAlpha.coerceIn(0f, 1f) * inkOpacity * 255f).toInt()
+        // The hand-painted circles and punched-out text are gone: Mido supplied two finished stamps
+        // (2026-10-27: *"use those pngs instead for the stamp ... just remove old text or material
+        // and use those"*). The 3D tilt, the slam scale, the fade and the sound all still apply —
+        // only the pixels changed.
+        val art = bitmap ?: return
+        if (art.width <= 0 || art.height <= 0) return
 
-        // Pass 1: the soft, slightly-offset "bleed" halo behind the stamp — the ink soaking
-        // into the paper. Alpha follows bleed; radius expands slightly.
-        val bleedR = r * (1f + 0.10f * bleed)
-        inkSoftPaint.color = colorWithAlpha(ink, (a255 * 0.35f * (1f - bleed)).toInt())
-        canvas.drawCircle(cx, cy, bleedR, inkSoftPaint)
+        // Fit inside the view with a margin, then apply the slam scale. Using the bitmap's own
+        // aspect ratio means the wide APPROVED mark and the tall REJECTED mark both sit correctly.
+        val fit = minOf(
+            (width * 0.82f) / art.width,
+            (height * 0.42f) / art.height
+        ) * stampScale
+        if (fit <= 0f) return
 
-        // Pass 2: the scraped imperfect edge — a solid circle slightly offset from centre,
-        // then the crisp main circle on top. Together they read as an inked rim, not a
-        // vector perfect circle.
-        edgePaint.color = colorWithAlpha(ink, (a255 * 0.8f).toInt())
-        canvas.drawCircle(cx - r * 0.015f, cy + r * 0.02f, r * 0.97f, edgePaint)
+        val w = art.width * fit
+        val h = art.height * fit
+        dst.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
 
-        // Pass 3: the main ink disc.
-        inkPaint.color = colorWithAlpha(ink, a255)
-        canvas.drawCircle(cx, cy, r, inkPaint)
-
-        // Pass 3b: GRAIN inside the ink. A stamp on paper is never a flat fill — the rubber is
-        // uneven and the sheet shows through, so a perfectly smooth disc reads as a sticker.
-        // The shared paper grain is clipped to the disc and multiplied over the ink.
-        canvas.save()
-        val disc = android.graphics.Path().apply { addCircle(cx, cy, r, android.graphics.Path.Direction.CW) }
-        canvas.clipPath(disc)
-        canvas.drawPaint(PaperGrain.paint())
-        canvas.restore()
-
-        // Pass 4: the word, punched out (paper colour on ink). Two-line stacked centre text.
-        val label = word
-        val textSize = r * 1.18f / maxOf(label.length, 1)
-        glyphPaint.textSize = textSize
-        glyphPaint.typeface = Theme.handFont(context)
-        glyphPaint.textAlign = Paint.Align.CENTER
-        glyphPaint.letterSpacing = 0.04f
-        val baseline = cy - (glyphPaint.descent() + glyphPaint.ascent()) / 2f
-        // Opaque paper: the word is punched OUT of the ink, so it must not fade with the ink.
-        glyphPaint.color = paper
-        canvas.drawText(label, cx, baseline, glyphPaint)
-
-        // A faint paper ring just inside the ink rim, so the letters read as stamped-through.
-        glyphPaint.style = Paint.Style.STROKE
-        glyphPaint.strokeWidth = r * 0.02f
-        glyphPaint.color = colorWithAlpha(paper, (a255 * 0.5f).toInt())
-        canvas.drawCircle(cx, cy, r * 0.85f, glyphPaint)
-        glyphPaint.style = Paint.Style.FILL
+        // `stampAlpha` is 0..1; a Paint alpha is 0..255. Passing the raw float was the bug that
+        // made the drawn stamp invisible for four releases.
+        stampPaint.alpha = (stampAlpha.coerceIn(0f, 1f) * inkOpacity * 255f).toInt()
+        canvas.drawBitmap(art, null, dst, stampPaint)
 
         canvas.restore()
     }
-
-    private fun colorWithAlpha(color: Int, alpha: Int): Int =
-        (color and 0x00FFFFFF) or ((alpha.coerceIn(0, 255)) shl 24)
 
     // Property setters so ObjectAnimator can drive these by name.
     fun setStampScale(v: Float) { stampScale = v; invalidate() }
