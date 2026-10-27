@@ -780,6 +780,16 @@ object NotifyOverlay {
             return
         }
 
+        // The stamp fires ONLY on a human decision, and only while the card is still on
+        // screen — never on EXPIRED/UNATTENDED/UNAVAILABLE, which are the absence of one.
+        // It goes in its own non-touchable window rather than as a child of the card: the
+        // card is a WRAP_CONTENT FrameLayout, so a MATCH_PARENT child would force it to the
+        // full window height (the 0.6.1 bug this file documents) and a fixed-size child
+        // would make a small card grow to fit the stamp.
+        if (reason == Reason.APPROVED || reason == Reason.TAPPED) {
+            stampDecision(entry, approved = reason == Reason.APPROVED)
+        }
+
         // THE BACKSTOP, and it is the point of this method. The fade below is a chain of
         // posted runnables; if any link throws or the main thread drops one, the card was
         // left on screen with `settled = true` — so every tap early-returned and nothing
@@ -903,6 +913,50 @@ object NotifyOverlay {
                 // the fade and the two cannot both try to remove one window.
                 teardown(entry)
             }
+        }
+    }
+
+    /**
+     * The rubber-stamp moment on a NOTIFY decision.
+     *
+     * Until now the stamp existed only on the SECURE modal, so anyone running the default
+     * `AUTOMATIC` mode never saw it — the "viral moment" was behind a mode most requests do not
+     * reach. This puts the same overlay over the card's decision.
+     *
+     * A separate window, not a child view, for two reasons: the card is `WRAP_CONTENT` (a
+     * `MATCH_PARENT` child would blow it up to full screen), and the stamp must survive the
+     * card's 200ms fade-out to read as one gesture rather than two.
+     *
+     * `FLAG_NOT_TOUCHABLE` is mandatory: this window covers the whole screen for ~1s, and a
+     * stamp that swallowed taps would make the app feel frozen for exactly the moment the user
+     * is most likely to tap again.
+     */
+    private fun stampDecision(entry: Entry, approved: Boolean) {
+        val ctx = entry.ctx
+        val overlay = com.mido.phonebridge.ui.StampOverlay(ctx)
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        overlay.onFinished = {
+            runCatching { wm(ctx).removeView(overlay) }
+                .onFailure { Log.w(TAG, "stamp overlay remove failed: ${it.message}") }
+        }
+        try {
+            wm(ctx).addView(overlay, lp)
+            com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
+            overlay.stamp(
+                if (approved) com.mido.phonebridge.ui.StampOverlay.Verdict.APPROVED
+                else com.mido.phonebridge.ui.StampOverlay.Verdict.DENIED
+            )
+        } catch (e: Exception) {
+            // The decision is already recorded. A stamp that cannot be drawn must never fail
+            // the request or leave the card stranded.
+            Log.w(TAG, "stamp overlay failed: ${e.message}")
         }
     }
 

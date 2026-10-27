@@ -3150,7 +3150,7 @@ Version 0.43.12 / build 166.
 
 ---
 
-## 0.43.13 — SSH: keep the tail, bound stderr, return partial output, and detach jobs (build 167) — CURRENT
+## 0.43.13 — SSH: keep the tail, bound stderr, return partial output, and detach jobs (build 167)
 2026-10-26
 
 Four fixes to the SSH route, all found by using it for real work rather than by reading it.
@@ -3191,6 +3191,47 @@ prompt into a closed stdin or keep a live password in a thread nobody is watchin
 the modal, so it costs no tap.
 
 Version 0.43.13 / build 167.
+
+---
+
+## 0.43.14 — paper you can feel: grain, a real thud, the stamp on NOTIFY, and a 3D slam (build 168) — CURRENT
+2026-10-27
+
+The rebrand shipped a warm palette, Handlee and torn edges, and it still read as "beige UI" rather
+than paper. The stamp and its sound existed but were unreachable in the default gate mode, and the
+"3D" never existed at all. Four changes, each fixing one of those.
+
+**Paper grain.** Real paper is never one flat value: it has fibre, sparse darker specks and slight
+density variation, and the eye reads that variation as material. A single `setColor` cannot produce
+it. `PaperGrain` builds one 96x96 tile from a fixed seed and repeats it through a `BitmapShader`,
+so the texture is identical on every repaint — a `Random` inside `draw()` would re-roll each frame
+and the surface would visibly crawl, the same trap the torn edge already documents. One tile costs
+~37 KB however large the surface is. It is layered ON TOP of the existing drawable rather than
+wrapping it, and clipped to the card's radius: an unclipped shader paints square corners over a
+rounded card and the corners go visibly dirty.
+
+**A real thud.** The old sound was a 90ms `ToneGenerator` beep — audible, but it read as a
+notification chirp rather than something hitting a desk. `res/raw/stamp.ogg` is now a synthesised
+knock (low sine burst with a falling pitch plus a short noise transient, ~220ms), played through a
+`SoundPool` decoded once and reused. `SoundPool`, not `MediaPlayer`: a `MediaPlayer` allocates a
+codec per instance with hundreds of ms of startup latency, which cannot land on the same frame as
+the stamp. Before the sample decodes (first stamp after a cold start) it falls back to the platform
+tone rather than going silent.
+
+**The stamp now exists in NOTIFY.** It used to fire only on the SECURE modal, so anyone on the
+default `AUTOMATIC` mode — where a small card is drawn instead — never saw the moment at all. The
+same overlay now fires on `APPROVED` and `TAPPED`, in its own `FLAG_NOT_TOUCHABLE` window: the card
+is `WRAP_CONTENT`, so a `MATCH_PARENT` child would force it to full window height (the 0.6.1 bug),
+and the stamp has to survive the card's 200ms fade-out to read as one gesture. It never fires on
+`EXPIRED`, `UNATTENDED` or `UNAVAILABLE` — those are the absence of a decision, not one.
+
+**The 3D slam.** `rotationX` from -55 degrees to 0 with `cameraDistance` set once, so the stamp
+comes DOWN out of the screen rather than merely scaling up. The tilt lands slightly before the
+scale settles, so the face is flat when the ink hits — a stamp still angled at contact reads as a
+hovering sticker. Set on the View, not the canvas: `Canvas` has no X-axis rotation, and faking it
+with a matrix would bypass the camera that makes the perspective correct.
+
+Version 0.43.14 / build 168.
 
 ---
 

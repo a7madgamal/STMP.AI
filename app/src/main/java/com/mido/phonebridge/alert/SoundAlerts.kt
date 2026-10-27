@@ -26,13 +26,57 @@ import com.mido.phonebridge.policy.isAttended
  *    denies before the card is drawn), so this guard is belt-and-braces — but it is
  *    the stated rule, and it is enforced here rather than assumed from upstream.
  *
- * Deliberately NOT a `MediaPlayer` with a bundled asset: this app has no `res/raw`
- * and does not want one for a 100ms beep. `ToneGenerator` is the platform's own
- * short-tone path and needs no resource.
+ * Deliberately NOT a `MediaPlayer`: a `MediaPlayer` allocates a codec per instance and
+ * has a startup latency measured in hundreds of milliseconds, which is wrong for a
+ * 200ms effect fired the instant a finger lifts. `SoundPool` decodes once and replays
+ * from memory, which is the only path that can land the thud on the same frame as the
+ * stamp. `ToneGenerator` is still used for the NOTIFY tick: that one IS a beep by
+ * design, and the platform tone needs no asset.
  */
 object SoundAlerts {
 
     private const val TAG = "SoundAlerts"
+
+    /**
+     * The rubber-stamp thud, decoded once and reused.
+     *
+     * `SoundPool` is the right container for a short effect fired on a UI event: it keeps
+     * the decoded PCM in memory, so `play()` is immediate. The pool is created lazily and
+     * kept for the process lifetime — building one per stamp would re-decode the sample on
+     * every tap and add the latency this class exists to avoid.
+     */
+    private var stampPool: android.media.SoundPool? = null
+    private var stampSoundId = 0
+    private var stampLoaded = false
+
+    private fun ensureStampLoaded(ctx: Context): Boolean {
+        if (stampLoaded) return true
+        val pool = stampPool ?: try {
+            android.media.SoundPool.Builder()
+                .setMaxStreams(2)
+                // Feedback for an action the user just took, so it rides the same stream
+                // class as the old tone: audible even when the ringer is silent.
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .build()
+                .also { stampPool = it }
+        } catch (e: Exception) {
+            Log.w(TAG, "stamp pool unavailable: ${e.message}")
+            return false
+        }
+        // `load` is asynchronous; the callback flips the flag so the NEXT stamp plays.
+        // The first stamp after a cold start may therefore be silent, which is the honest
+        // trade — blocking the UI thread on a decode would be worse.
+        stampSoundId = pool.load(ctx, com.mido.phonebridge.R.raw.stamp, 1)
+        pool.setOnLoadCompleteListener { _, sampleId, status ->
+            if (status == 0 && sampleId == stampSoundId) stampLoaded = true
+        }
+        return stampLoaded
+    }
 
     /** The subtle NOTIFY tick. Quiet, short, and gone. */
     fun notifyTick(ctx: Context) {
@@ -50,14 +94,12 @@ object SoundAlerts {
 
     /**
      * The rubber-stamp feedback: one firm, physical thud + a single strong haptic
-     * bump. Deliberately NOT a beep and NOT a game sting — a stamp has weight, and
-     * the sound is the weight. Built on [ToneGenerator]'s lowest DTMF-ish tone at
-     * low volume so it stays short and dull rather than chirpy.
+     * bump. A stamp has weight, and the sound is the weight.
      *
-     * The tone stream here is STREAM_SYSTEM rather than STREAM_NOTIFICATION: this
-     * is feedback for an action the user has ALREADY taken (their finger just
-     * approved/denied), not an inbound event, so it must not be swallowed by the
-     * ringer switch the way an incoming-request chime would be.
+     * The sample is a synthesised knock (low sine burst with a falling pitch plus a short
+     * noise transient), decoded once into a [android.media.SoundPool]. It replaced a
+     * `ToneGenerator` beep, which was audible but read as a notification chirp rather than
+     * something hitting a desk.
      */
     fun stamp(ctx: Context) {
         stampThud(ctx)
@@ -65,14 +107,27 @@ object SoundAlerts {
     }
 
     private fun stampThud(ctx: Context) {
+        try {
+            if (!ensureStampLoaded(ctx)) {
+                // Not decoded yet (first stamp after a cold start). Fall back to the
+                // platform knock rather than going silent, so the moment still lands.
+                toneKnock()
+                return
+            }
+            stampPool?.play(stampSoundId, 0.85f, 0.85f, 1, 0, 1.0f)
+        } catch (e: Exception) {
+            Log.w(TAG, "stamp thud unavailable: ${e.message}")
+        }
+    }
+
+    /** The old platform-tone knock, kept only as a fallback before the sample decodes. */
+    private fun toneKnock() {
         var tg: ToneGenerator? = null
         try {
             tg = ToneGenerator(AudioManager.STREAM_SYSTEM, 70)
-            // TONE_CDMA_ALERT_CALL_GUARD is a short, low, dull knock — the closest
-            // the platform's built-in set gets to a rubber stamp on wood.
             tg.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 90)
         } catch (e: Exception) {
-            Log.w(TAG, "stamp thud unavailable: ${e.message}")
+            Log.w(TAG, "tone knock unavailable: ${e.message}")
         } finally {
             val toRelease = tg
             if (toRelease != null) {

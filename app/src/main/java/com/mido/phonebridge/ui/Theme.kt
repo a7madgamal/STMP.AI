@@ -177,12 +177,17 @@ object Theme {
 
     // --- surfaces ---
 
-    /** A filled, rounded surface (card / block / badge). */
-    fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): GradientDrawable =
-        GradientDrawable().apply {
+    /** A filled, rounded surface (card / block / badge), with paper grain on top. */
+    fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable {
+        val base = GradientDrawable().apply {
             setColor(color)
             cornerRadius = radiusPx(ctx, radiusDp)
         }
+        // Grain is a LAYER, not a wrapper: the base keeps being a plain GradientDrawable so
+        // nothing that inspects it changes, and the texture is one extra drawable clipped to
+        // the same radius.
+        return LayerDrawable(arrayOf(base, GrainOverlay(radiusPx(ctx, radiusDp))))
+    }
 
     /** A filled surface with a hairline border — the standard card look. */
     fun outlined(
