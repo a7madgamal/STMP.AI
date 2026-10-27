@@ -3261,7 +3261,7 @@ Version 0.43.15 / build 169.
 
 ---
 
-## 0.43.16 — one way to paint a background, enforced by a test (build 170) — CURRENT
+## 0.43.16 — one way to paint a background, enforced by a test (build 170)
 2026-10-27
 
 Grain reached the approval gate and the screen root and nothing else, because it lived in two
@@ -3295,6 +3295,24 @@ Two details in that test worth keeping:
   first run by reporting three "unexplained" sites that were in fact its own allowlist entries.
 
 Version 0.43.16 / build 170.
+
+---
+
+## 0.43.17 — the real stamp sample, first 2 seconds (build 171) — CURRENT
+2026-10-27
+
+The synthesised knock was a guess at what a stamp sounds like. Mido supplied an actual recorded
+sample (freesound community, 45.5s of several hits), so the app now uses that instead.
+
+**First 2 seconds, not one hit.** The sample is a set of stamps with room tone between them. The
+first 2s are taken verbatim with a 150ms fade at the tail so it does not click when the stream
+ends; the rest is left unused rather than trimmed to a single knock, because the sequence is what
+Mido asked for and second-guessing it would be substituting my taste for his.
+
+Re-encoded to Ogg Vorbis (~20 KB) so the APK does not grow by a megabyte for one effect. Playback
+is unchanged: `SoundPool`, decoded once, fired on the same frame as the overlay.
+
+Version 0.43.17 / build 171.
 
 ---
 
