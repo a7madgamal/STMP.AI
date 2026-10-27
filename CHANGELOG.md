@@ -3618,7 +3618,7 @@ Version 0.43.29 / build 183.
 
 ---
 
-## 0.43.30 — green approve, see-through grainy ink, snappier slam (build 184) — CURRENT
+## 0.43.30 — green approve, see-through grainy ink, snappier slam (build 184)
 2026-10-27
 
 The stamp finally works, so this is the first release that could be about how it FEELS rather than
@@ -3641,6 +3641,27 @@ carry the same fibre.
 sooner and the whole gesture clears before it can feel like a wait.
 
 Version 0.43.30 / build 184.
+
+---
+
+## 0.43.31 — paper creases when the modal arrives (build 185) — CURRENT
+2026-10-27
+
+Mido supplied a recorded paper-creasing sample and was explicit about where it belongs:
+*"use this when modal appears"*, then *"nooo not the stamp"*, then *"modal appear only"*. Arrival and
+verdict are two different moments, so they are two different sounds.
+
+`res/raw/crease.ogg` is seconds 1–5 of that recording (exactly as asked), faded 40ms in and 100ms out
+so it does not click. `SoundAlerts.modalAppear` plays it at 0.7 volume from `ApprovalGate` when the
+prompt is posted — the stamp keeps its own thud on the decision.
+
+The two samples share one `SoundPool` and one load listener, which now marks whichever id finished
+rather than assuming the stamp. Both are decoded at service start via `preload`.
+
+Fail hard, unchanged: `modalAppear` throws `SoundUnavailable` if the sample is not decoded or will
+not play, and the caller logs it at ERROR. No substitution, no silence by accident.
+
+Version 0.43.31 / build 185.
 
 ---
 

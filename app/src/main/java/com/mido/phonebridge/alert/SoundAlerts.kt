@@ -33,6 +33,25 @@ object SoundAlerts {
     private var stampSoundId = 0
     @Volatile private var stampLoaded = false
 
+    private var creaseSoundId = 0
+    @Volatile private var creaseLoaded = false
+
+    /**
+     * Play the paper-creasing sound as the modal ARRIVES.
+     *
+     * Distinct from the stamp thud, which fires on the DECISION. Mido, 2026-10-27: *"use this when
+     * modal appears"* and *"nooo not the stamp"* — arrival and verdict are two different moments and
+     * must not share a sound.
+     *
+     * @throws SoundUnavailable when the sample is not decoded or will not play.
+     */
+    fun modalAppear(ctx: Context) {
+        ensureSamplesLoaded(ctx)
+        if (!creaseLoaded) throw SoundUnavailable("crease sample not decoded yet")
+        val played = stampPool?.play(creaseSoundId, 0.7f, 0.7f, 1, 0, 1.0f) ?: 0
+        if (played == 0) throw SoundUnavailable("SoundPool refused to play the crease sample")
+    }
+
     /**
      * Decode the stamp sample NOW, at application start.
      *
@@ -40,7 +59,7 @@ object SoundAlerts {
      * failure, not a reason to substitute another sound, so it throws and the caller decides.
      */
     fun preload(ctx: Context) {
-        ensureStampLoaded(ctx.applicationContext)
+        ensureSamplesLoaded(ctx.applicationContext)
     }
 
     /**
@@ -48,8 +67,8 @@ object SoundAlerts {
      *
      * @throws SoundUnavailable when the pool cannot be built or the sample will not load.
      */
-    private fun ensureStampLoaded(ctx: Context): Boolean {
-        if (stampLoaded) return true
+    private fun ensureSamplesLoaded(ctx: Context): Boolean {
+        if (stampLoaded && creaseLoaded) return true
         val pool = stampPool ?: try {
             SoundPool.Builder()
                 .setMaxStreams(2)
@@ -73,13 +92,20 @@ object SoundAlerts {
             if (status != 0) {
                 // Named, not ignored. A failed decode means the sample is not in the APK or is
                 // corrupt; the next `play` will throw with this on the stack.
-                throw SoundUnavailable("stamp sample failed to decode (status $status)")
+                throw SoundUnavailable("sample $sampleId failed to decode (status $status)")
             }
-            if (sampleId == stampSoundId) stampLoaded = true
+            when (sampleId) {
+                stampSoundId -> stampLoaded = true
+                creaseSoundId -> creaseLoaded = true
+            }
         }
         stampSoundId = pool.load(ctx, com.mido.phonebridge.R.raw.stamp, 1)
         if (stampSoundId == 0) {
             throw SoundUnavailable("SoundPool refused to load res/raw/stamp.ogg")
+        }
+        creaseSoundId = pool.load(ctx, com.mido.phonebridge.R.raw.crease, 1)
+        if (creaseSoundId == 0) {
+            throw SoundUnavailable("SoundPool refused to load res/raw/crease.ogg")
         }
         return stampLoaded
     }
@@ -91,7 +117,7 @@ object SoundAlerts {
      *   the failure; this file never substitutes a beep.
      */
     fun stamp(ctx: Context) {
-        if (!ensureStampLoaded(ctx)) {
+        if (!ensureSamplesLoaded(ctx)) {
             throw SoundUnavailable("stamp sample not decoded yet")
         }
         val played = stampPool?.play(stampSoundId, 0.85f, 0.85f, 1, 0, 1.0f) ?: 0

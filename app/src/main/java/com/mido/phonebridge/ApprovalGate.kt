@@ -611,6 +611,15 @@ object ApprovalGate {
         // double-tap vibration the channel may not provide.
         com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
 
+        // The paper-creasing sound as the modal ARRIVES — a separate moment from the stamp,
+        // which fires on the decision (Mido, 2026-10-27: *"use this when modal appears"*).
+        // Reported rather than swallowed: a missing sound must never cancel the prompt.
+        try {
+            com.mido.phonebridge.alert.SoundAlerts.modalAppear(ctx)
+        } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
+            android.util.Log.e("ApprovalGate", "MODAL SOUND FAILED: ${e.message}", e)
+        }
+
         val intent = buildApprovalIntent(ctx, p)
 
         val pi = PendingIntent.getActivity(
