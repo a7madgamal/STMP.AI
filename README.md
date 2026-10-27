@@ -78,8 +78,45 @@ printf 'sdk.dir=%s/android-sdk\n' "$HOME" > local.properties
 ./gradlew assembleDebug
 ```
 
-The APK lands in `app/build/outputs/apk/debug/`. Sideload it; there is no Play release and no
-intention of one — the whole design assumes you control the device.
+That builds. The APK lands in `app/build/outputs/apk/debug/`. Sideload it; there is no Play release
+and no intention of one — the whole design assumes you control the device.
+
+Everything except Google sign-in works with no further setup.
+
+## Google sign-in (optional)
+
+Gmail, Calendar and Drive need OAuth, and **the credentials are not in this repo** — each developer
+registers their own Google Cloud project. Not a formality: the Android client authenticates by
+package name + signing SHA-1, so a build signed with your key can never match someone else's
+registration. Everyone needs their own regardless.
+
+1. Create a project in the [Google Cloud console](https://console.cloud.google.com/) and enable the
+   Gmail, Calendar and Drive APIs.
+2. **Credentials → Create credentials → OAuth client ID → Android.** Package name
+   `com.mido.phonebridge`; for the SHA-1 run
+   `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android`
+   (or your project keystore if you have one).
+3. **Create a second OAuth client ID → Web application.** You need this one's id *and* secret,
+   because the app exchanges a server auth code for a refresh token.
+4. On the OAuth consent screen, add your own Google account as a **test user**. The app requests
+   scopes Google classifies as sensitive, so it will not pass verification for public use without a
+   review — for personal use, test-user is enough.
+5. Put all three values in `local.properties` (gitignored):
+
+```properties
+sdk.dir=/path/to/android-sdk
+
+google.clientId=<the Android client id>.apps.googleusercontent.com
+google.serverClientId=<the Web client id>.apps.googleusercontent.com
+google.clientSecret=<the Web client secret>
+```
+
+Rebuild. Without these the app still compiles, starts, and serves every non-Google route — login
+just reports `build not configured` instead of quietly authenticating against someone else's
+project.
+
+**Never commit `local.properties`.** It is gitignored, and that is the only thing keeping your
+secret out of the history.
 
 **Signing.** The project keystore is not in the repo (it is the app's identity; committing it would
 let anyone publish an update as this app). `assembleDebug` falls back to your SDK's debug keystore so

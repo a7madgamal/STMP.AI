@@ -86,26 +86,25 @@ class BridgeService : Service() {
         const val NOTIF_ID_STATUS = 4243
 
         /**
-         * Android-type OAuth client. Authenticates by package name + signing
-         * SHA-1: no embedded secret, no redirect URI, no loopback listener.
-         * Login uses Credential Manager + PKCE authorization-code flow.
+         * OAuth credentials, supplied at BUILD time from `local.properties`.
+         *
+         * **They are deliberately not in this repository.** Every developer registers their own
+         * Google Cloud project, because:
+         *  - the Android client authenticates by package name + signing SHA-1, so a stranger's
+         *    build can never match this app's registration — they need their own regardless;
+         *  - Google's docs treat a Web client's secret as confidential;
+         *  - sharing one consent screen means other people's users see your app name and spend
+         *    your quota.
+         *
+         * Empty when unset, and empty is handled rather than assumed away: the app builds and
+         * runs, and login reports "build not configured" instead of silently authenticating
+         * against a project the developer does not control.
+         *
+         * See README → "Google sign-in" for the exact keys.
          */
-        const val GOOGLE_CLIENT_ID = "503841343554-opgr4ibts6scrl0hauaruhmf1r8g1j3o.apps.googleusercontent.com"
-
-        /**
-         * Web-type client id, passed as `serverClientId` so Play Services
-         * returns a one-time server auth code we exchange for a refresh token.
-         * The Web client's SECRET is never embedded.
-         */
-        const val GOOGLE_SERVER_CLIENT_ID = "503841343554-hpcv5g12s7lk3mbgbqprdhokrj15fd0h.apps.googleusercontent.com"
-
-        /**
-         * Web-client secret. Required to redeem the server auth code against the
-         * Web client (Web clients must authenticate the exchange). Google
-         * documents installed-app secrets as non-secret; this app is personal,
-         * sideloaded, and never distributed.
-         */
-        const val GOOGLE_CLIENT_SECRET = "GOCSPX-REMOVED-SECRET-B"
+        val GOOGLE_CLIENT_ID: String = BuildConfig.GOOGLE_CLIENT_ID
+        val GOOGLE_SERVER_CLIENT_ID: String = BuildConfig.GOOGLE_SERVER_CLIENT_ID
+        val GOOGLE_CLIENT_SECRET: String = BuildConfig.GOOGLE_CLIENT_SECRET
 
         @Volatile
         var listenerRef: NotifListenerService? = null

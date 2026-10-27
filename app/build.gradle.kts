@@ -1,7 +1,29 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+/**
+ * Per-developer configuration, read from `local.properties` (gitignored).
+ *
+ * **The OAuth credentials are NOT in this repo.** Each developer creates their own Google Cloud
+ * project and supplies its client ids here, because:
+ *  - the Android client authenticates by package name + signing SHA-1, so someone else's key can
+ *    never match this app's registration — they must register their own anyway;
+ *  - the Web client's secret is treated as confidential by Google's own docs;
+ *  - a shared consent screen means someone else's users see your app name and your quota.
+ *
+ * A missing value is not fatal at build time — the app compiles and starts, and login fails with
+ * "build not configured" instead of silently authenticating against a stranger's project.
+ */
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun localProp(key: String): String = (localProps.getProperty(key) ?: "").trim()
 
 android {
     namespace = "com.mido.phonebridge"
@@ -51,6 +73,11 @@ android {
         targetSdk = 35
         versionCode = 188
         versionName = "0.43.34"
+
+        // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
+        buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"${localProp("google.serverClientId")}\"")
+        buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"${localProp("google.clientSecret")}\"")
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and
