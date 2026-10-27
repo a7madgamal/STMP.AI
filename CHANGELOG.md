@@ -3194,7 +3194,7 @@ Version 0.43.13 / build 167.
 
 ---
 
-## 0.43.14 — paper you can feel: grain, a real thud, the stamp on NOTIFY, and a 3D slam (build 168) — CURRENT
+## 0.43.14 — paper you can feel: grain, a real thud, the stamp on NOTIFY, and a 3D slam (build 168)
 2026-10-27
 
 The rebrand shipped a warm palette, Handlee and torn edges, and it still read as "beige UI" rather
@@ -3232,6 +3232,32 @@ hovering sticker. Set on the View, not the canvas: `Canvas` has no X-axis rotati
 with a matrix would bypass the camera that makes the perspective correct.
 
 Version 0.43.14 / build 168.
+
+---
+
+## 0.43.15 — the grain reaches the homepage (build 169) — CURRENT
+2026-10-27
+
+0.43.14 added paper grain and the homepage still looked identical. Three reasons, all mine.
+
+**The grain was on the wrong drawable.** It went into `surface()`, but the homepage's SETUP cards
+use `tornCard()` — a different drawable entirely. So the one screen the user was looking at got no
+texture at all. The grain now paints inside `TornPaper`, clipped to the same torn path, so the
+texture follows the tear instead of stopping at a rectangle.
+
+**The root was flat colour.** `setBackgroundColor(Theme.BG)` is the largest surface on the screen,
+and a flat fill there dominates the whole view. It is now `PaperSheet(BG)`: the base colour plus the
+same grain, full-bleed.
+
+**The texture was too timid to see.** Alpha 22 over cream, at phone brightness, is invisible — the
+comment claimed "felt rather than seen", which in practice meant not seen. Raised to 34 and the
+speck density from 18% to 26%, which is the range where it reads as material without looking like
+dirt on the glass.
+
+The lesson worth keeping: a visual change is verified on the screen that was complained about, not on
+the helper that looked like the right one.
+
+Version 0.43.15 / build 169.
 
 ---
 

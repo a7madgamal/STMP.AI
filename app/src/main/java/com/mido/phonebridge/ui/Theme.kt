@@ -299,6 +299,14 @@ object Theme {
             paint.color = scaled(fill)
             canvas.drawPath(path, paint)
 
+            // Grain, clipped to the SAME torn path — so the texture follows the tear instead of
+            // stopping at a rectangle. This is the drawable the homepage's SETUP cards actually
+            // use, which is why adding grain only to `surface()` changed nothing visible there.
+            canvas.save()
+            canvas.clipPath(path)
+            canvas.drawPaint(PaperGrain.paint())
+            canvas.restore()
+
             // A hairline on the torn edge so the paper reads as having thickness.
             paint.style = android.graphics.Paint.Style.STROKE
             paint.strokeWidth = tearPx / 4f

@@ -38,10 +38,11 @@ object PaperGrain {
     /**
      * Strength of the texture.
      *
-     * Deliberately low. At 40+ the specks read as dirt on the screen; at ~22 they are felt rather
-     * than seen, which is the whole point of grain.
+     * 22 was too timid: over cream, at phone brightness, the fibre was invisible and the surface
+     * still read as flat beige. 34 is the range where it is visible as material without looking
+     * like dirt on the glass.
      */
-    private const val ALPHA = 22
+    private const val ALPHA = 34
 
     private var shader: BitmapShader? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -57,8 +58,8 @@ object PaperGrain {
             // most pixels transparent (the paper itself), sparse dark fibre, rarer light fleck.
             val roll = rnd.nextInt(100)
             pixels[i] = when {
-                roll < 12 -> Color.argb(ALPHA, 90, 74, 52)
-                roll < 18 -> Color.argb(ALPHA / 2, 255, 252, 244)
+                roll < 18 -> Color.argb(ALPHA, 90, 74, 52)
+                roll < 26 -> Color.argb(ALPHA / 2, 255, 252, 244)
                 else -> Color.TRANSPARENT
             }
         }

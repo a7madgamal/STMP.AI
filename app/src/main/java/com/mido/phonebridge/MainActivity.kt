@@ -110,7 +110,10 @@ class MainActivity : FragmentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Theme.BG)
+            // The whole sheet, not a flat colour. This is the largest surface on the screen, and
+            // leaving it flat is why the homepage still read as beige UI after the cards got
+            // grain.
+            background = com.mido.phonebridge.ui.PaperSheet(Theme.BG)
         }
 
         val scroll = ScrollView(this)
