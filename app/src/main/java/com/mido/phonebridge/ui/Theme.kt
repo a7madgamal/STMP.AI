@@ -504,15 +504,28 @@ object Theme {
                 strokeWidth = dp(ctx, 1)
                 strokeColor = ColorStateList.valueOf(ACCENT)
             }
-            // The drawn edge goes in FOREGROUND, not background: replacing the background would
-            // drop the tint list, the ripple and the disabled state — the exact regression this
-            // file's header exists to prevent. A foreground layer draws over the ripple and
-            // leaves every one of those intact.
-            foreground = SquiggleBorder(
-                color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
-                strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
-                radiusPx = radiusPx(ctx, RADIUS_CONTROL),
-                amplitudePx = dpF(ctx, SQUIGGLE_DP),
+            // **GRAIN AND THE DRAWN EDGE GO IN FOREGROUND, not background.**
+            //
+            // `backgroundTintList` is what preserves the ripple, the pressed/disabled state and
+            // the corner radius — replacing the background with a drawable drops all three, which
+            // is the exact regression this file's header exists to prevent. But a tint paints
+            // over the entire button, so grain in the background could never show through: that
+            // is why buttons were the last flat elements on screen (Mido, 2026-10-27: *"EVERY
+            // FUCKING ELEMENT MUST HAVE IT"*).
+            //
+            // A LayerDrawable in the foreground draws grain first, then the wobbly border, over
+            // the tinted background. The ripple still fires underneath because the foreground
+            // layers are not clickable and do not consume touch.
+            foreground = LayerDrawable(
+                arrayOf(
+                    GrainOverlay(radiusPx(ctx, RADIUS_CONTROL)),
+                    SquiggleBorder(
+                        color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
+                        strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
+                        radiusPx = radiusPx(ctx, RADIUS_CONTROL),
+                        amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                    )
+                )
             )
             setOnClickListener { onClick() }
         }
@@ -571,7 +584,9 @@ object Theme {
         // would normally cost the ripple — which is correct here, because a control
         // mid-download is not tappable (see below) and press feedback would be a lie.
         // On completion the caller swaps back to [button] and the ripple returns with it.
-        val layered = LayerDrawable(arrayOf(track, fill))
+        // Grain ON TOP of the two-tone track/fill: the progress button is the one control that
+        // sets its own background, so this is the only place the texture can go.
+        val layered = LayerDrawable(arrayOf(track, fill, GrainOverlay(radius)))
         return MaterialButton(ctx).apply {
             text = label
             textSize = 14f

@@ -43,6 +43,19 @@ class GrainCoverageTest {
         // recolours it at runtime (`entry.cardBg`), and the grain is already a SEPARATE layer
         // stacked on top of it — see the LayerDrawable in `buildCard`.
         "NotifyOverlay.kt" to "val cardBg = GradientDrawable()",
+        // A 10dp status dot: an OVAL, so grain inside it would be clipped to a circle smaller
+        // than one grain tile and would render as a flat speck.
+        "Theme.kt" to "shape = GradientDrawable.OVAL",
+        // The progress track and fill. Both are drawn UNDER the GrainOverlay layer that
+        // `progressButton` stacks on top of them.
+        "Theme.kt" to "val track = GradientDrawable()",
+        "Theme.kt" to "setColor(bg)",
+        // `backgroundTintList` is a TINT, not a drawable: it recolours the MaterialButton's own
+        // background so the ripple, pressed and disabled states survive. Grain is layered in the
+        // button's FOREGROUND instead — see `button()`.
+        "MainActivity.kt" to "serverButton.backgroundTintList",
+        "MainActivity.kt" to "loginButton.backgroundTintList",
+        "ApprovalActivity.kt" to "allow.backgroundTintList",
     )
 
     @Test
@@ -91,7 +104,8 @@ class GrainCoverageTest {
                     if (code.isEmpty()) return@forEach
                     val raw = code.contains("setBackgroundColor(") ||
                         code.contains("GradientDrawable()") ||
-                        code.contains("ColorDrawable(")
+                        code.contains("ColorDrawable(") ||
+                        code.contains("backgroundTintList =")
                     if (raw) hits += file.name to code
                 }
             }

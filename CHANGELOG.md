@@ -3544,7 +3544,7 @@ Version 0.43.26 / build 180.
 
 ---
 
-## 0.43.27 — the stamp sound stops being a beep, and nothing fails silently (build 181) — CURRENT
+## 0.43.27 — the stamp sound stops being a beep, and nothing fails silently (build 181)
 2026-10-27
 
 Mido, 2026-10-27: *"the sound is back to a fucking peep"* then *"i said a million times no fucking
@@ -3567,6 +3567,32 @@ the cause, and the modal shows a toast. The overlay's own failure was logged as 
 an ERROR — that is the line that would have named the 1ms-flash bug the first time it happened.
 
 Version 0.43.27 / build 181.
+
+---
+
+## 0.43.28 — grain reaches the buttons (build 182) — CURRENT
+2026-10-27
+
+Mido, 2026-10-27: *"some ui buttons and elements still dont have the grain texture / EVERY FUCKING
+ELEMENT MUST HAVE IT"*.
+
+**Why buttons were flat.** They are `MaterialButton`s painted with `backgroundTintList`, which is
+deliberate — a tint preserves the ripple, the pressed/disabled state and the corner radius, and
+replacing the background with a drawable drops all three. But a tint paints over the whole control,
+so grain placed in the background could never show through. Grain and the drawn edge now go in the
+button's FOREGROUND as a `LayerDrawable`, over the tinted background. The ripple still fires
+underneath because the foreground layers are not clickable.
+
+**The progress button** sets its own background (a two-tone track plus a draining fill), so grain is
+stacked as a third layer there.
+
+**`GrainCoverageTest` now scans `backgroundTintList` too.** It was checking for
+`setBackgroundColor`/`GradientDrawable`/`ColorDrawable`, which is why the buttons slipped through —
+the tint was the thing making them flat, and the test did not know the word. The allowlist names each
+remaining exemption with its reason: a 3dp risk strip, a 10dp oval dot, the progress track and fill
+(both under the grain layer), and the three tint assignments (grain is in their foreground).
+
+Version 0.43.28 / build 182.
 
 ---
 
