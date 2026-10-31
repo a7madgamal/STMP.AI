@@ -1,0 +1,24 @@
+Notification cue sounds
+=======================
+
+Source: "Interface Sounds (1.0)" by Kenney (www.kenney.nl)
+URL:    https://kenney.nl/assets/interface-sounds
+
+License: Creative Commons Zero (CC0 1.0)
+         http://creativecommons.org/publicdomain/zero/1.0/
+
+CC0 places the work in the public domain, so no attribution is required. It is
+recorded here anyway, so a future reader can tell where the three files came
+from and re-check the terms rather than guessing.
+
+Files, and which original each was taken from (converted to Ogg Vorbis, no
+other processing — no trimming, no fades, no pitch/level changes beyond the
+codec):
+
+  cue_ping.ogg   <- bong_001.wav          0.13s  single soft blip
+  cue_chime.ogg  <- confirmation_001.wav  0.29s  two-note confirm
+  cue_alarm.ogg  <- error_003.wav         0.56s  longer, insistent
+
+Keeping the originals named is the point: "we generated some tones" would make
+them unreproducible and unattributable, and these are real recordings from a
+pack whose licence is checkable.

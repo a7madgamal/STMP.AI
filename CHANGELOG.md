@@ -3812,7 +3812,7 @@ Version 0.43.36 / build 190.
 
 ---
 
-## 0.43.37 — the AI backend is a choice: off, local, or a box on the tailnet (build 191) — CURRENT
+## 0.43.37 — the AI backend is a choice: off, local, or a box on the tailnet (build 191)
 2026-10-31
 
 Backlog item: *"Off = no summary and no risk, deterministic rows only (must not 503 the bridge).
@@ -3862,6 +3862,58 @@ human choosing it reads the trade-off there rather than discovering it when the 
 tests, 0 failures.
 
 Version 0.43.37 / build 191.
+
+---
+
+## 0.43.38 — attention cues, the one route that does not ask (build 192) — CURRENT
+2026-10-31
+
+Backlog item: *"let agents play sounds to get user attention — a route that plays a short sound so
+a request can get attention without a notification. Ships with a small fixed set (a few distinct
+cues, not arbitrary audio)."*
+
+**No card, no notification (Mido, 2026-10-31: *"no card or even notification for those"*).** That
+makes `POST /audio/{cue}` the only GATE-EXEMPT route in the app, and the reason is not convenience:
+a cue exists to make someone look at the phone, so requiring them to look first is a circular
+requirement. It is defensible only because the route can do exactly one thing — make a short noise.
+`Route.gateExempt` carries that reasoning in the source, including the rule that a future route
+wanting the flag and able to read, write or execute is asking for a policy rule, not an exemption.
+
+**It still logs like every other request (Mido: *"it still logs as other requests"*).** A normal
+`APPROVED` record — no new outcome value, no marker. A private outcome would have made the log stop
+being one list of requests: a reader would have to learn a second vocabulary to understand what the
+phone did.
+
+**The exemption is a branch, not an early return.** The gate block was wrapped rather than
+short-circuited, because the handler-call site below it is deliberately single: the comment there
+records that an early-returning ungated branch is exactly how `Route.auditResponseBody` once ended up
+honoured on one path and ignored on the other. A second exit would have re-opened that.
+
+**Three cues, closed set.** `ping`, `chime`, `alarm` — a name from a fixed list, so the worst a
+caller can do is choose which of three sounds plays. No file, no URL, no duration or volume. A route
+that took audio would be a speaker for hire.
+
+**One shot (Mido: *"one shot"*).** A single `SoundPool.play` with loop 0 — no repeat, no stop route,
+no state to clear, so nothing can keep making noise after the request that asked for it finished.
+
+**Refused when the screen is off.** A cue on a locked dark phone is noise in a pocket that nobody
+can act on, which is the same rule `SoundAlerts.notifyTick` already follows. Answering rather than
+silently skipping is deliberate: a caller that gets 200 must be able to believe a sound played.
+
+**The assets are real recordings, not generated tones (Mido: *"don't generate get assets online"*).**
+The first pass synthesized three sine waves with ffmpeg; that was wrong — an unattributable,
+unreproducible asset with no licence to check. Replaced with three files from Kenney's "Interface
+Sounds" 1.0 pack (CC0, public domain), converted to Ogg Vorbis with no other processing. The
+provenance is recorded in `assets/cue-attribution.txt` naming the original file per cue, so a future
+reader can verify the terms rather than guess.
+
+**The test suite caught a real bug this introduced.** `ErrorCodesTest` scans the source for every
+`PluginError("...")` code and fails if one is unclassified. The cue route throws `denied` on a dark
+screen — and `denied` was never in `ErrorCodes.MAP`, because the gate always constructed that 403 by
+hand and no plugin had ever thrown it. A plugin throwing it would have answered **500** and been
+logged as a server fault. Now classified as 403, with the history recorded at the entry.
+
+Version 0.43.38 / build 192.
 
 ---
 

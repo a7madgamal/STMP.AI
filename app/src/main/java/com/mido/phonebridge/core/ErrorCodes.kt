@@ -85,6 +85,13 @@ object ErrorCodes {
         // human clears by unlocking the app. 403 ("not allowed right now"), never 500 —
         // a locked vault is a normal condition, not a server fault.
         "secret_locked" to FORBIDDEN,
+        // A refusal that is not the human declining: the gate could not be presented (screen
+        // off, device locked), or a route refused because nobody could perceive it. The gate
+        // already answered 403 for this by constructing the response directly, so the code was
+        // never in this map — which meant a PLUGIN throwing it would have answered 500 and been
+        // logged as a server fault. Surfaced by the audio cue route, which refuses on a dark
+        // screen (ErrorCodesTest caught it).
+        "denied" to FORBIDDEN,
 
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
@@ -97,6 +104,10 @@ object ErrorCodes {
         // over budget). A fault on our side, never noise — the request could not be
         // described, so it must not be approved.
         "ai_unavailable" to INTERNAL,
+        // A cue could not be decoded or played. Same shape as ai_unavailable: the route exists
+        // and was approved, and the fault is ours — never a silent no-op, because the caller
+        // would otherwise believe the phone made a sound.
+        "audio_unavailable" to INTERNAL,
         "vault_missing" to UNAVAILABLE,
         "vault_corrupt" to INTERNAL,
         "vault_unrecoverable" to INTERNAL,

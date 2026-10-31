@@ -131,6 +131,28 @@ data class Route(
      * modal opens. Null means "never", which is right for every route but SSH.
      */
     val needsPassword: ((Req) -> Boolean)? = null,
+    /**
+     * Whether this route SKIPS the approval gate entirely.
+     *
+     * **The only such route in the app, and it should stay that way.** Every other route asks a
+     * human first — that is the product. This exists for one case (Mido, 2026-10-31: *"no card or
+     * even notification for those"*) where asking would defeat the purpose: an attention cue
+     * whose whole job is to get someone to look at the phone cannot itself require them to look
+     * at the phone.
+     *
+     * Because it bypasses the gate, the honest framing is that anyone on the tailnet can fire
+     * it. That is acceptable ONLY because such a route can do exactly one thing — make a short
+     * noise — and nothing else. If a future route wants this flag and can read, write or execute,
+     * the flag is the wrong tool; the answer is a policy rule, not an exemption.
+     *
+     * It still goes through:
+     *  - route resolution (unknown paths and cues 404 before anything happens),
+     *  - `validate` (bad input costs nothing),
+     *  - the audit, as a normal record with a normal outcome (Mido: *"it still logs as other
+     *    requests"*) — no special outcome, no marker, because a unique outcome value would make
+     *    it impossible to read the log as one list of requests.
+     */
+    val gateExempt: Boolean = false,
     val handler: suspend (Req) -> Resp
 ) {
     /**

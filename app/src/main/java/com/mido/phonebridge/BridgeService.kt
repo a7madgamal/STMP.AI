@@ -728,6 +728,9 @@ class BridgeService : Service() {
         if (PluginRegistry.get("logs") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.logs.LogcatPlugin(applicationContext))
         }
+        if (PluginRegistry.get("audio") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.audio.AudioPlugin(applicationContext))
+        }
         // The metadata half of the secrets feature: a route that answers "what is this
         // secret, where are its docs, what may it reach" WITHOUT the value. Registered
         // once (not per secret) because it serves the whole index.
@@ -1112,85 +1115,193 @@ class HttpServer(
             // not the same evidence as one that was on screen.
             val unattendedProceed = !attended
 
-            when (mode) {
-                Mode.NOTIFY -> {
-                    if (unattendedProceed) {
-                        // Nobody is at the screen, so a card cannot be read and must not be
-                        // drawn. Drawing one would be the dishonest version: it would report
-                        // "shown" for something that was never legible.
-                        //
-                        // This is the unattended approval the rule permits. It is recorded with
-                        // its own detail so the log never reads like an observed decision.
-                        draft.decision(
-                            Decision(
-                                mode.name, decisionSource(resolvedPolicy.source),
-                                globalMode.name, resolvedPolicy.ruleKey,
-                                null, null, System.currentTimeMillis(), 0
+            // GATE EXEMPTION. A route may skip the gate entirely — today only the audio cue
+            // route does, because a cue whose job is to make someone look at the phone cannot
+            // require them to look first. See Route.gateExempt: the exemption is only defensible
+            // for a route that can do nothing but make a short noise.
+            //
+            // It still records a normal APPROVED outcome, because Mido's rule is that it "still
+            // logs as other requests" — one log, one vocabulary, no private outcome value that a
+            // reader has to learn.
+            if (resolved.route.gateExempt) {
+                draft.outcome(AuditOutcome.APPROVED)
+            } else {
+                when (mode) {
+                    Mode.NOTIFY -> {
+                        if (unattendedProceed) {
+                            // Nobody is at the screen, so a card cannot be read and must not be
+                            // drawn. Drawing one would be the dishonest version: it would report
+                            // "shown" for something that was never legible.
+                            //
+                            // This is the unattended approval the rule permits. It is recorded with
+                            // its own detail so the log never reads like an observed decision.
+                            draft.decision(
+                                Decision(
+                                    mode.name, decisionSource(resolvedPolicy.source),
+                                    globalMode.name, resolvedPolicy.ruleKey,
+                                    null, null, System.currentTimeMillis(), 0
+                                )
                             )
-                        )
-                        draft.outcome(AuditOutcome.NOTIFY_APPROVED)
-                        draft.error("unattended")
-                    } else {
-                        // A small overlay card, not a notification: the draw permission
-                        // this app already holds makes the prompt ours, so it appears
-                        // above whatever the human is looking at instead of fighting the
-                        // shade. The card fetches the AI summary FIRST, then starts its 5s
-                        // clock; silence approves, a tap approves-and-skips, the ✕ rejects.
-                        val decision = NotifyGate.await(
-                            ctx,
-                            summary,
-                            labelOf(resolved.plugin.id, verb),
-                            verb,
-                            // Null facts for a route that declares `aiSummary = false`: the card
-                            // then shows its deterministic content and its clock starts at once.
-                            // Never built for an opted-out route, so the rows are not fetched
-                            // either — an opted-out route pays nothing for the AI.
-                            if (com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary))
-                                aiFactsFor(
-                                    resolved.route, verb, summary, path, body, query, remote,
-                                    // The body EXACTLY as received — `rawBody` is captured before
-                                    // parsing, so this is byte-for-byte what the caller sent.
+                            draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                            draft.error("unattended")
+                        } else {
+                            // A small overlay card, not a notification: the draw permission
+                            // this app already holds makes the prompt ours, so it appears
+                            // above whatever the human is looking at instead of fighting the
+                            // shade. The card fetches the AI summary FIRST, then starts its 5s
+                            // clock; silence approves, a tap approves-and-skips, the ✕ rejects.
+                            val decision = NotifyGate.await(
+                                ctx,
+                                summary,
+                                labelOf(resolved.plugin.id, verb),
+                                verb,
+                                // Null facts for a route that declares `aiSummary = false`: the card
+                                // then shows its deterministic content and its clock starts at once.
+                                // Never built for an opted-out route, so the rows are not fetched
+                                // either — an opted-out route pays nothing for the AI.
+                                if (com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary))
+                                    aiFactsFor(
+                                        resolved.route, verb, summary, path, body, query, remote,
+                                        // The body EXACTLY as received — `rawBody` is captured before
+                                        // parsing, so this is byte-for-byte what the caller sent.
+                                        rawBody = rawBody,
+                                        url = body.optString("url", "")
+                                    )
+                                else null,
+                                needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
+                            )
+                            when (decision) {
+                                is NotifyGate.Result.Approved -> {
+                                    draft.decision(
+                                        Decision(
+                                            mode.name, decisionSource(resolvedPolicy.source),
+                                            globalMode.name, resolvedPolicy.ruleKey,
+                                            null, decision.shownAt, decision.decidedAt, 0
+                                        )
+                                    )
+                                    draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                                }
+                                is NotifyGate.Result.Tapped -> {
+                                    // A deliberate tap-approve: recorded as NOTIFY_APPROVED
+                                    // (the outcome set is closed) but the decision block's
+                                    // decidedAt is the tap instant, and the detail carries the
+                                    // distinction so the log can tell a tap from silence.
+                                    draft.decision(
+                                        Decision(
+                                            mode.name, decisionSource(resolvedPolicy.source),
+                                            globalMode.name, resolvedPolicy.ruleKey,
+                                            null, decision.shownAt, decision.decidedAt, 0
+                                        )
+                                    )
+                                    draft.outcome(AuditOutcome.NOTIFY_APPROVED)
+                                    draft.error("tapped")
+                                }
+                                is NotifyGate.Result.Rejected -> {
+                                    draft.decision(
+                                        Decision(
+                                            mode.name, decisionSource(resolvedPolicy.source),
+                                            globalMode.name, resolvedPolicy.ruleKey,
+                                            null, decision.shownAt, decision.decidedAt, 0
+                                        )
+                                    )
+                                    draft.outcome(AuditOutcome.NOTIFY_REJECTED)
+                                    draft.error("denied")
+                                    draft.response(403, null)
+                                    return Dispatched(
+                                        Response.Status.FORBIDDEN,
+                                        err("denied", "request denied by user")
+                                    )
+                                }
+                                is NotifyGate.Result.AiFailed -> {
+                                    // The card could not be described, so it was withdrawn without a
+                                    // decision. The AI is core (Mido, 2026-10-19): this is a fault on
+                                    // our side, answered as a coded error — NEVER as an approval, and
+                                    // never as a deny either, because no human said no.
+                                    draft.outcome(AuditOutcome.HANDLER_FAILED)
+                                    draft.error("ai_unavailable")
+                                    val obj = err("ai_unavailable", decision.detail)
+                                    draft.response(500, obj.toString())
+                                    return Dispatched(Response.Status.INTERNAL_ERROR, obj)
+                                }
+                                is NotifyGate.Result.Unavailable -> {
+                                    // Could not be shown: no permission, evicted, or the screen
+                                    // went away mid-window. Deny, and say which. Approving
+                                    // because we failed to draw something would be the one
+                                    // failure mode this whole mode must never have.
+                                    draft.decision(
+                                        Decision(
+                                            mode.name, decisionSource(resolvedPolicy.source),
+                                            globalMode.name, resolvedPolicy.ruleKey,
+                                            null, decision.shownAt, decision.decidedAt, 0
+                                        )
+                                    )
+                                    draft.outcome(AuditOutcome.DENIED_UNATTENDED)
+                                    draft.error("denied")
+                                    val obj = err("denied", "gate unavailable: ${decision.detail}")
+                                    draft.response(403, obj.toString())
+                                    return Dispatched(Response.Status.FORBIDDEN, obj)
+                                }
+                            }
+                        }
+                    }
+                    Mode.SECURE -> {
+                        // Central gate: describe the concrete call, then wait for the human.
+                        //
+                        // The AI summary is NO LONGER computed here (Mido, 2026-10-19). It used
+                        // to block the modal for up to 10s and then leave the buttons dead for
+                        // another second — two static waits stacked. The modal now appears
+                        // immediately and the gate fetches in the background: the buttons enable
+                        // when the summary lands, and the 60s clock starts from THAT instant, so
+                        // the model's latency is never charged to the human's decision time.
+                        //
+                        // Rows are built ONCE, before the view, because a bad target must still
+                        // throw pre-gate (coded 4xx, no modal) and the AI needs the same rows.
+                        val rows = pluginRows(resolved.route, path, body, query, remote)
+                        val gate = ApprovalGate.await(
+                            ctx, remote, "$method $path", summary,
+                            detail = detailFor(resolved.route.path, path, body),
+                            account = account,
+                            view = approvalView(
+                                remote, account, resolved.route, path, body, query,
+                                summary = summary,
+                                // A `SECURE` modal asks for a fingerprint only when the option says
+                                // so. The VAULT is untouched by this: its key is auth-per-use in the
+                                // Keystore and `lockOnLoad` still unlocks it at app start, so a locked
+                                // vault answers `secret_locked` exactly as it already does under
+                                // NOTIFY, which never touched biometrics either.
+                                requiresBiometric = mode == Mode.SECURE && policy.fingerprintForModals,
+                                rows = rows,
+                                exceptionOffer = exceptionOfferFor(
+                                    globalMode, resolved.plugin.id, verb, mode
+                                ),
+                                // The gate needs this to render the field and to refuse a
+                                // resolve that arrives without one.
+                                needsPassword = needsPassword
+                            ),
+                            // **THE GATE'S OWN COPY, not just the view's.** The view above only
+                            // decides what the modal DRAWS; `await` decides whether
+                            // `resolveWithPassword` will accept the typed password. Omitting this
+                            // left `Pending.needsPassword` at its default `false`, so every
+                            // password was rejected with "does not need a password, or expired"
+                            // even though the field had rendered and the human had typed into it
+                            // (Mido, 2026-10-27: *"I entered the password and accepted"* → the
+                            // call still timed out).
+                            needsPassword = needsPassword,
+                            // Null for a route that declares `aiSummary = false`: there is nothing
+                            // to wait for, so its buttons go live at once.
+                            aiFacts = if (com.mido.phonebridge.ai.AiGateway
+                                    .requiresAi(ctx, resolved.route.aiSummary))
+                                factsFor(
+                                    resolved.route, verb, summary, rows,
                                     rawBody = rawBody,
                                     url = body.optString("url", "")
-                                )
-                            else null,
-                            needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
+                                ) else null
                         )
-                        when (decision) {
-                            is NotifyGate.Result.Approved -> {
-                                draft.decision(
-                                    Decision(
-                                        mode.name, decisionSource(resolvedPolicy.source),
-                                        globalMode.name, resolvedPolicy.ruleKey,
-                                        null, decision.shownAt, decision.decidedAt, 0
-                                    )
-                                )
-                                draft.outcome(AuditOutcome.NOTIFY_APPROVED)
-                            }
-                            is NotifyGate.Result.Tapped -> {
-                                // A deliberate tap-approve: recorded as NOTIFY_APPROVED
-                                // (the outcome set is closed) but the decision block's
-                                // decidedAt is the tap instant, and the detail carries the
-                                // distinction so the log can tell a tap from silence.
-                                draft.decision(
-                                    Decision(
-                                        mode.name, decisionSource(resolvedPolicy.source),
-                                        globalMode.name, resolvedPolicy.ruleKey,
-                                        null, decision.shownAt, decision.decidedAt, 0
-                                    )
-                                )
-                                draft.outcome(AuditOutcome.NOTIFY_APPROVED)
-                                draft.error("tapped")
-                            }
-                            is NotifyGate.Result.Rejected -> {
-                                draft.decision(
-                                    Decision(
-                                        mode.name, decisionSource(resolvedPolicy.source),
-                                        globalMode.name, resolvedPolicy.ruleKey,
-                                        null, decision.shownAt, decision.decidedAt, 0
-                                    )
-                                )
-                                draft.outcome(AuditOutcome.NOTIFY_REJECTED)
+                        draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
+
+                        when (gate) {
+                            is ApprovalGate.GateResult.Denied -> {
+                                draft.outcome(AuditOutcome.DENIED)
                                 draft.error("denied")
                                 draft.response(403, null)
                                 return Dispatched(
@@ -1198,136 +1309,40 @@ class HttpServer(
                                     err("denied", "request denied by user")
                                 )
                             }
-                            is NotifyGate.Result.AiFailed -> {
-                                // The card could not be described, so it was withdrawn without a
-                                // decision. The AI is core (Mido, 2026-10-19): this is a fault on
-                                // our side, answered as a coded error — NEVER as an approval, and
-                                // never as a deny either, because no human said no.
-                                draft.outcome(AuditOutcome.HANDLER_FAILED)
-                                draft.error("ai_unavailable")
-                                val obj = err("ai_unavailable", decision.detail)
-                                draft.response(500, obj.toString())
-                                return Dispatched(Response.Status.INTERNAL_ERROR, obj)
-                            }
-                            is NotifyGate.Result.Unavailable -> {
-                                // Could not be shown: no permission, evicted, or the screen
-                                // went away mid-window. Deny, and say which. Approving
-                                // because we failed to draw something would be the one
-                                // failure mode this whole mode must never have.
-                                draft.decision(
-                                    Decision(
-                                        mode.name, decisionSource(resolvedPolicy.source),
-                                        globalMode.name, resolvedPolicy.ruleKey,
-                                        null, decision.shownAt, decision.decidedAt, 0
-                                    )
+                            is ApprovalGate.GateResult.TimedOut -> {
+                                draft.outcome(AuditOutcome.TIMEOUT)
+                                draft.error("approval_timeout")
+                                draft.response(408, null)
+                                return Dispatched(
+                                    Response.Status.REQUEST_TIMEOUT,
+                                    err("approval_timeout", "approval timed out")
                                 )
-                                draft.outcome(AuditOutcome.DENIED_UNATTENDED)
-                                draft.error("denied")
-                                val obj = err("denied", "gate unavailable: ${decision.detail}")
-                                draft.response(403, obj.toString())
-                                return Dispatched(Response.Status.FORBIDDEN, obj)
                             }
+                            is ApprovalGate.GateResult.ApprovedWithException -> {
+                                // The human approved AND asked for this pair to behave
+                                // differently next time. Both halves are real, so both are
+                                // recorded: the approval here, the policy move in the same
+                                // commit below. A write that fails does NOT deny the request —
+                                // the human did approve — but it is surfaced, never swallowed.
+                                draft.outcome(AuditOutcome.APPROVED)
+                                writeException(gate.rule)
+                            }
+                            is ApprovalGate.GateResult.ApprovedWithPassword -> {
+                                // The human approved AND typed the password sudo needs. The
+                                // secret is attached to the request here — the ONE place that
+                                // knows both the approval and the Req — and wiped immediately
+                                // after the handler returns, in the finally below.
+                                //
+                                // The audit records THAT a password was supplied, never the
+                                // value: the summary gains one word, so no schema change and
+                                // nothing to redact.
+                                draft.outcome(AuditOutcome.APPROVED)
+                                draft.summary("$summary (sudo password supplied)")
+                                req.secretInput = gate.password
+                            }
+                            is ApprovalGate.GateResult.Approved ->
+                                draft.outcome(AuditOutcome.APPROVED)
                         }
-                    }
-                }
-                Mode.SECURE -> {
-                    // Central gate: describe the concrete call, then wait for the human.
-                    //
-                    // The AI summary is NO LONGER computed here (Mido, 2026-10-19). It used
-                    // to block the modal for up to 10s and then leave the buttons dead for
-                    // another second — two static waits stacked. The modal now appears
-                    // immediately and the gate fetches in the background: the buttons enable
-                    // when the summary lands, and the 60s clock starts from THAT instant, so
-                    // the model's latency is never charged to the human's decision time.
-                    //
-                    // Rows are built ONCE, before the view, because a bad target must still
-                    // throw pre-gate (coded 4xx, no modal) and the AI needs the same rows.
-                    val rows = pluginRows(resolved.route, path, body, query, remote)
-                    val gate = ApprovalGate.await(
-                        ctx, remote, "$method $path", summary,
-                        detail = detailFor(resolved.route.path, path, body),
-                        account = account,
-                        view = approvalView(
-                            remote, account, resolved.route, path, body, query,
-                            summary = summary,
-                            // A `SECURE` modal asks for a fingerprint only when the option says
-                            // so. The VAULT is untouched by this: its key is auth-per-use in the
-                            // Keystore and `lockOnLoad` still unlocks it at app start, so a locked
-                            // vault answers `secret_locked` exactly as it already does under
-                            // NOTIFY, which never touched biometrics either.
-                            requiresBiometric = mode == Mode.SECURE && policy.fingerprintForModals,
-                            rows = rows,
-                            exceptionOffer = exceptionOfferFor(
-                                globalMode, resolved.plugin.id, verb, mode
-                            ),
-                            // The gate needs this to render the field and to refuse a
-                            // resolve that arrives without one.
-                            needsPassword = needsPassword
-                        ),
-                        // **THE GATE'S OWN COPY, not just the view's.** The view above only
-                        // decides what the modal DRAWS; `await` decides whether
-                        // `resolveWithPassword` will accept the typed password. Omitting this
-                        // left `Pending.needsPassword` at its default `false`, so every
-                        // password was rejected with "does not need a password, or expired"
-                        // even though the field had rendered and the human had typed into it
-                        // (Mido, 2026-10-27: *"I entered the password and accepted"* → the
-                        // call still timed out).
-                        needsPassword = needsPassword,
-                        // Null for a route that declares `aiSummary = false`: there is nothing
-                        // to wait for, so its buttons go live at once.
-                        aiFacts = if (com.mido.phonebridge.ai.AiGateway
-                                .requiresAi(ctx, resolved.route.aiSummary))
-                            factsFor(
-                                resolved.route, verb, summary, rows,
-                                rawBody = rawBody,
-                                url = body.optString("url", "")
-                            ) else null
-                    )
-                    draft.decision(gateDecision(gate, globalMode, resolvedPolicy))
-
-                    when (gate) {
-                        is ApprovalGate.GateResult.Denied -> {
-                            draft.outcome(AuditOutcome.DENIED)
-                            draft.error("denied")
-                            draft.response(403, null)
-                            return Dispatched(
-                                Response.Status.FORBIDDEN,
-                                err("denied", "request denied by user")
-                            )
-                        }
-                        is ApprovalGate.GateResult.TimedOut -> {
-                            draft.outcome(AuditOutcome.TIMEOUT)
-                            draft.error("approval_timeout")
-                            draft.response(408, null)
-                            return Dispatched(
-                                Response.Status.REQUEST_TIMEOUT,
-                                err("approval_timeout", "approval timed out")
-                            )
-                        }
-                        is ApprovalGate.GateResult.ApprovedWithException -> {
-                            // The human approved AND asked for this pair to behave
-                            // differently next time. Both halves are real, so both are
-                            // recorded: the approval here, the policy move in the same
-                            // commit below. A write that fails does NOT deny the request —
-                            // the human did approve — but it is surfaced, never swallowed.
-                            draft.outcome(AuditOutcome.APPROVED)
-                            writeException(gate.rule)
-                        }
-                        is ApprovalGate.GateResult.ApprovedWithPassword -> {
-                            // The human approved AND typed the password sudo needs. The
-                            // secret is attached to the request here — the ONE place that
-                            // knows both the approval and the Req — and wiped immediately
-                            // after the handler returns, in the finally below.
-                            //
-                            // The audit records THAT a password was supplied, never the
-                            // value: the summary gains one word, so no schema change and
-                            // nothing to redact.
-                            draft.outcome(AuditOutcome.APPROVED)
-                            draft.summary("$summary (sudo password supplied)")
-                            req.secretInput = gate.password
-                        }
-                        is ApprovalGate.GateResult.Approved ->
-                            draft.outcome(AuditOutcome.APPROVED)
                     }
                 }
             }
