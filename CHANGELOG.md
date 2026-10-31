@@ -3702,7 +3702,7 @@ Version 0.43.33 / build 187.
 
 ---
 
-## 0.43.34 — a bigger, tilted, darker stamp (build 188) — CURRENT
+## 0.43.34 — a bigger, tilted, darker stamp (build 188)
 2026-10-27
 
 Mido, 2026-10-27: *"make stamp slightly larger, slightly rotated and darker"*.
@@ -3721,6 +3721,53 @@ about 22% of the brightness from every pixel while leaving the artwork's grain a
 intact. The filter's alpha stays at 255 so it does not re-key the transparent background.
 
 Version 0.43.34 / build 188.
+
+---
+
+## 0.43.35 — the log can be cleared, and it can no longer grow without limit (build 189) — CURRENT
+2026-10-31
+
+Mido, 2026-10-31: *"nuke, and make sure it doesn't grow forever — limit by count, date or size"*.
+
+**There was no way to clear the log at all.** `AuditStore.clear()` existed but nothing called it:
+no route, no button. So "reset the log" was a manual phone-side delete or nothing. Added
+`DELETE /audit`, which is a `DELETE` verb so it gets its own policy key and its own approval card —
+the card is the only place a human sees "this wipes the log" before it happens. It returns
+`deletedDayFiles`, and that count is the evidence: a `0` is deliberately ambiguous (already empty
+vs. nothing could be deleted), so it is reported alongside `recordsRemaining` rather than as a
+success flag. The removal is checked per file; reporting "cleared" over a file that would not
+delete would make the caller believe history was gone when it was not.
+
+**Retention only ever ran at process start.** `prune()` was called from the constructor and nowhere
+else, so a long-lived bridge — the normal case, since the service runs for days — appended forever
+and enforced nothing until the next restart. That is the actual "grows forever" bug: the bounds
+existed and were correct, they just never ran. `append()` now calls `pruneIfNeeded()`, which stats
+bytes and day files (O(days), single digits) and only pays for a full prune when a bound is
+actually crossed. Enforcing on every write must not mean re-reading every line on every request.
+
+**A third bound: `maxLines` (5000).** Age alone lets a burst pack an enormous amount into seven
+days; the size cap alone lets an absurd number of tiny records live under 20 MiB, because a
+rejection record is a few hundred bytes. All three act on WHOLE DAY FILES, oldest first, and the
+newest file is never deleted — a day cannot be trimmed in half when the file name IS the date, so
+one very busy day can sit above the cap, bounded by that single day rather than by growth forever.
+The count is tracked in `storedLines` and deliberately not read from `index.size`, which is capped
+at `DEFAULT_MAX` for the list view and would therefore silently stop enforcing above 2000.
+
+**`unreadableCount()` no longer moves when nothing changed.** `line()` — a pure read that runs every
+time a detail row is opened — incremented the corruption counter on a failed file read, so browsing
+the log inflated the number that reports corruption. Reads do not measure; `load()` does. That is
+also why `audit.unreadableLines` could not be trusted as "7": it had four causes (unreadable file,
+unreadable line, bad JSON, unknown outcome) behind one int, and one of them was a side effect of
+looking.
+
+`/debug` now also reports `audit.maxLines` next to `maxBytes`/`maxAgeDays`, so the three bounds are
+visible from the same place.
+
+**3 new tests**, all in `AuditLogTest` (10 → 13): the count cap drops the oldest whole day, the cap
+never deletes the newest day even when it alone exceeds it, and reading a line does not inflate the
+counter. `clear()`'s new return value is asserted as `1`, not ignored.
+
+Version 0.43.35 / build 189.
 
 ---
 

@@ -33,6 +33,18 @@ class AuditLog(
     private val index = ArrayDeque<AuditHeader>()
     private var unreadable = 0
 
+    /**
+     * Records currently on disk, across every day file.
+     *
+     * Kept in memory so the count bound costs nothing to enforce on the append path —
+     * re-reading every file to count lines would make each write O(history). Set by
+     * [prune] after it has scanned once, and incremented by [append] afterwards.
+     *
+     * Deliberately NOT [index.size]: the index is capped at [DEFAULT_MAX] for the list
+     * view, so using it here would silently disable the count bound above that number.
+     */
+    private var storedLines = 0
+
     init {
         if (!dir.exists() && !dir.mkdirs()) {
             throw IllegalStateException("cannot create audit dir $dir")
@@ -60,6 +72,7 @@ class AuditLog(
             throw e
         }
         AuditHealth.clear()
+        storedLines++
         index.addFirst(
             AuditHeader(
                 id = record.id,
@@ -75,6 +88,7 @@ class AuditLog(
             )
         )
         while (index.size > DEFAULT_MAX) index.removeLast()
+        pruneIfNeeded()
     }
 
     @Synchronized
@@ -108,6 +122,13 @@ class AuditLog(
      * Matches on the JSON `"id":"..."` needle rather than parsing every line: the
      * detail screen wants the verbatim bytes, and re-serialising a parsed record
      * would hand back something that merely looks the same.
+     *
+     * **This method is a READ and must not mutate diagnostic state.** It used to
+     * increment [unreadable] when a day file would not read, which meant merely
+     * browsing the log inflated the corruption count — a diagnostic number that moves
+     * when nobody changed the thing it measures is not a diagnostic number. A failed
+     * read here returns null for that file and leaves the count alone; [load] is the
+     * one place that measures.
      */
     @Synchronized
     override fun line(id: String): String? {
@@ -116,7 +137,6 @@ class AuditLog(
             val lines = try {
                 f.readLines()
             } catch (e: Exception) {
-                unreadable++
                 continue
             }
             for (l in lines) {
@@ -129,11 +149,24 @@ class AuditLog(
     @Synchronized
     override fun unreadableCount(): Int = unreadable
 
+    /**
+     * Delete everything. Returns how many day files were removed.
+     *
+     * A file that will not delete is a real failure — reporting "cleared" over it would
+     * make the caller believe the log is gone when it is not. So the removal is checked
+     * per file and the count reflects what actually left the filesystem.
+     */
     @Synchronized
-    override fun clear() {
-        for (f in dayFilesNewestFirst()) f.delete()
+    override fun clear(): Int {
+        var deleted = 0
+        for (f in dayFilesNewestFirst()) {
+            if (f.delete()) deleted++
+        }
         index.clear()
         unreadable = 0
+        storedLines = 0
+        AuditHealth.clear()
+        return deleted
     }
 
     private fun dayFilesNewestFirst(): List<File> = allDayFiles().sortedByDescending { it.name }
@@ -172,25 +205,82 @@ class AuditLog(
     }
 
     /**
-     * Drop what the retention rule says to drop: first by age, then by total size.
+     * Drop what the retention rule says to drop: age first, then total size, then
+     * record count. All three bounds act on WHOLE DAY FILES, oldest first, so the
+     * newest history — the part someone debugging actually reads — is what survives.
      *
-     * Age goes first so a very old day cannot survive merely because the log is
-     * small. Size then deletes OLDEST FIRST, so the newest history — the part someone
-     * debugging actually reads — is what remains.
+     * **This is also the one place that RECONCILES [storedLines] with the disk.** It
+     * always measures rather than trusting a running total, because a number that only
+     * ever counts up cannot notice a file deleted from outside the app.
      */
     private fun prune() {
-        val cutoff = System.currentTimeMillis() - retention.maxAgeDays.toLong() * 24L * 60L * 60L * 1000L
+        val cutoff = System.currentTimeMillis() - retention.maxAgeDays.toLong() * DAY_MS
         for (f in allDayFiles().sortedBy { it.name }) {
             val ts = dayStart(f.name) ?: continue
             if (ts < cutoff) f.delete()
         }
 
-        var total = allDayFiles().sumOf { it.length() }
-        for (f in allDayFiles().sortedBy { it.name }) {
-            if (total <= retention.maxTotalBytes) break
-            val size = f.length()
-            if (f.delete()) total -= size
+        var files = allDayFiles().sortedBy { it.name }
+
+        var total = files.sumOf { it.length() }
+        if (total > retention.maxTotalBytes) {
+            for (f in files) {
+                if (total <= retention.maxTotalBytes) break
+                val size = f.length()
+                if (f.delete()) total -= size
+            }
+            files = allDayFiles().sortedBy { it.name }
         }
+
+        val perFile = LinkedHashMap<File, Int>()
+        var lines = 0
+        for (f in files) {
+            // A file that will not read contributes 0 to the count rather than
+            // aborting the prune: refusing to enforce a bound because one file is
+            // damaged is how a log grows forever.
+            val n = try {
+                f.readLines().count { it.isNotBlank() }
+            } catch (e: Exception) {
+                0
+            }
+            perFile[f] = n
+            lines += n
+        }
+
+        if (lines > retention.maxLines) {
+            // Oldest first, and the NEWEST file is never removed: the file name IS the
+            // date, so a day cannot be trimmed in half, and deleting today would leave
+            // the next write with no history. The cost is that one very busy day can
+            // sit above the bound — bounded by that single day, not by growth forever.
+            for (f in files.dropLast(1)) {
+                if (lines <= retention.maxLines) break
+                if (f.delete()) lines -= perFile[f] ?: 0
+            }
+        }
+
+        storedLines = lines
+    }
+
+    /**
+     * Prune only when a bound is actually crossed.
+     *
+     * The append path calls this on every write, so it runs on EVERY request the phone
+     * handles — it must stay cheap. Counting bytes and stat-ing the day files is O(days)
+     * (single digits); a full prune re-reads every line and is O(history), so it is not
+     * something to do per request. That is the difference between enforcement and a
+     * tax on the hot path.
+     */
+    private fun pruneIfNeeded() {
+        val cutoff = System.currentTimeMillis() - retention.maxAgeDays.toLong() * DAY_MS
+        var total = 0L
+        var hasStale = false
+        for (f in allDayFiles()) {
+            total += f.length()
+            val ts = dayStart(f.name)
+            if (ts != null && ts < cutoff) hasStale = true
+        }
+        if (!hasStale && total <= retention.maxTotalBytes && storedLines <= retention.maxLines) return
+        prune()
     }
 
     private fun dayStart(name: String): Long? = try {
@@ -202,6 +292,7 @@ class AuditLog(
     companion object {
         const val DEFAULT_MAX = 2000
         private const val SUFFIX = ".jsonl"
+        private const val DAY_MS = 24L * 60L * 60L * 1000L
 
         @Volatile
         private var singleton: AuditStore? = null

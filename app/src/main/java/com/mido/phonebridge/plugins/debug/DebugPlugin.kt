@@ -54,7 +54,17 @@ class DebugPlugin(private val ctx: Context) : Plugin {
             // is what exempts it from the model-readiness gate (Mido, 2026-10-19:
             // "we need to be able to disable AI summary for some endpoints").
             aiSummary = false
-        ) { report(it) }
+        ) { report(it) },
+        Route(
+            "DELETE", "/audit", "DELETE THE REQUEST LOG", Verb.DELETE,
+            // No AI: this is an operational control, not a decision to describe. It also
+            // must keep working when the model is not ready — being unable to clear a log
+            // because the AI is missing would be a poor trade.
+            aiSummary = false,
+            // The response is a count, but the record of the deletion must not itself be
+            // the only surviving record of a log the human asked to be gone.
+            auditResponseBody = true
+        ) { clearAudit(it) }
     )
 
     override fun status(): PluginStatus = PluginStatus(
@@ -62,6 +72,30 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         PluginStatus.State.OK,
         "GET /debug"
     )
+
+    /**
+     * Delete every stored record.
+     *
+     * This is the one route that can destroy audit history, so it is a `DELETE` verb — it
+     * gets its own policy key and its own approval card, and the card is the only place a
+     * human can see "this wipes the log" before it happens.
+     *
+     * Reports the number of day files actually removed. A 0 is ambiguous on purpose: it
+     * means either "the log was already empty" or "nothing could be deleted", and the
+     * caller should read it alongside `audit.days` rather than as a success flag.
+     */
+    private fun clearAudit(req: Req): Resp {
+        val removed = try {
+            AuditLog.from(ctx).clear()
+        } catch (e: Exception) {
+            return Resp.error(500, "audit_unavailable", e.message ?: "audit store unavailable")
+        }
+        return Resp.ok(
+            JSONObject()
+                .put("deletedDayFiles", removed)
+                .put("recordsRemaining", AuditLog.from(ctx).headers().size)
+        )
+    }
 
     private fun report(req: Req): Resp {
         val o = JSONObject()
@@ -276,6 +310,7 @@ class DebugPlugin(private val ctx: Context) : Plugin {
             o.put("totalBytes", stats.totalBytes)
             o.put("maxBytes", stats.retention.maxTotalBytes)
             o.put("maxAgeDays", stats.retention.maxAgeDays)
+            o.put("maxLines", stats.retention.maxLines)
             o.put("unreadableLines", store.unreadableCount())
             val days = JSONArray()
             for (d in stats.days) {

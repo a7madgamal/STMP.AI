@@ -135,6 +135,65 @@ class AuditLogTest {
     }
 
     @Test
+    fun `retention deletes whole day files until the record count is under the cap`() {
+        val dir = tmp.newFolder()
+        // Dates inside the age window, or the age rule removes them first and this
+        // stops testing the count bound at all.
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        fun day(offsetDays: Long) =
+            fmt.format(java.util.Date(System.currentTimeMillis() - offsetDays * 86_400_000L))
+        fun line(id: String) = JSONObject().put("id", id).put("outcome", "APPROVED").toString()
+
+        File(dir, "${day(2)}.jsonl").writeText((1..40).joinToString("\n") { line("a$it") } + "\n")
+        File(dir, "${day(1)}.jsonl").writeText((1..40).joinToString("\n") { line("b$it") } + "\n")
+        File(dir, "${day(0)}.jsonl").writeText((1..40).joinToString("\n") { line("c$it") } + "\n")
+
+        // 120 records on disk, cap at 100: the oldest whole day must go.
+        log(dir, AuditRetention(maxAgeDays = 7, maxTotalBytes = 20L * 1024 * 1024, maxLines = 100))
+
+        val left = dir.listFiles()!!.map { it.name }.sorted()
+        assertEquals(
+            "the oldest day is dropped to get under the count cap",
+            listOf("${day(1)}.jsonl", "${day(0)}.jsonl"),
+            left
+        )
+    }
+
+    @Test
+    fun `the count cap never deletes the newest day, even when it alone exceeds the cap`() {
+        val dir = tmp.newFolder()
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val today = fmt.format(java.util.Date())
+        val yesterday = fmt.format(java.util.Date(System.currentTimeMillis() - 86_400_000L))
+        fun line(id: String) = JSONObject().put("id", id).put("outcome", "APPROVED").toString()
+
+        File(dir, "$yesterday.jsonl").writeText((1..10).joinToString("\n") { line("y$it") } + "\n")
+        File(dir, "$today.jsonl").writeText((1..50).joinToString("\n") { line("t$it") } + "\n")
+
+        log(dir, AuditRetention(maxAgeDays = 7, maxTotalBytes = 20L * 1024 * 1024, maxLines = 5))
+
+        val left = dir.listFiles()!!.map { it.name }
+        assertEquals(
+            "a day cannot be split, so today survives alone rather than being emptied",
+            listOf("$today.jsonl"),
+            left
+        )
+    }
+
+    @Test
+    fun `reading a line never inflates the unreadable count`() {
+        val dir = tmp.newFolder()
+        val a = log(dir)
+        record(a, AuditOutcome.APPROVED)
+
+        // Browsing the detail rows is a READ. It used to tick the corrupt-line counter
+        // whenever a file failed to read, so a diagnostic number moved while nothing
+        // it measures had changed.
+        repeat(5) { a.line("no-such-id") }
+        assertEquals("reads must not mutate the diagnostic counter", 0, a.unreadableCount())
+    }
+
+    @Test
     fun `headers are newest first`() {
         val a = log()
         // Two records in different milliseconds so ordering is unambiguous.
@@ -201,7 +260,9 @@ class AuditLogTest {
         val a = log(dir)
         record(a, AuditOutcome.APPROVED)
         record(a, AuditOutcome.DENIED)
-        a.clear()
+        // The return value is the evidence: it names how many day files actually left
+        // the disk, so "cleared" is a measurement rather than a claim.
+        assertEquals("one day file was removed", 1, a.clear())
         assertEquals(0, a.headers().size)
         assertEquals("fresh instance also sees nothing", 0, log(dir).headers().size)
     }

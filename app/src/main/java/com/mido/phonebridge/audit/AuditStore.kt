@@ -20,8 +20,13 @@ interface AuditStore {
     /** How many lines could not be parsed or read. Never silently zero-by-default. */
     fun unreadableCount(): Int
 
-    /** Delete everything. */
-    fun clear()
+    /**
+     * Delete every stored record. Returns how many day files actually left the disk.
+     *
+     * The count is the evidence: a caller that sees 0 cannot assume the log was empty,
+     * because it may also mean nothing could be deleted.
+     */
+    fun clear(): Int
 
     /** What is on disk right now. */
     fun storageStats(): AuditStorage
