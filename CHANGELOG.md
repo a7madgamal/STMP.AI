@@ -3724,7 +3724,7 @@ Version 0.43.34 / build 188.
 
 ---
 
-## 0.43.35 — the log can be cleared, and it can no longer grow without limit (build 189) — CURRENT
+## 0.43.35 — the log can be cleared, and it can no longer grow without limit (build 189)
 2026-10-31
 
 Mido, 2026-10-31: *"nuke, and make sure it doesn't grow forever — limit by count, date or size"*.
@@ -3768,6 +3768,47 @@ never deletes the newest day even when it alone exceeds it, and reading a line d
 counter. `clear()`'s new return value is asserted as `1`, not ignored.
 
 Version 0.43.35 / build 189.
+
+---
+
+## 0.43.36 — the hint card remembers where you left it, per orientation (build 190) — CURRENT
+2026-10-31
+
+Requested as a backlog item: *"the NOTIFY card can be dragged, and the position resets to the
+default corner on every new card"*.
+
+**It did not persist at all.** The anchor was two in-process ints set to `dp(14)` on first use, so
+the position survived only until the process died — and the service is deliberately long-lived, so
+"every new card" and "every reboot" were the same bug seen twice. Now saved to
+`SharedPreferences` on drag-end.
+
+**Per orientation, because one key would be a bug that looks like a feature.** The card is anchored
+bottom-left, so a landscape position restored into portrait is a coordinate the user never chose.
+`CardAnchorStore` keeps `portrait`/`landscape` separately, and the in-memory anchor carries the
+orientation it belongs to — without that, a rotation would keep the old anchor and the per-
+orientation store would only ever be read after a fresh start.
+
+**One clamp rule, used by drag AND restore.** The old clamp lived inline in the drag handler, so a
+restored value would have bypassed it — and a position saved on a wider display would come back
+off-screen. In `NOTIFY` mode silence approves, so a card nobody can reach is a request approved by
+nobody: this is correctness, not polish. `CardAnchor.clamp` is pure and total, and it floors the
+ceiling at `minEdge` — a card taller than the screen collapses to the edge rather than handing
+`coerceIn` an inverted range, which throws.
+
+**Height is clamped twice, on purpose.** The card's real height is only known after layout, so the
+attach pass clamps X against a known width and Y against height 0; a post-layout pass re-clamps both
+with the measured height, which is what catches a long AI line growing the card off the bottom edge.
+
+An unset anchor loads as `null`, never a default position — a default is indistinguishable from a
+saved value and would place the card where nobody put it.
+
+**No reset button.** Mido, 2026-10-31: *"no need for reset"*. Dragging it back is the reset.
+
+**5 new tests** (`CardAnchorTest`): an in-bounds position is kept exactly, a position from a wider
+display is pulled back to the edge, a card larger than the screen collapses instead of throwing,
+portrait and landscape keep separate anchors, and an unset anchor is null rather than a default.
+
+Version 0.43.36 / build 190.
 
 ---
 

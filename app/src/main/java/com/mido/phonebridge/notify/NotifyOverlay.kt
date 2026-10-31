@@ -200,6 +200,15 @@ object NotifyOverlay {
     private var anchorY = Int.MIN_VALUE
 
     /**
+     * The orientation [anchorX]/[anchorY] belong to, or 0 when nothing has been placed yet.
+     *
+     * Needed because the anchor is in-process state: without this, rotating the phone would
+     * carry the old orientation's position into the new one, and the per-orientation store
+     * would only ever be read on the first card after a fresh start.
+     */
+    private var anchorOrientation = 0
+
+    /**
      * Offer one prompt. [onOutcome] runs once, on the main thread; safe to call from any
      * thread, and a server thread is normally blocked while this is on screen.
      */
@@ -388,9 +397,32 @@ object NotifyOverlay {
         )
 
         val size = screenSize(wm)
-        if (anchorX == Int.MIN_VALUE) {
-            anchorX = dp(EDGE_DP)
-            anchorY = dp(EDGE_DP)   // measured up from the bottom edge
+        val minEdge = dp(EDGE_DP)
+        val orientation = ctx.resources.configuration.orientation
+        // Restore the last position for THIS orientation. Reloaded whenever the orientation
+        // changed, because the in-memory anchor belongs to the other one — a landscape
+        // position kept across a rotation to portrait is exactly the bug this avoids.
+        //
+        // The clamp runs on RESTORE, not just on drag: a value saved on a wider display
+        // would otherwise come back off-screen and the card would be unreachable, which in
+        // this mode means a request nobody can see.
+        //
+        // Card height is not known until layout, so it is 0 here and the clamp is repeated
+        // in the post-layout pass below.
+        if (anchorX == Int.MIN_VALUE || anchorOrientation != orientation) {
+            val stored = CardAnchorStore.load(ctx, orientation)
+            val restored = CardAnchor.clamp(
+                x = stored?.x ?: minEdge,
+                y = stored?.y ?: minEdge,
+                screenWidth = size.first,
+                screenHeight = size.second,
+                cardWidth = dp(CARD_WIDTH_DP),
+                cardHeight = 0,
+                minEdge = minEdge,
+            )
+            anchorX = restored.x
+            anchorY = restored.y
+            anchorOrientation = orientation
         }
 
         val params = WindowManager.LayoutParams(
@@ -443,12 +475,19 @@ object NotifyOverlay {
                     val dy = ev.rawY - downY
                     if (!dragging && (abs(dx) > slop || abs(dy) > slop)) dragging = true
                     if (dragging) {
-                        val minEdge = dp(EDGE_DP)
-                        val maxX = (size.first - dp(CARD_WIDTH_DP) - minEdge).coerceAtLeast(minEdge)
-                        val maxY = (size.second - card.height - minEdge).coerceAtLeast(minEdge)
+                        // One clamp rule for drag and for restore — see CardAnchor.clamp.
                         // y is measured UP from the bottom edge, so dragging up ADDS.
-                        anchorX = (originX + dx).roundToInt().coerceIn(minEdge, maxX)
-                        anchorY = (originY - dy).roundToInt().coerceIn(minEdge, maxY)
+                        val clamped = CardAnchor.clamp(
+                            x = (originX + dx).roundToInt(),
+                            y = (originY - dy).roundToInt(),
+                            screenWidth = size.first,
+                            screenHeight = size.second,
+                            cardWidth = dp(CARD_WIDTH_DP),
+                            cardHeight = card.height,
+                            minEdge = minEdge,
+                        )
+                        anchorX = clamped.x
+                        anchorY = clamped.y
                         params.x = anchorX
                         params.y = anchorY
                         runCatching { wm.updateViewLayout(card, params) }
@@ -462,6 +501,10 @@ object NotifyOverlay {
                     if (dragging) {
                         anchorX = params.x
                         anchorY = params.y
+                        // Persist the position the user chose, for this orientation only.
+                        CardAnchorStore.save(
+                            ctx, anchorOrientation, CardAnchor(anchorX, anchorY)
+                        )
                     } else if (ev.actionMasked == MotionEvent.ACTION_UP) {
                         // Tap = approve, and skip whatever wait remains (fetch included).
                         // Settle only: this card is meant to fade out normally, and the
@@ -543,6 +586,31 @@ object NotifyOverlay {
         }
 
         entry.root = card
+
+        // Second half of the restore clamp: the card's real height is only known after
+        // layout, and a card that grew (a long AI line) can hang off the bottom edge even
+        // when its width fitted. X was already clamped at attach, so this only moves Y.
+        card.post {
+            val h = card.height
+            if (h > 0 && anchorOrientation == orientation) {
+                val re = CardAnchor.clamp(
+                    x = anchorX,
+                    y = anchorY,
+                    screenWidth = size.first,
+                    screenHeight = size.second,
+                    cardWidth = dp(CARD_WIDTH_DP),
+                    cardHeight = h,
+                    minEdge = minEdge,
+                )
+                if (re.x != anchorX || re.y != anchorY) {
+                    anchorX = re.x
+                    anchorY = re.y
+                    params.x = anchorX
+                    params.y = anchorY
+                    runCatching { wm.updateViewLayout(card, params) }
+                }
+            }
+        }
         // Stamped on attach, not on entry into show(): `main.post` may run late behind
         // other UI work, and a `shownAt` taken earlier would inflate every recorded
         // duration by exactly that delay. It is also the tick's zero point.
