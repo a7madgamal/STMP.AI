@@ -3771,7 +3771,7 @@ Version 0.43.35 / build 189.
 
 ---
 
-## 0.43.36 — the hint card remembers where you left it, per orientation (build 190) — CURRENT
+## 0.43.36 — the hint card remembers where you left it, per orientation (build 190)
 2026-10-31
 
 Requested as a backlog item: *"the NOTIFY card can be dragged, and the position resets to the
@@ -3809,6 +3809,59 @@ display is pulled back to the edge, a card larger than the screen collapses inst
 portrait and landscape keep separate anchors, and an unset anchor is null rather than a default.
 
 Version 0.43.36 / build 190.
+
+---
+
+## 0.43.37 — the AI backend is a choice: off, local, or a box on the tailnet (build 191) — CURRENT
+2026-10-31
+
+Backlog item: *"Off = no summary and no risk, deterministic rows only (must not 503 the bridge).
+Local = the on-device `.litertlm` (current). External = Ollama or unsloth server over the tailnet."*
+
+**`aiEnabled: Boolean` became `aiBackend: OFF | LOCAL | EXTERNAL`.** "The AI is on" stopped being
+one thing the moment a remote backend became possible: LOCAL needs a model file on disk, EXTERNAL
+needs a host that answers, and they fail in different ways. A boolean would have had to mean one of
+them and hide the other behind a second flag that could disagree with it — two settings that can
+contradict each other is how a bridge ends up refusing everything for a reason nobody set.
+
+**`serves()` asks the BACKEND, not the model registry.** This was the load-bearing part. The old
+check was `ModelRegistry.readiness(ctx).ready`, which for EXTERNAL would have been permanently
+false — the build would have answered `503 model_not_ready` about a model file that path never
+loads. Now each backend answers for itself, and `notReadyDetail` names the actual cause instead of
+always blaming a missing file.
+
+**A dead box REFUSES the request (Mido, 2026-10-31: *"fail"*).** The AI is core here, so a null
+summary already fails the request; quietly dropping to rows-only for this one backend would be the
+silent fallback this project forbids. Reachability is probed on the request path (1.5s timeout,
+cached 3s so one request does not pay twice) so the refusal lands BEFORE a modal is built, with an
+error naming the endpoint and telling the human to start it or switch back.
+
+**The prompt and the parser moved into `AiReply`, shared.** Two copies — one per backend — would
+have drifted the first time either was tuned, and the drift would be invisible: both would still
+answer, and only the summaries would disagree. The system prompt is the specification and the
+parser is the check on it, so they are now one file. The prompt text is carried across verbatim,
+comment block included: every clause in it was bought with a specific failure.
+
+**Secrets cannot leak to the external box, by ORDERING rather than by a filter.** The AI step runs
+before the broker substitutes anything — `rawBody` is read from the socket at `BridgeService`, the
+facts are built inside the approval view, and `***` becomes the real credential only inside the
+handler that runs after `ApprovalGate.await`. So what crosses the wire is the literal placeholder.
+No redaction pass was added, because none is needed and a filter would have implied the ordering
+was not guaranteed.
+
+`EXTERNAL_AI_URL` comes from `local.properties` so a different host needs no code change; empty
+falls back to the compiled default. The model tag is a constant (`qwen3:8b`) — the point of this
+backend is "bigger than the phone's", and a free-text field would be one more thing to get wrong.
+
+The Options row is three buttons rather than a toggle: three states cannot be expressed as on/off
+without hiding which one is active. The EXTERNAL text states the refusal behaviour plainly, so a
+human choosing it reads the trade-off there rather than discovering it when the LAN box is asleep.
+
+**`PolicyTest` rewritten for the tri-state** — including that an unknown value falls back to OFF
+(the direction that frees memory and never reaches a network box) rather than guessing. Suite: 360
+tests, 0 failures.
+
+Version 0.43.37 / build 191.
 
 ---
 

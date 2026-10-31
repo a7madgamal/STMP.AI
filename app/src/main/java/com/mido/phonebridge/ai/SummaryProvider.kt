@@ -59,8 +59,12 @@ object SummaryProvider {
      * up early); this adds a hard wall so a wedged native call cannot pin the caller.
      * A wall-clock overrun discards the result rather than using a late answer.
      */
-    fun run(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
-        val model = ModelRegistry.active(ctx)
+    fun run(
+        ctx: Context,
+        model: SummaryModel,
+        facts: RequestFacts,
+        budgetMs: Long,
+    ): RequestSummary? {
         if (!model.isAvailable(ctx)) return null
         return try {
             val future = pool.submit<RequestSummary?> { model.summarize(ctx, facts, budgetMs) }

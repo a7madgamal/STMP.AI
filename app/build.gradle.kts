@@ -71,13 +71,18 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 190
-        versionName = "0.43.36"
+        versionCode = 191
+        versionName = "0.43.37"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
         buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"${localProp("google.serverClientId")}\"")
         buildConfigField("String", "GOOGLE_CLIENT_SECRET", "\"${localProp("google.clientSecret")}\"")
+
+        // Where the EXTERNAL AI backend lives (see AiBackend.EXTERNAL). Empty means "not
+        // configured", and ExternalModel falls back to its compiled default. Kept in
+        // local.properties so a different host does not need a code change.
+        buildConfigField("String", "EXTERNAL_AI_URL", "\"${localProp("ai.externalUrl")}\"")
 
         /*
          * arm64 ONLY. The litertlm AAR ships native libraries for BOTH arm64-v8a and

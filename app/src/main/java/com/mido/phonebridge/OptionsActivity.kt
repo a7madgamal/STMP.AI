@@ -117,22 +117,14 @@ class OptionsActivity : Activity() {
 
         container.addView(Theme.sectionHeader(this, "AI"))
 
-        // --- AI on/off ---
+        // --- AI backend: off / local / external ---
+        //
+        // A three-way choice, not a toggle. "AI on" stopped being one thing when a remote
+        // backend became possible: LOCAL loads the on-device model file, EXTERNAL asks a box on
+        // the tailnet, and they fail differently. A toggle would have to mean one of them and
+        // hide the other behind a second setting that could disagree with it.
         container.addView(
-            toggleRow(
-                title = "AI summaries",
-                state = if (policy.aiEnabled) "ON" else "OFF",
-                detail = if (policy.aiEnabled) {
-                    "Each request is described and risk-labelled on the device before you decide. " +
-                        "The model stays loaded, so it costs memory while the server runs."
-                } else {
-                    "No model is loaded, no request is described, and nothing is downloaded. " +
-                        "You still see the exact target and payload — the rows are built " +
-                        "deterministically. This frees the memory the model holds."
-                },
-                colour = if (policy.aiEnabled) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
-                onToggle = { save(store, policy.withAiEnabled(!policy.aiEnabled)) }
-            )
+            aiBackendRow(store, policy)
         )
 
         container.addView(Theme.spacer(this, 16))
@@ -144,6 +136,102 @@ class OptionsActivity : Activity() {
                 12f, Theme.ON_SURFACE_VARIANT
             )
         )
+    }
+
+    /**
+     * The AI backend block: current state, what it costs, and one button per alternative.
+     *
+     * Buttons name the DESTINATION ("use local", "use external") rather than toggling, because
+     * three states cannot be expressed as on/off without hiding which one is active.
+     *
+     * The external row states the failure mode plainly: an unreachable box refuses requests
+     * rather than approving them without a description. That is a decision (Mido, 2026-10-31:
+     * *"fail"*) and a human choosing EXTERNAL should read it here, not discover it later when the
+     * LAN box is asleep.
+     */
+    private fun aiBackendRow(
+        store: com.mido.phonebridge.policy.PolicyStore,
+        policy: com.mido.phonebridge.policy.Policy,
+    ): LinearLayout {
+        val current = policy.aiBackend
+        val block = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12),
+                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12)
+            )
+            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+        }
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        header.addView(
+            Theme.text(this, "AI summaries", 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(this@OptionsActivity)
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+            }
+        )
+        header.addView(
+            Theme.text(
+                this,
+                when (current) {
+                    com.mido.phonebridge.policy.AiBackend.OFF -> "OFF"
+                    com.mido.phonebridge.policy.AiBackend.LOCAL -> "LOCAL"
+                    com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "EXTERNAL"
+                },
+                13f,
+                if (current == com.mido.phonebridge.policy.AiBackend.OFF) {
+                    Theme.ON_SURFACE_VARIANT
+                } else {
+                    Theme.SUCCESS
+                }
+            )
+        )
+        block.addView(header)
+        block.addView(
+            Theme.text(
+                this,
+                when (current) {
+                    com.mido.phonebridge.policy.AiBackend.OFF ->
+                        "No model is loaded, no request is described, and nothing is downloaded. " +
+                            "You still see the exact target and payload — the rows are built " +
+                            "deterministically. This frees the memory the model holds."
+                    com.mido.phonebridge.policy.AiBackend.LOCAL ->
+                        "Each request is described and risk-labelled on the device before you " +
+                            "decide. The model stays loaded, so it costs memory while the server runs."
+                    com.mido.phonebridge.policy.AiBackend.EXTERNAL ->
+                        "Requests are described by a model server on your tailnet. If that box is " +
+                            "unreachable, requests are REFUSED with an error naming it — never " +
+                            "approved without a description. Nothing is loaded on the phone."
+                },
+                12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0) }
+        )
+
+        // One button per state that is not the current one.
+        val choices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, Theme.dp(this@OptionsActivity, 10), 0, 0)
+        }
+        for (target in com.mido.phonebridge.policy.AiBackend.values()) {
+            if (target == current) continue
+            val label = when (target) {
+                com.mido.phonebridge.policy.AiBackend.OFF -> "turn off"
+                com.mido.phonebridge.policy.AiBackend.LOCAL -> "use local"
+                com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "use external"
+            }
+            choices.addView(
+                Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true) {
+                    save(store, policy.withAiBackend(target))
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = Theme.dp(this@OptionsActivity, 8) }
+            )
+        }
+        block.addView(choices)
+        return block
     }
 
     /**

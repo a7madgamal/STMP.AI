@@ -36,17 +36,21 @@ class Policy(
      */
     val fingerprintForModals: Boolean = false,
     /**
-     * Is the AI on at all?
+     * Which summariser to use, if any.
      *
      * **Default OFF** (Mido, 2026-10-20: *"off means every damn AI feature completely off... free
-     * memory and just bypass any AI related function"*). When false, [AiGateway] never loads, never
+     * memory and just bypass any AI related function"*). With OFF, [AiGateway] never loads, never
      * provisions and never summarises, and readiness is satisfied unconditionally, so no route
      * answers `503 model_not_ready`.
      *
-     * Also parse-lenient for the same reason as [fingerprintForModals]: a preference must not be
-     * able to refuse to start the server.
+     * **Three values, not a boolean** — see [AiBackend]. EXTERNAL is a different trust boundary
+     * and a different failure mode from LOCAL, and a boolean cannot say which is meant.
+     *
+     * Parsed leniently for the same reason as [fingerprintForModals]: a preference must never be
+     * able to refuse to start the server. An unreadable value falls back to OFF, which is the
+     * safe direction — it frees memory rather than silently reaching out to a network box.
      */
-    val aiEnabled: Boolean = false,
+    val aiBackend: AiBackend = AiBackend.OFF,
     /**
      * Does the bridge start itself — after a reboot, after an app update, and on app load?
      *
@@ -88,7 +92,7 @@ class Policy(
         // Their ABSENCE is meaningful: a policy written before these existed parses with the
         // defaults, which is why VERSION does not move (see [parse]).
         .put("fingerprintForModals", fingerprintForModals)
-        .put("aiEnabled", aiEnabled)
+        .put("aiBackend", aiBackend.name)
         .put("autoStartOnBoot", autoStartOnBoot)
         .put(
             "rules",
@@ -123,7 +127,7 @@ class Policy(
             // requirement back on, or stop the bridge from restarting after a reboot, every time
             // someone added a rule.
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled,
+            aiBackend = aiBackend,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -133,7 +137,7 @@ class Policy(
             global = global,
             rules = rules.filterNot { it.plugin == plugin && it.verb == verb },
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled,
+            aiBackend = aiBackend,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -143,7 +147,7 @@ class Policy(
             global = mode,
             rules = rules,
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled,
+            aiBackend = aiBackend,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -153,17 +157,17 @@ class Policy(
             global = global,
             rules = rules,
             fingerprintForModals = enabled,
-            aiEnabled = aiEnabled,
+            aiBackend = aiBackend,
             autoStartOnBoot = autoStartOnBoot
         )
 
-    /** A new policy with the AI preference changed. */
-    fun withAiEnabled(enabled: Boolean): Policy =
+    /** A new policy with the AI backend changed. */
+    fun withAiBackend(backend: AiBackend): Policy =
         Policy(
             global = global,
             rules = rules,
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = enabled,
+            aiBackend = backend,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -173,7 +177,7 @@ class Policy(
             global = global,
             rules = rules,
             fingerprintForModals = fingerprintForModals,
-            aiEnabled = aiEnabled,
+            aiBackend = aiBackend,
             autoStartOnBoot = enabled
         )
 
@@ -227,7 +231,7 @@ class Policy(
             }
             val warnings = ArrayList<String>(3)
             val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
-            val ai = lenientFlag(o, "aiEnabled", false, warnings)
+            val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
@@ -235,7 +239,7 @@ class Policy(
                 global = global,
                 rules = rules,
                 fingerprintForModals = fingerprint,
-                aiEnabled = ai,
+                aiBackend = backend,
                 autoStartOnBoot = autoStart,
                 preferenceWarnings = warnings
             )
@@ -271,6 +275,33 @@ class Policy(
                     "using default $default"
             )
             return default
+        }
+
+        private fun lenientBackend(
+            o: JSONObject,
+            key: String,
+            default: AiBackend,
+            warnings: MutableList<String>,
+        ): AiBackend {
+            if (!o.has(key)) return default
+            val raw = o.opt(key)
+            if (raw !is String) {
+                warnings.add(
+                    "'$key' is not a string (${raw?.javaClass?.simpleName ?: "null"}); " +
+                        "using default ${default.name}"
+                )
+                return default
+            }
+            // An unknown NAME falls back rather than throwing, and the fallback is OFF: the
+            // direction that frees memory and never reaches a network box. A typo must not be
+            // able to silently select EXTERNAL, so this is a whitelist, not a guess.
+            return AiBackend.values().firstOrNull { it.name == raw } ?: run {
+                warnings.add(
+                    "'$key' has unknown value '$raw'; this build understands " +
+                        AiBackend.values().joinToString(", ") + " — using ${default.name}"
+                )
+                default
+            }
         }
 
         private fun parseRule(o: JSONObject, index: Int): Rule {

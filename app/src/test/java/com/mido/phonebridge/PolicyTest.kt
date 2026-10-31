@@ -1,6 +1,7 @@
 package com.mido.phonebridge
 
 import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.policy.AiBackend
 import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.ModeSource
@@ -488,7 +489,7 @@ class PolicyTest {
         val raw = """{"version":1,"global":"SECURE","rules":[]}"""
         val p = Policy.parse(raw)
         assertEquals(false, p.fingerprintForModals)
-        assertEquals(false, p.aiEnabled)
+        assertEquals(AiBackend.OFF, p.aiBackend)
         // Auto-start is the ONE preference that defaults ON: an install predating it should get
         // the new behaviour without a migration, because a bridge that only runs after someone
         // opens the app is the bug this release fixes.
@@ -523,18 +524,18 @@ class PolicyTest {
             GlobalMode.AUTOMATIC,
             emptyList(),
             fingerprintForModals = true,
-            aiEnabled = true,
+            aiBackend = AiBackend.LOCAL,
             autoStartOnBoot = false,
         )
         val afterRule = base.withRule(PolicyRule("gmail", Verb.READ, Mode.NOTIFY))
         assertEquals(false, afterRule.autoStartOnBoot)
-        assertEquals(true, afterRule.aiEnabled)
+        assertEquals(AiBackend.LOCAL, afterRule.aiBackend)
 
         val afterGlobal = base.withGlobal(GlobalMode.SECURE)
         assertEquals(false, afterGlobal.autoStartOnBoot)
         assertEquals(true, afterGlobal.fingerprintForModals)
 
-        val afterAi = base.withAiEnabled(false)
+        val afterAi = base.withAiBackend(AiBackend.OFF)
         assertEquals(false, afterAi.autoStartOnBoot)
         assertEquals(true, afterAi.fingerprintForModals)
     }
@@ -542,10 +543,10 @@ class PolicyTest {
     @Test
     fun `a preference is read when present`() {
         val raw = """{"version":1,"global":"SECURE","rules":[],""" +
-            """"fingerprintForModals":true,"aiEnabled":true}"""
+            """"fingerprintForModals":true,"aiBackend":"LOCAL"}"""
         val p = Policy.parse(raw)
         assertEquals(true, p.fingerprintForModals)
-        assertEquals(true, p.aiEnabled)
+        assertEquals(AiBackend.LOCAL, p.aiBackend)
     }
 
     @Test
@@ -554,17 +555,17 @@ class PolicyTest {
         // the server. `optBoolean` would coerce "yes" to false silently; this asserts the value
         // is ignored AND that the file still parses, which is the contract.
         val raw = """{"version":1,"global":"SECURE","rules":[],""" +
-            """"fingerprintForModals":"yes","aiEnabled":0}"""
+            """"fingerprintForModals":"yes","aiBackend":0}"""
         val p = Policy.parse(raw)
         assertEquals(false, p.fingerprintForModals)
-        assertEquals(false, p.aiEnabled)
+        assertEquals(AiBackend.OFF, p.aiBackend)
     }
 
     @Test
     fun `a preference does not weaken the STRICT fields`() {
         // The line that must not blur: leniency was added for two preferences, not for the gate.
         // `global` stays a hard error, or a typo would silently reattach a gate someone turned off.
-        val raw = """{"version":1,"global":"NONSENSE","rules":[],"aiEnabled":true}"""
+        val raw = """{"version":1,"global":"NONSENSE","rules":[],"aiBackend":"LOCAL"}"""
         assertThrows(PolicyException::class.java) { Policy.parse(raw) }
     }
 
@@ -577,16 +578,16 @@ class PolicyTest {
             GlobalMode.AUTOMATIC,
             listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
             fingerprintForModals = true,
-            aiEnabled = true
+            aiBackend = AiBackend.LOCAL
         )
         val next = base.withRule(PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
         assertEquals(true, next.fingerprintForModals)
-        assertEquals(true, next.aiEnabled)
+        assertEquals(AiBackend.LOCAL, next.aiBackend)
         assertEquals(2, next.rules.size)
 
         val removed = next.withoutRule("calendar", Verb.READ)
         assertEquals(true, removed.fingerprintForModals)
-        assertEquals(true, removed.aiEnabled)
+        assertEquals(AiBackend.LOCAL, removed.aiBackend)
     }
 
     @Test
@@ -597,12 +598,12 @@ class PolicyTest {
             GlobalMode.SECURE,
             listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
             fingerprintForModals = true,
-            aiEnabled = true
+            aiBackend = AiBackend.LOCAL
         )
         val next = base.withGlobal(GlobalMode.AUTOMATIC)
         assertEquals(GlobalMode.AUTOMATIC, next.global)
         assertEquals(true, next.fingerprintForModals)
-        assertEquals(true, next.aiEnabled)
+        assertEquals(AiBackend.LOCAL, next.aiBackend)
         // And the rules, which `Policy(after)` alone used to wipe.
         assertEquals(1, next.rules.size)
     }
@@ -616,12 +617,12 @@ class PolicyTest {
                 GlobalMode.AUTOMATIC,
                 listOf(gmailDelete),
                 fingerprintForModals = true,
-                aiEnabled = true
+                aiBackend = AiBackend.LOCAL
             )
         )
         val reread = PolicyStore(dir).get()
         assertEquals(true, reread.fingerprintForModals)
-        assertEquals(true, reread.aiEnabled)
+        assertEquals(AiBackend.LOCAL, reread.aiBackend)
         assertEquals(1, reread.rules.size)
         assertEquals(GlobalMode.AUTOMATIC, reread.global)
     }
