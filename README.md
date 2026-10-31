@@ -51,11 +51,15 @@ bytes never enter the audit log.
 | **ssh** | Run a command on a host, with a key generated *on the phone* |
 | **todoist** | Tasks, through the same vault broker |
 | **logs / debug** | The app's own logcat and state, so a broken bridge can explain itself |
+| **audio** | Play one of three short attention cues on the phone |
 
 ## The gate
 
 Every route declares a `Verb` (`READ`, `WRITE`, `EDIT`, `DELETE`, `EXECUTE`) and every request goes
-through `ApprovalGate` before a handler runs. A plugin cannot opt out.
+through `ApprovalGate` before a handler runs. A plugin cannot opt out — with **one** deliberate
+exception, `POST /audio/{cue}`, because a cue whose job is to make someone look at the phone cannot
+require them to look first. That route can only make a short noise, and it still writes a normal
+audit record. See `Route.gateExempt` for why the flag must not spread.
 
 Three modes, set per plugin/verb pair:
 
@@ -181,6 +185,9 @@ purpose: several entries exist to stop a future change undoing a fix that was pa
 ## Credits
 
 Handlee by Joe Prince — SIL Open Font License, see `OFL-Handlee.txt`.
+
+The attention cues (`res/raw/cue_*.ogg`) are from Kenney's "Interface Sounds" 1.0 pack, released
+under CC0 (public domain). Provenance per file is recorded in `assets/cue-attribution.txt`.
 Stamp and paper-crease audio are from Freesound; check the licence terms of the specific recordings
 before redistributing.
 
