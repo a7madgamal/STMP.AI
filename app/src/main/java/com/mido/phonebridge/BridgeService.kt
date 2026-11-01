@@ -737,6 +737,12 @@ class BridgeService : Service() {
         if (PluginRegistry.get("help") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.help.HelpPlugin(applicationContext))
         }
+        // The human liveness check: a real gated request with no dependencies, so a fresh
+        // install can prove the gate reaches the phone before any Google login or vault exists.
+        // `/status` stays the machine one — ungated and safe to poll.
+        if (PluginRegistry.get("probe") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.probe.ProbePlugin(applicationContext))
+        }
         // The metadata half of the secrets feature: a route that answers "what is this
         // secret, where are its docs, what may it reach" WITHOUT the value. Registered
         // once (not per secret) because it serves the whole index.

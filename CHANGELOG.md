@@ -4074,7 +4074,7 @@ Version 0.43.41 / build 195.
 
 ---
 
-## 0.43.42 — a blocked gate names its cause, and every text input is readable (build 196) — CURRENT
+## 0.43.42 — a blocked gate names its cause, and every text input is readable (build 196)
 2026-11-01
 
 Two defects with the same shape: the app knew what was wrong and told the human something else.
@@ -4109,6 +4109,40 @@ next input added inherits the rule rather than the bug.
 374 tests, 0 failures. Input contrast is not unit-testable — it needs the device.
 
 Version 0.43.42 / build 196.
+
+---
+
+## 0.43.43 — GET /probe: prove the gate reaches you, with no setup (build 197) — CURRENT
+2026-11-01
+
+Every real route has a prerequisite that may not exist yet: Gmail needs a login, `/notifications`
+needs the listener permission, Drive needs a scope, a secret route needs a vault entry, SSH needs a
+connection. So a first-run check built on any of them fails for a reason that has nothing to do with
+the gate — and the human concludes the gate is broken when it is only unconfigured.
+
+`GET /probe` has **zero dependencies by construction**. No Google account, no vault, no permission,
+no model. If it answers, the gate answered.
+
+**Approve passes AND deny passes** (Mido, 2026-11-01: *"the gate should offer to unlock so the user
+doesn't click approve on a broken gate like a fool"* — the same instinct, one level up). The claim
+being tested is "a human is asked and the answer is honoured", not "the request runs". A `403 denied`
+here is the product working: the gate refused and the handler never executed. Treating a denial as a
+failed probe would teach someone to approve everything on reflex, which is the opposite of the
+point.
+
+`aiSummary = false`, because the AI is core and the model is a ~474 MB download a fresh install has
+not made yet. A probe that waited for the model would answer `503 model_not_ready` at the exact
+moment it matters most.
+
+**It stays forever** (Mido: *"keep it just in case"*), as the HUMAN liveness check. `/status` remains
+the machine one: ungated, 404 means alive, safe to poll. The split is deliberate — a gated route
+must never be a watcher target, which is the bug that produced 523 approval cards in six days.
+
+Adding a route moved `contractVersion` to 2, and the guard caught the pin: `HelpContractTest` pins
+the route set, so a new route without a bump fails the build with a message naming both edits. That
+is the guard doing exactly what it was built for on its first real outing.
+
+Version 0.43.43 / build 197.
 
 ---
 
