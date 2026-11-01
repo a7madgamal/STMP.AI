@@ -3865,7 +3865,7 @@ Version 0.43.37 / build 191.
 
 ---
 
-## 0.43.38 — attention cues, the one route that does not ask (build 192) — CURRENT
+## 0.43.38 — attention cues, the one route that does not ask (build 192)
 2026-10-31
 
 Backlog item: *"let agents play sounds to get user attention — a route that plays a short sound so
@@ -3914,6 +3914,58 @@ hand and no plugin had ever thrown it. A plugin throwing it would have answered 
 logged as a server fault. Now classified as 403, with the history recorded at the entry.
 
 Version 0.43.38 / build 192.
+
+---
+
+## 0.43.39 — the bridge binds any reachable address, not just a tailnet one (build 193) — CURRENT
+2026-11-01
+
+Tailscale was a hard requirement, and nobody had decided that.
+
+`tailnetAddress()` returned an IPv4 only in `100.64.0.0/10` and `null` for everything else, and
+`BridgeService` treated `null` as "refuse to start", retry on a ladder, then sit waiting. So a
+phone on ordinary Wi-Fi could not serve at all — and the only evidence was a notification telling
+the human to open Tailscale. A recommendation had become a precondition inside a helper whose name
+did not say so. Mido, 2026-11-01: *"tailscale only offers an ip over internet, in theory if the
+bridge is using the same network it should still work without tailscale at all."*
+
+**The rule moved into `core/BindAddress`, a pure object**, so it can be asserted without a device —
+the same extraction `HostAllowlist`, `ResponseBody`, `StartupRetry` and `VaultState` already get. A
+bind decision buried in an interface loop is a decision nobody can test.
+
+Order: prefer the tailnet (the only address that survives leaving the network), then `wlan`/`eth`,
+then anything left. Rejections are the interesting half:
+
+- **loopback** — reachable only from the phone itself, so binding it makes the bridge look alive
+  while being unreachable from the agent;
+- **link-local `169.254/16`** — that is a failed DHCP lease, not an address;
+- **IPv6** — the server binds IPv4;
+- **cellular (`rmnet`/`ccmni`/`pdp`/`seth`)** — a valid IPv4 that no inbound connection can reach,
+  because the carrier NATs it. Binding one reports success and every caller times out, which is
+  the worst shape a failure can take.
+
+Null now means only "the phone has no reachable address" (airplane mode), and the caller still
+treats it as wait-never-bind-`0.0.0.0`: a wildcard bind is a decision nobody made.
+
+`BridgeStatusNotice.WAITING_FOR_TAILNET` became `WAITING_FOR_ADDRESS`, and the copy lost Tailscale
+as a requirement — "It will start by itself as soon as the phone is on a network", and the stopped
+state says "Check Wi-Fi or Tailscale" because Tailscale is now one option among two.
+
+**Tailscale is now a recommendation made once, on the onboarding screen** ("recommended so your
+agent can reach the phone from anywhere; without it, your agent must be on the same network").
+No toggle, no conditional ladder, no rebind.
+
+**Two things accepted as debt, deliberately.** Anyone who can reach the phone's address can reach
+the bridge, and `/help` is exempt — so route names, secret instance names and allowed hosts are
+readable from that network without a tap. Real operations still require a tap. Hardening comes
+after open source.
+
+**10 new tests** (`BindAddressTest`, 360 → 370), including the regression this change exists for:
+a Wi-Fi address alone now returns an address instead of null. Also pinned: the tailnet range
+boundaries are exact at `100.64` and `100.127/128`, since an off-by-one there either steals a
+carrier address or refuses a real tailnet one.
+
+Version 0.43.39 / build 193.
 
 ---
 

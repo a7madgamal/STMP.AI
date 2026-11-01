@@ -15,8 +15,8 @@ import org.junit.Test
  * new state could be added while the notification still described the old one, with no error and
  * no log. Extracting it means the states are enumerable and every one can be asserted.
  *
- * The `WAITING_FOR_TAILNET` case is the one that matters most: it exists because the service used
- * to stop after the retry ladder, which meant reconnecting Tailscale left the bridge down. Its
+ * The `WAITING_FOR_ADDRESS` case is the one that matters most: it exists because the service used
+ * to stop after the retry ladder, which meant the bridge stayed down after the network came back. Its
  * copy has to tell the human that doing NOTHING is correct, which is the opposite of what the old
  * "not running" wording implied.
  */
@@ -34,7 +34,7 @@ class BridgeStatusNoticeTest {
     fun `the waiting copy says it starts by itself`() {
         // The whole point of the state: the required action is none. If this copy ever tells the
         // human to do something, the state has lost its reason to exist.
-        val text = BridgeStatusNotice.text(Kind.WAITING_FOR_TAILNET, 0, 4)
+        val text = BridgeStatusNotice.text(Kind.WAITING_FOR_ADDRESS, 0, 4)
         assertTrue(
             "waiting copy must say it recovers on its own, got: $text",
             text.contains("by itself", ignoreCase = true),
@@ -53,7 +53,7 @@ class BridgeStatusNoticeTest {
         // them remove the only sign that it is waiting. STOPPED is a finished outcome, so it is
         // the one case that may be dismissed.
         assertTrue(BridgeStatusNotice.ongoing(Kind.RETRYING))
-        assertTrue(BridgeStatusNotice.ongoing(Kind.WAITING_FOR_TAILNET))
+        assertTrue(BridgeStatusNotice.ongoing(Kind.WAITING_FOR_ADDRESS))
         assertFalse(BridgeStatusNotice.ongoing(Kind.STOPPED))
     }
 
@@ -71,9 +71,11 @@ class BridgeStatusNoticeTest {
     }
 
     @Test
-    fun `the stopped copy names Tailscale as the thing to check`() {
-        // The only state that asks the human to act, so it has to say what to act ON.
+    fun `the stopped copy names what to check`() {
+        // The only state that asks the human to act, so it has to say what to act ON. Tailscale is
+        // named as ONE option, not as the requirement it used to be: a phone on plain Wi-Fi is a
+        // supported setup now.
         val text = BridgeStatusNotice.text(Kind.STOPPED, 0, 4)
-        assertTrue("got: $text", text.contains("Tailscale"))
+        assertTrue("must name a network to check, got: $text", text.contains("Wi-Fi"))
     }
 }

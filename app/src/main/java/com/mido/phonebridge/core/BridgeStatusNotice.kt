@@ -10,7 +10,7 @@ package com.mido.phonebridge.core
  * the service is actually doing. Same extraction rule as `HostAllowlist`, `ResponseBody` and
  * `ServerStatus`: a decision a human reads belongs where a test can fail on it.
  *
- * **Three states, and the third one exists because of a real gap.** `WAITING_FOR_TAILNET` is new
+ * **Three states, and the third one exists because of a real gap.** `WAITING_FOR_ADDRESS` is new
  * (2026-10-25): the service used to stop itself once the retry ladder was spent, so turning
  * Tailscale back on left the bridge down until someone opened the app. It now stays alive and
  * watches for the tailnet instead, and this state is what tells the human that waiting is the
@@ -28,7 +28,7 @@ object BridgeStatusNotice {
          * Distinct from [STOPPED] because the required action is different: nothing. It starts
          * by itself the moment Tailscale connects.
          */
-        WAITING_FOR_TAILNET,
+        WAITING_FOR_ADDRESS,
 
         /**
          * Not running, and nothing is watching. The human must act.
@@ -42,7 +42,7 @@ object BridgeStatusNotice {
 
     fun title(kind: Kind): String = when (kind) {
         Kind.RETRYING -> "PhoneBridge can't start yet"
-        Kind.WAITING_FOR_TAILNET -> "PhoneBridge is waiting for Tailscale"
+        Kind.WAITING_FOR_ADDRESS -> "PhoneBridge is waiting for a network"
         Kind.STOPPED -> "PhoneBridge is not running"
     }
 
@@ -51,15 +51,15 @@ object BridgeStatusNotice {
      * @param maxAttempts total attempts in the ladder, so the copy cannot drift from the schedule.
      */
     fun text(kind: Kind, attempt: Int, maxAttempts: Int): String = when (kind) {
-        Kind.RETRYING -> "No Tailscale address yet — retrying ($attempt/$maxAttempts)."
-        Kind.WAITING_FOR_TAILNET ->
-            "It will start by itself as soon as Tailscale connects."
-        Kind.STOPPED -> "No Tailscale address. Open the app and check Tailscale."
+        Kind.RETRYING -> "No network address yet — retrying ($attempt/$maxAttempts)."
+        Kind.WAITING_FOR_ADDRESS ->
+            "It will start by itself as soon as the phone is on a network."
+        Kind.STOPPED -> "No network address. Check Wi-Fi or Tailscale, then open the app."
     }
 
     /** Ongoing = the service is still working on it, so the human cannot dismiss it away. */
     fun ongoing(kind: Kind): Boolean = when (kind) {
-        Kind.RETRYING, Kind.WAITING_FOR_TAILNET -> true
+        Kind.RETRYING, Kind.WAITING_FOR_ADDRESS -> true
         Kind.STOPPED -> false
     }
 

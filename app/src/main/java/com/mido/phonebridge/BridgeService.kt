@@ -219,14 +219,14 @@ class BridgeService : Service() {
      * **Why a callback AND a poll.** `registerDefaultNetworkCallback` fires when the default
      * network changes, which is what happens when Tailscale connects (it is a VPN, so it becomes
      * the default network). That makes the common case instant. But a callback is not a promise
-     * that every interface change produces a `Network` object, and `tailnetAddress()` reads
+     * that every interface change produces a `Network` object, and `chooseBindAddress()` reads
      * interfaces directly — so a slow poll backs it up. The poll is one interface enumeration
      * (no network I/O), so it costs essentially nothing.
      */
     private var netCallback: ConnectivityManager.NetworkCallback? = null
 
     /** True while the service is deliberately staying alive for a tailnet that does not exist yet. */
-    private var waitingForTailnet = false
+    private var waitingForAddress = false
 
     override fun onCreate() {
         super.onCreate()
@@ -315,8 +315,8 @@ class BridgeService : Service() {
         }
 
         if (server == null) {
-            val bind = tailnetAddress()
-            if (bind == null) return noTailnetAddress()
+            val bind = chooseBindAddress()
+            if (bind == null) return noAddress()
             bindAddress = bind
             Debug.log("binding to $bind:$PORT")
             val s = HttpServer(this, bind, PORT)
@@ -366,7 +366,7 @@ class BridgeService : Service() {
      * same retries, and a notification if it never succeeds. Retrying costs nothing when the
      * address is there, because the first attempt binds immediately.
      */
-    private fun noTailnetAddress(): Int {
+    private fun noAddress(): Int {
         // S8: never silently bind all interfaces.
         // The wording is user-facing: it lands verbatim in the hero card when a start
         // fails, so it names the CAUSE and the FIX rather than the bind decision. A
@@ -375,8 +375,8 @@ class BridgeService : Service() {
         val delay = StartupRetry.delayFor(retryAttempt)
         if (delay == null) {
             // NOT stopSelf(). The service has to outlive the ladder to notice Tailscale coming
-            // back — see startWaitingForTailnet.
-            startWaitingForTailnet()
+            // back — see startWaitingForAddress.
+            startWaitingForAddress()
             return START_STICKY
         }
         retryAttempt += 1
@@ -397,16 +397,16 @@ class BridgeService : Service() {
      * service that is already running and a low-importance notification; the cost of stopping is
      * a bridge that needs a human to poke it.
      *
-     * The notification changes KIND here, not just text: [BridgeStatusNotice.Kind.WAITING_FOR_TAILNET]
+     * The notification changes KIND here, not just text: [BridgeStatusNotice.Kind.WAITING_FOR_ADDRESS]
      * tells the human that doing nothing is correct, which is the opposite of what the old
      * "not running" copy implied.
      */
-    private fun startWaitingForTailnet() {
-        if (waitingForTailnet) return
-        waitingForTailnet = true
-        Debug.log("REFUSING TO START: $lastError (waiting for the tailnet instead of stopping)")
+    private fun startWaitingForAddress() {
+        if (waitingForAddress) return
+        waitingForAddress = true
+        Debug.log("REFUSING TO START: $lastError (waiting for a network address instead of stopping)")
         postStatusNotification(
-            BridgeStatusNotice.Kind.WAITING_FOR_TAILNET,
+            BridgeStatusNotice.Kind.WAITING_FOR_ADDRESS,
             attempt = StartupRetry.maxAttempts(),
         )
 
@@ -414,11 +414,11 @@ class BridgeService : Service() {
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val cb = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) = checkTailnetNow("network available")
+                override fun onAvailable(network: Network) = checkAddressNow("network available")
                 override fun onCapabilitiesChanged(
                     network: Network,
                     caps: android.net.NetworkCapabilities,
-                ) = checkTailnetNow("capabilities changed")
+                ) = checkAddressNow("capabilities changed")
             }
             cm.registerDefaultNetworkCallback(cb)
             netCallback = cb
@@ -439,17 +439,17 @@ class BridgeService : Service() {
      * start is posted to the main looper — `onStartCommand` runs there and two threads racing it
      * would be a double-bind.
      */
-    private fun checkTailnetNow(why: String) {
-        if (!waitingForTailnet) return
-        if (tailnetAddress() == null) return
+    private fun checkAddressNow(why: String) {
+        if (!waitingForAddress) return
+        if (chooseBindAddress() == null) return
         Debug.log("tailnet address appeared ($why) — starting")
         retryHandler.post { startSelf() }
     }
 
     private val waitPoll: Runnable = object : Runnable {
         override fun run() {
-            if (!waitingForTailnet) return
-            if (tailnetAddress() != null) {
+            if (!waitingForAddress) return
+            if (chooseBindAddress() != null) {
                 Debug.log("tailnet address appeared (poll) — starting")
                 startSelf()
                 return
@@ -460,8 +460,8 @@ class BridgeService : Service() {
 
     /** Stop waiting: unregister the callback and drop the poll. Idempotent. */
     private fun stopWaiting() {
-        if (!waitingForTailnet && netCallback == null) return
-        waitingForTailnet = false
+        if (!waitingForAddress && netCallback == null) return
+        waitingForAddress = false
         retryHandler.removeCallbacks(waitPoll)
         netCallback?.let { cb ->
             try {
@@ -606,21 +606,21 @@ class BridgeService : Service() {
      * Tear the listener down and build it again on whatever address is current.
      *
      * A stale tailnet address is the case this exists for: the socket is fine, it is simply
-     * bound to an IP the tailnet no longer routes. Re-reading `tailnetAddress()` is what picks
+     * bound to an IP the tailnet no longer routes. Re-reading `chooseBindAddress()` is what picks
      * up the new one.
      */
     private fun rebind() {
         server?.stop()
         server = null
         markRunning(false)
-        val bind = tailnetAddress()
+        val bind = chooseBindAddress()
         if (bind == null) {
             lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
             Debug.log("watchdog: cannot rebind — no tailnet address")
             // The watchdog cannot fix this one, so hand over to the same wait path the start
             // ladder uses rather than posting a dead-end notice: Tailscale coming back is the
             // only thing that resolves it, and that is exactly what the wait watches for.
-            startWaitingForTailnet()
+            startWaitingForAddress()
             return
         }
         bindAddress = bind
@@ -776,24 +776,30 @@ class BridgeService : Service() {
         if (names.isNotEmpty()) Debug.log("registered ${names.size} secret plugin(s): ${names.joinToString()}")
     }
 
-    /** First IPv4 in the Tailscale CGNAT range 100.64.0.0/10, else null. */
-    private fun tailnetAddress(): String? {
+    /**
+     * The local IPv4 to bind, or null when the phone has no reachable address.
+     *
+     * **The rule moved into [BindAddress] so it can be tested without a device.** This function
+     * is only the Android half: enumerate interfaces, hand the candidates over, take the answer.
+     *
+     * It used to accept ONLY an address in Tailscale's `100.64.0.0/10` range, so a phone on
+     * ordinary Wi-Fi returned null and the service refused to start — making Tailscale a hard
+     * requirement hidden inside a helper. It is now a preference, not a precondition.
+     */
+    private fun chooseBindAddress(): String? {
+        val candidates = mutableListOf<com.mido.phonebridge.core.NicAddress>()
         try {
             for (nif in NetworkInterface.getNetworkInterfaces()) {
                 for (addr in nif.inetAddresses) {
                     val ip = addr.hostAddress ?: continue
-                    if (ip.startsWith("100.")) {
-                        val parts = ip.split(".")
-                        val second = parts.getOrNull(1)?.toIntOrNull() ?: continue
-                        // 100.64.0.0/10  => second octet 64..127
-                        if (second in 64..127) return ip
-                    }
+                    candidates.add(com.mido.phonebridge.core.NicAddress(nif.name, ip))
                 }
             }
         } catch (e: Exception) {
-            Log.w("BridgeService", "tailnetAddress failed: ${e.message}")
+            Debug.log("interface enumeration failed: ${e.javaClass.simpleName}: ${e.message}")
+            return null
         }
-        return null
+        return com.mido.phonebridge.core.BindAddress.choose(candidates)
     }
 
     private fun startForegroundCompat() {
