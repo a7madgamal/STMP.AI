@@ -4112,7 +4112,7 @@ Version 0.43.42 / build 196.
 
 ---
 
-## 0.43.43 — GET /probe: prove the gate reaches you, with no setup (build 197) — CURRENT
+## 0.43.43 — GET /probe: prove the gate reaches you, with no setup (build 197)
 2026-11-01
 
 Every real route has a prerequisite that may not exist yet: Gmail needs a login, `/notifications`
@@ -4143,6 +4143,44 @@ the route set, so a new route without a bump fails the build with a message nami
 is the guard doing exactly what it was built for on its first real outing.
 
 Version 0.43.43 / build 197.
+
+---
+
+## 0.43.44 — a stuck NOTIFY card can no longer strand itself, and the queue stops refusing bursts (build 198) — CURRENT
+2026-11-01
+
+Mido, 2026-11-01: *"I have many notifications, so I moved them and now they are stuck. Progress
+halted, can drag them but can't dismiss them."* Two defects behind one symptom.
+
+**The card that would not die.** `teardown` set `removed = true` BEFORE calling `removeView`, then
+swallowed any exception. So a single failed removal — a window the platform had already detached, a
+WM refusing mid-frame — left a card on screen that every later path skipped, because the entry said
+it was already gone. The card stayed: draggable, since its touch listener lives on the view, but
+undismissable, since the dismiss path reaches `settle()`, which early-returns on a settled entry.
+The countdown froze for the same reason: `teardown` had already cancelled the tick.
+
+The flag now follows the OUTCOME. A failed removal keeps the entry live with its window reference,
+and a `IllegalArgumentException` ("view not attached") counts as SUCCESS rather than a failure to
+retry — the platform dropping it is the outcome we wanted.
+
+**And something has to retry.** `sweepStranded` runs before every new card and re-runs itself every
+2s while anything is still stuck, because the common case is a burst that drains — the LAST card is
+the one that gets stranded, with nothing behind it to trigger a sweep on presentation. It is capped
+at 30 attempts: a self-reposting runnable with no exit is a leak, and if the window manager will
+never release the view, polling forever buys nothing. At the cap it stops and says so in the log,
+which is the only place an unremovable window can be understood from.
+
+**The queue was refusing the burst.** `MAX_WAITING = 3` meant every request past the fourth was
+`Admission.Refused` before any card was drawn — from the human's side, indistinguishable from
+"progress halted". A waiting card costs one Entry and no window, so the real constraint is patience,
+not memory, and `NotifyGate` already sizes its deadlock escape hatch from `MAX_IN_FLIGHT`. Raised to
+8: the line is now 9 deep, and the escape hatch scales with it automatically because it was derived
+rather than hardcoded.
+
+374 tests, 0 failures. The stranded path is not unit-testable — it needs a window manager that
+misbehaves — so it is verified by construction and by the log line at the cap.
+
+Version 0.43.44 / build 198.
 
 ---
 

@@ -64,8 +64,18 @@ object NotifyOverlay {
 
     private const val TAG = "NotifyOverlay"
 
-    /** Cards allowed to wait in line. Plus the one on screen, this bounds the line to 4. */
-    private const val MAX_WAITING = 3
+    /**
+     * Cards allowed to wait in line. Plus the one on screen, this bounds the line to 9.
+     *
+     * **Raised from 3, and the raise is the point.** With a burst of requests the queue filled
+     * immediately and every newcomer was REFUSED — silently, from the caller's side, since the
+     * whole admission happened before any card was drawn. A human who saw "progress halted"
+     * was watching a queue that had already started rejecting. Each waiting card costs one Entry
+     * and no window, so the real constraint is patience (a wait behind 8 cards is
+     * `MAX_IN_FLIGHT × CARD_LIFETIME_MS`, which NotifyGate already sizes its escape hatch from),
+     * not memory.
+     */
+    private const val MAX_WAITING = 8
 
     /**
      * Prompts that can be in the system at once: the one on screen plus the line.
@@ -79,7 +89,35 @@ object NotifyOverlay {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * How often a card that refused to come off is retried.
+     *
+     * Two seconds: fast enough that a stuck card is gone before a human gives up on it, slow
+     * enough that a genuinely broken window manager is not hammered.
+     */
+    private const val STRANDED_RETRY_MS = 2_000L
+
+    /** How many times a stuck card is retried before the sweep gives up and reports it. */
+    private const val MAX_STRANDED_SWEEPS = 30
+
+    /** Consecutive sweeps that found something stuck. Reset when the set empties. */
+    private var strandedSweeps = 0
+
     private val queue = NotifyQueue<Entry>(keyOf = { it.id }, maxWaiting = MAX_WAITING)
+
+    /**
+     * Cards that decided but whose window would not come off.
+     *
+     * A `removeView` can fail for reasons outside this file — the system detaching the window, a
+     * WM refusing mid-frame. When it does, the entry must NOT be marked gone (see [teardown]),
+     * because a card the app thinks is gone is a card every other path skips: draggable, because
+     * its touch listener lives on the view, and undismissable, because the dismiss path reaches a
+     * settled entry. That is the stuck card reported on 2026-11-01.
+     *
+     * So a failed removal lands here and [sweepStranded] retries it. A retry is cheap and idempotent;
+     * a write-off is permanent.
+     */
+    private val stranded = java.util.Collections.synchronizedSet(HashSet<Entry>())
 
     /** Why a prompt ended. Mapped to audit outcomes by the caller, not here. */
     enum class Reason {
@@ -244,6 +282,9 @@ object NotifyOverlay {
 
     /** Build and attach one card. Called for the head of the line only. */
     private fun present(entry: Entry) {
+        // Retry anything that previously refused to leave. Runs before the new card is built so a
+        // stranded window cannot sit under a fresh one and swallow its touches.
+        sweepStranded()
         val ctx = entry.ctx
         val wm = wm(ctx)
         val density = ctx.resources.displayMetrics.density
@@ -939,7 +980,6 @@ object NotifyOverlay {
      */
     private fun teardown(entry: Entry) {
         if (entry.removed) return
-        entry.removed = true
 
         entry.tick?.let(main::removeCallbacks)
         entry.timeout?.let(main::removeCallbacks)
@@ -950,15 +990,85 @@ object NotifyOverlay {
                 "notify[${entry.id}] teardown windowAlpha=${entry.params?.alpha} " +
                     "viewAlpha=${card.alpha}"
             )
-            runCatching { wm(entry.ctx).removeView(card) }
-                .onFailure {
-                    Log.w(TAG, "notify[${entry.id}] removeView failed: ${it.message}")
-                }
-            // Drop the reference so a second teardown cannot touch a dead view, and so the
-            // card is collectable while the Entry lives on in the queue's retired list.
-            entry.root = null
+            // **A FAILED REMOVE MUST NOT MARK THE ENTRY GONE.**
+            //
+            // This used to set `removed = true` BEFORE trying, then swallow the exception. So one
+            // failed `removeView` (a window already detached by the system, a WM that refused
+            // mid-frame) left a card on screen that every later path skipped because the entry
+            // said it was already gone. The card stayed: draggable, because its touch listener
+            // lived on the view, but undismissable, because the ✕ path reached `settle()` which
+            // early-returns on an already-settled entry — and the bar froze, because the tick had
+            // been removed. Reported on device 2026-11-01 as exactly that.
+            //
+            // So the flag now follows the OUTCOME. A failure leaves the entry live, keeps its
+            // window reference, and is retried by [sweepStranded] rather than written off.
+            val removedOk = try {
+                wm(entry.ctx).removeView(card)
+                true
+            } catch (e: IllegalArgumentException) {
+                // "View not attached to window manager" — the platform already dropped it, which
+                // is the outcome we wanted. Treat it as success, not as a failure to retry.
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "notify[${entry.id}] removeView failed: ${e.message}")
+                false
+            }
+            if (removedOk) {
+                entry.removed = true
+                // Drop the reference so a second teardown cannot touch a dead view, and so the
+                // card is collectable while the Entry lives on in the queue's retired list.
+                entry.root = null
+            } else {
+                // Keep it reachable. The sweep below is the retry; until then the entry is
+                // still "on screen" and must not be promoted past.
+                stranded.add(entry)
+                return
+            }
+        } else {
+            entry.removed = true
         }
         promoteNext()
+    }
+
+    /**
+     * Remove any card that decided but never left.
+     *
+     * **The second half of the stranded-card fix.** [teardown] can now fail and stay retryable, but
+     * something has to actually retry: a card whose fade chain threw, whose stamp never reported
+     * finished, or whose remove was refused would otherwise sit there forever — visibly draggable
+     * and completely undismissable, which is the worst state this overlay can be in because it
+     * looks alive.
+     *
+     * Runs on every presentation, and is cheap: it only touches entries already in [stranded] plus
+     * anything the queue has already retired. It never touches a live card.
+     */
+    private fun sweepStranded() {
+        val doomed = stranded.toList()
+        stranded.clear()
+        for (entry in doomed) {
+            if (!entry.removed) teardown(entry)
+        }
+        if (!stranded.isEmpty()) {
+            // **It must retry itself.** Running only on presentation meant a stranded card with
+            // nothing behind it was never revisited — the common case, since a burst drains and
+            // the last card is exactly the one that gets stuck.
+            //
+            // **Capped**, because a self-reposting runnable with no exit is a leak: if the window
+            // manager will never release the view, polling every 2s forever buys nothing. After
+            // the cap it stops and says so loudly — the card is unremovable, and the log is the
+            // only place that can be understood from.
+            if (strandedSweeps < MAX_STRANDED_SWEEPS) {
+                strandedSweeps++
+                main.postDelayed({ sweepStranded() }, STRANDED_RETRY_MS)
+            } else {
+                com.mido.phonebridge.Debug.log(
+                    "notify: ${stranded.size} card(s) could not be removed after " +
+                        "$MAX_STRANDED_SWEEPS sweeps — the window manager will not release them"
+                )
+            }
+        } else {
+            strandedSweeps = 0
+        }
     }
 
     /**
