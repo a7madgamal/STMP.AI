@@ -2,6 +2,8 @@ package com.mido.phonebridge
 
 import android.app.Activity
 import android.os.Bundle
+import android.text.InputType
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
@@ -329,7 +331,112 @@ class OptionsActivity : Activity() {
             )
         }
         block.addView(choices)
+
+        // --- the external endpoint ---
+        //
+        // **Only shown when EXTERNAL is selected**, because a URL field under a backend that
+        // ignores it is a control that does nothing — the same lie the single-boolean gate told
+        // before `BioStatus`. It is editable rather than a build constant because choosing
+        // EXTERNAL and finding no way to say WHERE is a dead end: the setting promises a remote
+        // server and then refuses for want of an address nobody could enter.
+        if (current == com.mido.phonebridge.policy.AiBackend.EXTERNAL) {
+            block.addView(
+                Theme.text(
+                    this,
+                    "Server URL",
+                    13f, Theme.ON_SURFACE
+                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 14), 0, Theme.dp(this@OptionsActivity, 6)) }
+            )
+
+            val urlField = EditText(this).apply {
+                setText(policy.aiExternalUrl)
+                hint = "http://192.168.1.9:11434"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                isSingleLine = true
+                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+                setSaveEnabled(false)
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 14f
+                background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                setPadding(
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                )
+            }
+
+            // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
+            // route fail, and saving it would hide the mistake behind a "not reachable" that
+            // looks like the server's fault rather than the address's.
+            val errorLine = Theme.text(this, "", 12f, Theme.DANGER).apply {
+                setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+                visibility = android.view.View.GONE
+            }
+
+            block.addView(urlField)
+            block.addView(errorLine)
+
+            block.addView(
+                Theme.button(this, "save url", Theme.ButtonStyle.PRIMARY, small = true) {
+                    val raw = urlField.text.toString().trim()
+                    val problem = validateEndpoint(raw)
+                    if (problem != null) {
+                        errorLine.text = problem
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
+                    errorLine.visibility = android.view.View.GONE
+                    save(store, policy.withAiExternalUrl(raw))
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Theme.dp(this@OptionsActivity, 10) }
+            )
+
+            block.addView(
+                Theme.text(
+                    this,
+                    if (policy.aiExternalUrl.isBlank()) {
+                        "No server set, so EXTERNAL refuses every request. Enter the address " +
+                            "of an Ollama or unsloth server you can reach from this phone."
+                    } else {
+                        "Requests are described by ${policy.aiExternalUrl}. If it is unreachable " +
+                            "they are refused — never approved without a description."
+                    },
+                    12f,
+                    if (policy.aiExternalUrl.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
+                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 8), 0, 0) }
+            )
+        }
+
         return block
+    }
+
+    /**
+     * Why [raw] is not a usable endpoint, or null when it is.
+     *
+     * Empty is invalid HERE but valid as a stored value: clearing the field is how a human
+     * removes a server, and that has to be expressible. So the caller distinguishes "blank means
+     * remove" from "malformed means refuse" — this only rejects what cannot work.
+     */
+    private fun validateEndpoint(raw: String): String? {
+        if (raw.isBlank()) return null
+        val parsed = try {
+            java.net.URI(raw)
+        } catch (e: Exception) {
+            return "not a valid URL: ${e.message}"
+        }
+        val scheme = parsed.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") {
+            return "must start with http:// or https://"
+        }
+        if (parsed.host.isNullOrBlank()) return "no host in that URL"
+        // Trailing slashes would double up when the chat path is appended.
+        if (raw.endsWith("/")) return "drop the trailing slash"
+        return null
     }
 
     /**

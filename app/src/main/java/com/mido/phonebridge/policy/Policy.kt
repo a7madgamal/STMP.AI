@@ -52,6 +52,23 @@ class Policy(
      */
     val aiBackend: AiBackend = AiBackend.OFF,
     /**
+     * Where the EXTERNAL model server lives, e.g. `http://192.168.1.9:11434`.
+     *
+     * **A runtime preference, not a build constant.** It was `BuildConfig.EXTERNAL_AI_URL`
+     * only, which meant choosing EXTERNAL in Options produced a backend that could never be
+     * pointed anywhere — the setting said "use a server" and then refused because no server
+     * had been compiled in. A toggle whose ON state cannot be configured is a dead control.
+     *
+     * Empty means "not configured", which is a real state: `AiGateway` refuses requests and
+     * names the cause rather than silently reaching for a default. There is deliberately no
+     * fallback address — a compiled-in default would mean "not set up" quietly sent requests
+     * to whoever built the APK.
+     *
+     * Lenient parse like the other preferences: a malformed value is dropped and logged, never
+     * a refusal to start. Stored with its scheme so the caller cannot guess one wrong.
+     */
+    val aiExternalUrl: String = "",
+    /**
      * Does the bridge start itself — after a reboot, after an app update, and on app load?
      *
      * **Default ON** (Mido, 2026-10-25). The whole point of the app is a server that is
@@ -93,6 +110,7 @@ class Policy(
         // defaults, which is why VERSION does not move (see [parse]).
         .put("fingerprintForModals", fingerprintForModals)
         .put("aiBackend", aiBackend.name)
+        .put("aiExternalUrl", aiExternalUrl)
         .put("autoStartOnBoot", autoStartOnBoot)
         .put(
             "rules",
@@ -128,6 +146,7 @@ class Policy(
             // someone added a rule.
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -138,6 +157,7 @@ class Policy(
             rules = rules.filterNot { it.plugin == plugin && it.verb == verb },
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -148,6 +168,7 @@ class Policy(
             rules = rules,
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -158,6 +179,7 @@ class Policy(
             rules = rules,
             fingerprintForModals = enabled,
             aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -168,6 +190,18 @@ class Policy(
             rules = rules,
             fingerprintForModals = fingerprintForModals,
             aiBackend = backend,
+            aiExternalUrl = aiExternalUrl,
+            autoStartOnBoot = autoStartOnBoot
+        )
+
+    /** A new policy with the external AI endpoint changed. Empty means "not configured". */
+    fun withAiExternalUrl(url: String): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiBackend = aiBackend,
+            aiExternalUrl = url,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -178,6 +212,7 @@ class Policy(
             rules = rules,
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
             autoStartOnBoot = enabled
         )
 
@@ -232,6 +267,7 @@ class Policy(
             val warnings = ArrayList<String>(3)
             val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
             val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
+            val externalUrl = lenientString(o, "aiExternalUrl", warnings)
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
@@ -240,6 +276,7 @@ class Policy(
                 rules = rules,
                 fingerprintForModals = fingerprint,
                 aiBackend = backend,
+                aiExternalUrl = externalUrl,
                 autoStartOnBoot = autoStart,
                 preferenceWarnings = warnings
             )
@@ -275,6 +312,31 @@ class Policy(
                     "using default $default"
             )
             return default
+        }
+
+        /**
+         * Read a PREFERENCE string: absent or garbage means "" plus a log.
+         *
+         * Same contract as [lenientFlag] and [lenientBackend] — a preference must never be able
+         * to refuse to start the server, and a silent fallback would leave someone believing a
+         * value took effect when it did not. Garbage becomes EMPTY rather than a guess: for an
+         * endpoint, "" means "not configured", which refuses and says so, while any guessed
+         * address would send requests somewhere nobody chose.
+         */
+        private fun lenientString(
+            o: JSONObject,
+            key: String,
+            warnings: MutableList<String>,
+        ): String {
+            if (!o.has(key)) return ""
+            val raw = o.opt(key)
+            if (raw !is String) {
+                warnings.add(
+                    "'$key' is not a string (${raw?.javaClass?.simpleName ?: "null"}); using empty"
+                )
+                return ""
+            }
+            return raw.trim()
         }
 
         private fun lenientBackend(

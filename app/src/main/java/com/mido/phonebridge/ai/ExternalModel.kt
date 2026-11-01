@@ -47,11 +47,26 @@ object ExternalModel : SummaryModel {
      * `AiBackend.EXTERNAL` refuses the request and names the cause. The fix is a build with
      * `ai.externalUrl` set in `local.properties`, not a silent guess.
      */
-    private val baseUrl: String
-        get() = BuildConfig.EXTERNAL_AI_URL.trim()
+    /**
+     * The endpoint, resolved per call.
+     *
+     * **Policy first, then the build constant.** The policy field is what Options writes, so a
+     * human can point this at a box without rebuilding. The build constant remains as a
+     * compile-time default for a fixed deployment, and comes second so a runtime choice always
+     * wins — the reverse order would make the setting look broken on any build that shipped one.
+     */
+    private fun baseUrl(ctx: Context): String {
+        val stored = try {
+            com.mido.phonebridge.policy.PolicyStore.from(ctx).get().aiExternalUrl
+        } catch (e: Exception) {
+            // An unreadable policy already refuses to start the server; treat it as unset here
+            // rather than throwing from inside a request.
+            ""
+        }
+        return stored.ifBlank { BuildConfig.EXTERNAL_AI_URL.trim() }
+    }
 
-    /** True when this build has an endpoint at all. Checked before anything touches the URL. */
-    private val configured: Boolean get() = baseUrl.isNotEmpty()
+    private fun configured(ctx: Context): Boolean = baseUrl(ctx).isNotEmpty()
 
     /** The Ollama chat route. Kept as a constant so the probe and the call cannot disagree. */
     private const val CHAT_PATH = "/api/chat"
@@ -93,13 +108,13 @@ object ExternalModel : SummaryModel {
      * An unconfigured build says so in words rather than rendering an empty string, because
      * "the external backend () is not reachable" tells a human nothing actionable.
      */
-    fun endpointLabel(): String =
-        if (configured) baseUrl else "no endpoint configured (set ai.externalUrl and rebuild)"
+    fun endpointLabel(ctx: Context): String =
+        baseUrl(ctx).ifEmpty { "no endpoint configured (set it in Options → AI)" }
 
     override fun isAvailable(ctx: Context): Boolean {
         // An unconfigured build is NOT "probably fine": it cannot reach anything, and the
         // refusal should say that instead of failing at URL parse time.
-        if (!configured) {
+        if (!configured(ctx)) {
             lastError = "no endpoint configured"
             lastProbeOk = false
             return false
@@ -107,7 +122,7 @@ object ExternalModel : SummaryModel {
         val now = System.currentTimeMillis()
         val at = probedAtMs.get()
         if (at != 0L && now - at < PROBE_TTL_MS) return lastProbeOk
-        val ok = probe()
+        val ok = probe(ctx)
         lastProbeOk = ok
         probedAtMs.set(now)
         return ok
@@ -120,8 +135,8 @@ object ExternalModel : SummaryModel {
      * listening, and treating a non-200 as "down" would report a working box as dead. Only a
      * refused connection or a timeout is a "no".
      */
-    private fun probe(): Boolean = try {
-        val conn = (URL(baseUrl).openConnection() as HttpURLConnection).apply {
+    private fun probe(ctx: Context): Boolean = try {
+        val conn = (URL(baseUrl(ctx)).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = PROBE_TIMEOUT_MS
             readTimeout = PROBE_TIMEOUT_MS
@@ -140,7 +155,7 @@ object ExternalModel : SummaryModel {
     }
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
-        if (!configured) {
+        if (!configured(ctx)) {
             lastError = "no endpoint configured"
             return null
         }
@@ -163,7 +178,7 @@ object ExternalModel : SummaryModel {
         }
 
         val reply = try {
-            post(body, budgetMs)
+            post(ctx, body, budgetMs)
         } catch (e: Exception) {
             lastError = "${e.javaClass.simpleName}: ${e.message}"
             Debug.log("ai-external: request failed — $lastError")
@@ -189,8 +204,8 @@ object ExternalModel : SummaryModel {
      * the parser expects a complete reply, and reassembling a stream would be a second protocol
      * to get wrong.
      */
-    private fun post(body: JSONObject, budgetMs: Long): String {
-        val conn = (URL(baseUrl + CHAT_PATH).openConnection() as HttpURLConnection).apply {
+    private fun post(ctx: Context, body: JSONObject, budgetMs: Long): String {
+        val conn = (URL(baseUrl(ctx) + CHAT_PATH).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = budgetMs.toInt().coerceAtMost(5_000)
@@ -217,10 +232,11 @@ object ExternalModel : SummaryModel {
 
     fun status(ctx: Context): String {
         val up = isAvailable(ctx)
+        val url = baseUrl(ctx)
         return if (up) {
-            "external — $baseUrl is reachable (model $MODEL)"
+            "external — $url is reachable (model $MODEL)"
         } else {
-            "external — $baseUrl is NOT reachable" +
+            "external — $url is NOT reachable" +
                 (if (lastError.isBlank()) "" else " ($lastError)")
         }
     }

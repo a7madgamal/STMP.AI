@@ -4237,7 +4237,7 @@ Version 0.43.46 / build 200.
 
 ---
 
-## 0.43.47 — GET STARTED: one copyable prompt that works with any agent (build 201) — CURRENT
+## 0.43.47 — GET STARTED: one copyable prompt that works with any agent (build 201)
 2026-11-01
 
 STMP has no UI to speak of: the phone is a server, the agent is the client. So the useful artifact
@@ -4273,6 +4273,40 @@ because it is the only one a new user needs.
 374 tests, 0 failures. The screen is UI, so it needs the device.
 
 Version 0.43.47 / build 201.
+
+---
+
+## 0.43.48 — choosing EXTERNAL AI gives you somewhere to point it (build 202) — CURRENT
+2026-11-01
+
+Mido, 2026-11-01: *"when ai option is set to external, I expected being able to set the server url!"*
+He was right, and the hole was mine.
+
+0.43.41 removed a hardcoded default endpoint — correctly, since it pointed at one specific person's
+machine — and left `BuildConfig.EXTERNAL_AI_URL` as the only source. That is a build-time constant.
+So selecting EXTERNAL produced a backend that could never be given an address at runtime: the
+setting promised a remote server and then refused for want of a value no screen could set. **A
+toggle whose ON state cannot be configured is a dead control**, which is the same defect the gate
+declared a day earlier with its single `Boolean`.
+
+**`aiExternalUrl` is now a policy preference**, parsed leniently like the others: absent or garbage
+means empty, which is a real state — `AiGateway` refuses and names the cause instead of guessing an
+address. `ExternalModel` resolves *policy first, build constant second*, so a runtime choice always
+wins over a compiled default; the reverse order would make the setting look broken on any build that
+shipped one.
+
+**The field only appears when EXTERNAL is selected.** A URL box under a backend that ignores it is a
+control that does nothing — the same lie, one level down.
+
+**It validates before saving.** The scheme must be http or https, a host must be present, and a
+trailing slash is refused because the chat path appends and would double it. Saving a malformed
+address would surface later as "not reachable", which reads as the server's fault rather than the
+address's.
+
+Blank is accepted and means "remove the server" — clearing the field has to be expressible, so the
+validator rejects only what cannot work, not what is merely unset.
+
+Version 0.43.48 / build 202.
 
 ---
 

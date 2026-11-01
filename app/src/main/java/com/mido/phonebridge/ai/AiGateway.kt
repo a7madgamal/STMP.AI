@@ -86,7 +86,7 @@ object AiGateway {
         AiBackend.OFF -> "the AI is switched off, so nothing can be missing" // unreachable by design
         AiBackend.LOCAL -> ModelRegistry.readiness(ctx).detail
         AiBackend.EXTERNAL ->
-            "the external AI backend (${ExternalModel.endpointLabel()}) is not reachable; " +
+            "the external AI backend (${ExternalModel.endpointLabel(ctx)}) is not reachable; " +
                 "start it, or switch the AI backend to LOCAL or OFF in Options"
     }
 
@@ -109,7 +109,7 @@ object AiGateway {
             }
             AiBackend.EXTERNAL -> {
                 com.mido.phonebridge.Debug.log(
-                    "ai: external (${ExternalModel.endpointLabel()}) — no local engine to warm"
+                    "ai: external (${ExternalModel.endpointLabel(ctx)}) — no local engine to warm"
                 )
                 return
             }
