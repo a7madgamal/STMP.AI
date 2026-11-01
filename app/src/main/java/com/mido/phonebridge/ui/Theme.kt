@@ -12,6 +12,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
@@ -64,6 +65,15 @@ object Theme {
     const val BORDER = 0xFFC9B98F.toInt()
 
     /** Primary ink: near-black brown, never pure black. */
+    /**
+     * Body text on a light surface.
+     *
+     * **Every `EditText` must set this explicitly.** The platform's default input colour comes
+     * from the launch theme and reads white-ish — invisible on this app's cream background — so
+     * a field left to default hides what the human typed: a sudo password, a secret value, a
+     * host. Set `setTextColor(ON_SURFACE)` and `setHintTextColor(ON_SURFACE_VARIANT)` on every
+     * input, or the value is there and unreadable.
+     */
     const val ON_SURFACE = 0xFF2B2318.toInt()
 
     /** Faded ink: secondary text, captions. */
@@ -682,4 +692,5 @@ object Theme {
     fun spacer(ctx: Context, dp: Int): View = View(ctx).apply {
         layoutParams = LinearLayout.LayoutParams(1, dp(ctx, dp))
     }
+
 }

@@ -89,6 +89,10 @@ class CallerActivity : FragmentActivity() {
         )
 
         nameField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             // A machine name, not a password: no masking, and no personalised-learning opt-out —
             // the keyboard learning "Ahmed's laptop" is harmless and helps next time.
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_NORMAL

@@ -272,11 +272,19 @@ class SecretsActivity : Activity() {
 
     private fun editLinksDialog(name: String, current: SecretVault.SecretMeta) {
         val docsField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "API docs (https://…)"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setText(current.docs)
         }
         val keyField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "where to get the key (https://…)"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setText(current.key)
@@ -363,6 +371,10 @@ class SecretsActivity : Activity() {
             else -> SecretVault.SecretMeta()
         }
         val nameField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "name (lowercase, e.g. todoist)"
             inputType = InputType.TYPE_CLASS_TEXT
             // Editable only when CONFIRMING a name the human typed. A template name is fixed:
@@ -373,6 +385,10 @@ class SecretsActivity : Activity() {
             setText(existing ?: template?.name ?: "")
         }
         val valueField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "secret value"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             // The keyboard and any autofill service must never learn this.
@@ -382,11 +398,19 @@ class SecretsActivity : Activity() {
         // ordinary text fields and they are stored in the plaintext index. Both optional:
         // a secret with no links is legal, it just cannot point you anywhere.
         val docsField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "API docs URL (optional)"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setText(existingLinks.docs)
         }
         val keyField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "where to get the key (optional)"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setText(existingLinks.key)
@@ -396,6 +420,10 @@ class SecretsActivity : Activity() {
         // form plus a second trip to a host list. Comma-separated, prefilled from what
         // is already stored so a replace does not silently drop the rules.
         val hostsField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "allowed hosts (comma-separated, e.g. api.todoist.com)"
             inputType = InputType.TYPE_CLASS_TEXT
             setText(existingLinks.hosts.joinToString(", "))
@@ -470,6 +498,10 @@ class SecretsActivity : Activity() {
 
     private fun addHostDialog(secret: String) {
         val field = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "api.todoist.com or *.todoist.com"
             inputType = InputType.TYPE_CLASS_TEXT
         }

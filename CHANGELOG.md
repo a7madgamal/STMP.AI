@@ -4021,7 +4021,7 @@ Version 0.43.40 / build 194.
 
 ---
 
-## 0.43.41 — callers must be named before they can call (build 195) — CURRENT
+## 0.43.41 — callers must be named before they can call (build 195)
 2026-11-01
 
 The build box's tailnet IP was compiled into every APK in three places, and the "label" for a
@@ -4071,6 +4071,44 @@ carries `IMPORTANCE_HIGH`.
 374 tests, 0 failures.
 
 Version 0.43.41 / build 195.
+
+---
+
+## 0.43.42 — a blocked gate names its cause, and every text input is readable (build 196) — CURRENT
+2026-11-01
+
+Two defects with the same shape: the app knew what was wrong and told the human something else.
+
+**The gate said "set up a fingerprint" for every reason it was blocked.** The check returned a
+`Boolean`, so `canUseBiometric()` collapsed four unrelated causes — nothing enrolled, temporarily
+locked out, hardware unavailable, vault key invalidated — into `false`, and the modal printed one
+line for all of them. So a human whose vault key had been invalidated by a new fingerprint was sent
+into Settings to add a fingerprint they already had, and a two-minute lockout read as "your device
+cannot do this". Both left APPROVE dead with no way forward, and Mido's report is the design rule:
+*"the gate should offer to unlock so the user doesn't click approve on a broken gate like a fool."*
+
+`BioStatus` now names the cause and the copy matches it: no fingerprint → go to Settings; lockout →
+it clears by itself, so wait rather than reconfigure; vault key invalid → reset the vault in
+Options, which is the only thing that can actually fix it. A hardware fault is deliberately NOT
+reported as a lockout — telling someone to wait for something that will never clear is worse than
+saying it is broken.
+
+`NeedsUnlock` was written and then deleted: a crypto-bound prompt IS the unlock, so that state can
+never occur. A state that cannot be reached is a fourth cause the UI must be trusted not to print.
+
+**Every `EditText` in the app left text colour to the platform, and the platform's default is
+white-ish** — invisible on this app's cream background. Fourteen inputs across four screens: a sudo
+password, a secret value, a host name, a caller name. The value was there and unreadable, which is
+worse than a missing field because you retype it and blame the keyboard. The default comes from the
+launch theme, and this app builds every screen programmatically, so nothing had ever set it.
+
+All fourteen now state `setTextColor(ON_SURFACE)`, `setHintTextColor(ON_SURFACE_VARIANT)` and
+`highlightColor = ACCENT` explicitly, and the reason is recorded on the `ON_SURFACE` constant so the
+next input added inherits the rule rather than the bug.
+
+374 tests, 0 failures. Input contrast is not unit-testable — it needs the device.
+
+Version 0.43.42 / build 196.
 
 ---
 

@@ -587,10 +587,16 @@ class ApprovalActivity : FragmentActivity() {
             }
         }
         // Fails closed: if a mutating route needs a biometric that this device cannot
-        // provide (none enrolled, none present), APPROVE must never be tappable — only
-        // DENY works, and the reason is stated.
-        val biometricUsable = requiresBiometric && canUseBiometric()
-        val biometricBlocked = requiresBiometric && !biometricUsable
+        // provide, APPROVE must never be tappable — only DENY works, and the reason is stated.
+        //
+        // **`var`, not `val`, because the reason can be FIXED from inside this modal.** The old
+        // code collapsed every cause into one boolean and printed one message — "set up a
+        // fingerprint" — for all of them, so a dead vault key sent the human to Settings for a
+        // problem that was not there, and tapping APPROVE did nothing at all. Both halves of
+        // that are fixed below: the cause is now named, and when the cause is "you need to
+        // authenticate" the modal offers the unlock instead of a dead button.
+        var bioStatus = bioStatus()
+        var biometricBlocked = requiresBiometric && bioStatus != BioStatus.Usable
 
         // The ONE enable path. No timer any more (Mido, 2026-10-19): the tick above calls
         // this with the gate's live `enabledAtMs > 0`, so the controls go live exactly when
@@ -654,6 +660,10 @@ class ApprovalActivity : FragmentActivity() {
         // and can never scroll out of reach.
         val passwordSection: View? = if (needsPassword) {
             val field = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
                 // **Masking is applied at the END of this block, on purpose.**
                 // `setInputType` internally re-derives the transformation from the type, so an
                 // explicit `transformationMethod` set BEFORE it is silently cleared. That is why
@@ -742,10 +752,26 @@ class ApprovalActivity : FragmentActivity() {
         pinned.addView(detailScroll)
         pinned.addView(queueLine)
         pinned.addView(countdown)
+        // The banner must name the CAUSE, because each one needs a different action and the old
+        // single line sent everyone to Settings — including the two cases where Settings would
+        // not help at all.
         if (biometricBlocked) {
-            pinned.addView(
-                label("⚠ APPROVE unavailable — set up a fingerprint/PIN (strong) to approve", 14f, Theme.DANGER)
-            )
+            val msg = when (bioStatus) {
+                BioStatus.Usable -> ""
+                BioStatus.NotEnrolled ->
+                    "⚠ APPROVE unavailable — no fingerprint enrolled. Add one in Settings, " +
+                        "then return here."
+                BioStatus.LockedOut ->
+                    "⚠ Biometric locked out after too many attempts. It clears by itself — " +
+                        "this screen re-checks and APPROVE returns without you doing anything."
+                BioStatus.VaultBroken ->
+                    "⚠ APPROVE unavailable — the stored vault key is invalid or was " +
+                        "invalidated (a new fingerprint can do this). Reset the vault in " +
+                        "Options and re-add the secrets."
+            }
+            if (msg.isNotEmpty()) {
+                pinned.addView(label(msg, 14f, Theme.DANGER))
+            }
         }
         // The icon moved to the header, so the duplicate row here is gone (Mido, 2026-10-27:
         // *"and remove it from down"*).
@@ -1007,36 +1033,67 @@ class ApprovalActivity : FragmentActivity() {
         intent.getStringExtra(EXTRA_ENDPOINT) ?: "PhoneBridge"
 
     /**
-     * Can this device satisfy the approval requirement right now? Uses the SAME
-     * authenticator set as [promptBiometric], so the button state and the prompt can
-     * never disagree: when a vault exists that is STRONG biometric alone (crypto-bound,
-     * decision A), otherwise STRONG or device credential.
+     * Why approval is or is not possible right now.
      *
-     * Also fails closed when the vault cipher cannot be prepared — an invalidated key
-     * means the prompt could never succeed, so APPROVE must not enable.
+     * **A boolean was not enough, and the modal lied because of it.** The old check collapsed
+     * every failure into `false` and the UI printed one line — "set up a fingerprint/PIN
+     * (strong) to approve" — for all of them. So a vault key invalidated by a new fingerprint
+     * sent the human into Settings to add a fingerprint they already had, and a temporary
+     * lockout read as "your device cannot do this". Both are wrong, and both leave APPROVE dead
+     * with no way forward.
+     *
+     * Naming the cause is what lets the screen offer the right action: re-authenticate, or go to
+     * Settings, or nothing at all because a retry will work.
      */
-    private fun canUseBiometric(): Boolean {
-        val bound = if (SecretVault.exists(this)) {
+    private enum class BioStatus {
+        /** The prompt will work if the human passes it. */
+        Usable,
+
+        /** Nothing is enrolled: the device genuinely cannot satisfy it until Settings is used. */
+        NotEnrolled,
+
+        /** Temporarily locked out (too many attempts). A wait fixes it; nothing to configure. */
+        LockedOut,
+
+        /** The vault key is gone or invalidated. The vault has to be recreated; APPROVE cannot. */
+        VaultBroken,
+    }
+
+    /**
+     * Resolve the cause. Mirrors [promptBiometric]'s authenticator choice exactly, so the banner
+     * and the prompt can never disagree about what is possible.
+     */
+    private fun bioStatus(): BioStatus {
+        val hasVault = SecretVault.exists(this)
+        if (hasVault) {
             try {
-                // Prepare it for its side effect: this throws when the key is
-                // invalidated, which is exactly the case where APPROVE must not enable.
+                // Preparing the cipher is the real test: an invalidated key throws here, and a
+                // prompt carrying it could never succeed.
                 SecretVault.prepareUnlockCipher(this)
-                true
             } catch (e: Exception) {
-                Log.w("ApprovalActivity", "vault cipher unavailable; APPROVE stays disabled: ${e.message}")
-                return false
+                Log.w("ApprovalActivity", "vault cipher unavailable: ${e.message}")
+                return BioStatus.VaultBroken
             }
-        } else {
-            false
         }
-        val authenticators = if (bound) {
+        val authenticators = if (hasVault) {
+            // Crypto-bound: the platform forbids DEVICE_CREDENTIAL alongside a CryptoObject.
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         } else {
             BiometricManager.Authenticators.BIOMETRIC_STRONG or
                 BiometricManager.Authenticators.DEVICE_CREDENTIAL
         }
-        return BiometricManager.from(this).canAuthenticate(authenticators) ==
-            BiometricManager.BIOMETRIC_SUCCESS
+        return when (BiometricManager.from(this).canAuthenticate(authenticators)) {
+            BiometricManager.BIOMETRIC_SUCCESS -> BioStatus.Usable
+            // A locked vault is not a device problem: the prompt itself unlocks it, which is
+            // exactly the "one scan does both jobs" decision this app already made.
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BioStatus.NotEnrolled
+            // 7 == BIOMETRIC_ERROR_LOCKOUT: too many attempts, clears by itself.
+            7 -> BioStatus.LockedOut
+            // A hardware fault is NOT a lockout: nothing the human does on this screen fixes it,
+            // and telling them to wait would be a lie.
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BioStatus.VaultBroken
+            else -> BioStatus.VaultBroken
+        }
     }
 
     @Deprecated("Deprecated in the platform; kept for back-compat behavior on older devices.")

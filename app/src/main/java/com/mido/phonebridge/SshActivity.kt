@@ -220,20 +220,36 @@ class SshActivity : Activity() {
             return
         }
         val nameField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "name (lowercase, e.g. prod)"
             inputType = InputType.TYPE_CLASS_TEXT
         }
         val hostField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "host (e.g. box.example.com)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
         }
         val portField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "port (default 22)"
             inputType = InputType.TYPE_CLASS_NUMBER
             setText("22")
         }
         val userField = EditText(this).apply {
+                // Explicit colours: the platform default is white-on-cream here.
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
             hint = "user (e.g. deploy)"
             inputType = InputType.TYPE_CLASS_TEXT
             importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
