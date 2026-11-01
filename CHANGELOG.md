@@ -4216,7 +4216,7 @@ Version 0.43.45 / build 199.
 
 ---
 
-## 0.43.46 — /help stops dropping fields it builds (build 200) — CURRENT
+## 0.43.46 — /help stops dropping fields it builds (build 200)
 2026-11-01
 
 `sshConnections` shipped in 0.43.45's markdown and never appeared in its JSON. The builder produced
@@ -4234,6 +4234,45 @@ Found by calling the installed build and comparing the two renderers, not by rea
 which is the only way this class of bug surfaces.
 
 Version 0.43.46 / build 200.
+
+---
+
+## 0.43.47 — GET STARTED: one copyable prompt that works with any agent (build 201) — CURRENT
+2026-11-01
+
+STMP has no UI to speak of: the phone is a server, the agent is the client. So the useful artifact
+for someone who just installed it is not documentation — it is a paragraph they paste into whatever
+agent they already use, which makes that agent productive with nothing installed.
+
+**The screen carries no API documentation.** Routes, verbs and every error meaning are served live by
+`GET /help`. Restating them here would be a second copy that rots — the same mistake `respond()` made
+an hour earlier by enumerating keys instead of copying them. What the prompt carries is the part
+`/help` deliberately does not: judgment.
+
+The rules it states, each of which cost a rebuild:
+
+- One call costs one approval, so prefer one well-formed request to several small ones.
+- `403 denied` means a human declined. Do not retry, do not rephrase, do not route around it.
+- `403 caller_unverified` means this machine has never been named — check the phone, then retry once.
+- `403 caller_denied` means the machine is blocked. Stop.
+- A credential is never sent; `/secrets` routes take the literal `***` and the phone substitutes.
+- `GET /probe` proves the gate reaches a human, and **a `403 denied` there is a pass** — the gate
+  refused and the handler never ran.
+
+**The address is read from the running service, not typed.** A hardcoded IP would be wrong on any
+other phone and changes between Wi-Fi and Tailscale on this one. When the server is not up the prompt
+says `http://<start the server first>:8787` rather than rendering an empty host, because a blank one
+reads as a typo.
+
+The prompt is a selectable read-only field rather than a label: a human may want to correct the
+address by hand, and text you cannot select has to be retyped from a screenshot.
+
+Reached from a `START` button beside the other destinations on the home screen — first in the row,
+because it is the only one a new user needs.
+
+374 tests, 0 failures. The screen is UI, so it needs the device.
+
+Version 0.43.47 / build 201.
 
 ---
 

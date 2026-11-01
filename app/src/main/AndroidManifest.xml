@@ -117,6 +117,12 @@
             android:name=".OptionsActivity"
             android:exported="false" />
 
+        <!-- "How do I use this?" — a copyable starting prompt for any agent, plus what to
+             expect. No API documentation: /help serves that, live. -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false" />
+
         <!-- The caller-naming prompt. Full-screen, triggered by an unnamed address's first
              request; writes callers.json and releases the waiting request. -->
         <activity

@@ -228,6 +228,9 @@ class MainActivity : FragmentActivity() {
         content.addView(Theme.sectionHeader(this, "Tools"))
         toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         content.addView(toolsContainer)
+        // GET STARTED first: it is the only entry a new user needs, and the whole point of
+        // the screen is that nobody has to be told where it is.
+        toolsContainer.addView(toolButton("START") { startActivity(Intent(this, OnboardingActivity::class.java)) })
         toolsContainer.addView(toolButton("REQUEST LOG") { startActivity(Intent(this, LogActivity::class.java)) })
         toolsContainer.addView(toolButton("EXCEPTIONS") { startActivity(Intent(this, ExceptionsActivity::class.java)) })
         toolsContainer.addView(toolButton("OPTIONS") { startActivity(Intent(this, OptionsActivity::class.java)) })
