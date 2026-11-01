@@ -3917,7 +3917,7 @@ Version 0.43.38 / build 192.
 
 ---
 
-## 0.43.39 — the bridge binds any reachable address, not just a tailnet one (build 193) — CURRENT
+## 0.43.39 — the bridge binds any reachable address, not just a tailnet one (build 193)
 2026-11-01
 
 Tailscale was a hard requirement, and nobody had decided that.
@@ -3966,6 +3966,58 @@ boundaries are exact at `100.64` and `100.127/128`, since an off-by-one there ei
 carrier address or refuses a real tailnet one.
 
 Version 0.43.39 / build 193.
+
+---
+
+## 0.43.40 — GET /help: the agent's entry point, and its update mechanism (build 194) — CURRENT
+2026-11-01
+
+The first piece of the agent-facing distribution design. `GET /help` describes this bridge and
+everything it can do, from the RUNNING build — nothing is restated from memory or from a document,
+which is why it cannot describe a route this build does not have.
+
+**A normal gated plugin, not an exemption.** It ships with a seeded `help/ANY -> NOTIFY` rule, so a
+first call costs a 5-second card rather than a full-screen modal. NOTIFY is still the floor: the card
+appears, silence approves, the call is audited like every other one. The rule is seeded as DATA, so
+it appears on the exceptions screen where the human can see and change it — a hidden default that
+nobody can find is the kind of thing this app refuses to do.
+
+**Fresh installs now default to AUTOMATIC, not SECURE.** AUTOMATIC is the only mode that READS the
+rule table, so it is the only one where a default rule means anything — under a forced SECURE or
+NOTIFY every rule is inert, and the seeded rule above would be a line that never fires. This does
+not weaken the gate: `AUTOMATIC` with no matching rule still resolves to `SECURE`, so "silence means
+ask me" is preserved, and a rule can never auto-approve because no such mode exists.
+
+**One builder, two renderers.** The JSON fields and the `markdown` string are produced from the same
+objects in the same pass, so the prose cannot drift from the data. `markdown` is a FIELD, not a
+second response shape: a `?format=md` branch was written and then removed — it bought a Content-Type
+and nothing else, at the price of two shapes on one route, which is where a bug hides and the path
+nobody tests as often. A caller that wants the raw text does `jq -r .markdown`.
+
+**The markdown carries FACTS, never advice.** "`denied` — no approval was recorded" is a fact about
+the code. "Do not retry a `denied`" is judgment, and judgment belongs in the agent skill. Keeping
+that line clean is what stops this route from becoming a second, diverging skill.
+
+**`ErrorCodes.MEANINGS`** — 55 codes, one factual line each, exact match with `MAP`. This exists
+because the status map alone cannot be used: knowing `denied` is 403 does not say whether a human
+refused or the phone was in a pocket, and those two demand opposite responses. Guarded exactly as
+`MAP` is — a code with no meaning, a meaning with no code, or a blank meaning fails the build.
+
+**`contractVersion`**, separate from the app version and from `appBuild`. It moves only when the
+agent-facing surface moves; cosmetic releases leave it alone, so an agent's cached understanding
+survives a stamp change. `HelpContractTest` pins the route set (34 routes, scanned from source
+because most plugins need a Context the JVM suite does not have) — adding or removing a route
+without bumping fails with a message naming both edits. It also pins that the audio cue is the ONLY
+gate-exempt route, so a second exemption has to be argued for rather than quietly added.
+
+**What `/help` deliberately omits:** token values — the metadata path never reads them, so that is
+structural rather than a filter, and no parameter can ask; and the gate's current state, because
+capability is describable and policy is not. `gmail/DELETE` being NOTIFY tells a reader which of your
+operations is least protected.
+
+**3 new tests** (`HelpContractTest`), 371 -> 374.
+
+Version 0.43.40 / build 194.
 
 ---
 

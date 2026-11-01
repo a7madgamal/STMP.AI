@@ -31,7 +31,17 @@ class PolicyStore(private val dir: File) {
             // No file is a real, valid state: a fresh install has never chosen.
             // This is the one place a default is correct, and it is written down
             // immediately so the "no choice" state is not re-derived every boot.
-            val fresh = Policy(GlobalMode.SECURE)
+            //
+            // **AUTOMATIC, not SECURE.** AUTOMATIC is the mode that READS the rule table, so
+            // it is the only one where a default rule means anything. Under a forced SECURE or
+            // NOTIFY every rule is inert, which would make the seeded `help/NOTIFY` below a lie
+            // — the screen would show a rule that never fires.
+            //
+            // This does not weaken the gate: AUTOMATIC with no matching rule still resolves to
+            // SECURE (see `resolve`), so "silence means ask me" is preserved. The default
+            // changes WHICH mode is in force, not how much a rule can grant — and a rule can
+            // never auto-approve, because no such mode exists.
+            val fresh = Policy(GlobalMode.AUTOMATIC, DEFAULT_RULES)
             write(fresh)
             return fresh
         }
@@ -84,6 +94,24 @@ class PolicyStore(private val dir: File) {
 
     companion object {
         private const val FILE_NAME = "policy.json"
+
+        /**
+         * The rules a fresh install starts with.
+         *
+         * **`help/ANY → NOTIFY` exists so the first thing an agent calls does not demand a
+         * fingerprint.** `/help` is read-only and returns nothing sensitive, so making a
+         * newcomer tap a full-screen modal to learn what the bridge can do is friction with no
+         * security payoff. NOTIFY is the floor, not an exemption: the card still appears, silence
+         * still approves for five seconds, and the call is still audited like every other one.
+         *
+         * ANY rather than an exact READ rule so a future help route is downgraded too — the
+         * point is the plugin's character, not one path.
+         *
+         * Seeded as DATA rather than baked into the resolver: it shows up on the exceptions
+         * screen like any other rule, so the human can see it and change it. A hidden default
+         * that a user cannot find is the kind of thing this app refuses to do.
+         */
+        private val DEFAULT_RULES: List<Rule> = listOf(Rule("help", null, Mode.NOTIFY))
 
         @Volatile
         private var singleton: PolicyStore? = null

@@ -43,6 +43,34 @@ class ErrorCodesTest {
     }
 
     @Test
+    fun `every classified code carries a meaning`() {
+        // `MAP` alone cannot be used: knowing `denied` is 403 does not say whether a human
+        // refused or the phone was in a pocket, and those demand opposite responses. A
+        // hand-maintained meanings map that nothing checks is wrong within two releases, so
+        // this is the same guard as the status map — add a code without a meaning and the
+        // build goes red.
+        val withoutMeaning = ErrorCodes.classified() - ErrorCodes.meanings()
+        assertEquals(
+            "these codes would answer a status but tell a caller nothing: $withoutMeaning",
+            emptySet<String>(),
+            withoutMeaning,
+        )
+
+        val orphaned = ErrorCodes.meanings() - ErrorCodes.classified()
+        assertEquals(
+            "these meanings have no matching status entry: $orphaned",
+            emptySet<String>(),
+            orphaned,
+        )
+
+        // A meaning that is blank is worse than none: it looks answered.
+        for (code in ErrorCodes.meanings()) {
+            val meaning = ErrorCodes.meaningOf(code)
+            assertTrue("$code has no meaning", meaning != null && meaning.isNotBlank())
+        }
+    }
+
+    @Test
     fun `caller-fault codes are 4xx and never 5xx`() {
         // The line that matters. A malformed request must be noise in the log; if one of
         // these ever drifts to 5xx it becomes an incident-shaped record for a typo.

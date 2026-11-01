@@ -460,10 +460,32 @@ class PolicyTest {
     // --- first run ---
 
     @Test
-    fun `no file means SECURE, and the choice is written down`() {
+    fun `no file means AUTOMATIC with a help rule, and the choice is written down`() {
         val dir = tmp.newFolder()
         val store = PolicyStore(dir)
-        assertEquals(GlobalMode.SECURE, store.get().global)
+        val fresh = store.get()
+
+        // AUTOMATIC, not SECURE: it is the only mode that READS the rule table, so it is the
+        // only one where a seeded default rule means anything. Under a forced SECURE/NOTIFY
+        // every rule is inert and the `help` rule below would be a line that never fires.
+        assertEquals(GlobalMode.AUTOMATIC, fresh.global)
+
+        // The seeded exception: /help is a normal gated route, downgraded to the 5s card so a
+        // newcomer's first call does not cost a full-screen modal. NOTIFY is still the floor —
+        // the card appears and silence approves — so this is a downgrade, never an exemption.
+        assertEquals(1, fresh.rules.size)
+        val help = fresh.rules.single()
+        assertEquals("help", help.plugin)
+        assertNull("ANY, so a future help route is downgraded too", help.verb)
+        assertEquals(Mode.NOTIFY, help.mode)
+
+        // And AUTOMATIC with no rule still means SECURE: the default changed which mode is in
+        // force, not how much a rule can grant.
+        assertEquals(
+            Mode.SECURE,
+            resolveMode(GlobalMode.AUTOMATIC, fresh.rules, "gmail", Verb.DELETE),
+        )
+
         // Written immediately, so "never chosen" is not re-derived on every boot.
         assertEquals(true, File(dir, "policy.json").exists())
     }

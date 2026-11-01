@@ -179,4 +179,90 @@ object ErrorCodes {
 
     /** Every classified code. Used by the totality test; not for runtime decisions. */
     fun classified(): Set<String> = MAP.keys
+
+    /**
+     * What each code MEANS, in one line, for a caller that has never seen this app.
+     *
+     * **Facts only, never advice.** "`denied` — no approval was recorded" is a fact about the
+     * code. "Do not retry a `denied`" is judgment, and it belongs in the agent skill, not here.
+     * Keeping that line clean is what stops `/help` from becoming a second, diverging skill.
+     *
+     * This exists because `MAP` alone is not enough to use the API: knowing `denied` is 403 does
+     * not tell a caller whether a human refused or the phone was simply in a pocket, and those
+     * two demand opposite responses.
+     *
+     * Total over [MAP], enforced by `ErrorCodesTest` — a code without a meaning fails the build
+     * exactly as an unclassified code does. A hand-maintained map that nothing checks is a map
+     * that is wrong within two releases.
+     */
+    private val MEANINGS: Map<String, String> = mapOf(
+        // --- caller's fault ---
+        "bad_request" to "Required input is missing or malformed; nothing ran.",
+        "bad_count" to "`count` was negative or not an integer.",
+        "bad_package" to "`package` was present but empty.",
+        "bad_time_min" to "`timeMin` is missing, malformed, or not a real instant.",
+        "bad_time_max" to "`timeMax` is missing, malformed, or not a real instant.",
+        "bad_time_range" to "`timeMin` is not before `timeMax`.",
+        "bad_timezone" to "`timeZone` is missing or not a recognised zone id.",
+        "bad_max" to "`max` is outside the range this route accepts.",
+        "bad_lines" to "`lines` is outside 1..500.",
+        "sudo_needs_stdin" to "The command needs a TTY for sudo, which this route cannot provide.",
+        "unsupported_action" to "The notification has no action with that index or label.",
+        "missing_reply_text" to "A Reply action needs `replyText` and none was sent.",
+        "decode_error" to "The request body is not valid JSON.",
+        "unknown_secret" to "No secret is stored under that name.",
+        "host_not_allowed" to "The outbound host is not on that secret's allowlist; nothing was sent.",
+        "redirect_refused" to "The upstream tried to redirect; the broker does not follow redirects.",
+        "unsupported_content_type" to "The upstream body is not a JSON object (array, HTML, binary, scalar).",
+        "unsupported_storage" to "Saving to the phone needs API 29+; this device is older.",
+        "vault_exists" to "A vault is already set up; it cannot be created twice.",
+
+        // --- target gone or misidentified ---
+        "not_found" to "No route matches that method and path, or the target id does not exist.",
+        "notification_gone" to "The notification is no longer present; it was dismissed or cleared.",
+        "not_clearable" to "That notification cannot be dismissed.",
+
+        // --- credentials ---
+        "auth_required" to "The Google account is not signed in.",
+        "auth_expired" to "The OAuth token expired and needs a re-login on the phone.",
+        "secret_locked" to "The vault is shut. A human unlocks it by opening the app.",
+        "denied" to "No approval was recorded: the human declined, a NOTIFY card was rejected, or the gate could not be presented (screen off or locked).",
+
+        // --- our side ---
+        "auth_not_configured" to "This build has no OAuth credentials; it cannot serve Google routes.",
+        "listener_unavailable" to "The notification listener is not bound (permission or service killed).",
+        "model_not_ready" to "The AI model is not provisioned, so every described route answers 503.",
+        "ai_unavailable" to "The model exists but could not describe this request in budget.",
+        "audio_unavailable" to "The cue could not be decoded or played.",
+        "vault_missing" to "No vault exists on this device yet.",
+        "vault_corrupt" to "The vault or its index cannot be read.",
+        "vault_unrecoverable" to "The vault was written without its wrap IV; its secrets cannot be recovered.",
+        "vault_unwrap_failed" to "The vault key could not be unwrapped (invalidated or wrong key).",
+        "allowlist_corrupt" to "The per-secret host allowlist cannot be read.",
+        "upstream_timeout" to "The outbound call exceeded the broker's 60s limit.",
+        "upstream_failed" to "The outbound call failed; the response exceeded the size cap or the transport broke.",
+        "policy_unavailable" to "The gate policy file cannot be read, so no request may run.",
+        "calendar_zone_unavailable" to "The calendar's own time zone could not be read (needed by quick-add).",
+        "google_error" to "Google rejected the call; see the message for its reason.",
+        "ssh_bad_key" to "The stored SSH private key cannot be parsed.",
+        "ssh_keygen_failed" to "Generating an ed25519 keypair failed on this device.",
+        "ssh_host_key_unknown" to "Nothing is pinned for this host yet. Repeat the call with `trustHostKey` to confirm the fingerprint shown.",
+        "ssh_host_key_changed" to "The host key does not match the pinned one. Only a human can decide whether that is expected.",
+        "ssh_host_key_refused" to "The host key was refused for a reason the app could not name.",
+        "ssh_timeout" to "The command was still running at its deadline and was stopped.",
+        "ssh_job_not_found" to "No detached job has that id (unknown, or its output expired).",
+        "ssh_job_limit" to "Too many detached jobs are already running.",
+        "ssh_failed" to "The SSH connection was refused: auth rejected, host unreachable, or algorithm mismatch.",
+        "auth_error" to "The OAuth exchange failed.",
+        "secure_storage_error" to "A Keystore operation failed.",
+        "email_lookup_failed" to "The signed-in address could not be read.",
+        "no_scopes" to "The account granted none of the scopes this plugin needs.",
+        "internal_error" to "An unexpected fault on the phone; see `GET /debug`.",
+    )
+
+    /** The one-line meaning for [code], or null for a code this build does not know. */
+    fun meaningOf(code: String): String? = MEANINGS[code]
+
+    /** Every code that carries a meaning. Used by the totality test. */
+    fun meanings(): Set<String> = MEANINGS.keys
 }
