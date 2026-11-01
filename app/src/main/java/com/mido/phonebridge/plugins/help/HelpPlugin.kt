@@ -72,11 +72,13 @@ class HelpPlugin(private val ctx: Context) : Plugin {
         // Content-Type and nothing else — at the price of two shapes on one route, which is
         // where a bug hides and the path nobody tests as often. A caller that wants the raw text
         // does `jq -r .markdown`, which is a one-liner rather than a second code path.
+        // **Copy every key, never an enumerated list.** This used to name four keys by hand, so
+        // `sshConnections` — added to `describe()` later — was silently dropped from the response
+        // while still appearing in the markdown. The prose and the data disagreed, which is
+        // exactly the drift one builder is supposed to prevent: the builder was right and the
+        // hand-written copy was not.
         return Resp(200, JSONObject().put("ok", true).also { out ->
-            out.put("markdown", json.getString("markdown"))
-            out.put("stmp", json.getJSONObject("stmp"))
-            out.put("errors", json.getJSONArray("errors"))
-            out.put("plugins", json.getJSONArray("plugins"))
+            for (key in json.keys()) out.put(key, json.get(key))
         })
     }
 

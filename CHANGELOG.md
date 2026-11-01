@@ -4184,7 +4184,7 @@ Version 0.43.44 / build 198.
 
 ---
 
-## 0.43.45 — an SSH key is not a broker secret, and /help can list SSH targets (build 199) — CURRENT
+## 0.43.45 — an SSH key is not a broker secret, and /help can list SSH targets (build 199)
 2026-11-01
 
 `GET /help` advertised `POST /secrets/ssh-evox2/call` — a route that could never succeed, because
@@ -4213,6 +4213,27 @@ SSH key called `todoist` is stored as `ssh-todoist`. The claim was wrong and no 
 it.
 
 Version 0.43.45 / build 199.
+
+---
+
+## 0.43.46 — /help stops dropping fields it builds (build 200) — CURRENT
+2026-11-01
+
+`sshConnections` shipped in 0.43.45's markdown and never appeared in its JSON. The builder produced
+it; the response did not carry it.
+
+`respond()` copied four keys BY HAND — `markdown`, `stmp`, `errors`, `plugins` — so any field added
+to `describe()` afterwards was silently dropped. The prose and the data disagreed, which is exactly
+the drift that having one builder is supposed to prevent: the builder was right and the hand-written
+copy was not.
+
+It now copies every key `describe()` produces. A list of names beside a function that returns
+objects is a second source of truth, and the one nobody updates.
+
+Found by calling the installed build and comparing the two renderers, not by reading the code —
+which is the only way this class of bug surfaces.
+
+Version 0.43.46 / build 200.
 
 ---
 
