@@ -4146,7 +4146,7 @@ Version 0.43.43 / build 197.
 
 ---
 
-## 0.43.44 — a stuck NOTIFY card can no longer strand itself, and the queue stops refusing bursts (build 198) — CURRENT
+## 0.43.44 — a stuck NOTIFY card can no longer strand itself, and the queue stops refusing bursts (build 198)
 2026-11-01
 
 Mido, 2026-11-01: *"I have many notifications, so I moved them and now they are stuck. Progress
@@ -4181,6 +4181,38 @@ rather than hardcoded.
 misbehaves — so it is verified by construction and by the log line at the cap.
 
 Version 0.43.44 / build 198.
+
+---
+
+## 0.43.45 — an SSH key is not a broker secret, and /help can list SSH targets (build 199) — CURRENT
+2026-11-01
+
+`GET /help` advertised `POST /secrets/ssh-evox2/call` — a route that could never succeed, because
+an SSH connection has no allowed hosts, so `host_not_allowed` fires pre-gate forever. It also told
+a caller "there is an HTTP API called evox2", which is simply false.
+
+**One vault holds both kinds**, so iterating the name index registered a broker plugin for every
+entry. `SecretMeta.kind` already distinguishes `SECRET` from `SSH` — it exists so the Secrets
+screen refuses to reveal a private key — and registration now checks it. An unreadable entry is
+skipped rather than guessed at, because a metadata read that throws must not silently produce a
+route either. The route is now genuinely absent: a caller gets `404`, not a `403` implying it
+exists.
+
+**`/help` gained `sshConnections`.** SSH targets live in the vault, not `PluginRegistry`, so they
+appeared in no route list — a caller had to GUESS a connection name, and a wrong guess is
+`404 not_found`, which reads as "the route is broken" rather than "that name does not exist".
+Names only: the private key never leaves the vault, and `/help` is reachable by any verified
+caller.
+
+Adding a key to the contract surface moved `contractVersion` — the `HelpContractTest` pin forces
+the route table and the version to move together, which is the whole reason that guard exists.
+
+A correction to something asserted earlier in the session and never checked: SSH connection names
+**cannot** collide with secret names. `vaultNameFor()` prefixes every SSH entry with `ssh-`, so an
+SSH key called `todoist` is stored as `ssh-todoist`. The claim was wrong and no fix was needed for
+it.
+
+Version 0.43.45 / build 199.
 
 ---
 

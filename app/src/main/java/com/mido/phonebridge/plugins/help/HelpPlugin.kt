@@ -117,11 +117,29 @@ class HelpPlugin(private val ctx: Context) : Plugin {
             plugins.put(describePlugin(plugin))
         }
 
+        // SSH connections are NOT plugins, so they do not appear in `plugins` above. Without
+        // this block a caller has to GUESS a connection name — and a wrong guess is
+        // `404 not_found`, which reads as "the route is broken" rather than "you used a name
+        // that does not exist". Names only: the private key never leaves the vault, and this
+        // route is reachable by any verified caller.
+        val sshNames = try {
+            SecretVault.names(ctx)
+                .filter { it.startsWith("ssh-") }
+                .map { it.removePrefix("ssh-") }
+                .sorted()
+        } catch (e: Exception) {
+            // An unreadable index is not "no connections": say so rather than print an empty
+            // list that reads as a complete answer.
+            emptyList()
+        }
+        val ssh = JSONArray(sshNames)
+
         val out = JSONObject()
             .put("stmp", stmp)
             .put("errors", errors)
             .put("plugins", plugins)
-        out.put("markdown", markdown(stmp, errors, plugins))
+            .put("sshConnections", ssh)
+        out.put("markdown", markdown(stmp, errors, plugins, ssh))
         return out
     }
 
@@ -176,7 +194,12 @@ class HelpPlugin(private val ctx: Context) : Plugin {
      * Built from the same [JSONObject]s the caller gets, so a field added above appears here
      * automatically or not at all — there is no second place to forget.
      */
-    private fun markdown(stmp: JSONObject, errors: JSONArray, plugins: JSONArray): String {
+    private fun markdown(
+        stmp: JSONObject,
+        errors: JSONArray,
+        plugins: JSONArray,
+        ssh: JSONArray,
+    ): String {
         val sb = StringBuilder()
         sb.appendLine("# STMP ${stmp.getString("appVersion")} (build ${stmp.getInt("appBuild")})")
         sb.appendLine()
@@ -235,6 +258,18 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                     "- `${r.getString("method")} ${r.getString("path")}` — " +
                         "${r.getString("verb")} · ${r.getString("describe")} · $gated"
                 )
+            }
+            sb.appendLine()
+        }
+
+        if (ssh.length() > 0) {
+            sb.appendLine("## SSH connections")
+            sb.appendLine()
+            sb.appendLine("Use the name as `{name}` in `POST /ssh/{name}`. Names only — the")
+            sb.appendLine("private key never leaves the phone.")
+            sb.appendLine()
+            for (i in 0 until ssh.length()) {
+                sb.appendLine("- `${ssh.getString(i)}`")
             }
             sb.appendLine()
         }

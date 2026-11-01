@@ -778,14 +778,34 @@ class BridgeService : Service() {
             stopSelf()
             return
         }
+        var broker = 0
         for (name in names) {
+            // **AN SSH KEY IS NOT A BROKER SECRET.** One vault holds both, so iterating the name
+            // index used to register `POST /secrets/<ssh-name>/call` for an SSH private key — a
+            // route that could never succeed: it has no allowed hosts, so `host_not_allowed`
+            // fires pre-gate forever, and /help then advertises a capability that does not exist.
+            // It also told a caller "there is an HTTP API called evox2", which is simply false.
+            //
+            // So the kind decides. An unreadable entry is skipped rather than guessed at: a
+            // metadata read that throws must not silently produce a broker route either.
+            val kind = try {
+                com.mido.phonebridge.core.SecretVault.meta(applicationContext, name).kind
+            } catch (e: Exception) {
+                Debug.log("secret '$name': metadata unreadable (${e.message}); not registering")
+                continue
+            }
+            if (kind != com.mido.phonebridge.core.SecretVault.SecretMeta.Kind.SECRET) {
+                Debug.log("secret '$name': kind=$kind — not a broker secret, no route")
+                continue
+            }
             if (PluginRegistry.get(name) == null) {
                 PluginRegistry.register(
                     com.mido.phonebridge.plugins.secrets.SecretPlugin(applicationContext, name)
                 )
+                broker++
             }
         }
-        if (names.isNotEmpty()) Debug.log("registered ${names.size} secret plugin(s): ${names.joinToString()}")
+        if (broker > 0) Debug.log("registered $broker broker secret plugin(s)")
     }
 
     /**
