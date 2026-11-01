@@ -36,16 +36,22 @@ object ExternalModel : SummaryModel {
     override val id: String = "external"
 
     /**
-     * Where the server lives.
+     * Where the model server lives, or EMPTY when this build was never configured.
      *
-     * The gateway box on the tailnet. Overridable at build time so a different host does not
-     * need a code change — same pattern as the OAuth keys, and empty means "not configured",
-     * which [isAvailable] reports as unreachable rather than attempting a request to nothing.
+     * **There is no fallback endpoint, deliberately.** There used to be one, and it was a
+     * specific machine on a specific person's tailnet — so "external AI not set up" silently
+     * meant "send this request to a stranger's box". A default that points at someone else's
+     * infrastructure is not a default, it is a leak with a friendly name.
+     *
+     * Empty is a real state and [isAvailable] reports it as unreachable, which under
+     * `AiBackend.EXTERNAL` refuses the request and names the cause. The fix is a build with
+     * `ai.externalUrl` set in `local.properties`, not a silent guess.
      */
     private val baseUrl: String
-        get() = BuildConfig.EXTERNAL_AI_URL.ifBlank { DEFAULT_ENDPOINT }
+        get() = BuildConfig.EXTERNAL_AI_URL.trim()
 
-    private const val DEFAULT_ENDPOINT = "http://100.64.0.10:11434"
+    /** True when this build has an endpoint at all. Checked before anything touches the URL. */
+    private val configured: Boolean get() = baseUrl.isNotEmpty()
 
     /** The Ollama chat route. Kept as a constant so the probe and the call cannot disagree. */
     private const val CHAT_PATH = "/api/chat"
@@ -81,10 +87,23 @@ object ExternalModel : SummaryModel {
     var lastError: String = ""
         private set
 
-    /** What the UI shows in place of a host name it was not configured with. */
-    fun endpointLabel(): String = baseUrl
+    /**
+     * What the UI and the refusal detail show.
+     *
+     * An unconfigured build says so in words rather than rendering an empty string, because
+     * "the external backend () is not reachable" tells a human nothing actionable.
+     */
+    fun endpointLabel(): String =
+        if (configured) baseUrl else "no endpoint configured (set ai.externalUrl and rebuild)"
 
     override fun isAvailable(ctx: Context): Boolean {
+        // An unconfigured build is NOT "probably fine": it cannot reach anything, and the
+        // refusal should say that instead of failing at URL parse time.
+        if (!configured) {
+            lastError = "no endpoint configured"
+            lastProbeOk = false
+            return false
+        }
         val now = System.currentTimeMillis()
         val at = probedAtMs.get()
         if (at != 0L && now - at < PROBE_TTL_MS) return lastProbeOk
@@ -121,6 +140,10 @@ object ExternalModel : SummaryModel {
     }
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
+        if (!configured) {
+            lastError = "no endpoint configured"
+            return null
+        }
         val body = JSONObject().apply {
             put("model", MODEL)
             put("stream", false)

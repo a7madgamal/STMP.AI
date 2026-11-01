@@ -878,9 +878,15 @@ class HttpServer(
         val remote = session.remoteIpAddress ?: "unknown"
         val query = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
 
+        // The label comes from the REGISTRY, not from the address. `CallerStore.labelFor`
+        // answers a human-given name, "this device" for loopback, or an explicit
+        // "unverified caller <ip>" — never a bare IP dressed up as a name.
+        val callerLabel = callerLabelFor(remote)
+
         val draft = AuditDraft(
             startedAtMs = startedAt,
             remote = remote,
+            requesterLabelValue = callerLabel,
             method = method,
             path = path,
             query = query,
@@ -945,6 +951,85 @@ class HttpServer(
         query: Map<String, String>
     ): Dispatched {
         return try {
+            // CALLER CHECK — FIRST, before routing, before policy, before the gate.
+            //
+            // Deliberately ahead of `resolve`: an unverified address must not learn which routes
+            // exist. Answering 404 for an unknown path and 403 for an unknown caller would let a
+            // stranger map the surface by watching which refusal they get.
+            //
+            // Loopback is exempt inside the registry (it is the device itself, unreachable from
+            // anywhere else), so the app's own probes never depend on a human naming them.
+            val callerState = try {
+                com.mido.phonebridge.callers.CallerStore.from(ctx).stateOf(remote)
+            } catch (e: Exception) {
+                // An unreadable registry is NOT "everyone unverified" and NOT "everyone fine":
+                // both would be a decision made by a corrupt file. Refuse, and name the cause.
+                draft.outcome(AuditOutcome.HANDLER_FAILED)
+                draft.error("caller_registry_unavailable")
+                val obj = err(
+                    "caller_registry_unavailable",
+                    "the caller registry cannot be read (${e.message}); refusing rather than " +
+                        "guessing who may call"
+                )
+                draft.response(500, obj.toString())
+                return Dispatched(Response.Status.INTERNAL_ERROR, obj)
+            }
+            when (callerState) {
+                is com.mido.phonebridge.callers.CallerState.Verified -> Unit
+                com.mido.phonebridge.callers.CallerState.Denied -> {
+                    draft.outcome(AuditOutcome.REJECTED_INVALID)
+                    draft.error("caller_denied")
+                    val obj = err(
+                        "caller_denied",
+                        "this address was blocked on the phone. No route will answer it until " +
+                            "that block is removed in Options."
+                    )
+                    draft.response(403, obj.toString())
+                    return Dispatched(Response.Status.FORBIDDEN, obj)
+                }
+                null -> {
+                    // Unverified: ask the human, once, with a full-screen prompt triggered by
+                    // THIS request. The caller's own first call is the onboarding trigger — a
+                    // stranger cannot make the phone light up repeatedly, because the answer is
+                    // recorded (verified or denied) rather than forgotten.
+                    val outcome = com.mido.phonebridge.callers.CallerPrompt.ask(ctx, remote)
+                    when (outcome) {
+                        is com.mido.phonebridge.callers.CallerPrompt.Result.Named -> Unit
+                        com.mido.phonebridge.callers.CallerPrompt.Result.Blocked -> {
+                            draft.outcome(AuditOutcome.REJECTED_INVALID)
+                            draft.error("caller_denied")
+                            val obj = err(
+                                "caller_denied",
+                                "this address was blocked on the phone."
+                            )
+                            draft.response(403, obj.toString())
+                            return Dispatched(Response.Status.FORBIDDEN, obj)
+                        }
+                        com.mido.phonebridge.callers.CallerPrompt.Result.Unavailable -> {
+                            draft.outcome(AuditOutcome.REJECTED_INVALID)
+                            draft.error("caller_unverified")
+                            val obj = err(
+                                "caller_unverified",
+                                "this address has never been named and the prompt could not be " +
+                                    "shown (screen off or locked). Unlock the phone and retry."
+                            )
+                            draft.response(403, obj.toString())
+                            return Dispatched(Response.Status.FORBIDDEN, obj)
+                        }
+                        com.mido.phonebridge.callers.CallerPrompt.Result.Timeout -> {
+                            draft.outcome(AuditOutcome.REJECTED_INVALID)
+                            draft.error("caller_unverified")
+                            val obj = err(
+                                "caller_unverified",
+                                "the naming prompt expired with no answer. Retry to be asked again."
+                            )
+                            draft.response(403, obj.toString())
+                            return Dispatched(Response.Status.FORBIDDEN, obj)
+                        }
+                    }
+                }
+            }
+
             val resolved = PluginRegistry.resolve(method, path)
             if (resolved == null) {
                 draft.outcome(AuditOutcome.UNROUTED)
@@ -1588,7 +1673,7 @@ class HttpServer(
             // Target rows come from the plugin (NotificationsPlugin.describeRows),
             // same as every other plugin — one source of truth, not a second copy here.
             return ApprovalGate.ApprovalView(
-                requester = requesterLabel(remote),
+                requester = callerLabelFor(remote),
                 account = account,
                 actionLabel = action.title?.toString() ?: "(unnamed action)",
                 appLabel = appLabel,
@@ -1616,7 +1701,7 @@ class HttpServer(
             val title = extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() ?: ""
             val text = extras?.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString() ?: ""
             return ApprovalGate.ApprovalView(
-                requester = requesterLabel(remote),
+                requester = callerLabelFor(remote),
                 account = account,
                 actionLabel = "Dismiss a notification",
                 appLabel = "",
@@ -1638,7 +1723,7 @@ class HttpServer(
         // exactly how /calendar/events shipped and 500'd with `undescribed_route`.
         val actionLabel = route.describe
         return ApprovalGate.ApprovalView(
-            requester = requesterLabel(remote),
+            requester = callerLabelFor(remote),
             account = account,
             actionLabel = actionLabel,
             appLabel = "",
@@ -1799,9 +1884,27 @@ class HttpServer(
         return out
     }
 
-    /** Turn a source IP into something a human recognises. */
-    private fun requesterLabel(remote: String): String =
-        if (remote == "100.64.0.10") "OpenClaw (this box)" else remote
+    /**
+     * The label for a caller address, from the REGISTRY.
+     *
+     * Three possible answers and no fourth: a human-given name, `this device` for loopback, or an
+     * explicit `unverified caller <ip>`. There is deliberately no "just use the address" fallback
+     * — that was the old behaviour and it made a named host indistinguishable from an unnamed one.
+     *
+     * An unreadable registry answers `unknown caller <ip>`, which states exactly what is true
+     * rather than inventing a name. Dispatch refuses such a request on the same condition, so
+     * this label only ever describes a record that is about to say "refused".
+     */
+    private fun callerLabelFor(remote: String): String = try {
+        com.mido.phonebridge.callers.CallerStore.from(ctx).labelFor(remote)
+    } catch (e: Exception) {
+        "unknown caller $remote"
+    }
+
+    // The `requesterLabel` helper that used to live here was a DUPLICATE of the one in
+    // core/Labels.kt, with the build box's tailnet IP inlined a second time. Both are gone:
+    // the label now comes from CallerStore, which knows a caller's NAME rather than guessing
+    // one from its address.
 
     // Target-row building lives in each Plugin (see Plugin.describeRows): only the
     // plugin knows its request shapes and can fetch live data to name the target.

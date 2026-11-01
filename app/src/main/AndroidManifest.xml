@@ -117,6 +117,12 @@
             android:name=".OptionsActivity"
             android:exported="false" />
 
+        <!-- The caller-naming prompt. Full-screen, triggered by an unnamed address's first
+             request; writes callers.json and releases the waiting request. -->
+        <activity
+            android:name=".CallerActivity"
+            android:exported="false" />
+
         <activity
             android:name=".SshActivity"
             android:exported="false" />

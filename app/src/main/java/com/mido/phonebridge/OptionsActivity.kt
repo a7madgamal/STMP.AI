@@ -127,6 +127,15 @@ class OptionsActivity : Activity() {
             aiBackendRow(store, policy)
         )
 
+        container.addView(Theme.sectionHeader(this, "Callers"))
+
+        // --- who may reach the bridge ---
+        //
+        // Not a preference: an unnamed address is REFUSED, so this list is the allow rule. It is
+        // visible and editable because a block you cannot undo without hand-editing JSON is a
+        // trap, and because a misheard name should be fixable without a rebuild.
+        container.addView(callerRows())
+
         container.addView(Theme.spacer(this, 16))
         container.addView(
             Theme.text(
@@ -137,6 +146,95 @@ class OptionsActivity : Activity() {
             )
         )
     }
+
+    /**
+     * The caller registry, as a list.
+     *
+     * Each row can be renamed or forgotten. Forget is the ONLY way back from a block or a
+     * misheard name, and it deliberately means "unverified again" rather than "allowed" — the
+     * address has to re-earn a name through the prompt, which is the same door everyone else
+     * came through.
+     */
+    private fun callerRows(): LinearLayout {
+        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        val entries = try {
+            com.mido.phonebridge.callers.CallerStore.from(applicationContext).all()
+        } catch (e: Exception) {
+            block.addView(
+                Theme.text(
+                    this,
+                    "\u26a0 caller registry unreadable: ${e.message}\n\nEvery request is refused " +
+                        "until this file is fixed or removed.",
+                    12f, Theme.DANGER
+                )
+            )
+            return block
+        }
+
+        if (entries.isEmpty()) {
+            block.addView(
+                Theme.text(
+                    this,
+                    "No callers yet. The first request from another machine will ask you to " +
+                        "name it.",
+                    12f, Theme.ON_SURFACE_VARIANT
+                )
+            )
+            return block
+        }
+
+        for (entry in entries.values.sortedBy { it.ip }) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                )
+                background = Theme.outlined(
+                    this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD
+                )
+            }
+            val label = when (val st = entry.state) {
+                is com.mido.phonebridge.callers.CallerState.Verified -> st.name
+                com.mido.phonebridge.callers.CallerState.Denied -> "blocked"
+            }
+            val colour = when (entry.state) {
+                is com.mido.phonebridge.callers.CallerState.Verified -> Theme.SUCCESS
+                com.mido.phonebridge.callers.CallerState.Denied -> Theme.DANGER
+            }
+            row.addView(
+                Theme.text(this, "$label\n${entry.ip}", 14f, colour).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                    )
+                }
+            )
+            row.addView(
+                Theme.button(this, "forget", Theme.ButtonStyle.NEUTRAL, small = true) {
+                    try {
+                        com.mido.phonebridge.callers.CallerStore
+                            .from(applicationContext).forget(entry.ip)
+                        com.mido.phonebridge.audit.AuditLog.from(applicationContext).append(
+                            com.mido.phonebridge.audit.PolicyAudit.record(
+                                policy().global, policy().global, "options"
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            this, "could not forget: ${e.message}", Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    render()
+                }
+            )
+            block.addView(row)
+            block.addView(Theme.spacer(this, 8))
+        }
+        return block
+    }
+
+    private fun policy() = com.mido.phonebridge.policy.PolicyStore.from(applicationContext).get()
 
     /**
      * The AI backend block: current state, what it costs, and one button per alternative.

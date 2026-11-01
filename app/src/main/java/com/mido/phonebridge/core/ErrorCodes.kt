@@ -92,6 +92,13 @@ object ErrorCodes {
         // logged as a server fault. Surfaced by the audio cue route, which refuses on a dark
         // screen (ErrorCodesTest caught it).
         "denied" to FORBIDDEN,
+        // An address nobody has named. Refused at the TOP of dispatch, before policy and before
+        // the gate, because it is not a question about the request — it is a question about who
+        // is asking. The first call from a new machine is also the onboarding trigger.
+        "caller_unverified" to FORBIDDEN,
+        // A human explicitly blocked this address. Refused silently with no prompt, so a blocked
+        // caller cannot make the phone light up again.
+        "caller_denied" to FORBIDDEN,
 
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
@@ -227,6 +234,8 @@ object ErrorCodes {
         "auth_expired" to "The OAuth token expired and needs a re-login on the phone.",
         "secret_locked" to "The vault is shut. A human unlocks it by opening the app.",
         "denied" to "No approval was recorded: the human declined, a NOTIFY card was rejected, or the gate could not be presented (screen off or locked).",
+        "caller_unverified" to "This address has never been named. A human must approve it on the phone (with a name) before any route will answer.",
+        "caller_denied" to "A human blocked this address. No route will answer it until that block is removed on the phone.",
 
         // --- our side ---
         "auth_not_configured" to "This build has no OAuth credentials; it cannot serve Google routes.",

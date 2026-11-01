@@ -39,6 +39,7 @@ class RouteAuditTest {
     private fun draft() = AuditDraft(
         startedAtMs = 1L,
         remote = "100.1.1.1",
+        requesterLabelValue = "unverified caller 100.1.1.1",
         method = "GET",
         path = "/debug",
         query = emptyMap(),

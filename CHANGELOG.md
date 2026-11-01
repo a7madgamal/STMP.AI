@@ -3969,7 +3969,7 @@ Version 0.43.39 / build 193.
 
 ---
 
-## 0.43.40 — GET /help: the agent's entry point, and its update mechanism (build 194) — CURRENT
+## 0.43.40 — GET /help: the agent's entry point, and its update mechanism (build 194)
 2026-11-01
 
 The first piece of the agent-facing distribution design. `GET /help` describes this bridge and
@@ -4018,6 +4018,59 @@ operations is least protected.
 **3 new tests** (`HelpContractTest`), 371 -> 374.
 
 Version 0.43.40 / build 194.
+
+---
+
+## 0.43.41 — callers must be named before they can call (build 195) — CURRENT
+2026-11-01
+
+The build box's tailnet IP was compiled into every APK in three places, and the "label" for a
+caller was a fallback in disguise: match one hardcoded address, otherwise echo the raw IP. A reader
+could not tell a machine named `192.168.1.5` from one that had never been named at all.
+
+**A caller registry replaces the guess.** `callers.json`, keyed by address, states `verified(name)`
+or `denied`. **Absent means unverified, and unverified is REFUSED** (Mido, 2026-11-01: *"refused
+until named"*) — so the registry is an allow rule, not a label. The check runs at the TOP of
+dispatch, ahead of route resolution: an unnamed address must not learn which routes exist by
+watching whether it gets 403 or 404.
+
+**Naming is a full-screen prompt triggered by the caller's own first request** (`CallerActivity`,
+same shell as the approval modal, own class — `ApprovalView` is fifteen fields describing a request
+to approve, and a naming prompt fits none of them). A name is required to allow, and the answer is
+recorded, so a stranger cannot make the phone light up repeatedly: they are offered once, and either
+named or blocked.
+
+**Deny is offered, and needs a fingerprint too** (Mido: *"yes"*). A one-tap block would let someone
+holding an unlocked phone block the owner's own laptop. Denying writes `denied`, and that address is
+then refused SILENTLY with no prompt on every later call — the record is what makes blocking
+cheap instead of a re-prompt every knock.
+
+Loopback resolves to "this device" inside the registry, so the app's own probes never depend on a
+human naming them.
+
+**Lenient parse that DROPS rather than defaults.** An unreadable row makes the address unverified
+again. Defaulting to `verified` would let a corrupt byte grant access; defaulting to `denied` would
+lock out a host the human approved. Neither is a decision a parser may make.
+
+**The two hidden fallbacks are gone.** `ExternalModel` had a default endpoint pointing at a specific
+private machine, so "external AI not configured" silently meant "send this request to someone
+else's box" — now an unconfigured build reports exactly that and refuses. And `BridgeService` held a
+DUPLICATE of the caller-label function with the same IP inlined a second time; both are deleted, and
+`AuditDraft` now requires a label with no default, because only the registry knows the difference
+between a name and an address.
+
+**Options gains the caller list**, so a block can be undone and a misheard name fixed without
+editing JSON. "Forget" removes the row entirely, which means unverified again — the only way back
+is through the same prompt everyone else came through.
+
+**Three compiler catches worth recording:** `BiometricPrompt` needs a `FragmentActivity`, not an
+`Activity`; Kotlin's `Any` has no `wait`/`notifyAll`, so the one-prompt-at-a-time lock had to be a
+`ReentrantLock`; and `setPriority` is deprecated under `allWarningsAsErrors` — the channel already
+carries `IMPORTANCE_HIGH`.
+
+374 tests, 0 failures.
+
+Version 0.43.41 / build 195.
 
 ---
 

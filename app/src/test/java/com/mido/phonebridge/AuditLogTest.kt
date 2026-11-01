@@ -41,6 +41,7 @@ class AuditLogTest {
         val d = com.mido.phonebridge.audit.AuditDraft(
             startedAtMs = 1_000L,
             remote = "100.64.0.10",
+            requesterLabelValue = "this device",
             method = "POST",
             path = path,
             query = emptyMap(),
@@ -198,10 +199,10 @@ class AuditLogTest {
         val a = log()
         // Two records in different milliseconds so ordering is unambiguous.
         val d1 = com.mido.phonebridge.audit.AuditDraft(
-            1L, "1.1.1.1", "GET", "/notifications", emptyMap(), emptyMap(), "0.4.0", 66
+            1L, "1.1.1.1", "unverified caller 1.1.1.1", "GET", "/notifications", emptyMap(), emptyMap(), "0.4.0", 66
         ).apply { bindRoute("notifications", Verb.READ, "/notifications"); outcome(AuditOutcome.APPROVED); response(200, "{}") }
         val d2 = com.mido.phonebridge.audit.AuditDraft(
-            1L, "1.1.1.1", "GET", "/notifications", emptyMap(), emptyMap(), "0.4.0", 66
+            1L, "1.1.1.1", "unverified caller 1.1.1.1", "GET", "/notifications", emptyMap(), emptyMap(), "0.4.0", 66
         ).apply { bindRoute("notifications", Verb.READ, "/notifications"); outcome(AuditOutcome.DENIED); response(403, "{}") }
         a.append(d1.toRecord(5_000L))
         a.append(d2.toRecord(6_000L))
@@ -226,7 +227,7 @@ class AuditLogTest {
         // The dead end this exists to prevent: answering 400 "invalid JSON body"
         // while keeping not one byte of what the caller actually sent.
         val d = com.mido.phonebridge.audit.AuditDraft(
-            1L, "1.1.1.1", "POST", "/notifications/abc/action", emptyMap(), emptyMap(), "0.5.0", 69
+            1L, "1.1.1.1", "unverified caller 1.1.1.1", "POST", "/notifications/abc/action", emptyMap(), emptyMap(), "0.5.0", 69
         )
         d.bindRoute("notifications", Verb.EXECUTE, "/notifications/{id}/action")
         d.requestBody("{\"action\": broken")
@@ -244,7 +245,7 @@ class AuditLogTest {
         // /debug returns the log itself and opts out of storing its response. An empty
         // responseBody must not read as "the handler returned nothing".
         val d = com.mido.phonebridge.audit.AuditDraft(
-            1L, "1.1.1.1", "GET", "/debug", emptyMap(), emptyMap(), "0.5.0", 69
+            1L, "1.1.1.1", "unverified caller 1.1.1.1", "GET", "/debug", emptyMap(), emptyMap(), "0.5.0", 69
         )
         d.bindRoute("debug", Verb.READ, "/debug")
         d.outcome(AuditOutcome.APPROVED)

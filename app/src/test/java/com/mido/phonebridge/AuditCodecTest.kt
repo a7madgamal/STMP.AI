@@ -31,6 +31,7 @@ class AuditCodecTest {
     private fun draft(path: String = "/gmail/messages/abc/modify"): AuditDraft = AuditDraft(
         startedAtMs = 1_000L,
         remote = "100.64.0.10",
+        requesterLabelValue = "this device",
         method = "POST",
         path = path,
         query = mapOf("count" to "3"),

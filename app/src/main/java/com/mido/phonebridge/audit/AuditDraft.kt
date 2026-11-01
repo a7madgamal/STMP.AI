@@ -3,7 +3,6 @@ package com.mido.phonebridge.audit
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.labelOf
 import com.mido.phonebridge.core.originOf
-import com.mido.phonebridge.core.requesterLabelFor
 import java.util.Locale
 
 /**
@@ -26,6 +25,16 @@ import java.util.Locale
 class AuditDraft(
     private val startedAtMs: Long,
     private val remote: String,
+    /**
+     * What to CALL the caller in the log: a human-given name, `this device`, or an explicit
+     * `unverified caller <ip>`.
+     *
+     * Required, with no default. It used to be derived here from [remote] by matching one
+     * hardcoded IP and otherwise echoing the address — a fallback dressed as a label, which made
+     * "named `192.168.1.5`" indistinguishable from "never named at all". Only the caller registry
+     * knows the difference, so only the dispatcher can supply this.
+     */
+    private var requesterLabelValue: String,
     private val method: String,
     private val path: String,
     private val query: Map<String, String>,
@@ -38,6 +47,17 @@ class AuditDraft(
 
     var verb: Verb? = null
         private set
+
+    /**
+     * Replace the caller label mid-request.
+     *
+     * Exists for exactly one case: an unverified caller that a human NAMES while this very
+     * request waits. The label captured at construction would say "unverified"; by the time the
+     * record is written the name is known, and the log should say what actually happened.
+     */
+    fun requesterLabel(label: String) {
+        requesterLabelValue = label
+    }
 
     /** `METHOD /route/{template}` — the template, never the concrete path. */
     var route: String = ""
@@ -171,7 +191,7 @@ class AuditDraft(
             verb = verbName,
             origin = originOf(remote).name,
             remote = remote,
-            requester = requesterLabelFor(remote),
+            requester = requesterLabelValue,
             route = route,
             method = method.uppercase(Locale.ROOT),
             path = path,
