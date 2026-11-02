@@ -4450,7 +4450,7 @@ Version 0.43.52 / build 206.
 
 ---
 
-## 0.43.53 — the model is picked from the server, not invented (build 207) — CURRENT
+## 0.43.53 — the model is picked from the server, not invented (build 207)
 2026-11-02
 
 Mido, 2026-11-02: *"this was very stupid, i said no hidden fallbacks. we need to make this work for
@@ -4497,6 +4497,34 @@ about missing downloads.
 6 new tests, 380 total, 0 failures.
 
 Version 0.43.53 / build 207.
+
+---
+
+## 0.43.54 — refresh reports what the server actually said (build 208) — CURRENT
+2026-11-02
+
+Mido, 2026-11-02: *"couldn't list models."* The server was answering `200` the whole time. The
+listing worked and the RESULT was thrown away.
+
+`refresh` built its outcome as a `Pair`: `null to message` on failure, and the catalogue itself on
+success. The UI then pulled it apart with `outcome as? Pair<*, *>` — which is null for BOTH, because
+a success value is a `ModelCatalogue` and not a pair. So `catalogue` was always null and the
+message was always "no answer", even against a server that had just listed a model correctly.
+
+**The shape was the bug.** One variable holding either "a result" or "a result plus an error" is a
+type doing two jobs, and the cast that separated them was the only thing making it work — a cast
+that is silently null when it is wrong. It now uses `Result<ModelCatalogue>`: `getOrNull()` for the
+value, `exceptionOrNull()` for the reason. A failure carries its own message instead of hiding in a
+tuple that needs unpacking.
+
+This is the second defect in this one button, after the dialect/path mix-up, and both had the same
+signature: **a success path that reported failure.** The lesson recorded in the code: when a UI says
+"could not", print the exception, not a placeholder — "no answer" was the one word that ruled out
+every real cause.
+
+380 tests, 0 failures.
+
+Version 0.43.54 / build 208.
 
 ---
 

@@ -486,18 +486,28 @@ class OptionsActivity : Activity() {
                 // to block on one. The result comes back through runOnUiThread so every view
                 // touch happens where Android requires it.
                 Thread {
-                    val outcome = try {
-                        com.mido.phonebridge.ai.ExternalModels.fetch(
-                            url, tokenField.text.toString().trim()
+                    // An explicit outcome, NOT a Pair that has to be re-cast.
+                    //
+                    // The first version built `null to message` on failure and returned the
+                    // catalogue directly on success, then tried `outcome as? Pair<*, *>` to pull
+                    // them apart — which is null for BOTH, so a working server reported
+                    // "could not list models — no answer" every single time. A success value and
+                    // a failure value that need a cast to tell apart is a type doing two jobs.
+                    val outcome: Result<com.mido.phonebridge.ai.ModelCatalogue> = try {
+                        Result.success(
+                            com.mido.phonebridge.ai.ExternalModels.fetch(
+                                url, tokenField.text.toString().trim()
+                            )
                         )
                     } catch (e: Exception) {
-                        null to (e.message ?: e.javaClass.simpleName)
+                        Result.failure(
+                            IllegalStateException(e.message ?: e.javaClass.simpleName, e)
+                        )
                     }
                     runOnUiThread {
-                        val catalogue = (outcome as? Pair<*, *>)?.first
-                            as? com.mido.phonebridge.ai.ModelCatalogue
+                        val catalogue = outcome.getOrNull()
                         if (catalogue == null) {
-                            val why = (outcome as? Pair<*, *>)?.second as? String ?: "no answer"
+                            val why = outcome.exceptionOrNull()?.message ?: "no answer"
                             modelStatus.text = "could not list models — $why"
                             modelStatus.setTextColor(Theme.DANGER)
                             modelSpinner.visibility = android.view.View.GONE
