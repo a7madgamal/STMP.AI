@@ -19,20 +19,19 @@ enum class Verb { READ, WRITE, EDIT, DELETE, EXECUTE }
  * gate anything (R1/R2/R3): it is an IP-derived label, not an authenticated
  * principal, so a rule keyed on it would encode a guess.
  */
-enum class Origin { OPENCLAW, LOCAL, TAILNET, UNKNOWN }
-
-/** This build box's tailnet address. */
-const val OPENCLAW_IP = "100.64.0.10"
+enum class Origin { LOCAL, TAILNET, UNKNOWN }
 
 /**
  * Pure, total mapping from a remote address to an origin label.
  *
  * Never throws and never guesses: anything unrecognised is [Origin.UNKNOWN].
- * Deliberately blunt — a false UNKNOWN costs a filter, a false OPENCLAW would
- * mislabel a stranger as the trusted caller.
+ * Deliberately blunt — a false UNKNOWN costs a filter; there is no privileged
+ * bucket to be wrongly promoted into. This used to special-case the build box's
+ * own tailnet address as `OPENCLAW`, but caller identity now comes from
+ * `CallerStore`, which knows a caller's NAME rather than inferring one from an
+ * address. The CGNAT branch below covers that box as ordinary TAILNET.
  */
 fun originOf(remote: String): Origin = when {
-    remote == OPENCLAW_IP -> Origin.OPENCLAW
     remote == "127.0.0.1" || remote == "::1" || remote == "localhost" -> Origin.LOCAL
     remote.startsWith("100.") -> {
         // Tailscale CGNAT range is 100.64.0.0/10 => second octet 64..127.
@@ -41,10 +40,6 @@ fun originOf(remote: String): Origin = when {
     }
     else -> Origin.UNKNOWN
 }
-
-/** Human-recognisable name for the caller, used by the modal and the log. */
-fun requesterLabelFor(remote: String): String =
-    if (remote == OPENCLAW_IP) "OpenClaw (this box)" else remote
 
 /** The audit label for a request: `plugin.verb`, e.g. `gmail.write`. */
 fun labelOf(pluginId: String, verb: Verb): String = "$pluginId.${verb.name.lowercase()}"

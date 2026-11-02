@@ -53,14 +53,23 @@ class HelpContractTest {
     }
 
     @Test
-    fun `only the audio cue skips the gate`() {
+    fun `only the two sound routes skip the gate`() {
         // `/help` must NOT be exempt: it is a normal plugin whose DEFAULT RULE downgrades it to a
         // NOTIFY card. If someone "helpfully" marks it gateExempt, the seeded rule becomes dead
         // config and the call stops being recorded as a decision.
         //
-        // One exempt route, asserted as an exact set: a second exemption is a decision that
-        // deserves its own argument, not a quiet addition.
-        assertEquals(setOf("POST /audio/{cue}"), declaredExemptRoutes())
+        // An exact set, so a THIRD exemption cannot be added quietly — it has to argue here.
+        //
+        // Both current entries are one decision (Mido, 2026-11-02: *"exempt as long as known
+        // ip"*): a route whose job is to reach someone who is NOT looking cannot itself require
+        // them to look. The bound is not the route but the CALLER — the caller check runs before
+        // routing, so an unnamed address is refused before a route is even resolved, and neither
+        // of these can be fired by a stranger. Neither can do anything but make a sound: one has
+        // a closed set of three cues, the other speaks the string it was given and nothing else.
+        assertEquals(
+            setOf("POST /audio/{cue}", "POST /tts"),
+            declaredExemptRoutes()
+        )
     }
 
     /** Every `Method "path"` pair in the main source. */
@@ -117,12 +126,13 @@ class HelpContractTest {
          * Not generated: writing the pin by hand is what makes a bump a deliberate act rather
          * than something a script does while you are not looking.
          */
-        const val CONTRACT_VERSION = 2
+        const val CONTRACT_VERSION = 4
 
         val PINNED_ROUTES: Set<String> = setOf(
             "DELETE /audit",
             "DELETE /calendar/events/{id}",
             "GET /calendar/events",
+            "GET /contacts",
             "GET /debug",
             "GET /drive/files",
             "GET /drive/files/{id}",
@@ -155,6 +165,7 @@ class HelpContractTest {
             "POST /secrets/{name}/call",
             "POST /ssh/{name}",
             "POST /ssh/{name}/detach",
+            "POST /tts",
         )
     }
 }

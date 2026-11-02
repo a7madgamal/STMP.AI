@@ -30,7 +30,7 @@ class AuditCodecTest {
 
     private fun draft(path: String = "/gmail/messages/abc/modify"): AuditDraft = AuditDraft(
         startedAtMs = 1_000L,
-        remote = "100.64.0.10",
+        remote = "100.101.102.103",
         requesterLabelValue = "this device",
         method = "POST",
         path = path,
@@ -62,7 +62,10 @@ class AuditCodecTest {
         assertEquals("APPROVED", parsed.getString("outcome"))
         assertEquals("gmail.edit", parsed.getString("label"))
         assertEquals("EDIT", parsed.getString("verb"))
-        assertEquals("OPENCLAW", parsed.getString("origin"))
+        // The fixture remote is a CGNAT address, so the label is TAILNET. There is no
+        // OPENCLAW bucket any more: caller identity comes from CallerStore, not from an
+        // address that had to be hardcoded into the build.
+        assertEquals("TAILNET", parsed.getString("origin"))
         assertEquals(2, parsed.getJSONObject("decision").getInt("queueDepth"))
         assertFalse(parsed.getBoolean("noise"))
         // The real invariant: the stored line re-parses to the SAME object, so the

@@ -40,7 +40,7 @@ class AuditLogTest {
     private fun record(log: AuditLog, outcome: AuditOutcome, path: String = "/gmail/messages") {
         val d = com.mido.phonebridge.audit.AuditDraft(
             startedAtMs = 1_000L,
-            remote = "100.64.0.10",
+            remote = "100.101.102.103",
             requesterLabelValue = "this device",
             method = "POST",
             path = path,

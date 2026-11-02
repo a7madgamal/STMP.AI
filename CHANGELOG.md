@@ -4500,7 +4500,7 @@ Version 0.43.53 / build 207.
 
 ---
 
-## 0.43.54 — refresh reports what the server actually said (build 208) — CURRENT
+## 0.43.54 — refresh reports what the server actually said (build 208)
 2026-11-02
 
 Mido, 2026-11-02: *"couldn't list models."* The server was answering `200` the whole time. The
@@ -4525,6 +4525,407 @@ every real cause.
 380 tests, 0 failures.
 
 Version 0.43.54 / build 208.
+
+---
+
+## 0.43.55 — the hint card can no longer grow when the summary lands (build 209)
+2026-11-02
+
+Mido, 2026-11-02: *"the problem is the hint, just fucking see why would it ever render a full height card and fix it"*.
+
+The question is the fix. A `NOTIFY` card is a `WRAP_CONTENT` `FrameLayout`, so **anything else that
+participates in its layout can decide its size** — and the risk tint was a child `View`. That is
+the defect that shipped in 0.6.2 (a `MATCH_PARENT` fill under a `WRAP_CONTENT` parent forces the card
+to the whole window) and again in 0.25.1 (the same shape, hidden until the AI summary made the strip
+`VISIBLE`, reported as *"looked good until summarize finished then it went back to full height
+shit"*).
+
+The 0.25.1 fix was not a fix. It made the strip `WRAP_CONTENT` and then **stretched it to the card's
+measured height in a `post {}`** — so the tint still depended on the card, the card still had a child
+whose geometry was derived from it, and the whole thing still ran through a stale height read one
+frame after the text changed. It was the same dependency wearing a hat.
+
+**The tint is now a background LAYER, not a view at all.** `ui/EdgeBand` is a `Drawable` with a
+width, rounded on the card's own corner radius. A background layer cannot participate in layout, so
+the AI arriving can now change text and paint but can never change geometry — that is a property of
+the construction, not a value to keep in sync. The `post {}` stretch is deleted along with the view,
+and so is the `entry.riskStrip?.setBackgroundColor(...)` call whose line was the only reason
+`GrainCoverageTest` had an allowlist entry for a 3dp strip.
+
+**Enforced by a test, because this shipped twice while the code looked right.**
+`NotifyCardLayoutTest` scans the source and fails the build if `NotifyOverlay` ever adds a second
+child to the card, and fails if the risk tint returns as a `View`. The rule is a shape in the
+source, so the source is where it can be broken.
+
+**Not reproduced on the installed build, and that is recorded honestly.** Firing live requests
+(`/gmail/profile`, `/secrets`) against 0.43.54 produced cards measuring 405×78 px at teardown —
+including cards whose summary had landed (`summarised in 1672ms: risk=LOW` in the same second). The
+one taller card was 405×112, and that was the AI-failure card carrying an extra error line. So the
+trigger is narrower than "a summary exists" — but the layout path was a latent size dependency
+either way, and it is gone now.
+
+383 tests, 0 failures.
+
+Version 0.43.55 / build 209.
+
+---
+
+## 0.43.56 — POST /tts: the phone says a sentence, and answers when it has (build 210)
+2026-11-02
+
+The backlog item, planned in chat first and built on an explicit go. Mido's decisions, in the order
+they were asked: *"exempt as long as known ip"*, *"all basic options configureable in plugin
+options, including cap limit"*, *"wait until finished"*, *"both should work if screen off"*,
+*"serial bounded"*, *"a silent phone is enough"*, *"refuse"*.
+
+**`POST /tts`, body `{"text": "..."}`, `gateExempt = true`.**
+
+**The exemption is bounded by the CALLER, not by the route, and that needed no new mechanism.** The
+caller check runs before routing (0.43.41), so an unnamed address is refused before a route is even
+resolved. `gateExempt` on this route therefore means "any caller you have already named may speak",
+not "anyone at all". A stranger cannot make the phone talk.
+
+**Why exempt at all.** The point is delivering something to someone who is *not* looking at the
+phone. A prompt-first requirement would make the feature usable only when it was unnecessary — the
+same circularity that makes `/audio` exempt.
+
+**The wait IS the contract.** The route returns only after `onDone`, so `ok` means the phone
+finished saying it. `UtteranceProgressListener.onDone` is the only success path: `onStop` is
+reported as failure, because an utterance that did not finish is exactly the "ok for something
+nobody heard" lie this file refuses to ship. The deadline is `8s + 120ms/char` derived from the cap,
+never a fixed number — and a deadline that trips FAILS the request rather than claiming success.
+
+**Serial and bounded, not flush.** A flush would cut off an older utterance, and because the caller
+blocks for the whole thing, the interrupted one could only be answered with a success conditional on
+timing. A line is duller and it can be trusted. Overflow answers `503 tts_busy` with the count.
+
+**Everything configurable, capped by construction.** `TtsSettings` (cap, rate, pitch, queue depth)
+is ONE object on `Policy` rather than four loose fields — this file has already paid for a
+positional rebuild silently resetting siblings, and eight copy methods each naming four more fields
+is eight more chances to drop one. `withTts` carries every other field by name. Every value is
+clamped by `TtsLimits` on read AND on use: a stored `0.0` rate is not worth crashing for and not
+worth honouring either. `TtsLimitsTest` (9 cases) covers the cap, the ceiling, the clamps and the
+deadline — these are decisions, and a decision only checkable by listening to a phone is one nobody
+re-checks.
+
+**`/audio` loses its attendance check in the same commit.** Mido: *"both should work if screen off"*.
+It refused on a dark screen on the reasoning that a cue nobody can see is noise in a pocket — but the
+case where an attention cue matters most IS a phone in a pocket or face-down, so the route worked
+only when it was unnecessary.
+
+**A silent phone is enough, so there is no ON/OFF toggle.** The utterance rides
+`USAGE_NOTIFICATION`, so silent/vibrate/DND silence it for free. A second brake that can disagree
+with the first is worse than none, and a setting must never make "off" ambiguous.
+
+**Over the cap is refused, never truncated** — `400 text_too_long` naming the actual length and the
+cap, checked pre-gate so it costs no engine work. Truncation is the one failure this route cannot
+report, because the reply would look identical to success.
+
+`aiSummary = false`: the text IS the description. Asking a model to summarise a sentence a human is
+about to hear can only lose information, and a route that went silent because inference timed out
+would fail exactly when someone wanted to be told something.
+
+`HelpContractTest` caught both consequences immediately and both were updated deliberately, not
+weakened: `CONTRACT_VERSION` 2 → 3, `POST /tts` pinned, and the exempt set is now an exact TWO —
+so a third exemption has to argue for itself in that test.
+
+391 tests, 0 failures.
+
+Version 0.43.56 / build 210.
+
+---
+
+## 0.43.57 — GET /contacts: search only, and the log keeps half a number (build 211)
+2026-11-02
+
+Backlog item 11, *"Phone contacts plugin — must allow search"*. Mido's one decision on the shape:
+*"audit both but keep number half redacted"*.
+
+**Search-only is the security property, not a limitation.** No list-all, no paging, no export — a
+route that dumps the address book hands a stranger every number on the phone in one call, while a
+route that REQUIRES a query can only answer about names the caller already half-knows. The backlog
+wording is the design.
+
+**Two ways a "query" would have quietly become a bulk download, both closed:**
+
+- An empty query is REFUSED rather than treated as "match everything" — a route that returns the
+  whole book for `query=` is the export route with extra steps.
+- `%` and `_` are `LIKE` wildcards, so `query=%` matched every row. The query is now escaped and
+  the selection declares `ESCAPE '\'`. Escaping runs backslash-FIRST, or the backslashes added for
+  `%` and `_` would themselves be doubled.
+
+Also: one character is refused (<mark><code>MIN_QUERY = 2</code></mark>) because `a` matches a large
+fraction of any real book; results are capped at 25, read one PAST the cap so the reply can say
+`truncated: true` instead of presenting a partial list as complete; and duplicate name+number rows
+(the mobile + WhatsApp entry every real contact has) are collapsed, so `count` means people.
+
+**`READ_CONTACTS` is a runtime permission and a route cannot ask for one.** A dialog needs an
+Activity and a tap; a handler has neither. So the split is forced: the plugin CHECKS and answers
+<mark><code>503 contacts_unavailable</code></mark>, and `MainActivity` owns the prompt behind a
+"Contacts search — tap to grant" row. Not asked at launch: a contacts prompt with no visible reason
+gets denied reflexively, and a denial is sticky enough to need Settings to undo.
+
+**The audit keeps the matches with numbers half-masked — and this needed a new mechanism, not a
+flag.** `auditResponseBody` can only say keep or drop, and this route needs neither: the caller must
+receive REAL numbers (a search returning masked ones is useless) while the append-only log must not
+become an address book of people who never installed this app. So `Route.auditResponseTransform`
+builds a DIFFERENT object for the log — same shape, `number` renamed to `numberRedacted` so nobody
+can mistake a mask for the real thing — and the caller's bytes are never rewritten. It runs in the
+single dispatch site beside `auditResponseBody`, because that flag itself once drifted by being
+honoured on one path and ignored on another.
+
+The mask keeps the LEADING half (`+49 151 1234 5678` → `+49 151 12•• ••••`): country and area code
+are what make a number recognisable to its owner, while the subscriber digits are the part that
+reaches a person. Masking the middle would keep both ends and identify the number almost completely,
+which is redaction theatre. Formatting survives, and a string with no digits is returned unchanged
+rather than given a mask it did not earn.
+
+`ContactRulesTest` (8 cases) covers the empty query, the one-character query, the odd-length digit
+count (rounds UP, because rounding down masks MORE than half and "half" is the promise), and that
+no run of four unmasked digits survives into the audit copy.
+
+`HelpContractTest` caught the new route again and was updated deliberately: `CONTRACT_VERSION` 3 → 4,
+`GET /contacts` pinned.
+
+398 tests, 0 failures.
+
+Version 0.43.57 / build 211.
+
+---
+
+## 0.43.58 — a denied permission now says so instead of pretending nothing happened (build 212)
+2026-11-02
+
+Reported on device: *"i tapped, but I expected to be asked for the permission"*. The log says the
+prompt DID appear — `requesting READ_CONTACTS` at 14:36:54.190, the window lost focus 70ms later and
+regained it 5.2s after, then `READ_CONTACTS result: DENIED` at 14:36:59.381. The permission is
+declared in the shipped APK (`aapt2 dump permissions` confirms it).
+
+So the request worked and the dialog was real. **The defect was what happened after it:** the row
+went straight back to "tap to grant", exactly as it had been before the tap. Nothing distinguished
+"never asked" from "asked and declined" from "Android will not ask again". That is what made a real
+prompt feel like a dead button.
+
+**Three states now, all distinguishable:**
+
+- never asked → <mark><code>tap to grant</code></mark>, warning
+- declined, can ask again → <mark><code>declined — tap to ask again</code></mark>, warning
+- permanently blocked → <mark><code>blocked — tap to open Settings</code></mark>, danger, and the
+  tap opens App details
+
+`shouldShowRequestPermissionRationale` is the authority on "may I ask again", but it is FALSE both
+before the first ask and after a permanent denial — so a persisted `contactsAsked` flag separates
+those two. Without it a first-ever install would wrongly read as blocked.
+
+**A denial now also produces a Toast**, naming which of the two states you landed in. Silence after
+a dialog is the specific thing that made the tap look broken.
+
+Settings opens `ACTION_APPLICATION_DETAILS_SETTINGS`, not the OEM "app permissions" deep link:
+Samsung's S22 firmware lands the latter on a page without the contacts toggle.
+
+Set before `render()`, not after — the row's text depends on "have they been asked", so marking it
+after the repaint would render the stale state.
+
+Version 0.43.58 / build 212.
+
+---
+
+## 0.43.59 — the row now says what the tap will ACTUALLY do (build 213)
+2026-11-02
+
+Third report of *"still fucking misleading"*, and 212 did not fix it because 212 was still
+describing the permission state instead of describing the BUTTON.
+
+The defect, stated plainly: a row labelled `tap to grant` is a promise that a dialog will open.
+Once Android has decided not to prompt, that promise is false — the tap returns `DENIED` in
+roughly zero milliseconds with nothing on screen at all. The user taps, nothing happens, and the
+label says the same thing it did before. Nothing in that loop is honest.
+
+**The rule now: the label is a description of what the tap does.**
+
+- never asked → <mark><code>tap to grant</code></mark> → asks
+- declined, Android will still prompt → <mark><code>declined — tap to ask again</code></mark> → asks
+- asked before and Android will not prompt → <mark><code>tap to open Settings and allow Contacts</code></mark> → opens Settings
+
+That third label cannot be wrong, which is the point. `shouldShowRequestPermissionRationale` alone
+cannot pick between the last two — it is false both before the first ask and after a permanent
+denial — so the persisted `contactsAsked` flag separates them, and after ANY denial this app
+assumes blocked. That is the conservative direction on purpose: opening Settings for someone who
+could have been re-prompted is a small cost; promising a dialog that will never appear is the bug
+being fixed.
+
+**On denial, Settings now opens by itself** when Android will not prompt again, with a Toast saying
+so. Telling someone "allow it in Settings" and leaving them on a screen whose button still says
+"tap to grant" is the exact loop being removed.
+
+Version 0.43.59 / build 213.
+
+---
+
+## 0.43.60 — the permission outcome is stated in a modal, not a Toast you can miss (build 214)
+2026-11-02
+
+Reported, accurately: *"As a user I wouldn't know this shit didn't work, I want to know that I need
+to give the permission in the same fucking modal."*
+
+212 and 213 both improved the ROW. Both were wrong about where the outcome belongs. A Toast fades
+over the very row it describes, so the only durable evidence of a denial was a label the user had
+to already suspect was there.
+
+**The tap now always opens a modal that states the situation**, and the modal is where the answer
+comes back:
+
+- never asked → "STMP needs permission to search your contacts… Android will ask you to confirm on
+  the next screen." → **Allow**
+- declined, Android will prompt → "Contacts permission was declined earlier." → **Allow**
+- blocked → "Android will not show the request again, so it has to be enabled in Settings" →
+  **Open Settings**
+- **just denied** → the SAME modal returns saying you denied it, and either offers Allow again or
+  sends you to Settings
+
+No path silently calls `requestPermissions` and hopes. A permission flow whose outcome the user
+cannot see is a permission flow that looks broken — which is exactly how it was reported three
+times.
+
+`requestContactsPermission()` now delegates to the dialog rather than requesting directly, so
+nothing can bypass the explanation.
+
+Version 0.43.60 / build 214.
+
+---
+
+## 0.43.61 — the 5-second repaint was eating taps (build 215)
+2026-11-02
+
+Reported: *"nothing changed no modal"* — after two releases of dialog work that never appeared.
+
+**The device log had the cause, and it was not the dialog.** The tap logged
+<mark><code>ViewPostIme pointer 0</code></mark> and **no `pointer 1`**: a press that never became a
+release. A gesture cancelled mid-flight.
+
+`uiTick` calls `render()` every 5 seconds, and `render()` begins with
+`statusContainer.removeAllViews()` — it destroys and rebuilds every checklist row. A press held
+longer than the interval has its View removed from under the finger, so the click never fires.
+Pressing a row is a 1–2 second gesture, so this ate them routinely.
+
+**The bug was self-concealing**, which is why it survived three rounds of guessing: nothing
+crashed, nothing logged, and the screen looked *identical* afterwards because it had just been
+rebuilt with the same content. Two releases of modal copy were written against a tap that could
+never reach them. My first two attempts fixed the label and then the dialog — both real
+improvements, neither reachable.
+
+**Fix: the tick repaints only when something it displays actually changed.** `renderSignature()`
+is a cheap fingerprint of every value the checklist paints — server state, bind address, the three
+contacts-permission states, FSI, overlay, battery, vault, AI enabled/ready/download percent, login
+email, audit health, and each plugin's title+state. Unchanged signature, no repaint, so rows keep
+their identity between ticks and a press can complete. `render()` re-baselines the signature on
+every explicit call, so a tap-driven repaint is never immediately undone by the tick.
+
+The download percent is IN the signature on purpose — without it a model download would freeze on
+whatever value was on screen when skipping began.
+
+Shortening the interval was the tempting alternative and would have made it strictly worse.
+
+Version 0.43.61 / build 215.
+
+---
+
+## 0.43.62 — APPROVE on the contacts card now asks for the permission (build 216)
+2026-11-02
+
+Reported with a screenshot of the approval card — which is the part I got wrong four times:
+*"all i want is when clicking approve here I give the fucking permission"*.
+
+Every previous attempt fixed the **home screen checklist row**. The card in that screenshot is
+`ApprovalActivity`, an entirely separate surface that I never opened. So the loop was:
+
+1. caller asks for contacts
+2. card appears, human taps APPROVE — exactly what the product asks of them
+3. the request runs, the plugin finds no `READ_CONTACTS`, and answers
+   <mark><code>503 contacts_unavailable</code></mark>
+4. the remedy is hidden on a different screen nobody had a reason to visit
+
+**Approving a contacts request is now the moment the permission is requested.** On
+`GET /contacts`, APPROVE calls `requestPermissions(READ_CONTACTS)` FIRST and leaves the request
+**PENDING** — resolving first would fire a handler guaranteed to fail. On grant it approves for
+real; on denial it stays pending with the buttons live.
+
+A denial now says so **on the card**, in an `AlertDialog` naming the two outcomes — ask again, or
+open Settings when Android will not re-prompt. Not a Toast: that is the feedback that vanished
+before it could be read for four releases.
+
+`needsContactsPermission` is derived from the ENDPOINT on the card, because the plugin cannot help
+here — it only runs after approval, so the check has to happen on the gate's side of the line. A
+`contactsPromptRunning` guard stops a double tap from stacking two system dialogs, which on some
+OEM builds silently drops the first result.
+
+`onRequestPermissionsResult` is now overridden in this Activity too. It logs the grant/deny either
+way, because "the route is broken" and "nobody allowed it" look identical from a tailnet.
+
+Version 0.43.62 / build 216.
+
+---
+
+## 0.43.63 — contacts can answer "what is their email", and the card shows the query (build 217)
+2026-11-02
+
+Two separate defects, both reported in one message:
+
+1. *"can you get me the email of Ahmed Awadi?"* — the plugin only ever read
+   `CommonDataKinds.Phone`, so every row carried a name and a number and nothing else. The address
+   book has the emails; I never queried them. That is not a permission problem and no amount of
+   granting would have fixed it.
+2. *"I can't see more details about the search modal request"* — `ContactsPlugin` never implemented
+   `describeRows`, so `rowsFor` fell through to the empty-read default and the card rendered a bare
+   endpoint line. The query existed only inside the collapsed JSON blob, so the human was asked to
+   approve a search without being told what it would search for.
+
+**Emails.** `CommonDataKinds.Email` is scanned as a second pass, matched on display name OR address,
+so a name search finds someone whose address says nothing about their name. Rows from both
+providers fold together by `CONTACT_ID` ([ContactRules.collapse]) — one person, every number and
+every address, duplicates dropped. `count` still means people.
+
+**Shape change, deliberately breaking:** each contact now carries `numbers[]` and `emails[]` instead
+of a single `number`. A contact genuinely has several of each, and picking one would have been a
+guess the caller could not see. The audit mirrors it as `numbersRedacted[]` / `emailsRedacted[]`.
+
+**Email redaction** keeps the domain and halves the local part: `ahmed@gmail.com` →
+`ahm••@gmail.com`. The domain is shared with thousands of people and identifies nobody; the local
+part is the identifying half, so it gets the same half rule as a number. A string with no `@` is
+masked whole rather than passed through — returning malformed input raw would leak on exactly the
+case nobody tests.
+
+**The card now shows** SEARCH / RETURNS / LIMIT as real rows, so the query is visible without
+expanding anything.
+
+Cap accounting also tightened: `Accumulator.add` stops on a new *person* past the cap but keeps
+folding extra values for a person already collected, so a truncated reply never drops a number the
+person actually has.
+
+404 tests, 0 failures.
+
+---
+
+## 0.43.64 — email-only contacts came back nameless (build 218) — CURRENT
+2026-11-02
+
+Found by testing 217 on the device rather than by reading it back: `GET /contacts?query=gmail`
+returned 25 contacts, **every one with `"name": ""`**. A list of bare addresses is not an answer —
+the human cannot tell who they are looking at.
+
+Cause: `CommonDataKinds.Email.DISPLAY_NAME` is routinely empty for a contact with only an address,
+and `Phone.DISPLAY_NAME` is empty for the same contact because it has no phone row at all. So the
+name existed on `ContactsContract.Contacts` and nowhere in either scanned provider.
+
+`resolveMissingNames` now runs **after** the scan, batched into ONE query with an `IN (...)`, and
+names only the ids that are still blank. At most 25 ids, one round trip, no per-row query.
+
+A failure in that pass is deliberately not fatal: the numbers and addresses are already correct,
+and failing the whole search would answer less than the device can.
+
+Also confirmed on device in the same run: `numbers` comes back as an array per person, deduped and
+collapsed by contact id — *Ahmed Aly Luxor* carries seven numbers across four countries in one
+entry, exactly as intended.
 
 ---
 

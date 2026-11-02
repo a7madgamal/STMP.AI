@@ -1,0 +1,32 @@
+STMP — Your phone answers to an API.
+Copyright 2026 Ahmed Hassanein
+
+This product is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License. You may obtain
+a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+
+Waqf intention
+--------------
+
+This work is released as a waqf — an endowment whose benefit is intended to
+continue — and as sadaqah jariyah. The Apache-2.0 licence above is the binding
+legal instrument and grants every right it grants, to everyone, without
+condition: this statement adds an intention, not a restriction.
+
+If it is useful to you, use it. If you improve it, share the improvement.
+
+
+Third-party components
+----------------------
+
+This product includes software developed by third parties under their own
+licences, listed in full in THIRD-PARTY-NOTICES.md. Those licences govern those
+components; the Apache-2.0 grant above covers the original work only.

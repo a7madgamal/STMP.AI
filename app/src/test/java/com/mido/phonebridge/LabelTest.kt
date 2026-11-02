@@ -1,11 +1,8 @@
 package com.mido.phonebridge
 
 import com.mido.phonebridge.core.Origin
-import com.mido.phonebridge.core.OPENCLAW_IP
 import com.mido.phonebridge.core.originOf
-import com.mido.phonebridge.core.requesterLabelFor
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,11 +16,6 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class LabelTest {
-
-    @Test
-    fun `this build box is OPENCLAW`() {
-        assertEquals(Origin.OPENCLAW, originOf(OPENCLAW_IP))
-    }
 
     @Test
     fun `loopback is LOCAL in every spelling`() {
@@ -51,12 +43,5 @@ class LabelTest {
         assertEquals(Origin.UNKNOWN, originOf("not-an-ip"))
         assertEquals(Origin.UNKNOWN, originOf("192.168.1.5"))
         assertEquals(Origin.UNKNOWN, originOf("100."))
-    }
-
-    @Test
-    fun `requester label names the box, otherwise echoes the address`() {
-        assertEquals("OpenClaw (this box)", requesterLabelFor(OPENCLAW_IP))
-        assertEquals("100.64.0.11", requesterLabelFor("100.64.0.11"))
-        assertFalse(requesterLabelFor("100.64.0.11").contains("OpenClaw"))
     }
 }

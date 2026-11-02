@@ -33,9 +33,6 @@ class GrainCoverageTest {
      * shifts, and an allowlist that silently stops matching is worse than none — it fails open.
      */
     private val allowed = listOf(
-        // A 3dp colour strip: there is no surface for grain to sit on, and tinting it is the
-        // whole point of the view.
-        "NotifyOverlay.kt" to "entry.riskStrip?.setBackgroundColor",
         // The countdown drain is a solid accent bar drawn UNDER the card's grain layer; giving it
         // its own texture would fight the bar's job of being a clean progress fill.
         "NotifyOverlay.kt" to "val drainFill = GradientDrawable()",

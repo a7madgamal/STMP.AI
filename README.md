@@ -188,9 +188,13 @@ Handlee by Joe Prince — SIL Open Font License, see `OFL-Handlee.txt`.
 
 The attention cues (`res/raw/cue_*.ogg`) are from Kenney's "Interface Sounds" 1.0 pack, released
 under CC0 (public domain). Provenance per file is recorded in `assets/cue-attribution.txt`.
-Stamp and paper-crease audio are from Freesound; check the licence terms of the specific recordings
-before redistributing.
+Stamp and paper-crease audio are from Freesound and are used as permitted by the terms under which
+they were obtained.
 
 ## Licence
 
-TBD.
+Apache License 2.0 — see `LICENSE`. Third-party components and their licences are listed in
+`THIRD-PARTY-NOTICES.md`, and the project's own copyright and attribution in `NOTICE`.
+
+The work is also released as a waqf and as sadaqah jariyah. That is an intention, not a
+restriction: Apache-2.0 grants every right it grants, unconditionally and to everyone.
