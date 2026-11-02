@@ -85,9 +85,13 @@ object AiGateway {
     fun notReadyDetail(ctx: Context): String = when (backend(ctx)) {
         AiBackend.OFF -> "the AI is switched off, so nothing can be missing" // unreachable by design
         AiBackend.LOCAL -> ModelRegistry.readiness(ctx).detail
-        AiBackend.EXTERNAL ->
-            "the external AI backend (${ExternalModel.endpointLabel(ctx)}) is not reachable; " +
-                "start it, or switch the AI backend to LOCAL or OFF in Options"
+        // NOT "not reachable" unconditionally. Three different faults live behind EXTERNAL —
+        // no address, never listed, no model picked — and only the fourth is a dead server.
+        // Reporting all four as "unreachable" is how someone ends up rebooting a box that was
+        // answering fine while the real problem was a spinner nobody had tapped.
+        AiBackend.EXTERNAL -> ExternalModel.problem(ctx)
+            ?: "the external AI backend (${ExternalModel.endpointLabel(ctx)}) is not reachable; " +
+            "start it, or switch the AI backend to LOCAL or OFF in Options"
     }
 
     /** Should this request be described? The route must want it AND a backend must exist. */

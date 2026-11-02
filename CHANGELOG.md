@@ -4415,7 +4415,7 @@ Version 0.43.51 / build 205.
 
 ---
 
-## 0.43.52 — the summariser stops thinking, and starts answering (build 206) — CURRENT
+## 0.43.52 — the summariser stops thinking, and starts answering (build 206)
 2026-11-02
 
 Mido, 2026-11-02: *"10s is too slow, is the local model warm?"* Warm — measured 2.7s for 60 tokens,
@@ -4447,6 +4447,56 @@ deliberate and quietly lands somewhere else. Not changed here — making it a se
 decision — but recorded so the next person does not trust it.
 
 Version 0.43.52 / build 206.
+
+---
+
+## 0.43.53 — the model is picked from the server, not invented (build 207) — CURRENT
+2026-11-02
+
+Mido, 2026-11-02: *"this was very stupid, i said no hidden fallbacks. we need to make this work for
+other setups not just mine. we should fetch available models and fill a select box with them."*
+Correct on every count, and the bug was worse than a wrong constant.
+
+**EXTERNAL had never produced a single summary.** It sent `POST /api/chat` with
+`"model": "qwen3:8b"`. The configured server implements `/v1/chat/completions` and not `/api/chat`,
+which answers **405 Method Not Allowed**; and it never served `qwen3:8b` either. So every worded
+route failed twice over and nothing said so — `/notifications` returned `200` with fifty
+notifications and no summaries, which looks like a working feature on a quiet day.
+
+That is three hidden fallbacks stacked in one path:
+- `MODEL = "qwen3:8b"`, a constant that no server was asked about
+- `stored.ifBlank { BuildConfig.EXTERNAL_AI_URL }`, an empty field silently reaching a compiled-in URL
+- the server substituting its own model for an unknown tag, so the wrong name was invisible
+
+**`ExternalDialect` is now stored, not assumed.** Two shapes exist and they are not
+interchangeable: `OPENAI` (`/v1/models`, `/v1/chat/completions`, answer in `choices[0].message`)
+and `OLLAMA` (`/api/tags`, `/api/chat`, answer in `message`). Detection happens once, when the
+human presses refresh, and the winner is written to the policy — visible in Options as
+"OpenAI-compatible" or "Ollama". Not re-guessed per request: detection costs a round trip, and a
+server that blipped would flip the protocol under a request already decided.
+
+**`aiExternalModel` stores the id the SERVER listed.** The Options picker is a spinner filled from
+that listing, so the stored value is always one the server offered. It cannot be typed, which is
+the point — a typed id is a guess with extra steps.
+
+**Model and dialect travel in ONE setter.** A model id is only meaningful in the dialect it came
+from; storing an OpenAI id beside an ellama dialect would send it down a route the server does not
+implement. `withAiExternalModel(model, dialect)` makes the wrong pairing unrepresentable.
+
+**Both fallbacks are deleted.** No build constant, no model constant. An empty field is empty, and
+`configureProblem` names WHICH piece is missing: no address, never listed, or no model picked —
+three different actions that "not configured" used to collapse into one useless sentence.
+
+**The listing is parsed in a pure object, not in the activity.** `ExternalModels.parse` is where a
+server renaming a field turns a real list into an empty one, so it is separated from transport and
+covered by JVM tests. It also distinguishes two outcomes that look identical in a broken UI:
+"listed nothing" (an empty list, worded as an empty server) and "not readable" (an exception naming
+the dialect, worded as the wrong server). Collapsing those hides a wrong address behind a message
+about missing downloads.
+
+6 new tests, 380 total, 0 failures.
+
+Version 0.43.53 / build 207.
 
 ---
 

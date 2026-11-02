@@ -424,6 +424,113 @@ class OptionsActivity : Activity() {
             }
             block.addView(tokenField)
 
+            // --- the model, chosen from what the SERVER says it has ---
+            //
+            // **A picker, not a text field, and the list comes from the server.** A model id is
+            // an exact string a server decides; letting it be typed is how "qwen3:8b" ended up
+            // in a constant while the server served something else entirely. Unsloth answers an
+            // unknown tag with its loaded default instead of failing, so a wrong name is not an
+            // error a human sees — it is a silent substitution.
+            block.addView(
+                Theme.text(this, "Model", 13f, Theme.ON_SURFACE)
+                    .apply {
+                        setPadding(
+                            0, Theme.dp(this@OptionsActivity, 14), 0,
+                            Theme.dp(this@OptionsActivity, 6)
+                        )
+                    }
+            )
+
+            // The last successful listing, held here because the picker is populated
+            // asynchronously and `save` must store the dialect that produced the choice — the two
+            // travel together or the id goes down a route the server does not implement.
+            var listed: com.mido.phonebridge.ai.ModelCatalogue? = null
+
+            val modelStatus = Theme.text(
+                this,
+                if (policy.aiExternalModel.isBlank()) {
+                    "No model selected. Press refresh to ask the server — EXTERNAL refuses " +
+                        "until one is chosen."
+                } else {
+                    "Using ${policy.aiExternalModel}" +
+                        (policy.aiExternalDialect?.let { " (${it.label})" } ?: "")
+                },
+                12f,
+                if (policy.aiExternalModel.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 8), 0, 0) }
+
+            val modelSpinner = android.widget.Spinner(this).apply {
+                visibility = android.view.View.GONE
+                background = Theme.outlined(
+                    this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL
+                )
+            }
+
+            val refresh = Theme.button(this, "refresh models", Theme.ButtonStyle.NEUTRAL, small = true) {
+                val url = urlField.text.toString().trim()
+                val problem = validateEndpoint(url)
+                if (problem != null) {
+                    errorLine.text = problem
+                    errorLine.visibility = android.view.View.VISIBLE
+                    return@button
+                }
+                if (url.isBlank()) {
+                    errorLine.text = "Enter the server URL first, then refresh."
+                    errorLine.visibility = android.view.View.VISIBLE
+                    return@button
+                }
+                errorLine.visibility = android.view.View.GONE
+                modelStatus.text = "asking $url …"
+
+                // Off the main thread: this is a network call and the UI thread is not allowed
+                // to block on one. The result comes back through runOnUiThread so every view
+                // touch happens where Android requires it.
+                Thread {
+                    val outcome = try {
+                        com.mido.phonebridge.ai.ExternalModels.fetch(
+                            url, tokenField.text.toString().trim()
+                        )
+                    } catch (e: Exception) {
+                        null to (e.message ?: e.javaClass.simpleName)
+                    }
+                    runOnUiThread {
+                        val catalogue = (outcome as? Pair<*, *>)?.first
+                            as? com.mido.phonebridge.ai.ModelCatalogue
+                        if (catalogue == null) {
+                            val why = (outcome as? Pair<*, *>)?.second as? String ?: "no answer"
+                            modelStatus.text = "could not list models — $why"
+                            modelStatus.setTextColor(Theme.DANGER)
+                            modelSpinner.visibility = android.view.View.GONE
+                            return@runOnUiThread
+                        }
+                        listed = catalogue
+                        modelSpinner.adapter = android.widget.ArrayAdapter(
+                            this@OptionsActivity,
+                            android.R.layout.simple_spinner_dropdown_item,
+                            catalogue.models
+                        )
+                        // Preselect the stored model when the server still offers it, so a
+                        // refresh does not silently move a working install to a different model.
+                        val keep = catalogue.models.indexOf(policy.aiExternalModel)
+                        if (keep >= 0) modelSpinner.setSelection(keep)
+                        modelSpinner.visibility = android.view.View.VISIBLE
+                        modelStatus.text = "${catalogue.models.size} model(s) — " +
+                            "picked from a ${catalogue.dialect.label} server. Press save."
+                        modelStatus.setTextColor(Theme.ON_SURFACE_VARIANT)
+                    }
+                }.start()
+            }
+
+            block.addView(refresh, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) })
+            block.addView(modelSpinner, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) })
+            block.addView(modelStatus)
+
             block.addView(errorLine)
 
             block.addView(
@@ -435,13 +542,38 @@ class OptionsActivity : Activity() {
                         errorLine.visibility = android.view.View.VISIBLE
                         return@button
                     }
+                    // **A model is REQUIRED**, not defaulted. Without one the app would have to
+                    // invent a name, and an invented name is exactly the fallback that made this
+                    // backend look broken while it was really asking for a model that did not
+                    // exist. Refusing here is the honest failure.
+                    val chosen = (modelSpinner.visibility == android.view.View.VISIBLE)
+                        .let { visible ->
+                            if (visible) modelSpinner.selectedItem?.toString() else null
+                        } ?: listed?.takeIf { policy.aiExternalModel.isNotBlank() }
+                            ?.let { policy.aiExternalModel }
+                    if (chosen.isNullOrBlank()) {
+                        errorLine.text = "Press refresh and pick a model — EXTERNAL cannot " +
+                            "describe requests without one."
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
+                    val dialect = listed?.dialect ?: policy.aiExternalDialect
+                    if (dialect == null) {
+                        errorLine.text = "Press refresh first: the model was never listed, so " +
+                            "the server protocol is unknown."
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
                     errorLine.visibility = android.view.View.GONE
-                    // Both in ONE write: two saves would send a policy change notice twice and
-                    // leave a window where the URL is stored without the token it needs.
+                    // ONE write for URL, token, model and dialect. Four saves would emit four
+                    // policy-change records and leave windows where the stored set is internally
+                    // inconsistent — an address without its credential, or a model without the
+                    // route that can serve it.
                     save(
                         store,
                         policy.withAiExternalUrl(raw)
                             .withAiExternalToken(tokenField.text.toString().trim())
+                            .withAiExternalModel(chosen, dialect)
                     )
                 },
                 LinearLayout.LayoutParams(

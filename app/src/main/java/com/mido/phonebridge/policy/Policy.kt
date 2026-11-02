@@ -89,6 +89,33 @@ class Policy(
      */
     val aiExternalToken: String = "",
     /**
+     * The model id to ask for, exactly as the SERVER names it.
+     *
+     * **Empty means "not chosen", and that is a refusal, not a guess.** This replaced a
+     * hardcoded `"qwen3:8b"` that the configured server did not serve: Unsloth does not error
+     * on an unknown tag, it silently answers with whatever it has loaded. So the app appeared
+     * to work while asking for a model that did not exist, and would have kept "working" after
+     * the human loaded something else. A name this build invented is precisely the hidden
+     * fallback this project forbids.
+     *
+     * Written by the picker in Options, from the list the server itself reported — so the value
+     * is always one the server offered rather than one someone typed.
+     */
+    val aiExternalModel: String = "",
+    /**
+     * Which HTTP shape the configured server speaks.
+     *
+     * **Stored, not re-detected per request.** Detection costs a round trip, and a server that
+     * is briefly unreachable would flip the dialect under a request that had already been
+     * decided. [ExternalDialect] is null until a listing has succeeded; null means "we have
+     * never successfully talked to this server", which is refused with words rather than being
+     * guessed from the URL's shape.
+     *
+     * Not an `AiBackend` value: the backend says WHOSE model answers, the dialect says HOW to
+     * ask. Conflating them would need a fourth enum value per vendor.
+     */
+    val aiExternalDialect: ExternalDialect? = null,
+    /**
      * Does the bridge start itself — after a reboot, after an app update, and on app load?
      *
      * **Default ON** (Mido, 2026-10-25). The whole point of the app is a server that is
@@ -132,6 +159,11 @@ class Policy(
         .put("aiBackend", aiBackend.name)
         .put("aiExternalUrl", aiExternalUrl)
         .put("aiExternalToken", aiExternalToken)
+        .put("aiExternalModel", aiExternalModel)
+        // Written as a NAME, and omitted when never detected: an absent key is "never talked to
+        // this server", which parses back to null. Writing a guessed name would make the file
+        // claim a fact nobody established.
+        .apply { aiExternalDialect?.let { put("aiExternalDialect", it.name) } }
         .put("autoStartOnBoot", autoStartOnBoot)
         .put(
             "rules",
@@ -169,6 +201,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -181,6 +215,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -193,6 +229,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -205,6 +243,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -217,6 +257,8 @@ class Policy(
             aiBackend = backend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -229,6 +271,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = url,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -241,6 +285,29 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = token,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
+            autoStartOnBoot = autoStartOnBoot
+        )
+
+    /**
+     * A new policy with the chosen external model and the dialect it was listed under.
+     *
+     * **Both in ONE method, because they are one decision.** A model id is only meaningful in the
+     * dialect it came from: storing the id from an OpenAI listing while the stored dialect still
+     * says OLLAMA would send that id down a route the server does not implement. Two setters
+     * would let a caller pair them wrongly; one method makes the wrong pairing unrepresentable.
+     */
+    fun withAiExternalModel(model: String, dialect: ExternalDialect): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
+            aiExternalModel = model,
+            aiExternalDialect = dialect,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -253,6 +320,8 @@ class Policy(
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
             aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = enabled
         )
 
@@ -309,6 +378,8 @@ class Policy(
             val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
             val externalUrl = lenientString(o, "aiExternalUrl", warnings)
             val externalToken = lenientString(o, "aiExternalToken", warnings)
+            val externalModel = lenientString(o, "aiExternalModel", warnings)
+            val externalDialect = lenientDialect(o, "aiExternalDialect", warnings)
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
@@ -319,6 +390,8 @@ class Policy(
                 aiBackend = backend,
                 aiExternalUrl = externalUrl,
                 aiExternalToken = externalToken,
+                aiExternalModel = externalModel,
+                aiExternalDialect = externalDialect,
                 autoStartOnBoot = autoStart,
                 preferenceWarnings = warnings
             )
@@ -405,6 +478,38 @@ class Policy(
                         AiBackend.values().joinToString(", ") + " — using ${default.name}"
                 )
                 default
+            }
+        }
+
+        /**
+         * Read the stored dialect NAME: absent means null (never detected), garbage means null
+         * plus a warning.
+         *
+         * Null rather than a default because every default would be a claim about a server we
+         * have not spoken to. The UI treats null as "press refresh", which is the only honest
+         * instruction.
+         */
+        private fun lenientDialect(
+            o: JSONObject,
+            key: String,
+            warnings: MutableList<String>,
+        ): ExternalDialect? {
+            if (!o.has(key)) return null
+            val raw = o.opt(key)
+            if (raw !is String) {
+                warnings.add(
+                    "'$key' is not a string (${raw?.javaClass?.simpleName ?: "null"}); using none"
+                )
+                return null
+            }
+            return ExternalDialect.values()
+                .firstOrNull { it.name == raw } ?: run {
+                warnings.add(
+                    "'$key' has unknown value '$raw'; this build understands " +
+                        ExternalDialect.values().joinToString(", ") +
+                        " — using none"
+                )
+                null
             }
         }
 

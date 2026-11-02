@@ -1,7 +1,6 @@
 package com.mido.phonebridge.ai
 
 import android.content.Context
-import com.mido.phonebridge.BuildConfig
 import com.mido.phonebridge.Debug
 import com.mido.phonebridge.core.Verb
 import org.json.JSONArray
@@ -48,41 +47,118 @@ object ExternalModel : SummaryModel {
      * `ai.externalUrl` set in `local.properties`, not a silent guess.
      */
     /**
-     * The endpoint, resolved per call.
+     * The endpoint, resolved per call — POLICY ONLY.
      *
-     * **Policy first, then the build constant.** The policy field is what Options writes, so a
-     * human can point this at a box without rebuilding. The build constant remains as a
-     * compile-time default for a fixed deployment, and comes second so a runtime choice always
-     * wins — the reverse order would make the setting look broken on any build that shipped one.
+     * **The build-time constant is gone, deliberately.** It was
+     * `stored.ifBlank { BuildConfig.EXTERNAL_AI_URL }`, which meant an empty field silently
+     * reached a URL compiled into the APK. For a setting that points at a model server this is
+     * the worst kind of fallback: the UI says "no server set", the toggle says EXTERNAL, and
+     * requests quietly go somewhere nobody chose. Empty is now empty, and [isAvailable] reports
+     * it as a refusal that names the field to fill.
      */
-    private fun baseUrl(ctx: Context): String {
-        val stored = try {
-            com.mido.phonebridge.policy.PolicyStore.from(ctx).get().aiExternalUrl
-        } catch (e: Exception) {
-            // An unreadable policy already refuses to start the server; treat it as unset here
-            // rather than throwing from inside a request.
-            ""
-        }
-        return stored.ifBlank { BuildConfig.EXTERNAL_AI_URL.trim() }
+    private fun baseUrl(ctx: Context): String = read(ctx).aiExternalUrl
+
+    /**
+     * The model id to ask for, or "" when none has been chosen.
+     *
+     * Read from the policy on every call, like the URL: picking a different model in Options
+     * must take effect on the next request, not the next process.
+     */
+    private fun model(ctx: Context): String = read(ctx).aiExternalModel
+
+    /**
+     * The stored dialect, or null when this server has never been listed.
+     *
+     * Null is refused rather than guessed. Every guess would be a claim about a server we have
+     * not successfully spoken to, and getting it wrong is not a slow path — it is a `405` that
+     * produces no summary at all, which is the bug this whole change exists to remove.
+     */
+    private fun dialect(ctx: Context): com.mido.phonebridge.policy.ExternalDialect? =
+        read(ctx).aiExternalDialect
+
+    /**
+     * One policy read per call site.
+     *
+     * An unreadable policy already refuses to start the server, so treating it as "unset"
+     * here cannot hide a broken file — and throwing from inside a request would turn a policy
+     * problem into a 500 on a route that only wanted a sentence.
+     */
+    private fun read(ctx: Context): com.mido.phonebridge.policy.Policy = try {
+        com.mido.phonebridge.policy.PolicyStore.from(ctx).get()
+    } catch (e: Exception) {
+        com.mido.phonebridge.policy.Policy(
+            com.mido.phonebridge.policy.GlobalMode.AUTOMATIC
+        )
     }
 
     /**
      * The optional bearer token, or "" when none is set.
      *
      * Sent as `Authorization: Bearer <token>` only when non-empty, so a trusted local server
-     * that wants no auth keeps getting no header. Read per call like the URL: changing it in
-     * Options must take effect on the next request, not the next process.
+     * that wants no auth keeps getting no header.
      */
-    private fun authToken(ctx: Context): String = try {
-        com.mido.phonebridge.policy.PolicyStore.from(ctx).get().aiExternalToken
-    } catch (e: Exception) {
-        ""
+    private fun authToken(ctx: Context): String = read(ctx).aiExternalToken
+
+    /**
+     * Can this backend be called at all?
+     *
+     * FOUR things, not one. Address, model and dialect are each independently required, and an
+     * earlier version tested only the address — which is how a request went out asking for a
+     * model that did not exist, down a route the server did not implement. Checking them here
+     * means [isAvailable] refuses with a reason before a modal is built, instead of failing
+     * deep inside a POST with an HTTP code that describes the wrong thing.
+     */
+    private fun configured(ctx: Context): Boolean =
+        baseUrl(ctx).isNotEmpty() &&
+            model(ctx).isNotEmpty() &&
+            dialect(ctx) != null
+
+    /**
+     * The stored dialect, refusing loudly when there is none.
+     *
+     * Reached only after [configured] said yes, so a null here means the policy changed under a
+     * request in flight. Throwing is right: guessing would send a request down the wrong route,
+     * and the failure would arrive as an HTTP code describing the protocol instead of the
+     * missing fact.
+     */
+    private fun requireDialect(ctx: Context): com.mido.phonebridge.policy.ExternalDialect =
+        dialect(ctx) ?: throw IllegalStateException(
+            "no model server protocol selected; press refresh in Options → AI"
+        )
+
+    /**
+     * Pull the assistant text out of a chat reply.
+     *
+     * **The two dialects disagree about where it lives**, which is the second half of why one
+     * request body was not enough:
+     *
+     *  - OpenAI: `choices[0].message.content`
+     *  - Ollama: `message.content`
+     *
+     * Blank is an error rather than an empty summary. A reasoning model that spends its whole
+     * budget thinking returns exactly that: `200`, a valid body, and no text — and "no text" must
+     * not become "a summary with no words" further up.
+     */
+    private fun extractContent(
+        dialect: com.mido.phonebridge.policy.ExternalDialect,
+        text: String,
+    ): String {
+        val obj = JSONObject(text)
+        val content = when (dialect) {
+            com.mido.phonebridge.policy.ExternalDialect.OPENAI ->
+                obj.optJSONArray("choices")?.optJSONObject(0)
+                    ?.optJSONObject("message")?.optString("content").orEmpty()
+
+            com.mido.phonebridge.policy.ExternalDialect.OLLAMA ->
+                obj.optJSONObject("message")?.optString("content").orEmpty()
+        }
+        if (content.isBlank()) {
+            throw IllegalStateException("the reply had no text (finish_reason=" +
+                (obj.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason")
+                    ?: "unknown") + ")")
+        }
+        return content
     }
-
-    private fun configured(ctx: Context): Boolean = baseUrl(ctx).isNotEmpty()
-
-    /** The Ollama chat route. Kept as a constant so the probe and the call cannot disagree. */
-    private const val CHAT_PATH = "/api/chat"
 
     /**
      * How long a reachability probe may take.
@@ -122,13 +198,36 @@ object ExternalModel : SummaryModel {
      * "the external backend () is not reachable" tells a human nothing actionable.
      */
     fun endpointLabel(ctx: Context): String =
-        baseUrl(ctx).ifEmpty { "no endpoint configured (set it in Options → AI)" }
+        baseUrl(ctx).ifEmpty { "no model server address set" }
+
+    /** The reason this backend cannot answer right now, or null when it could. */
+    fun problem(ctx: Context): String? = configureProblem(ctx)
+
+    /**
+     * What is missing before this backend could answer, or null when nothing is.
+     *
+     * **Each missing piece is named separately.** "Not configured" covering three different
+     * faults is the same class of bug as the gate's single `Boolean`: a human reads one generic
+     * sentence and cannot act. The three are genuinely different actions — type an address,
+     * press refresh, or pick a model — so each gets its own words.
+     *
+     * Order is the order they must be fixed in: there is no point listing models before there is
+     * a server to ask.
+     */
+    private fun configureProblem(ctx: Context): String? = when {
+        baseUrl(ctx).isEmpty() -> "no model server address; set it in Options → AI"
+        dialect(ctx) == null -> "the server has never been listed; press refresh in Options → AI"
+        model(ctx).isEmpty() -> "no model selected; press refresh and pick one in Options → AI"
+        else -> null
+    }
 
     override fun isAvailable(ctx: Context): Boolean {
         // An unconfigured build is NOT "probably fine": it cannot reach anything, and the
         // refusal should say that instead of failing at URL parse time.
         if (!configured(ctx)) {
-            lastError = "no endpoint configured"
+            // The SPECIFIC missing piece, not a generic "not configured": the refusal a caller
+            // receives is this string, and it has to tell a human which control to touch.
+            lastError = configureProblem(ctx) ?: "not configured"
             lastProbeOk = false
             return false
         }
@@ -179,7 +278,10 @@ object ExternalModel : SummaryModel {
             return null
         }
         val body = JSONObject().apply {
-            put("model", MODEL)
+            // FROM THE POLICY, not a constant. A fixed tag is how this sent "qwen3:8b" to a
+            // server that never served it: Unsloth answers an unknown tag with its loaded
+            // default instead of failing, so the bug was invisible until the model changed.
+            put("model", model(ctx))
             put("stream", false)
             // THINKING OFF, and it is not a preference. The loaded model is a reasoning model:
             // left on, it spends the whole completion budget on reasoning_content and returns an
@@ -237,7 +339,8 @@ object ExternalModel : SummaryModel {
      * to get wrong.
      */
     private fun post(ctx: Context, body: JSONObject, budgetMs: Long): String {
-        val conn = (URL(baseUrl(ctx) + CHAT_PATH).openConnection() as HttpURLConnection).apply {
+        val path = requireDialect(ctx).chatPath
+        val conn = (URL(baseUrl(ctx) + path).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = budgetMs.toInt().coerceAtMost(5_000)
@@ -257,11 +360,7 @@ object ExternalModel : SummaryModel {
             if (code !in 200..299) {
                 throw IllegalStateException("HTTP $code: ${text.take(200)}")
             }
-            val obj = JSONObject(text)
-            val message = obj.optJSONObject("message") ?: JSONObject()
-            val content = message.optString("content")
-            if (content.isBlank()) throw IllegalStateException("empty content in reply")
-            return content
+            return extractContent(requireDialect(ctx), text)
         } finally {
             conn.disconnect()
         }
@@ -271,19 +370,13 @@ object ExternalModel : SummaryModel {
         val up = isAvailable(ctx)
         val url = baseUrl(ctx)
         return if (up) {
-            "external — $url is reachable (model $MODEL)"
+            val d = dialect(ctx)
+            "external — $url is reachable (model ${model(ctx)}, ${d?.label ?: "?"})"
         } else {
             "external — $url is NOT reachable" +
                 (if (lastError.isBlank()) "" else " ($lastError)")
         }
     }
-
-    /**
-     * The model tag asked for. A constant rather than a setting for now: the point of this
-     * backend is "a bigger model than the phone's", and picking one removes a choice that
-     * would otherwise need a free-text field to get wrong.
-     */
-    private const val MODEL = "qwen3:8b"
 
     /**
      * Completion ceiling for a summary.
