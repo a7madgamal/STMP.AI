@@ -181,6 +181,19 @@ object ExternalModel : SummaryModel {
         val body = JSONObject().apply {
             put("model", MODEL)
             put("stream", false)
+            // THINKING OFF, and it is not a preference. The loaded model is a reasoning model:
+            // left on, it spends the whole completion budget on reasoning_content and returns an
+            // EMPTY content string with finish_reason=length. Cost measured on the real server:
+            // ~10s to produce nothing, versus ~1.9s to produce the summary with thinking off.
+            // A summariser has no use for chain-of-thought — it gets a handful of facts and must
+            // answer in one sentence.
+            //
+            // Sent as a chat-template kwarg because that is what the server reads; a model that
+            // does not recognise it ignores an unknown kwarg rather than failing the request.
+            put("chat_template_kwargs", JSONObject().put("enable_thinking", false))
+            // A hard ceiling regardless: an unbounded completion is a latency bug waiting for the
+            // right input. The summaries are one to three short sentences.
+            put("max_tokens", MAX_TOKENS)
             put(
                 "messages",
                 JSONArray().apply {
@@ -271,4 +284,12 @@ object ExternalModel : SummaryModel {
      * would otherwise need a free-text field to get wrong.
      */
     private const val MODEL = "qwen3:8b"
+
+    /**
+     * Completion ceiling for a summary.
+     *
+     * Generous for the job — one to three short sentences — but bounded, because the failure this
+     * guards against is not truncation: it is a model that thinks forever and returns nothing.
+     */
+    private const val MAX_TOKENS = 400
 }

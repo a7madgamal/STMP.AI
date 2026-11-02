@@ -4380,7 +4380,7 @@ Version 0.43.50 / build 204.
 
 ---
 
-## 0.43.51 — plain HTTP to a LAN model server is allowed again (build 205) — CURRENT
+## 0.43.51 — plain HTTP to a LAN model server is allowed again (build 205)
 2026-11-02
 
 EXTERNAL never worked, and the relay was only half the reason. **Android has blocked cleartext HTTP
@@ -4412,6 +4412,41 @@ wrong. The lesson recorded in the file: a network error string is a description 
 "not reachable" must not be trusted as "the peer is down" until the exception type has been read.
 
 Version 0.43.51 / build 205.
+
+---
+
+## 0.43.52 — the summariser stops thinking, and starts answering (build 206) — CURRENT
+2026-11-02
+
+Mido, 2026-11-02: *"10s is too slow, is the local model warm?"* Warm — measured 2.7s for 60 tokens,
+twice, no cold start. The model was not the problem. **Thinking was.**
+
+The loaded backend is a reasoning model. Left to itself it spends the entire completion budget on
+`reasoning_content` and then returns **an empty string** with `finish_reason: "length"`. So the
+request paid ten seconds for chain-of-thought and got nothing back — the summary was never
+generated, and `AiReply.parse` had empty text to work with.
+
+Measured on the real server:
+
+| | latency | content | reasoning |
+|---|---|---|---|
+| thinking on | ~10s | **empty** | long, hit the cap |
+| thinking off | **1.9s** | one clean sentence | none |
+
+`chat_template_kwargs: {enable_thinking: false}` now goes with every request. A summariser has no
+use for chain-of-thought: it is handed a handful of already-redacted facts and must answer in one
+sentence. Reasoning is pure cost here.
+
+A **400-token ceiling** is set as well, and the reason is recorded on the constant: the failure this
+guards is not truncation, it is a model that thinks forever and returns nothing.
+
+**The model tag was also wrong.** `MODEL` was a hardcoded `"qwen3:8b"`, which is not served by the
+configured backend; the server silently substituted its default 27B, which is exactly the model that
+reasons before answering. A fixed tag that does not exist is worse than a setting, because it looks
+deliberate and quietly lands somewhere else. Not changed here — making it a setting is a separate
+decision — but recorded so the next person does not trust it.
+
+Version 0.43.52 / build 206.
 
 ---
 
