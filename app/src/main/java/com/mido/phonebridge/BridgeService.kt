@@ -1094,9 +1094,14 @@ class HttpServer(
                 // `AuditClassify` exists to prevent.
                 draft.outcome(AuditOutcome.HANDLER_FAILED)
                 draft.error("model_not_ready")
+                // **NOT `ModelRegistry.readiness().detail`.** That always describes the LOCAL
+                // model file, so under EXTERNAL it reported "ready (328 MB)" while the bridge was
+                // refusing every worded route — a detail that contradicts its own status code and
+                // sends a human to look for a missing model that is not missing. `notReadyDetail`
+                // asks the configured BACKEND why it cannot answer.
                 val obj = err(
                     "model_not_ready",
-                    com.mido.phonebridge.ai.ModelRegistry.readiness(ctx).detail
+                    com.mido.phonebridge.ai.AiGateway.notReadyDetail(ctx)
                 )
                 draft.response(503, obj.toString())
                 return Dispatched(Response.Status.SERVICE_UNAVAILABLE, obj)

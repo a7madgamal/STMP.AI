@@ -4310,7 +4310,7 @@ Version 0.43.48 / build 202.
 
 ---
 
-## 0.43.49 — the external AI backend can authenticate (build 203) — CURRENT
+## 0.43.49 — the external AI backend can authenticate (build 203)
 2026-11-02
 
 Mido, 2026-11-02: *"STMP should accept an optional token."* He was right, and the missing header was
@@ -4350,6 +4350,33 @@ must be one *this phone* can reach.
 374 tests, 0 failures.
 
 Version 0.43.49 / build 203.
+
+---
+
+## 0.43.50 — the token field masks, and a 503 stops lying about the model (build 204) — CURRENT
+2026-11-02
+
+Two defects found by actually calling the installed build.
+
+**The token field was not masked.** It set `TYPE_TEXT_VARIATION_PASSWORD` and relied on the theme to
+derive the transformation. That is the same trap `ApprovalActivity` records for the sudo field:
+`setInputType` re-derives the transformation from the type, so anything assigned before it is
+silently cleared, and anything the theme does not supply simply does not happen. A credential field
+that renders in plain sight is worse than no field, because you type it in front of whoever is
+standing there. It now sets `PasswordTransformationMethod` explicitly, LAST, after `inputType`.
+
+**A 503 described the wrong backend.** `model_not_ready` reported
+`ModelRegistry.readiness().detail`, which always describes the LOCAL model file. With EXTERNAL
+selected and no reachable server, the caller got `503 model_not_ready` with the detail
+`"ready (328 MB)"` — a message that contradicts its own status code and sends a human hunting for a
+missing model that is present and fine. It now asks `AiGateway.notReadyDetail`, which answers for the
+CONFIGURED backend: "the external AI backend (http://…) is not reachable; start it, or switch the AI
+backend to LOCAL or OFF in Options".
+
+That is the same class as the gate's single `Boolean`: one field describing two different systems,
+so the message tells the truth about the one that is not in use.
+
+Version 0.43.50 / build 204.
 
 ---
 

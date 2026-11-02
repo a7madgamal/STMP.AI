@@ -416,6 +416,11 @@ class OptionsActivity : Activity() {
                     Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
                     Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
                 )
+                // Set LAST, after inputType: `setInputType` re-derives the transformation from
+                // the type and silently clears anything assigned before it — the bug recorded in
+                // ApprovalActivity. Declared explicitly so the mask is not left to the theme.
+                transformationMethod =
+                    android.text.method.PasswordTransformationMethod.getInstance()
             }
             block.addView(tokenField)
 
