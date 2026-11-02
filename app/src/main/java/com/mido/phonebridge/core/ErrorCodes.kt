@@ -115,6 +115,26 @@ object ErrorCodes {
         // and was approved, and the fault is ours — never a silent no-op, because the caller
         // would otherwise believe the phone made a sound.
         "audio_unavailable" to INTERNAL,
+        // --- TTS ---
+        // Over the cap is the caller's mistake, and it is refused pre-gate so it costs no work.
+        "text_too_long" to BAD_REQUEST,
+        // The line is full. The request was fine and nothing is broken, so 503 says "try again",
+        // not "you did something wrong" and not "we are at fault".
+        "tts_busy" to UNAVAILABLE,
+        // No engine / no voice installed. Our side or the device's, and the caller cannot fix it
+        // by changing the request.
+        "tts_unavailable" to UNAVAILABLE,
+        // The engine accepted the text and then failed to say it — a real fault, never a silent
+        // success, because the caller would otherwise believe the human heard it.
+        "tts_failed" to INTERNAL,
+        // --- Contacts ---
+        // The permission was never granted (or was revoked). 503 because the route EXISTS and the
+        // device CAN do it — the missing thing is a human tap. 403 would say "you may not", which
+        // is a different and permanent-sounding claim.
+        "contacts_unavailable" to UNAVAILABLE,
+        // The contacts provider itself failed: a corrupt database, a vendor ROM bug, a cursor
+        // that came back null. Ours to fix, never the caller's.
+        "contacts_query_failed" to INTERNAL,
         "vault_missing" to UNAVAILABLE,
         "vault_corrupt" to INTERNAL,
         "vault_unrecoverable" to INTERNAL,
@@ -243,6 +263,12 @@ object ErrorCodes {
         "model_not_ready" to "The AI model is not provisioned, so every described route answers 503.",
         "ai_unavailable" to "The model exists but could not describe this request in budget.",
         "audio_unavailable" to "The cue could not be decoded or played.",
+        "text_too_long" to "The text is longer than the configured cap. Shorten it; it is never truncated.",
+        "tts_busy" to "Too many utterances are already queued or speaking. Retry shortly.",
+        "tts_unavailable" to "No usable text-to-speech engine or voice is installed on the device.",
+        "tts_failed" to "The engine accepted the text and then failed to speak it.",
+        "contacts_unavailable" to "READ_CONTACTS is not granted. A human must allow it on the phone.",
+        "contacts_query_failed" to "The contacts provider refused or failed the query.",
         "vault_missing" to "No vault exists on this device yet.",
         "vault_corrupt" to "The vault or its index cannot be read.",
         "vault_unrecoverable" to "The vault was written without its wrap IV; its secrets cannot be recovered.",

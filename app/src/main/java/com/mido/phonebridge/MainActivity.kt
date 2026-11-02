@@ -35,6 +35,7 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
+        const val REQ_READ_CONTACTS = 1002
 
         /**
          * How often the hero re-renders while the activity is resumed.
@@ -88,6 +89,26 @@ class MainActivity : FragmentActivity() {
      * so the threading is obvious to a reader rather than inferred from construction order.
      */
     private val uiTickHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * What the checklist looked like at the last repaint.
+     *
+     * **This field exists because a tap was being eaten.** Reported 2026-11-02: *"nothing changed
+     * no modal"*. The device log had the answer — a tap logged `pointer 0` and NO `pointer 1`,
+     * a gesture cancelled before it could become a click. The cause was `uiTick`: every 5 seconds
+     * `render()` calls `statusContainer.removeAllViews()` and builds every row again, so a press
+     * held for longer than the interval had its View destroyed underneath the finger and the click
+     * never fired. Pressing a row is exactly the kind of touch that lasts a second or two, so the
+     * interaction was lost often enough to look like "the button does nothing".
+     *
+     * Worse, the bug is self-concealing: nothing crashed, nothing logged, the screen looked
+     * identical because it had been rebuilt with the same content. Two releases of dialog copy
+     * were written against a tap that never reached them.
+     *
+     * So the tick now repaints ONLY when something it displays actually changed. The rows keep
+     * their identity between ticks, which is what lets a press survive to become a click.
+     */
+    private var lastRenderSignature: String? = null
 
     /** Guards the unrecoverable-vault reset dialog so it does not stack. */
     private var resetOffered = false
@@ -443,10 +464,69 @@ class MainActivity : FragmentActivity() {
         uiTickHandler.removeCallbacksAndMessages(null)
     }
 
-    /** Repaints on a timer while the activity is resumed. See [onResume]. */
+    /**
+     * A cheap fingerprint of everything the checklist renders.
+     *
+     * Deliberately primitives and short strings only — no view construction, no disk, no network.
+     * It is compared once every 5 seconds, so it must cost less than the repaint it is avoiding.
+     *
+     * `progress?.percent` is included because the model download must visibly advance; without it
+     * a download would freeze at whatever value was on screen when the tick started skipping.
+     */
+    private fun renderSignature(): String = buildString(96) {
+        append(BridgeService.serverUp).append('|')
+        append(BridgeService.isVerifiedAlive()).append('|')
+        append(BridgeService.lastError).append('|')
+        append(BridgeService.bindAddress).append('|')
+        append(BridgeService.listenerRef != null).append('|')
+        append(hasNotifPermission()).append('|')
+        // The contacts row's THREE states, since they must change without a repaint of their own.
+        append(
+            checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+        ).append('|')
+        append(contactsAskedBefore()).append('|')
+        append(
+            shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS)
+        ).append('|')
+        // `this@MainActivity`, NOT `this`: inside buildString the implicit receiver is the
+        // StringBuilder, so a bare `this` would be the wrong object entirely.
+        append(ApprovalGate.canUseFullScreenIntent(this@MainActivity)).append('|')
+        append(android.provider.Settings.canDrawOverlays(this@MainActivity)).append('|')
+        append(isIgnoringBatteryOptimizations()).append('|')
+        append(SecretVault.isUnlocked()).append('|')
+        append(com.mido.phonebridge.ai.AiGateway.enabled(this@MainActivity)).append('|')
+        append(com.mido.phonebridge.ai.ModelProvisioner.running).append('|')
+        append(com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: -1).append('|')
+        append(com.mido.phonebridge.ai.ModelRegistry.readiness(this@MainActivity).ready).append('|')
+        append(AuthManager.isLoggedIn(this@MainActivity)).append('|')
+        append(AuthManager.accountEmail ?: "").append('|')
+        append(AuditHealth.reason ?: "").append('|')
+        // Plugin rows: title plus state is what the row actually paints.
+        for (p in PluginRegistry.all()) {
+            val st = p.status()
+            append(st.title).append(':').append(st.state).append(';')
+        }
+    }
+
+    /**
+     * Repaints on a timer while the activity is resumed. See [onResume].
+     *
+     * **Repaints only on a real change.** The unconditional `render()` here rebuilt every row
+     * every 5 seconds, which destroyed the View under any press that outlasted the interval and
+     * cancelled the click (see [lastRenderSignature] for the evidence). A tap on a checklist row
+     * is a 1–2 second gesture, so this ate them routinely while the screen looked unchanged.
+     *
+     * The alternative — keeping the rebuild and shortening the interval — would make it worse.
+     * Skipping unchanged repaints is the only version where a press can complete.
+     */
     private val uiTick = object : Runnable {
         override fun run() {
-            render()
+            val signature = renderSignature()
+            if (signature != lastRenderSignature) {
+                lastRenderSignature = signature
+                render()
+            }
             uiTickHandler.postDelayed(this, UI_TICK_MS)
         }
     }
@@ -454,6 +534,11 @@ class MainActivity : FragmentActivity() {
     // --- rendering ---
 
     private fun render() {
+        // Baseline the tick's fingerprint. Every render() path — tap, permission result, service
+        // callback — re-baselines here, so the 5-second tick cannot immediately undo a repaint
+        // that was explicitly requested.
+        lastRenderSignature = renderSignature()
+
         // --- 1. HERO: one line that answers "is it working?" ---
         val listenerOk = BridgeService.listenerRef != null
         val notifOk = hasNotifPermission()
@@ -556,6 +641,66 @@ class MainActivity : FragmentActivity() {
                 onClick = { requestNotifPermission() }
             )
         )
+        // Contacts: search is a route, but the PERMISSION can only be granted by a tap here.
+        //
+        // A route handler has no Activity and no way to show a dialog, so `GET /contacts` refuses
+        // with `contacts_unavailable` until this row is tapped. Shown only while missing — a
+        // permanent row saying "granted" is the kind of furniture that trains people to stop
+        // reading the list, which is how a real warning gets missed.
+        val contactsOk = checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!contactsOk) {
+            // THREE states, because "tap to grant" is a lie after a denial.
+            //
+            // Reported on device 2026-11-02: the row said "tap to grant", the tap fired the
+            // request (the log proves a dialog was up for ~5s), the answer came back DENIED —
+            // and the row went straight back to "tap to grant" as if nothing had happened. So a
+            // human who declined once had no way to tell whether the tap registered, whether the
+            // dialog appeared, or whether Android had stopped asking. That is the misleading
+            // part, not the dialog.
+            //
+            // `shouldShowRequestPermissionRationale` is the authoritative "may I ask again"
+            // signal, but it is FALSE both before the first ask and after a permanent denial —
+            // so the persisted "asked once" flag is what separates those two. Without it the
+            // first-ever state would wrongly read as blocked.
+            val asked = contactsAskedBefore()
+            val canAskAgain = shouldShowRequestPermissionRationale(
+                Manifest.permission.READ_CONTACTS
+            )
+            // **The rule: the label must describe what the TAP will actually do.**
+            //
+            // Reported three times on device (2026-11-02) as "misleading", and the reason was
+            // structural rather than cosmetic: a button saying "tap to grant" is a promise that a
+            // dialog will appear, and once Android has decided not to show one, the promise is
+            // false — the tap returns DENIED in ~0ms with nothing on screen at all. A label that
+            // cannot be wrong is worth more than a label that is usually right.
+            //
+            // `shouldShowRequestPermissionRationale` is false in TWO different situations — never
+            // asked, and asked-and-refused-forever — so it alone cannot pick the label. The
+            // persisted flag separates them, and after ANY denial this app treats the permission
+            // as blocked, which is the conservative direction: worst case it opens Settings for
+            // someone who could have re-prompted, instead of promising a dialog that never comes.
+            val (detail, tint) = when {
+                !asked -> "not granted — tap to allow" to Theme.WARNING
+                canAskAgain -> "declined — tap to allow" to Theme.WARNING
+                else -> "blocked — tap to fix in Settings" to Theme.DANGER
+            }
+            // **The tap ALWAYS opens a modal that says what is true.** Reported 2026-11-02:
+            // *"As a user I wouldn't know this shit didn't work, I want to know that I need to
+            // give the permission in the same fucking modal."*
+            //
+            // So the row never silently calls `requestPermissions` and hopes. The modal states the
+            // situation, names the button that will fix it, and only then acts. And when the answer
+            // comes back DENIED, the modal returns with the failure instead of a Toast that fades.
+            // A permission flow the user cannot see the outcome of is a permission flow that
+            // looks broken.
+            statusContainer.addView(
+                Theme.statusRow(
+                    this, "Contacts search", detail, tint,
+                    onClick = { showContactsPermissionDialog() }
+                )
+            )
+        }
         // Full-screen popup: NOT a checklist requirement any more.
         //
         // Measured on device 2026-10-19 with FSI revoked and draw-over-apps granted: a SECURE
@@ -1006,6 +1151,115 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * Ask for READ_CONTACTS.
+     *
+     * Separate from [requestNotifPermission] rather than a generic "request everything" call, and
+     * deliberately NOT asked at launch: a contacts prompt on first open, with no visible reason,
+     * is the kind of thing people deny reflexively — and a denial is sticky enough that the app
+     * then needs Settings to recover. Tapping the row that says "Contacts search" is a request the
+     * human understands.
+     */
+    /** Whether the contacts prompt has EVER been shown, so "not asked" is distinguishable. */
+    private fun contactsAskedBefore(): Boolean =
+        getSharedPreferences("permissions", MODE_PRIVATE)
+            .getBoolean("contactsAsked", false)
+
+    private fun markContactsAsked() {
+        getSharedPreferences("permissions", MODE_PRIVATE)
+            .edit().putBoolean("contactsAsked", true).apply()
+    }
+
+    /**
+     * App details, where a permanently-denied permission can actually be re-granted.
+     *
+     * Not the "app permissions" deep link: that one varies by OEM and Samsung's S22 build lands
+     * on a page without the contacts toggle in several firmware revisions. App details always
+     * shows Permissions.
+     */
+    private fun openAppSettings() {
+        try {
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:$packageName")
+                )
+            )
+            Debug.log("opened app settings for contacts permission")
+        } catch (e: Exception) {
+            // Nothing to fall back to that would help: say so rather than pretend.
+            Debug.log("cannot open app settings: ${e.message}")
+            Toast.makeText(this, "Open Settings > Apps > STMP > Permissions", Toast.LENGTH_LONG)
+                .show()
+        }
+    }
+
+    /**
+     * The one place that explains the contacts permission, and the only launcher.
+     *
+     * [deniedJustNow] changes the copy from "here is what you need" to "that was declined" — the
+     * outcome has to arrive somewhere the user is already looking, which is this dialog rather
+     * than a Toast that disappears over the row it is describing.
+     */
+    private fun showContactsPermissionDialog(deniedJustNow: Boolean = false) {
+        val granted = checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            // Only reachable from the post-result repaint; keeps the dialog honest if the grant
+            // landed while it was being built.
+            AlertDialog.Builder(this)
+                .setTitle("Contacts search")
+                .setMessage("Contacts permission is granted. Searches will work.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val canAsk = shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS)
+        val asked = contactsAskedBefore()
+
+        val message = when {
+            deniedJustNow && !canAsk ->
+                "You denied it, and Android will not show that prompt again.\n\n" +
+                    "Open Settings > Permissions > Contacts and choose Allow. " +
+                    "The Contacts search route stays unavailable until you do."
+            deniedJustNow ->
+                "You denied it, so contact search will not work yet.\n\n" +
+                    "Tap Allow to be asked again, or leave it and the route keeps answering " +
+                    "contacts_unavailable."
+            !asked ->
+                "STMP needs permission to search your contacts.\n\n" +
+                    "Android will ask you to confirm on the next screen. Without it the " +
+                    "GET /contacts route answers contacts_unavailable."
+            canAsk ->
+                "Contacts permission was declined earlier.\n\n" +
+                    "Tap Allow to be asked again."
+            else ->
+                "Contacts permission is blocked\n\n" +
+                    "Android will not show the request again, so it has to be enabled in " +
+                    "Settings > Permissions > Contacts."
+        }
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle(if (deniedJustNow) "Contacts permission denied" else "Contacts search")
+            .setMessage(message)
+            .setNegativeButton("Cancel", null)
+
+        if (canAsk) {
+            builder.setPositiveButton("Allow") { _, _ ->
+                Debug.log("requesting READ_CONTACTS (from dialog)")
+                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQ_READ_CONTACTS)
+            }
+        } else {
+            builder.setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
+        }
+        builder.show()
+    }
+
+    private fun requestContactsPermission() {
+        // Delegates to the dialog; nothing should bypass the explanation.
+        showContactsPermissionDialog()
+    }
+
     private fun requestNotifPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Debug.log("requesting POST_NOTIFICATIONS")
@@ -1019,6 +1273,26 @@ class MainActivity : FragmentActivity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_READ_CONTACTS) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            // Recorded even on DENIED, and specifically BEFORE render(): the row's state depends
+            // on "have they been asked", so setting it after the repaint would show the stale one.
+            markContactsAsked()
+            // Logged either way: a denial is the difference between "the route is broken" and
+            // "nobody granted it", and that question gets asked from the other end of a tailnet.
+            Debug.log(
+                "READ_CONTACTS result: ${if (granted) "granted" else "DENIED"}" +
+                    " (canAskAgain=${shouldShowRequestPermissionRationale(
+                        Manifest.permission.READ_CONTACTS
+                    )})"
+            )
+            // The outcome goes back into the SAME modal. A Toast over the row is exactly the
+            // feedback that got reported as "I wouldn't know this shit didn't work".
+            render()
+            if (!granted) showContactsPermissionDialog(deniedJustNow = true)
+            return
+        }
         if (requestCode == REQ_POST_NOTIF) {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             Debug.log("POST_NOTIFICATIONS result: ${if (granted) "granted" else "DENIED"}")

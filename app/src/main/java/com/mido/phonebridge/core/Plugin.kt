@@ -54,6 +54,24 @@ data class Route(
      */
     val auditRequestBody: Boolean = true,
     /**
+     * A REDACTED COPY of the reply, for the audit only. Null means "store the reply as-is".
+     *
+     * **Why this exists rather than a flag.** `auditResponseBody` can only say keep or drop, and
+     * contacts needs neither: the caller must receive real phone numbers (a search that returns
+     * masked ones is useless), while the append-only log must not become an address book of people
+     * who never installed this app. Drop-the-body would lose the evidence that the lookup happened;
+     * keep-it loses the numbers. So the route hands the audit a DIFFERENT object — same shape, one
+     * field renamed (`number` → `numberRedacted`, so nobody can mistake a mask for a real number).
+     *
+     * **The response is untouched.** The transform runs on a separate object built for the log;
+     * the caller's bytes are never rewritten, which is the property that makes this safe to add to
+     * one route without auditing what every other route does with its reply.
+     *
+     * Runs in the single dispatch site next to `auditResponseBody` (Mido, 2026-11-02: *"audit both
+     * but keep number half redacted"*).
+     */
+    val auditResponseTransform: ((org.json.JSONObject) -> org.json.JSONObject)? = null,
+    /**
      * Whether this route receives the raw request body as a STREAM instead of parsed JSON.
      *
      * **Independent of [auditRequestBody] on purpose.** This one is about MEMORY: the normal path

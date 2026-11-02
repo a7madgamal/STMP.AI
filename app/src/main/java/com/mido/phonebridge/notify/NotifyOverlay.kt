@@ -225,8 +225,13 @@ object NotifyOverlay {
         /** The card's background layer, restroked with the risk colour on arrival. */
         var cardBg: GradientDrawable? = null
 
-        /** The risk strip, hidden until a risk is known. */
-        var riskStrip: View? = null
+        /**
+         * The risk band — a background LAYER, transparent until a risk is known.
+         *
+         * A layer, not a `View`, on purpose: a tint that is laid out can change the card's
+         * height, which is the defect that shipped twice (0.6.2, 0.25.1).
+         */
+        var riskBand: com.mido.phonebridge.ui.EdgeBand? = null
     }
 
     /**
@@ -315,6 +320,20 @@ object NotifyOverlay {
             cornerRadius = radius
         }
 
+        // The risk tint is a LAYER, not a child view. See [EdgeBand] for why: a child view
+        // with a height made the card's size depend on the tint, which is the defect that
+        // shipped in 0.6.2 and again in 0.25.1 — the card measured fine, then grew the
+        // instant the AI summary made the strip VISIBLE. A background layer cannot be laid
+        // out, so the summary can now change pixels and text but never geometry.
+        val riskBand = com.mido.phonebridge.ui.EdgeBand(
+            widthPx = dp(3).toFloat(),
+            cornerPx = radius,
+        ).apply {
+            // No assessment yet is the initial state, and it is a TRANSPARENT band rather
+            // than hidden geometry: alpha 0 draws nothing and moves nothing.
+            alpha = 0
+        }
+
         val card = FrameLayout(ctx).apply {
             // Rounded corners come from the LAYERS themselves (both carry `cornerRadius`),
             // so `clipToOutline` is not needed — and here it was actively dangerous. Its
@@ -327,6 +346,7 @@ object NotifyOverlay {
                 arrayOf(
                     cardBg,
                     drain,
+                    riskBand,
                     // Grain on the NOTIFY card too. Without this the one surface a user actually
                     // touches in AUTOMATIC mode was the only untextured thing on screen.
                     com.mido.phonebridge.ui.GrainOverlay(radius)
@@ -335,25 +355,7 @@ object NotifyOverlay {
             isClickable = true
         }
         entry.cardBg = cardBg
-
-        // A thin risk strip down the left edge: the "risk tint" the card carries once
-        // the summary arrives. Its own view (not a border stroke) so it can be toggled
-        // without rebuilding the background, and so it reads as a margin marker rather
-        // than a change to the card's silhouette.
-        //
-        // **Height is WRAP_CONTENT and the parent is the CARD, not the column.** It is added
-        // to the WRAP_CONTENT card as a MATCH_PARENT-height child, which is the exact bug
-        // that made the card full-screen in 0.6.2: in a WRAP_CONTENT parent, a MATCH_PARENT
-        // child forces the parent to match ITS parent. It went unnoticed this time because
-        // the strip is GONE until the AI summary lands — so the card looked correct, then
-        // snapped to full height the moment the model answered (reported on device
-        // 2026-10-19: *"looked good until summarize finished then it went back to full
-        // height shit"*). The card gets a FIXED height once the text is laid out, and the
-        // strip is stretched to that measured height afterwards, never by layout.
-        val riskStrip = View(ctx).apply {
-            visibility = View.GONE
-        }
-        entry.riskStrip = riskStrip
+        entry.riskBand = riskBand
 
         val column = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -414,8 +416,10 @@ object NotifyOverlay {
         column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         // The AI description line, present from the start so the fetch can fill it in
-        // without a relayout surprise. While the fetch runs it reads as a status, not
-        // as an empty row (never print a label with nothing under it).
+        // WITHOUT A RELAYOUT SURPRISE. While the fetch runs it reads as a status, not as an
+        // empty row (never print a label with nothing under it). Its row exists from the
+        // first frame, capped at two lines, so the arriving summary rewrites text in a
+        // box that is already there — it can never add height the card did not have.
         val aiLine = TextView(ctx).apply {
             text = if (entry.facts != null) "◌ summarising…" else ""
             textSize = 10f
@@ -429,13 +433,11 @@ object NotifyOverlay {
         column.addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         card.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-        // WRAP_CONTENT height on purpose. The strip is stretched to the card's measured
-        // height by hand after layout (see [applyAi]); a MATCH_PARENT child here would make
-        // the WRAP_CONTENT card fill the screen the instant it became visible.
-        card.addView(
-            riskStrip,
-            FrameLayout.LayoutParams(dp(3), WRAP_CONTENT).apply { gravity = Gravity.START }
-        )
+        // **The column is the card's ONLY child, and it must stay that way.** The card is
+        // WRAP_CONTENT, so any second child participating in layout can decide the card's
+        // size — and a MATCH_PARENT one makes it the full window. That is the 0.6.2 and
+        // 0.25.1 bug, twice. Decoration that must not affect size belongs in the background
+        // LayerDrawable (drain, risk band, grain); `NotifyCardLayoutTest` enforces this.
 
         val size = screenSize(wm)
         val minEdge = dp(EDGE_DP)
@@ -817,21 +819,10 @@ object NotifyOverlay {
         line.text = result.description
         line.visibility = View.VISIBLE
         line.setTextColor(TEXT)
-        // The risk tint: a strip down the card's edge, coloured by consequence.
-        val color = riskColor(result.risk)
-        entry.riskStrip?.setBackgroundColor(color)
-        entry.riskStrip?.visibility = View.VISIBLE
-        // Stretch the strip to the card's MEASURED height rather than letting layout do it.
-        // \`post\` so the new AI line has been measured first; before that the height is
-        // stale and the strip would be short. Only its own height changes — the card's size
-        // stays decided by the text, which is what keeps it small.
-        entry.root?.post {
-            val h = entry.root?.height ?: 0
-            entry.riskStrip?.layoutParams?.let { lp ->
-                lp.height = h
-                entry.riskStrip?.layoutParams = lp
-            }
-        }
+        // The risk tint: a band down the card's edge, coloured by consequence. One call, and
+        // it touches only paint — never the card's size, never a posted re-measure. There is
+        // deliberately nothing else here: the summary is text and colour, not layout.
+        entry.riskBand?.set(riskColor(result.risk))
     }
 
     /**

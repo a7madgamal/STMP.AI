@@ -73,12 +73,17 @@ class AudioPlugin(private val ctx: Context) : Plugin {
     }
 
     private fun play(cue: AudioCues.Cue): Resp {
-        if (!com.mido.phonebridge.policy.isAttended(ctx)) {
-            throw PluginError(
-                "denied",
-                "the screen is off or the phone is locked, so a cue would be heard by nobody"
-            )
-        }
+        // **No attendance check, and its removal is the decision** (Mido, 2026-11-02: *"both
+        // should work if screen off"* — about this route and TTS together).
+        //
+        // It used to refuse on a dark screen, on the reasoning that a cue nobody can see is
+        // noise in a pocket. But the cue's whole job is to make someone LOOK, and the case where
+        // that matters most is a phone in a pocket or face-down. Refusing there meant the feature
+        // worked only when it was unnecessary — the same circularity that makes this route
+        // gate-exempt in the first place.
+        //
+        // What keeps it honest is unchanged: a closed set of three cues, no volume or duration
+        // parameter, and the notification stream so silent/DND silence it for free.
         try {
             AudioCues.play(ctx, cue)
         } catch (e: AudioCues.CueUnavailable) {

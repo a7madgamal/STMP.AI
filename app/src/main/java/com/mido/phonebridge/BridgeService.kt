@@ -268,6 +268,10 @@ class BridgeService : Service() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         com.mido.phonebridge.ai.AiGateway.release()
+        // Stop speaking and release the engine. A waiting caller is FAILED rather than left to
+        // time out: the service is going away, and a request pinning a thread for a deadline that
+        // can never be interesting is worse than a named refusal.
+        com.mido.phonebridge.plugins.tts.TtsSpeaker.shutdown()
         Debug.log("onTrimMemory($level): model engine released")
     }
 
@@ -734,6 +738,19 @@ class BridgeService : Service() {
         // The agent's entry point. Registered beside the rest, gated like the rest — its
         // default rule (help/ANY -> NOTIFY) is seeded into the policy file, not baked in here,
         // so the human can see and change it on the exceptions screen.
+        // Contacts: search-only by construction. Registered unconditionally — the route must
+        // exist so a caller gets `contacts_unavailable` (a fact about a missing tap) instead of a
+        // 404 (which would say the feature does not exist).
+        if (PluginRegistry.get("contacts") == null) {
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.contacts.ContactsPlugin(applicationContext)
+            )
+        }
+        // Speak: exempt from the gate because the caller check already bounds it to named
+        // addresses, and a prompt-first requirement would make it usable only when unnecessary.
+        if (PluginRegistry.get("tts") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.tts.TtsPlugin(applicationContext))
+        }
         if (PluginRegistry.get("help") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.help.HelpPlugin(applicationContext))
         }
@@ -1491,7 +1508,16 @@ class HttpServer(
                 req.secretInput?.fill('\u0000')
                 req.secretInput = null
             }
-            recordResponse(draft, resolved.route.auditResponseBody, resp.status, resp.body)
+            // The route may hand the log a REDACTED copy while the caller keeps the real one
+            // (contacts: real numbers out, half-masked numbers retained). Applied here, in the
+            // one dispatch site, so the transform cannot be honoured on one path and ignored on
+            // another — the exact way `auditResponseBody` itself drifted before `recordResponse`.
+            recordResponse(
+                draft,
+                resolved.route.auditResponseBody,
+                resp.status,
+                resolved.route.auditResponseTransform?.invoke(resp.body) ?: resp.body,
+            )
             Dispatched(statusOf(resp.status), resp.body, resp.payload)
         } catch (e: PluginError) {
             // Two very different failures share this type. BEFORE the gate it is the

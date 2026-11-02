@@ -291,6 +291,6 @@ class HelpPlugin(private val ctx: Context) : Plugin {
          * **Guarded by a test**, because a number nobody checks is a number that is wrong. The
          * suite pins the route set against this build; changing a route without bumping fails.
          */
-        const val CONTRACT_VERSION = 2
+        const val CONTRACT_VERSION = 4
     }
 }

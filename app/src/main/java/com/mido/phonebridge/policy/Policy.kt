@@ -135,6 +135,19 @@ class Policy(
      */
     val autoStartOnBoot: Boolean = true,
     /**
+     * How the phone speaks, when a caller asks it to — cap, rate, pitch, queue depth.
+     *
+     * **One object rather than four fields**, and that is a deliberate answer to a defect this
+     * file already paid for: `Policy(global, rules)` compiled fine and silently reset every other
+     * field, so `applyGate` wiped the rule table. Every `withX` below therefore NAMES the fields it
+     * keeps — four loose TTS fields would be four more chances to drop one in eight copy methods.
+     * As a single value, one `tts = tts` carries the whole group.
+     *
+     * A preference, parsed leniently and clamped on use: a garbled rate must never refuse to start
+     * the bridge, and a stored `0.0` must never be honoured either.
+     */
+    val tts: TtsSettings = TtsSettings(),
+    /**
      * Preferences that were present but unreadable, for the caller to LOG.
      *
      * **Carried rather than logged here, and that is a purity constraint, not tidiness.**
@@ -165,6 +178,9 @@ class Policy(
         // claim a fact nobody established.
         .apply { aiExternalDialect?.let { put("aiExternalDialect", it.name) } }
         .put("autoStartOnBoot", autoStartOnBoot)
+        // Always written, never omitted: the block has defaults for every key, so a file that
+        // round-trips through write-then-read must read back what was stored.
+        .put("tts", tts.toJson())
         .put(
             "rules",
             JSONArray().apply {
@@ -203,7 +219,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the pair's rule removed. [verb] null removes the ANY rule. */
@@ -217,7 +234,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the gate switch changed, preserving rules and preferences. */
@@ -231,7 +249,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the modal-fingerprint preference changed. */
@@ -245,7 +264,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the AI backend changed. */
@@ -259,7 +279,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the external AI endpoint changed. Empty means "not configured". */
@@ -273,7 +294,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /** A new policy with the external AI token changed. Empty means "send no Authorization". */
@@ -287,7 +309,8 @@ class Policy(
             aiExternalToken = token,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
         )
 
     /**
@@ -308,7 +331,28 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = model,
             aiExternalDialect = dialect,
-            autoStartOnBoot = autoStartOnBoot
+            autoStartOnBoot = autoStartOnBoot,
+            tts = tts,
+        )
+
+    /**
+     * A new policy with the speak settings changed.
+     *
+     * Every other field is named, for the reason given on [tts] and already paid for elsewhere in
+     * this file: a positional rebuild compiles fine and silently resets what it forgot.
+     */
+    fun withTts(next: TtsSettings): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
+            autoStartOnBoot = autoStartOnBoot,
+            tts = next
         )
 
     /** A new policy with the boot auto-start preference changed. */
@@ -322,7 +366,8 @@ class Policy(
             aiExternalToken = aiExternalToken,
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
-            autoStartOnBoot = enabled
+            autoStartOnBoot = enabled,
+            tts = tts,
         )
 
     companion object {
@@ -383,6 +428,9 @@ class Policy(
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
+            // Absent means defaults, which is the normal state for a file written before TTS
+            // existed — so absence is NOT a warning. A present-but-unreadable value is.
+            val ttsSettings = TtsSettings.parse(o.optJSONObject("tts"), warnings)
             return Policy(
                 global = global,
                 rules = rules,
@@ -393,6 +441,7 @@ class Policy(
                 aiExternalModel = externalModel,
                 aiExternalDialect = externalDialect,
                 autoStartOnBoot = autoStart,
+                tts = ttsSettings,
                 preferenceWarnings = warnings
             )
         }

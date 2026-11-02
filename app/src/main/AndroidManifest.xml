@@ -26,6 +26,11 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Contact search. A RUNTIME permission, so declaring it grants nothing: the app must ask,
+         and `GET /contacts` answers 503 contacts_unavailable until a human taps the prompt on the
+         PhoneBridge screen. Declared here because a route cannot ask for a permission — only an
+         Activity can — so the declaration and the refusal code are the two halves of one design. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
         <!--
           Keep config across an uninstall, without ever keeping a secret.

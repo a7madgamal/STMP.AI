@@ -44,6 +44,28 @@ class ApprovalActivity : FragmentActivity() {
     private var needsPassword = false
 
     /**
+     * Whether approving this request requires READ_CONTACTS, and it is not granted yet.
+     *
+     * **This is the missing half of the contacts feature, and the reason it kept looking broken.**
+     * Reported 2026-11-02, with a screenshot of the approval card: *"all i want is when clicking
+     * approve here I give the fucking permission"*. Correct — and every previous attempt fixed the
+     * HOME SCREEN row instead, which is a different surface.
+     *
+     * The flow was: caller asks for contacts → card appears → human taps APPROVE → the request
+     * runs → the plugin finds no permission → <mark><code>503 contacts_unavailable</code></mark>.
+     * The human did exactly what was asked of them and the call still failed, with the fix hidden
+     * on another screen. Approving a contacts request should be the moment the permission is
+     * requested.
+     *
+     * This Activity is the only surface that CAN ask: a route handler has no Activity, and the
+     * permission dialog needs one.
+     */
+    private var needsContactsPermission = false
+
+    /** Guard so a second tap cannot stack a second system dialog. */
+    private var contactsPromptRunning = false
+
+    /**
      * The indeterminate fetch indicator, held as a FIELD so the stamp can hide it.
      *
      * It was a local until the stamp needed to dismiss it: after a decision the tick used to call
@@ -61,6 +83,9 @@ class ApprovalActivity : FragmentActivity() {
         const val EXTRA_TIMEOUT_SECONDS = "timeoutSeconds"
         const val EXTRA_CREATED_AT = "createdAt"
         const val EXTRA_WAITING_BEHIND = "waitingBehind"
+
+        /** READ_CONTACTS, asked from the card itself when APPROVE is tapped. */
+        const val REQ_CONTACTS = 2001
 
         /**
          * Words cycled while the model works, so the wait reads as thinking rather than
@@ -128,6 +153,15 @@ class ApprovalActivity : FragmentActivity() {
         // The gate decided whether this request cannot proceed without a password.
         // Read once, like the other two: the UI renders decisions, it does not make them.
         needsPassword = view?.needsPassword == true
+
+        // Does approving this request need READ_CONTACTS, and is it missing?
+        //
+        // Derived from the ENDPOINT, because that is what the human is looking at on the card:
+        // `GET /contacts`. The plugin cannot help here — it only runs AFTER approval — so the
+        // decision has to be made from the request itself, on this side of the gate.
+        needsContactsPermission = endpoint.contains("/contacts") &&
+            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
 
         val pad = Theme.dp(this, 24)
 
@@ -509,6 +543,18 @@ class ApprovalActivity : FragmentActivity() {
             isEnabled = false
             alpha = 0.4f
         }
+        // APPROVE on a contacts request asks for the permission FIRST.
+        //
+        // **This is the whole point of the fix** (Mido, 2026-11-02, with a screenshot of this very
+        // card: *"all i want is when clicking approve here I give the fucking permission"*).
+        // Approving used to run the request, the plugin then found no READ_CONTACTS, and the call
+        // answered `503 contacts_unavailable` — after the human had done exactly what was asked.
+        // The remedy lived on a different screen they had no reason to visit.
+        //
+        // The request is left PENDING, not resolved: the human has not approved anything yet, and
+        // resolving first would fire a handler that is guaranteed to fail. The system dialog runs,
+        // and onGranted approves for real. A denial also leaves it pending with the buttons live,
+        // so the human can try again or DENY deliberately.
         val allow = Theme.button(this, "APPROVE", Theme.ButtonStyle.SUCCESS) {
             // Mutating routes bind APPROVE to a live biometric: the tap opens the
             // system prompt and the request fires only on success. A failed or
@@ -520,7 +566,11 @@ class ApprovalActivity : FragmentActivity() {
             // human is present, then the chars are read from the field. Order matters —
             // collecting the password first would leave it held in memory across an
             // asynchronous prompt that may never complete.
-            if (requiresBiometric) {
+            // The lambda is `() -> Unit`, so this is an if/else chain rather than an early
+            // return: three mutually exclusive ways to approve, in priority order.
+            if (needsContactsPermission) {
+                requestContactsThenApprove(id)
+            } else if (requiresBiometric) {
                 promptBiometric { approveNow(id) }
             } else {
                 approveNow(id)
@@ -882,6 +932,95 @@ class ApprovalActivity : FragmentActivity() {
      * `text.toString()`: a String cannot be wiped, and going through one would leave an
      * unremovable copy of the password in the heap for no benefit.
      */
+    /**
+     * Ask for READ_CONTACTS, then approve the request that needed it.
+     *
+     * The human tapped APPROVE on `GET /contacts`, so the two things they meant are "yes, run it"
+     * and "yes, you may read my contacts". Asking here means the answer arrives while they are
+     * still looking at the card that asked the question.
+     *
+     * `contactsPromptRunning` prevents a double tap from stacking two system dialogs, which on
+     * some OEM builds drops the first result entirely.
+     */
+    private fun requestContactsThenApprove(id: Long) {
+        if (contactsPromptRunning) {
+            Log.i("ApprovalActivity", "contacts prompt already running; ignoring second tap")
+            return
+        }
+        contactsPromptRunning = true
+        Log.i("ApprovalActivity", "APPROVE: requesting READ_CONTACTS before resolving $id")
+        requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), REQ_CONTACTS)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_CONTACTS) return
+        contactsPromptRunning = false
+
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        Log.i(
+            "ApprovalActivity",
+            "READ_CONTACTS from card: ${if (granted) "granted" else "DENIED"}"
+        )
+        if (granted) {
+            // Now the approval means what it says: the handler will find the permission.
+            approveNow(id)
+            return
+        }
+
+        // Declined: leave the request PENDING and say so ON THE CARD. A 503 the human never sees
+        // is how this looked like a dead button for four releases.
+        needsContactsPermission = false
+        showPermissionDeniedNotice()
+    }
+
+    /**
+     * Tell the human, on this card, that the request cannot run without the permission.
+     *
+     * Not a Toast: a Toast can vanish before it is read, and this is the message that was missing
+     * for the entire life of the feature.
+     */
+    private fun showPermissionDeniedNotice() {
+        val canAsk = shouldShowRequestPermissionRationale(
+            android.Manifest.permission.READ_CONTACTS
+        )
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Contacts permission needed")
+            .setMessage(
+                if (canAsk) {
+                    "Without it this request cannot run — contacts search answers " +
+                        "contacts_unavailable.\n\nTap APPROVE to be asked again."
+                } else {
+                    "Android will not show that prompt again.\n\nEnable Contacts in " +
+                        "Settings > Permissions, then approve this request again."
+                }
+            )
+            .setPositiveButton(
+                if (canAsk) "OK" else "Open Settings"
+            ) { _, _ ->
+                if (!canAsk) {
+                    try {
+                        startActivity(
+                            android.content.Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.w("ApprovalActivity", "cannot open settings: ${e.message}")
+                    }
+                }
+                // Re-arm the button so a retry is possible without leaving the card.
+                needsContactsPermission = true
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun approveNow(id: Long) {
         val field = passwordField
         if (!needsPassword || field == null) {

@@ -129,6 +129,10 @@ class OptionsActivity : Activity() {
             aiBackendRow(store, policy)
         )
 
+        container.addView(Theme.sectionHeader(this, "Speak"))
+
+        container.addView(ttsRows(store, policy))
+
         container.addView(Theme.sectionHeader(this, "Callers"))
 
         // --- who may reach the bridge ---
@@ -234,6 +238,205 @@ class OptionsActivity : Activity() {
             block.addView(Theme.spacer(this, 8))
         }
         return block
+    }
+
+    /**
+     * How the phone speaks.
+     *
+     * **No on/off toggle, deliberately.** Mido, 2026-11-02: *"a silent phone is enough"* — the
+     * utterance rides the notification stream, so silent/vibrate mode already silences it. A
+     * toggle would be a second brake that can disagree with the first, and the one thing a
+     * setting must never do is make "off" ambiguous.
+     *
+     * Every value is saved through [TtsSettings.clamped], so the field cannot store something the
+     * engine would refuse — a rate of 0 is accepted by the UI, clamped on save, and read back as
+     * the value actually in force.
+     */
+    private fun ttsRows(
+        store: com.mido.phonebridge.policy.PolicyStore,
+        policy: com.mido.phonebridge.policy.Policy,
+    ): LinearLayout {
+        val block = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12),
+                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12)
+            )
+            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+        }
+        val tts = policy.tts.clamped()
+
+        block.addView(
+            Theme.text(this, "POST /tts", 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(this@OptionsActivity)
+            }
+        )
+        block.addView(
+            Theme.text(
+                this,
+                "A named caller can make the phone say a sentence, and the call returns only " +
+                    "once it has finished. Silent mode silences it — it uses the notification " +
+                    "stream, so there is no separate switch to remember.",
+                12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0) }
+        )
+
+        // One numeric field per setting. Each saves on its own so a half-typed neighbour cannot
+        // be dragged into a save it did not ask for.
+        block.addView(
+            numberRow(
+                label = "Cap (characters)",
+                value = tts.maxChars.toString(),
+                hint = "1–${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_CHARS_CEILING}",
+                detail = "Longer text is REFUSED with 400 text_too_long, naming both numbers. " +
+                    "It is never truncated, because a truncated utterance would still answer ok.",
+                integer = true,
+                commit = { raw ->
+                    val n = raw.toIntOrNull()
+                        ?: return@numberRow "not a whole number"
+                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampCap(n)
+                    if (clamped != n) "clamped to $clamped"
+                    else {
+                        save(store, policy.withTts(tts.copy(maxChars = clamped)))
+                        null
+                    }
+                }
+            )
+        )
+
+        block.addView(
+            numberRow(
+                label = "Rate",
+                value = tts.rate.toString(),
+                hint = "${com.mido.phonebridge.plugins.tts.TtsLimits.MIN_RATE}–" +
+                    "${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_RATE}",
+                detail = "1.0 is normal speed. The engine's own range is 0.5–2.0.",
+                integer = false,
+                commit = { raw ->
+                    val f = raw.toFloatOrNull() ?: return@numberRow "not a number"
+                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampRate(f)
+                    if (clamped != f) "clamped to $clamped"
+                    else {
+                        save(store, policy.withTts(tts.copy(rate = clamped)))
+                        null
+                    }
+                }
+            )
+        )
+
+        block.addView(
+            numberRow(
+                label = "Pitch",
+                value = tts.pitch.toString(),
+                hint = "${com.mido.phonebridge.plugins.tts.TtsLimits.MIN_PITCH}–" +
+                    "${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_PITCH}",
+                detail = "1.0 is the voice's natural pitch.",
+                integer = false,
+                commit = { raw ->
+                    val f = raw.toFloatOrNull() ?: return@numberRow "not a number"
+                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampPitch(f)
+                    if (clamped != f) "clamped to $clamped"
+                    else {
+                        save(store, policy.withTts(tts.copy(pitch = clamped)))
+                        null
+                    }
+                }
+            )
+        )
+
+        block.addView(
+            numberRow(
+                label = "Line depth",
+                value = tts.queueDepth.toString(),
+                hint = "1–${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_QUEUE_DEPTH}",
+                detail = "How many utterances may wait behind the one speaking. Beyond that a " +
+                    "caller gets 503 tts_busy instead of waiting forever.",
+                integer = true,
+                commit = { raw ->
+                    val n = raw.toIntOrNull() ?: return@numberRow "not a whole number"
+                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampQueueDepth(n)
+                    if (clamped != n) "clamped to $clamped"
+                    else {
+                        save(store, policy.withTts(tts.copy(queueDepth = clamped)))
+                        null
+                    }
+                }
+            )
+        )
+
+        return block
+    }
+
+    /**
+     * A labelled numeric field with its own save button.
+     *
+     * [commit] returns an error message, or null when it saved. Returning the message instead of
+     * showing a Toast inside it keeps the parsing and the clamping together and lets every field
+     * report "clamped to 2.0" in one place — which matters, because a value silently changed
+     * under the user is the failure this screen exists to avoid.
+     */
+    private fun numberRow(
+        label: String,
+        value: String,
+        hint: String,
+        detail: String,
+        integer: Boolean,
+        commit: (String) -> String?,
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, Theme.dp(this@OptionsActivity, 12), 0, 0)
+        }
+        row.addView(
+            Theme.text(this, label, 13f, Theme.ON_SURFACE)
+        )
+        val field = EditText(this).apply {
+            setText(value)
+            this.hint = hint
+            inputType = if (integer) {
+                InputType.TYPE_CLASS_NUMBER
+            } else {
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            }
+            isSingleLine = true
+            importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+            setSaveEnabled(false)
+            setTextColor(Theme.ON_SURFACE)
+            setHintTextColor(Theme.ON_SURFACE_VARIANT)
+            highlightColor = Theme.ACCENT
+            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = 14f
+            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+            setPadding(
+                Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
+                Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+            )
+        }
+        row.addView(field)
+        row.addView(
+            Theme.text(this, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+            }
+        )
+        val error = Theme.text(this, "", 12f, Theme.DANGER).apply {
+            setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+            visibility = android.view.View.GONE
+        }
+        row.addView(error)
+        row.addView(
+            Theme.button(this, "save", Theme.ButtonStyle.NEUTRAL, small = true) {
+                val problem = commit(field.text.toString().trim())
+                if (problem != null) {
+                    error.text = problem
+                    error.visibility = android.view.View.VISIBLE
+                }
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) }
+        )
+        return row
     }
 
     private fun policy() = com.mido.phonebridge.policy.PolicyStore.from(applicationContext).get()
