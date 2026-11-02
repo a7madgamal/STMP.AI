@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP, deliberately allowed, with the reason recorded here rather than in a commit
+  message nobody reads.
+
+  The external AI backend is a URL the USER types: an Ollama or Unsloth server on their LAN or
+  tailnet. It is a bare IP and port, usually with no certificate. Android has blocked cleartext
+  by default since API 28 (this app targets 35), so without this file every request to that
+  backend fails before it leaves the device — and the failure surfaces as "not reachable",
+  which reads as the server being down while it is answering happily on another machine.
+
+  A `domain-config` cannot fix this. Those entries are matched by hostname, and the host is
+  unknown at build time; a user may point at any address on their own network. There is nothing
+  to enumerate.
+
+  So the base config permits cleartext. The compensating control is that this app only ever
+  sends ONE kind of thing over that connection: a request fact summary. It carries no vault
+  contents, no credentials, no SMS bodies — `RequestFacts` is already redacted before it reaches
+  the backend. Tokens are sent only as the Authorization header for the server the user chose.
+
+  Never widen this to `android:usesCleartextTraffic="true"`: that flag is the blunt version and
+  hides which hosts are affected. This file is where the decision lives.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

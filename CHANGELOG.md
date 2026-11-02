@@ -4353,7 +4353,7 @@ Version 0.43.49 / build 203.
 
 ---
 
-## 0.43.50 — the token field masks, and a 503 stops lying about the model (build 204) — CURRENT
+## 0.43.50 — the token field masks, and a 503 stops lying about the model (build 204)
 2026-11-02
 
 Two defects found by actually calling the installed build.
@@ -4377,6 +4377,41 @@ That is the same class as the gate's single `Boolean`: one field describing two 
 so the message tells the truth about the one that is not in use.
 
 Version 0.43.50 / build 204.
+
+---
+
+## 0.43.51 — plain HTTP to a LAN model server is allowed again (build 205) — CURRENT
+2026-11-02
+
+EXTERNAL never worked, and the relay was only half the reason. **Android has blocked cleartext HTTP
+by default since API 28**, and this app targets 35. There was no `usesCleartextTraffic` and no
+`networkSecurityConfig`, so every request to a `http://` backend was refused on the device before a
+single byte reached the network.
+
+The failure mode is what made this expensive: `HttpURLConnection` throws `CleartextNotPermittedException`,
+`probe()` catches it and returns false, and the caller gets **"not reachable"**. That reads as the
+server being down — so the hunt went to socat, then to firewalls, then to Tailscale `Host` headers,
+while the server was answering `200` on every other machine in the building.
+
+**`network_security_config.xml` now permits cleartext**, and the file records why rather than leaving
+it to a commit message. A `domain-config` cannot solve this: those entries match by hostname and the
+host is whatever address the user types, so there is nothing to enumerate at build time. The base
+config is the only mechanism that fits a user-supplied endpoint.
+
+The compensating control is scope, not restriction: this app sends exactly one kind of payload over
+that connection — a request-fact summary, already redacted before it reaches the backend. No vault
+contents, no SMS bodies, no credentials. The token travels only as the `Authorization` header for the
+server the user chose.
+
+It deliberately does NOT use `android:usesCleartextTraffic="true"`: that flag is the blunt version and
+hides which hosts are affected.
+
+This is the third defect in this chain that reported the wrong thing — after the 401 that was really
+auth and the 503 that described the local model. Each one sent the investigation somewhere real and
+wrong. The lesson recorded in the file: a network error string is a description of a SYMPTOM, and
+"not reachable" must not be trusted as "the peer is down" until the exception type has been read.
+
+Version 0.43.51 / build 205.
 
 ---
 
