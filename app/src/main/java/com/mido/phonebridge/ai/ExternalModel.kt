@@ -66,6 +66,19 @@ object ExternalModel : SummaryModel {
         return stored.ifBlank { BuildConfig.EXTERNAL_AI_URL.trim() }
     }
 
+    /**
+     * The optional bearer token, or "" when none is set.
+     *
+     * Sent as `Authorization: Bearer <token>` only when non-empty, so a trusted local server
+     * that wants no auth keeps getting no header. Read per call like the URL: changing it in
+     * Options must take effect on the next request, not the next process.
+     */
+    private fun authToken(ctx: Context): String = try {
+        com.mido.phonebridge.policy.PolicyStore.from(ctx).get().aiExternalToken
+    } catch (e: Exception) {
+        ""
+    }
+
     private fun configured(ctx: Context): Boolean = baseUrl(ctx).isNotEmpty()
 
     /** The Ollama chat route. Kept as a constant so the probe and the call cannot disagree. */
@@ -140,6 +153,12 @@ object ExternalModel : SummaryModel {
             requestMethod = "GET"
             connectTimeout = PROBE_TIMEOUT_MS
             readTimeout = PROBE_TIMEOUT_MS
+            // The probe must carry the SAME auth as a real call, or a healthy server that
+            // requires a token answers 401 and gets reported as unreachable — the wrong
+            // verdict, and one that would send a human hunting for a network fault.
+            authToken(ctx).takeIf { it.isNotEmpty() }?.let {
+                setRequestProperty("Authorization", "Bearer $it")
+            }
             // Ollama answers 200 on /; anything else still proves a listener.
         }
         try {
@@ -211,6 +230,11 @@ object ExternalModel : SummaryModel {
             connectTimeout = budgetMs.toInt().coerceAtMost(5_000)
             readTimeout = budgetMs.toInt().coerceAtMost(30_000)
             setRequestProperty("Content-Type", "application/json")
+            // Only when a token is configured: a local server that trusts the host must not
+            // receive an empty Authorization header, which some servers reject outright.
+            authToken(ctx).takeIf { it.isNotEmpty() }?.let {
+                setRequestProperty("Authorization", "Bearer $it")
+            }
         }
         try {
             conn.outputStream.use { it.write(body.toString().toByteArray()) }

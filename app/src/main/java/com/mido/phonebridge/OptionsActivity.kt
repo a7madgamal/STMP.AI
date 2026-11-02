@@ -350,7 +350,7 @@ class OptionsActivity : Activity() {
 
             val urlField = EditText(this).apply {
                 setText(policy.aiExternalUrl)
-                hint = "http://192.168.1.9:11434"
+                hint = "http://host:port  (no trailing slash)"
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
                 isSingleLine = true
                 importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
@@ -376,10 +376,53 @@ class OptionsActivity : Activity() {
             }
 
             block.addView(urlField)
+
+            // --- optional token ---
+            //
+            // **Masked, because it is a credential.** Unsloth treats a private host as trusted and
+            // answers 401 with `www-authenticate: Bearer` the moment the same server is reached
+            // over a tailnet address, which is not private. Sending a token is the honest fix;
+            // routing around auth with a Host-rewriting proxy is not.
+            //
+            // Optional on purpose: a loopback or LAN server needs none, and sending an empty
+            // Authorization header makes some servers reject the request outright.
+            block.addView(
+                Theme.text(
+                    this,
+                    "Token (optional)",
+                    13f, Theme.ON_SURFACE
+                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 12), 0, Theme.dp(this@OptionsActivity, 6)) }
+            )
+
+            val tokenField = EditText(this).apply {
+                setText(policy.aiExternalToken)
+                hint = "leave empty if the server trusts this device"
+                // Masking applied AFTER inputType, for the reason recorded in ApprovalActivity:
+                // setInputType re-derives the transformation and would clear an earlier one.
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                isSingleLine = true
+                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or
+                    android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                setSaveEnabled(false)
+                isSaveFromParentEnabled = false
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 14f
+                background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                setPadding(
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
+                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                )
+            }
+            block.addView(tokenField)
+
             block.addView(errorLine)
 
             block.addView(
-                Theme.button(this, "save url", Theme.ButtonStyle.PRIMARY, small = true) {
+                Theme.button(this, "save", Theme.ButtonStyle.PRIMARY, small = true) {
                     val raw = urlField.text.toString().trim()
                     val problem = validateEndpoint(raw)
                     if (problem != null) {
@@ -388,7 +431,13 @@ class OptionsActivity : Activity() {
                         return@button
                     }
                     errorLine.visibility = android.view.View.GONE
-                    save(store, policy.withAiExternalUrl(raw))
+                    // Both in ONE write: two saves would send a policy change notice twice and
+                    // leave a window where the URL is stored without the token it needs.
+                    save(
+                        store,
+                        policy.withAiExternalUrl(raw)
+                            .withAiExternalToken(tokenField.text.toString().trim())
+                    )
                 },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -400,8 +449,13 @@ class OptionsActivity : Activity() {
                 Theme.text(
                     this,
                     if (policy.aiExternalUrl.isBlank()) {
-                        "No server set, so EXTERNAL refuses every request. Enter the address " +
-                            "of an Ollama or unsloth server you can reach from this phone."
+                        "No server set, so EXTERNAL refuses every request.\n\n" +
+                            "Format: http://host:port — no trailing slash, no path.\n" +
+                            "e.g. http://192.168.1.9:8888  ·  http://100.101.102.103:11434\n\n" +
+                            "The port is the part people get wrong: Unsloth Studio serves 8888, " +
+                            "Ollama serves 11434. The address must be one THIS PHONE can reach — " +
+                            "a LAN address works only on the same network, so a tailnet address " +
+                            "is usually what you want."
                     } else {
                         "Requests are described by ${policy.aiExternalUrl}. If it is unreachable " +
                             "they are refused — never approved without a description."

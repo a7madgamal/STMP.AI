@@ -69,6 +69,26 @@ class Policy(
      */
     val aiExternalUrl: String = "",
     /**
+     * Optional bearer token for the external model server.
+     *
+     * **Optional on purpose.** Unsloth (and most local servers) treat a private or loopback host
+     * as trusted and need no auth at all; a tailnet address does not count as private, so the
+     * same server starts answering `401` with `www-authenticate: Bearer` the moment the request
+     * arrives over `100.64/10`. Without this field the only ways to satisfy that are to route
+     * around auth with a proxy that rewrites `Host`, or to leave the backend unusable. A token is
+     * the honest answer: the server asked for one.
+     *
+     * **Stored in `policy.json`, which is app-private but NOT encrypted at rest** — the vault is
+     * the encrypted store, and it is biometric-gated per session, which would block an
+     * unattended summarise call. So this is a deliberate trade: a bearer token for a LAN model
+     * server lives beside the endpoint that needs it, in the same file as the rest of the AI
+     * preference, rather than in a store this code path cannot open. Do not reuse a token from
+     * anywhere else for it.
+     *
+     * Empty means "send no Authorization header", which is what a trusted local server expects.
+     */
+    val aiExternalToken: String = "",
+    /**
      * Does the bridge start itself — after a reboot, after an app update, and on app load?
      *
      * **Default ON** (Mido, 2026-10-25). The whole point of the app is a server that is
@@ -111,6 +131,7 @@ class Policy(
         .put("fingerprintForModals", fingerprintForModals)
         .put("aiBackend", aiBackend.name)
         .put("aiExternalUrl", aiExternalUrl)
+        .put("aiExternalToken", aiExternalToken)
         .put("autoStartOnBoot", autoStartOnBoot)
         .put(
             "rules",
@@ -147,6 +168,7 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -158,6 +180,7 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -169,6 +192,7 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -180,6 +204,7 @@ class Policy(
             fingerprintForModals = enabled,
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -191,6 +216,7 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = backend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -202,6 +228,19 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
             aiExternalUrl = url,
+            aiExternalToken = aiExternalToken,
+            autoStartOnBoot = autoStartOnBoot
+        )
+
+    /** A new policy with the external AI token changed. Empty means "send no Authorization". */
+    fun withAiExternalToken(token: String): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
+            aiExternalToken = token,
             autoStartOnBoot = autoStartOnBoot
         )
 
@@ -213,6 +252,7 @@ class Policy(
             fingerprintForModals = fingerprintForModals,
             aiBackend = aiBackend,
             aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
             autoStartOnBoot = enabled
         )
 
@@ -268,6 +308,7 @@ class Policy(
             val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
             val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
             val externalUrl = lenientString(o, "aiExternalUrl", warnings)
+            val externalToken = lenientString(o, "aiExternalToken", warnings)
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
@@ -277,6 +318,7 @@ class Policy(
                 fingerprintForModals = fingerprint,
                 aiBackend = backend,
                 aiExternalUrl = externalUrl,
+                aiExternalToken = externalToken,
                 autoStartOnBoot = autoStart,
                 preferenceWarnings = warnings
             )

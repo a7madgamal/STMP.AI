@@ -4276,7 +4276,7 @@ Version 0.43.47 / build 201.
 
 ---
 
-## 0.43.48 — choosing EXTERNAL AI gives you somewhere to point it (build 202) — CURRENT
+## 0.43.48 — choosing EXTERNAL AI gives you somewhere to point it (build 202)
 2026-11-01
 
 Mido, 2026-11-01: *"when ai option is set to external, I expected being able to set the server url!"*
@@ -4307,6 +4307,49 @@ Blank is accepted and means "remove the server" — clearing the field has to be
 validator rejects only what cannot work, not what is merely unset.
 
 Version 0.43.48 / build 202.
+
+---
+
+## 0.43.49 — the external AI backend can authenticate (build 203) — CURRENT
+2026-11-02
+
+Mido, 2026-11-02: *"STMP should accept an optional token."* He was right, and the missing header was
+a real gap, not a misconfiguration.
+
+`ExternalModel` set only `Content-Type`. It had **no Authorization header at all**, so no token could
+be sent even if one existed. Meanwhile the local model server answers `401` with
+`www-authenticate: Bearer` to any request arriving from a non-private address — and Tailscale's
+`100.64/10` is not RFC1918, so the same server that needs no auth from this VM demands one from the
+phone. Without this field the only ways to satisfy it were to route around auth with a `Host`-
+rewriting proxy, or leave the backend unusable.
+
+**`aiExternalToken`** joins `aiExternalUrl` in the policy, parsed leniently like every other
+preference: absent or garbage means empty, which sends no header at all — a local server that trusts
+the device must not receive an empty `Authorization`, which some servers reject outright.
+
+**The probe carries it too, and that matters.** A reachability probe without auth answers `401` and
+would report a healthy server as unreachable — the wrong verdict, and one that sends a human hunting
+for a network fault that does not exist.
+
+**The field is masked**, with the transformation applied after `inputType` for the reason
+`ApprovalActivity` records: `setInputType` re-derives the mask and silently clears one set earlier.
+It is also excluded from autofill and from instance-state saving.
+
+**Stored in `policy.json`, which is app-private but not encrypted at rest.** The vault is the
+encrypted store and is biometric-gated per session, which would block an unattended summarise call.
+So this is a deliberate trade, recorded in the field's own comment: a bearer token for a LAN model
+server lives beside the endpoint that needs it. Do not reuse a token from anywhere else for it.
+
+URL and token save in ONE write, so there is no window where the address is stored without the
+credential it needs, and one policy-change record rather than two.
+
+The URL field also gained the shape guidance Mido asked for: `http://host:port`, no trailing slash,
+no path, with the two real ports named (8888 Unsloth, 11434 Ollama) and the note that the address
+must be one *this phone* can reach.
+
+374 tests, 0 failures.
+
+Version 0.43.49 / build 203.
 
 ---
 
