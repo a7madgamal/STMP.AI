@@ -85,27 +85,10 @@ class OptionsActivity : BridgeScreen() {
             )
         )
 
-        container.addView(Theme.sectionHeader(this, "Approval"))
-
-        // --- fingerprint for SECURE modals ---
-        container.addView(
-            toggleRow(
-                title = "Fingerprint for approval modals",
-                state = if (policy.fingerprintForModals) "ON" else "OFF",
-                detail = if (policy.fingerprintForModals) {
-                    "A SECURE request needs a fingerprint to approve. A denied or failed prompt " +
-                        "leaves the request pending, so you can retry within its window."
-                } else {
-                    "A SECURE request approves on a plain tap, like NOTIFY already does. " +
-                        "The secret vault is NOT affected — it keeps its own fingerprint and is " +
-                        "unlocked when the app opens."
-                },
-                colour = if (policy.fingerprintForModals) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
-                onToggle = {
-                    save(store, policy.withFingerprintForModals(!policy.fingerprintForModals))
-                }
-            )
-        )
+        // The fingerprint toggle moved to Home, into the gate card (Mido, 2026-11-03: *"gate on
+        // home"*). The mode picker and the fingerprint requirement are one subject — when you are
+        // asked, and how you prove it — so splitting them across two screens meant neither could
+        // be reasoned about in full.
 
         container.addView(Theme.sectionHeader(this, "AI"))
 

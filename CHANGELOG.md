@@ -5135,11 +5135,15 @@ devDependencies. `node_modules/` is gitignored.
 - Made section headers larger.
 - Fixed the bottom bar underline spanning a third of the screen instead of the width of the label.
 
-## 0.43.84 (build 238) — 2026-11-03 — CURRENT
+## 0.43.84 (build 238) — 2026-11-03
 - Added a Google account plugin holding the signed-in email, token state and sign-in button.
 - Moved both notification accesses to the Notifications plugin, which now declares runtime permissions and system access separately.
 - Made the Tools list vertical; five buttons across the screen truncated their own labels.
 - Removed the Setup header and the Server row from Home; the hero already states both.
+
+## 0.43.85 (build 239) — 2026-11-03 — CURRENT
+- Added the stamp mark to the Home hero.
+- Moved the fingerprint-for-modals toggle from Settings to the gate card on Home, so the mode picker and the proof it requires sit together.
 
 ## Keeping this file honest
 

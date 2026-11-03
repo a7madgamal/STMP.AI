@@ -56,6 +56,8 @@ class MainActivity : BridgeScreen() {
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
+    private lateinit var gateFingerprint: MaterialButton
+    private lateinit var gateFingerprintWhy: TextView
     private lateinit var secretsButton: MaterialButton
     private lateinit var loginButton: MaterialButton
     private lateinit var toolsContainer: LinearLayout
@@ -139,8 +141,36 @@ class MainActivity : BridgeScreen() {
             setTextColor(Theme.ON_SURFACE_VARIANT)
             setPadding(0, Theme.dp(this@MainActivity, 4), 0, 0)
         }
-        heroCard.addView(heroTitle)
-        heroCard.addView(heroSub)
+
+        // The stamp mark, beside the status rather than above it.
+        //
+        // `WRAP_CONTENT` + `adjustViewBounds`, the same treatment the approval modal gives it:
+        // the mark is roughly 2:1, so forcing it into a square box letterboxes it into a smear.
+        // Height drives the size and the width follows.
+        val mark = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.logo_mark)
+            adjustViewBounds = true
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            contentDescription = "STMP"
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Theme.dp(this@MainActivity, 44)
+            ).apply { marginEnd = Theme.dp(this@MainActivity, 12) }
+        }
+        val heroText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(heroTitle)
+            addView(heroSub)
+        }
+        val heroRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(mark)
+            addView(heroText, LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+            ))
+        }
+        heroCard.addView(heroRow)
         container.addView(heroCard)
 
         // --- 2. CONTROLS: the primary action ---
@@ -197,6 +227,28 @@ class MainActivity : BridgeScreen() {
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
         gateCard.addView(gateButtons)
+
+        // The fingerprint toggle lives HERE, beside the mode picker, not in Settings.
+        //
+        // They are one subject: the mode decides WHEN you are asked, this decides HOW you prove
+        // it. Split across two screens, neither half can be reasoned about — you could read
+        // "AUTOMATIC" and never learn that a SECURE request will ask for a fingerprint.
+        val fpRow = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, Theme.dp(this@MainActivity, 12), 0, 0)
+        }
+        gateFingerprint = Theme.button(this, "", Theme.ButtonStyle.NEUTRAL, small = true) {
+            toggleFingerprintForModals()
+        }
+        fpRow.addView(gateFingerprint)
+        gateFingerprintWhy = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            setPadding(0, Theme.dp(this@MainActivity, 6), 0, 0)
+        }
+        fpRow.addView(gateFingerprintWhy)
+        gateCard.addView(fpRow)
+
         container.addView(gateCard)
 
         // The plugin list used to live here and made Home a wall: twelve status cards between
@@ -474,6 +526,8 @@ class MainActivity : BridgeScreen() {
         ).append('|')
         // `this@MainActivity`, NOT `this`: inside buildString the implicit receiver is the
         // StringBuilder, so a bare `this` would be the wrong object entirely.
+        append(runCatching { PolicyStore.from(applicationContext).get().fingerprintForModals }
+            .getOrDefault(false)).append('|')
         append(ApprovalGate.canUseFullScreenIntent(this@MainActivity)).append('|')
         append(android.provider.Settings.canDrawOverlays(this@MainActivity)).append('|')
         append(isIgnoringBatteryOptimizations()).append('|')
@@ -794,6 +848,11 @@ class MainActivity : BridgeScreen() {
             gateTitle.setTextColor(Theme.DANGER)
             gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
             gateButtons.removeAllViews()
+            // Hidden rather than left showing the last known position: an unreadable policy means
+            // the app does not know what it is enforcing, so a switch position here would be a
+            // claim it cannot support.
+            gateFingerprint.visibility = TextView.GONE
+            gateFingerprintWhy.visibility = TextView.GONE
             return
         }
 
@@ -833,6 +892,64 @@ class MainActivity : BridgeScreen() {
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
             ).apply { marginEnd = Theme.dp(this@MainActivity, 6) })
         }
+
+        // The fingerprint control, rendered from the STORED value rather than from what we
+        // assume: a write that silently failed must not leave the screen claiming otherwise.
+        val policy = try {
+            PolicyStore.from(applicationContext).get()
+        } catch (e: PolicyException) {
+            // Unreachable in practice — the early return above already handled it — but a
+            // second read that throws must not crash a screen the user is looking at.
+            gateFingerprint.visibility = TextView.GONE
+            gateFingerprintWhy.visibility = TextView.GONE
+            return
+        }
+        gateFingerprint.visibility = TextView.VISIBLE
+        gateFingerprintWhy.visibility = TextView.VISIBLE
+        val fp = policy.fingerprintForModals
+        gateFingerprint.text = if (fp) "FINGERPRINT FOR MODALS: ON" else "FINGERPRINT FOR MODALS: OFF"
+        gateFingerprint.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (fp) Theme.SUCCESS else Theme.SURFACE_VARIANT
+        )
+        gateFingerprint.setTextColor(if (fp) Theme.ON_COLOR else Theme.ON_SURFACE)
+        gateFingerprintWhy.text = if (fp) {
+            "A SECURE request needs your fingerprint to approve. A denied prompt leaves the " +
+                "request pending so you can retry in its window."
+        } else {
+            "A SECURE request approves on a plain tap, like NOTIFY does. The secret vault is " +
+                "unaffected — it keeps its own fingerprint."
+        }
+    }
+
+    /**
+     * Flip the fingerprint-for-modals preference.
+     *
+     * Audited as POLICY_CHANGED, exactly as the Settings screen used to do: a fingerprint
+     * requirement DISAPPEARING is the kind of change a later reader wants dated.
+     */
+    private fun toggleFingerprintForModals() {
+        val store = PolicyStore.from(applicationContext)
+        val current = try {
+            store.get()
+        } catch (e: PolicyException) {
+            Toast.makeText(this, "policy unreadable: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val next = current.withFingerprintForModals(!current.fingerprintForModals)
+        try {
+            store.set(next)
+        } catch (e: Exception) {
+            Toast.makeText(this, "could not save: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            AuditLog.from(applicationContext).append(
+                com.mido.phonebridge.audit.PolicyAudit.record(next.global, next.global, "home")
+            )
+        } catch (e: Exception) {
+            Debug.log("audit record failed for fingerprint toggle: ${e.message}")
+        }
+        render()
     }
 
     /**

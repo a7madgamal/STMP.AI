@@ -52,6 +52,10 @@ class GrainCoverageTest {
         // button's FOREGROUND instead — see `button()`.
         "MainActivity.kt" to "serverButton.backgroundTintList",
         "MainActivity.kt" to "loginButton.backgroundTintList",
+        // The gate's fingerprint control, same rule as the two buttons above: a TINT on a
+        // MaterialButton, so its ripple and pressed states survive. Grain is layered in the
+        // button's foreground by `Theme.button`.
+        "MainActivity.kt" to "gateFingerprint.backgroundTintList",
         "ApprovalActivity.kt" to "allow.backgroundTintList",
     )
 
