@@ -5153,8 +5153,11 @@ devDependencies. `node_modules/` is gitignored.
 - Moved device access, tools and debug to Settings, grouped as Device access, Tools and Debug.
 - Moved the vault unlock and the system-settings intents into shared helpers, so no screen holds a second copy.
 
-## 0.43.88 (build 242) — 2026-11-03 — CURRENT
+## 0.43.88 (build 242) — 2026-11-03
 - Fixed the "no address" message blaming Tailscale, which is now a recommendation rather than a requirement.
+
+## 0.43.89 (build 243) — 2026-11-03 — CURRENT
+- Removed the contacts permission flow from Home. Its only entry point was a row that moved to the Contacts plugin, so the whole chain was unreachable.
 
 ## Keeping this file honest
 

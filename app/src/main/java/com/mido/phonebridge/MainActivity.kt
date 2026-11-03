@@ -35,7 +35,6 @@ class MainActivity : BridgeScreen() {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
-        const val REQ_READ_CONTACTS = 1002
 
         /**
          * How often the hero re-renders while the activity is resumed.
@@ -385,15 +384,6 @@ class MainActivity : BridgeScreen() {
         append(BridgeService.bindAddress).append('|')
         append(BridgeService.listenerRef != null).append('|')
         append(hasNotifPermission()).append('|')
-        // The contacts row's THREE states, since they must change without a repaint of their own.
-        append(
-            checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
-                PackageManager.PERMISSION_GRANTED
-        ).append('|')
-        append(contactsAskedBefore()).append('|')
-        append(
-            shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS)
-        ).append('|')
         // `this@MainActivity`, NOT `this`: inside buildString the implicit receiver is the
         // StringBuilder, so a bare `this` would be the wrong object entirely.
         append(runCatching { PolicyStore.from(applicationContext).get().fingerprintForModals }
@@ -788,15 +778,7 @@ class MainActivity : BridgeScreen() {
      * human understands.
      */
     /** Whether the contacts prompt has EVER been shown, so "not asked" is distinguishable. */
-    private fun contactsAskedBefore(): Boolean =
-        getSharedPreferences("permissions", MODE_PRIVATE)
-            .getBoolean("contactsAsked", false)
-
-    private fun markContactsAsked() {
-        getSharedPreferences("permissions", MODE_PRIVATE)
-            .edit().putBoolean("contactsAsked", true).apply()
-    }
-
+ 
     /**
      * App details, where a permanently-denied permission can actually be re-granted.
      *
@@ -804,23 +786,7 @@ class MainActivity : BridgeScreen() {
      * on a page without the contacts toggle in several firmware revisions. App details always
      * shows Permissions.
      */
-    private fun openAppSettings() {
-        try {
-            startActivity(
-                Intent(
-                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    android.net.Uri.parse("package:$packageName")
-                )
-            )
-            Debug.log("opened app settings for contacts permission")
-        } catch (e: Exception) {
-            // Nothing to fall back to that would help: say so rather than pretend.
-            Debug.log("cannot open app settings: ${e.message}")
-            Toast.makeText(this, "Open Settings > Apps > STMP > Permissions", Toast.LENGTH_LONG)
-                .show()
-        }
-    }
-
+ 
     /**
      * The one place that explains the contacts permission, and the only launcher.
      *
@@ -828,65 +794,8 @@ class MainActivity : BridgeScreen() {
      * outcome has to arrive somewhere the user is already looking, which is this dialog rather
      * than a Toast that disappears over the row it is describing.
      */
-    private fun showContactsPermissionDialog(deniedJustNow: Boolean = false) {
-        val granted = checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            // Only reachable from the post-result repaint; keeps the dialog honest if the grant
-            // landed while it was being built.
-            AlertDialog.Builder(this)
-                .setTitle("Contacts search")
-                .setMessage("Contacts permission is granted. Searches will work.")
-                .setPositiveButton("OK", null)
-                .show()
-            return
-        }
-        val canAsk = shouldShowRequestPermissionRationale(Manifest.permission.READ_CONTACTS)
-        val asked = contactsAskedBefore()
-
-        val message = when {
-            deniedJustNow && !canAsk ->
-                "You denied it, and Android will not show that prompt again.\n\n" +
-                    "Open Settings > Permissions > Contacts and choose Allow. " +
-                    "The Contacts search route stays unavailable until you do."
-            deniedJustNow ->
-                "You denied it, so contact search will not work yet.\n\n" +
-                    "Tap Allow to be asked again, or leave it and the route keeps answering " +
-                    "contacts_unavailable."
-            !asked ->
-                "STMP needs permission to search your contacts.\n\n" +
-                    "Android will ask you to confirm on the next screen. Without it the " +
-                    "GET /contacts route answers contacts_unavailable."
-            canAsk ->
-                "Contacts permission was declined earlier.\n\n" +
-                    "Tap Allow to be asked again."
-            else ->
-                "Contacts permission is blocked\n\n" +
-                    "Android will not show the request again, so it has to be enabled in " +
-                    "Settings > Permissions > Contacts."
-        }
-
-        val builder = AlertDialog.Builder(this)
-            .setTitle(if (deniedJustNow) "Contacts permission denied" else "Contacts search")
-            .setMessage(message)
-            .setNegativeButton("Cancel", null)
-
-        if (canAsk) {
-            builder.setPositiveButton("Allow") { _, _ ->
-                Debug.log("requesting READ_CONTACTS (from dialog)")
-                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), REQ_READ_CONTACTS)
-            }
-        } else {
-            builder.setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
-        }
-        builder.show()
-    }
-
-    private fun requestContactsPermission() {
-        // Delegates to the dialog; nothing should bypass the explanation.
-        showContactsPermissionDialog()
-    }
-
+ 
+ 
     private fun requestNotifPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Debug.log("requesting POST_NOTIFICATIONS")
@@ -900,26 +809,6 @@ class MainActivity : BridgeScreen() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_READ_CONTACTS) {
-            val granted = grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            // Recorded even on DENIED, and specifically BEFORE render(): the row's state depends
-            // on "have they been asked", so setting it after the repaint would show the stale one.
-            markContactsAsked()
-            // Logged either way: a denial is the difference between "the route is broken" and
-            // "nobody granted it", and that question gets asked from the other end of a tailnet.
-            Debug.log(
-                "READ_CONTACTS result: ${if (granted) "granted" else "DENIED"}" +
-                    " (canAskAgain=${shouldShowRequestPermissionRationale(
-                        Manifest.permission.READ_CONTACTS
-                    )})"
-            )
-            // The outcome goes back into the SAME modal. A Toast over the row is exactly the
-            // feedback that got reported as "I wouldn't know this shit didn't work".
-            render()
-            if (!granted) showContactsPermissionDialog(deniedJustNow = true)
-            return
-        }
         if (requestCode == REQ_POST_NOTIF) {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             Debug.log("POST_NOTIFICATIONS result: ${if (granted) "granted" else "DENIED"}")
