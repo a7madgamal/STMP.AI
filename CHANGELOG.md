@@ -5156,8 +5156,11 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.88 (build 242) — 2026-11-03
 - Fixed the "no address" message blaming Tailscale, which is now a recommendation rather than a requirement.
 
-## 0.43.89 (build 243) — 2026-11-03 — CURRENT
+## 0.43.89 (build 243) — 2026-11-03
 - Removed the contacts permission flow from Home. Its only entry point was a row that moved to the Contacts plugin, so the whole chain was unreachable.
+
+## 0.43.90 (build 244) — 2026-11-03 — CURRENT
+- Moved the seven design plans into `docs/plans/`, with an index that says they record decisions rather than describing the code.
 
 ## Keeping this file honest
 
