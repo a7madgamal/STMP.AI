@@ -5145,8 +5145,13 @@ devDependencies. `node_modules/` is gitignored.
 - Added the stamp mark to the Home hero.
 - Moved the fingerprint-for-modals toggle from Settings to the gate card on Home, so the mode picker and the proof it requires sit together.
 
-## 0.43.86 (build 240) — 2026-11-03 — CURRENT
+## 0.43.86 (build 240) — 2026-11-03
 - Fixed notification cards freezing after being touched. A teardown could re-present the card already on screen, attaching a second window and orphaning the first, which then could not be removed and swallowed every touch.
+
+## 0.43.87 (build 241) — 2026-11-03 — CURRENT
+- Reduced Home to the status hero, the start/stop control and the approval gate.
+- Moved device access, tools and debug to Settings, grouped as Device access, Tools and Debug.
+- Moved the vault unlock and the system-settings intents into shared helpers, so no screen holds a second copy.
 
 ## Keeping this file honest
 

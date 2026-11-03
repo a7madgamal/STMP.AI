@@ -1,16 +1,19 @@
 package com.mido.phonebridge
 
-import android.app.Activity
+import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.text.InputType
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
 
 /**
@@ -30,6 +33,9 @@ import com.mido.phonebridge.ui.Theme
  * checklist, which is already long.
  */
 class OptionsActivity : BridgeScreen() {
+
+    private var logExpanded = false
+    private lateinit var logView: TextView
 
     private lateinit var container: LinearLayout
 
@@ -65,7 +71,8 @@ class OptionsActivity : BridgeScreen() {
             return
         }
 
-        container.addView(Theme.sectionHeader(this, "Startup"))
+        // --- BRIDGE: how the server behaves ---
+        container.addView(Theme.sectionHeader(this, "Bridge"))
 
         // --- auto-start ---
         container.addView(
@@ -106,6 +113,77 @@ class OptionsActivity : BridgeScreen() {
         // Speak — so the settings sit with the routes they govern instead of in a second list
         // that had to be kept in step by hand.
 
+        container.addView(Theme.sectionHeader(this, "Device access"))
+
+        // These five rows came OFF Home (Mido, 2026-11-03: *"rethink each button screen"*).
+        // They are device and service state, not live answers about whether the bridge is
+        // running — which is the one question Home now answers. Kept in the same order the
+        // right-hand bracket in Mido's drawing ran down the screen.
+        container.addView(Theme.statusRow(
+            this, "Lock-screen popup",
+            if (ApprovalGate.canUseFullScreenIntent(this)) "granted (wakes a locked screen)"
+            else "optional — tap if approvals miss on a locked screen",
+            if (ApprovalGate.canUseFullScreenIntent(this)) Theme.SUCCESS
+            else Theme.ON_SURFACE_VARIANT,
+            onClick = { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(this) }
+        ))
+        container.addView(Theme.statusRow(
+            this, "Draw over apps",
+            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)) "granted" else "tap to grant",
+            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)) Theme.SUCCESS
+            else Theme.WARNING,
+            onClick = { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(this) }
+        ))
+        container.addView(Theme.statusRow(
+            this, "Battery optimization",
+            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)) "exempt"
+            else "tap to allow background",
+            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)) Theme.SUCCESS
+            else Theme.WARNING,
+            onClick = { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(this) }
+        ))
+        // The vault: locked on every new process, one scan opens it for the session. Shown here
+        // because a locked vault is why a secret call answers `secret_locked`.
+        container.addView(Theme.statusRow(
+            this, "Secret vault",
+            if (SecretVault.isUnlocked()) "unlocked (this session)" else "locked — tap to unlock",
+            if (SecretVault.isUnlocked()) Theme.SUCCESS else Theme.WARNING,
+            onClick = { VaultUnlock.ensureUnlocked(this, force = true) { render() } }
+        ))
+        container.addView(aiModelRow(store, policy))
+
+        // --- TOOLS: the destinations that are not tabs ---
+        container.addView(Theme.sectionHeader(this, "Tools"))
+        container.addView(toolRow("Get started") {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+        })
+        container.addView(toolRow("Request log") {
+            startActivity(Intent(this, LogActivity::class.java))
+        })
+        container.addView(toolRow("Exceptions") {
+            startActivity(Intent(this, ExceptionsActivity::class.java))
+        })
+        container.addView(toolRow("SSH") {
+            startActivity(Intent(this, SshActivity::class.java))
+        })
+
+        // --- DEBUG ---
+        container.addView(Theme.sectionHeader(this, "Debug"))
+        container.addView(Theme.button(this, "SHOW LOG", Theme.ButtonStyle.GHOST) {
+            logExpanded = !logExpanded
+            logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
+        })
+        logView = TextView(this).apply {
+            textSize = 11f
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            visibility = TextView.GONE
+            text = Debug.dump()
+        }
+        container.addView(logView)
+
+        // --- CALLERS: who may reach the bridge at all ---
         container.addView(Theme.sectionHeader(this, "Callers"))
 
         // --- who may reach the bridge ---
@@ -779,4 +857,83 @@ class OptionsActivity : BridgeScreen() {
         // silently failed, the screen must show the truth, not the intent.
         render()
     }
+
+    /**
+     * The AI model row, moved here from Home.
+     *
+     * Rendered as a BUTTON while it is the thing to press, and as a plain row once ready: the
+     * action and its feedback are the same control, which is why the label carries the progress.
+     */
+    private fun aiModelRow(
+        store: PolicyStore,
+        policy: com.mido.phonebridge.policy.Policy,
+    ): android.view.View {
+        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
+        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(this)
+        val downloading = aiOn && com.mido.phonebridge.ai.ModelProvisioner.running
+        val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
+
+        // With the AI off there is nothing to fetch, so offering a download would advertise the
+        // exact behaviour that was turned off above on this same screen.
+        if (!aiOn) {
+            return Theme.statusRow(
+                this, "AI model",
+                "off — no model loaded",
+                Theme.ON_SURFACE_VARIANT
+            )
+        }
+        if (downloading) {
+            val pct = progress?.percent ?: 0
+            return Theme.progressButton(this, "AI MODEL — DOWNLOADING $pct%", pct)
+        }
+        return Theme.statusRow(
+            this, "AI model",
+            if (modelState.ready) "${modelState.detail} — tap to re-download"
+            else "tap to download — ${modelState.detail}",
+            if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
+            onClick = {
+                // A ready model CONFIRMS before re-fetching ~474 MB. Tapping a green row used to
+                // silently restart the download (Mido, 2026-10-19).
+                if (modelState.ready) confirmRedownload() else startModelDownload()
+            }
+        )
+    }
+
+    private fun confirmRedownload() {
+        AlertDialog.Builder(this)
+            .setTitle("Re-download the AI model?")
+            .setMessage(
+                "The model is already downloaded and verified. Re-downloading fetches ~474 MB " +
+                    "again and replaces the working copy."
+            )
+            .setNegativeButton("Keep it") { _, _ -> Debug.log("re-download declined") }
+            .setPositiveButton("Re-download") { _, _ -> startModelDownload(force = true) }
+            .show()
+    }
+
+    private fun startModelDownload(force: Boolean = false) {
+        Debug.log("model download requested (force=$force)")
+        render()
+        Thread({
+            val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
+                applicationContext,
+                force = force,
+                onProgress = { runOnUiThread { render() } },
+            )
+            runOnUiThread {
+                Debug.log("model provision: ${result.detail}")
+                Toast.makeText(this, result.detail, Toast.LENGTH_LONG).show()
+                render()
+            }
+        }, "model-download").apply { isDaemon = true }.start()
+    }
+
+    /** One full-width destination row. Vertical, because five across truncated their labels. */
+    private fun toolRow(label: String, onClick: () -> Unit): android.view.View =
+        Theme.button(this, label.uppercase(), Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(this@OptionsActivity, 6) }
+        }
 }

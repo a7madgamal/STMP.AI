@@ -48,8 +48,6 @@ class MainActivity : BridgeScreen() {
         const val UI_TICK_MS = 5_000L
     }
 
-    private lateinit var logView: TextView
-    private lateinit var statusContainer: LinearLayout
     private lateinit var serverButton: MaterialButton
     private lateinit var auditBanner: TextView
     private lateinit var gateCard: LinearLayout
@@ -60,18 +58,15 @@ class MainActivity : BridgeScreen() {
     private lateinit var gateFingerprintWhy: TextView
     private lateinit var secretsButton: MaterialButton
     private lateinit var loginButton: MaterialButton
-    private lateinit var toolsContainer: LinearLayout
     private lateinit var accountBanner: TextView
     private lateinit var heroCard: LinearLayout
     private lateinit var heroTitle: TextView
     private lateinit var heroSub: TextView
-    private var logExpanded = false
 
     /**
      * Guards the load prompt so returning to the app (onResume) never re-prompts on
      * its own. One prompt per process — which is exactly the session.
      */
-    private var promptAttempted = false
 
     /**
      * Guards auto-start so it runs once per process.
@@ -97,7 +92,7 @@ class MainActivity : BridgeScreen() {
      * **This field exists because a tap was being eaten.** Reported 2026-11-02: *"nothing changed
      * no modal"*. The device log had the answer — a tap logged `pointer 0` and NO `pointer 1`,
      * a gesture cancelled before it could become a click. The cause was `uiTick`: every 5 seconds
-     * `render()` calls `statusContainer.removeAllViews()` and builds every row again, so a press
+     * `render()` rebuilds rows, so a press
      * held for longer than the interval had its View destroyed underneath the finger and the click
      * never fired. Pressing a row is exactly the kind of touch that lasts a second or two, so the
      * interaction was lost often enough to look like "the button does nothing".
@@ -112,7 +107,6 @@ class MainActivity : BridgeScreen() {
     private var lastRenderSignature: String? = null
 
     /** Guards the unrecoverable-vault reset dialog so it does not stack. */
-    private var resetOffered = false
 
     override val tab = Theme.Tab.HOME
 
@@ -181,19 +175,12 @@ class MainActivity : BridgeScreen() {
             } else {
                 startBridge()
             }
-            statusContainer.postDelayed({ render() }, 600)
+            uiTickHandler.postDelayed({ render() }, 600)
         }
         serverButton.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
         container.addView(serverButton)
-
-        // --- 3. CHECKLIST: app-wide health, each row actionable ---
-        //
-        // The "Setup" header and the Server row are gone (Mido, 2026-11-03): the hero above
-        // already says "Running · address", so the row repeated the only fact most visits need.
-        statusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(statusContainer)
 
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
         // account part to the google plugin"*). Signing in is a precondition the Google plugins
@@ -255,57 +242,9 @@ class MainActivity : BridgeScreen() {
         // the server control and the tools, pushing "is the bridge running" off the first
         // screen. It moved to the Plugins tab, where capability inventory belongs.
 
-        // --- 4. TOOLS: the scattered nav, collapsed into one tidy row. ---
-        //
-        // Before this, four loose buttons — OPEN REQUEST LOG, EXCEPTIONS, OPTIONS, SSH —
-        // sat dumped at the bottom of the scroll, mixed in with the audit banner and the
-        // debug toggle, all reading the same "NEUTRAL full-width button" visually. That is
-        // "options and labels mixed together": not one ugly value, but no place grouping the
-        // things that are destinations rather than live state. These four are all
-        // DESTINATIONS (open another screen), so they belong under one section, compact, and
-        // the audit-degraded banner lives NEXT TO the log button it explains instead of
-        // floating above the group.
-        container.addView(Theme.sectionHeader(this, "Tools"))
-        // A VERTICAL list, not a row of five squeezed buttons (Mido, 2026-11-03: *"make tools a
-        // vertical list it's too narrow now"*). Five labels across a phone width left each one
-        // ~60dp, which truncated "REQUEST LOG" and "OPTIONS" into unreadable stubs.
-        toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(toolsContainer)
-        // GET STARTED first: it is the only entry a new user needs, and the whole point of
-        // the screen is that nobody has to be told where it is.
-        toolsContainer.addView(toolButton("START") { startActivity(Intent(this, OnboardingActivity::class.java)) })
-        toolsContainer.addView(toolButton("REQUEST LOG") { startActivity(Intent(this, LogActivity::class.java)) })
-        toolsContainer.addView(toolButton("EXCEPTIONS") { startActivity(Intent(this, ExceptionsActivity::class.java)) })
-        // No OPTIONS button: OptionsActivity IS the Settings tab, so a button to it here was a
-        // loop back to the screen you already had a tab for.
-        toolsContainer.addView(toolButton("SSH") { startActivity(Intent(this, SshActivity::class.java)) })
-
-        // --- 4b. AUDIT BANNER: sits with the log button it explains, not mid-list ---
-        auditBanner = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Theme.ON_COLOR)
-            background = Theme.surface(this@MainActivity, Theme.DANGER_SURFACE, Theme.RADIUS_CONTROL)
-            setPadding(Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10),
-                Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10))
-            visibility = TextView.GONE
-        }
-        container.addView(auditBanner)
-
-        // --- 5. Debug: collapsed by default, out of the main flow ---
-        container.addView(Theme.sectionHeader(this, "Debug"))
-        container.addView(fullWidthButton("SHOW LOG", Theme.ButtonStyle.GHOST) {
-            logExpanded = !logExpanded
-            logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
-            render()
-        })
-        logView = TextView(this).apply {
-            textSize = 11f
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            visibility = TextView.GONE
-        }
-        container.addView(logView)
+        // Tools and Debug moved to Settings (Mido, 2026-11-03: *"rethink each button screen"*).
+        // They are destinations and diagnostics, not live state — and REQUEST LOG / SSH were
+        // sitting on Home purely because there was nowhere else to put them.
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -337,7 +276,7 @@ class MainActivity : BridgeScreen() {
             Debug.log("AUDIT STORE FAILED: ${e.message}")
         }
         render()
-        lockOnLoad()
+        VaultUnlock.ensureUnlocked(this) { render() }
         maybeAutoStartServer()
     }
 
@@ -380,7 +319,7 @@ class MainActivity : BridgeScreen() {
         }
         Debug.log("auto-start: bringing the server up on app load")
         startBridge()
-        statusContainer.postDelayed({ render() }, 600)
+        uiTickHandler.postDelayed({ render() }, 600)
     }
 
     /**
@@ -392,82 +331,13 @@ class MainActivity : BridgeScreen() {
      * renders (the bridge is a separate process concern and keeps running), but every
      * secret operation will answer `secret_locked` until the human unlocks.
      */
-    private fun lockOnLoad(force: Boolean = false) {
-        if (SecretVault.isUnlocked()) return
-        if (promptAttempted && !force) return
-        promptAttempted = true
-        if (SecretVault.isUnrecoverable(this)) {
-            // A vault from 0.14.x: the data key was wrapped without storing the IV, and
-            // AES-GCM cannot be unwrapped without it. The secrets inside are gone. Say
-            // so plainly and offer the only honest way forward — a reset — instead of
-            // throwing a cipher error at every unlock attempt.
-            offerVaultReset(iVMissing = true)
-            return
-        }
-        if (SecretVault.isOrphaned(this)) {
-            // The vault survived a reinstall but its Keystore key did not — reachable since
-            // `hasFragileUserData` began preserving prefs across an uninstall. Calling the
-            // normal unlock path here was the trap: `vaultKey()` mints a fresh key when the
-            // alias is missing, so the prompt would appear, accept a finger, and then fail to
-            // unwrap the old blob every single time, forever, with no reset on offer. Same
-            // dead end as the 0.14.x vault, different cause — so it gets its own wording.
-            offerVaultReset(iVMissing = false)
-            return
-        }
-        if (VaultGate.hasVault(this)) {
-            VaultGate.unlock(
-                this,
-                onUnlocked = { Debug.log("vault unlocked (session open)"); render() },
-                onFailed = { Debug.log("vault unlock not completed: $it"); render() }
-            )
-        } else {
-            // First run: the same prompt authorises creating the vault.
-            VaultGate.initialize(
-                this,
-                onReady = { Debug.log("vault created (session open)"); render() },
-                onFailed = { Debug.log("vault creation not completed: $it"); render() }
-            )
-        }
-    }
-
+ 
     /**
      * The 0.14.x vault is dead (missing wrap IV). Offer a reset, once per process, and
      * be honest that the stored secrets cannot be recovered — a silent fresh vault would
      * look like success while quietly discarding a credential.
      */
-    private fun offerVaultReset(iVMissing: Boolean) {
-        if (resetOffered) return
-        resetOffered = true
-        // Two causes, one remedy. The copy has to name the right one: telling someone an old
-        // build destroyed their vault when the truth is "you reinstalled and kept the config"
-        // is a lie that makes them distrust the app instead of understanding it.
-        val message = if (iVMissing) {
-            "This vault was created by an earlier build that saved the key without " +
-                "the IV it needs to be reopened. The secrets inside it cannot be " +
-                "recovered — this is a bug in that build, not something you did.\n\n" +
-                "Resetting clears the vault so you can create a fresh one and re-add " +
-                "your secrets. Nothing else on the phone is affected."
-        } else {
-            "Your config was kept across the reinstall, but the vault's encryption key " +
-                "could not come with it — Android deletes app keys on uninstall, always.\n\n" +
-                "So the secrets themselves are gone. Your gate rules, audit log and account " +
-                "are all intact. Resetting clears the dead vault so you can create a fresh " +
-                "one and re-add your secrets; nothing else is touched."
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Secret vault needs a reset")
-            .setMessage(message)
-            .setPositiveButton("reset vault") { _, _ ->
-                SecretVault.destroy(this)
-                Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
-                promptAttempted = false
-                lockOnLoad()
-                render()
-            }
-            .setNegativeButton("not now", null)
-            .show()
-    }
-
+ 
     override fun onResume() {
         super.onResume()
         render()
@@ -530,7 +400,7 @@ class MainActivity : BridgeScreen() {
             .getOrDefault(false)).append('|')
         append(ApprovalGate.canUseFullScreenIntent(this@MainActivity)).append('|')
         append(android.provider.Settings.canDrawOverlays(this@MainActivity)).append('|')
-        append(isIgnoringBatteryOptimizations()).append('|')
+        append(com.mido.phonebridge.ui.SystemAccess.batteryExempt(this@MainActivity)).append('|')
         append(SecretVault.isUnlocked()).append('|')
         append(com.mido.phonebridge.ai.AiGateway.enabled(this@MainActivity)).append('|')
         append(com.mido.phonebridge.ai.ModelProvisioner.running).append('|')
@@ -643,178 +513,14 @@ class MainActivity : BridgeScreen() {
             serverButton.setTextColor(Theme.ON_COLOR)
         }
 
-        statusContainer.removeAllViews()
-        // **Both notification rows moved to the Notifications plugin** (Mido, 2026-11-03:
-        // *"notification related access belong with the notification plugin"*). The plugin
-        // declares them now, so the screen that shows why a notification call failed is the
-        // same screen that fixes it. `listenerOk`/`notifOk` are still read above because
-        // `ServerStatus` uses them to decide whether a healthy bridge can actually serve — the
-        // fact is still needed here, only the controls moved.
-        // **The Contacts permission row moved to the Contacts plugin.**
-        //
-        // It was here because Home was the only screen that could request a permission. Now the
-        // plugin declares it (ContactsPlugin.permissions()) and Plugins → Contacts requests it
-        // with the reason attached, which is where someone looking for "why does search fail"
-        // actually goes.
-        //
-        // Keeping both would be two places that must agree about one permission — the exact
-        // defect class this epic exists to remove. The remaining rows here are app-wide health
-        // (server, notification access, overlay, battery, vault, model), which no single plugin
-        // owns and which therefore still belong on Home.
-
-        // Full-screen popup: NOT a checklist requirement any more.
-        //
-        // Measured on device 2026-10-19 with FSI revoked and draw-over-apps granted: a SECURE
-        // calendar request still opened the modal and was approved (8797ms, `APPROVED`) — the
-        // `ctx.startActivity` path alone is enough while the screen is on. So this row no
-        // longer reports a missing FSI as a warning; nagging for a permission the app does not
-        // need is exactly how a checklist trains its user to ignore it.
-        //
-        // It is still reported when GRANTED, because it is not useless: FSI is what wakes a
-        // LOCKED screen. The test above ran with the screen on, so the locked-screen path is
-        // unproven — and until it is, this stays an optional row rather than a removed
-        // permission or a false alarm.
-        val fsiOk = ApprovalGate.canUseFullScreenIntent(this)
-        if (fsiOk) {
-            statusContainer.addView(
-                Theme.statusRow(
-                    this, "Lock-screen popup",
-                    "granted (wakes a locked screen)",
-                    Theme.SUCCESS,
-                    onClick = { openFullScreenIntentSettings() }
-                )
-            )
-        } else {
-            statusContainer.addView(
-                Theme.statusRow(
-                    this, "Lock-screen popup",
-                    "optional — tap if approvals miss on a locked screen",
-                    Theme.ON_SURFACE_VARIANT,
-                    onClick = { openFullScreenIntentSettings() }
-                )
-            )
-        }
-        val overlayOk = android.provider.Settings.canDrawOverlays(this)
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Draw over apps",
-                if (overlayOk) "granted" else "tap to grant",
-                if (overlayOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { openOverlaySettings() }
-            )
-        )
-        val batteryOk = isIgnoringBatteryOptimizations()
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Battery optimization",
-                if (batteryOk) "exempt" else "tap to allow background",
-                if (batteryOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { requestIgnoreBatteryOptimizations() }
-            )
-        )
-        // The vault: locked by default on every new process; one scan opens it for the
-        // session. Shown here because a locked vault is the reason a secret call would
-        // answer `secret_locked`, and that must be visible before it happens.
-        val vaultOk = SecretVault.isUnlocked()
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Secret vault",
-                if (vaultOk) "unlocked (this session)" else "locked — tap to unlock",
-                if (vaultOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { lockOnLoad(force = true) }
-            )
-        )
-
-        // The AI model. CORE functionality (Mido, 2026-10-19), so this row is not a
-        // nicety: until it is ready the bridge refuses every request with 503.
-        //
-        // Rendered as a BUTTON, not a status row, because here the action and its feedback
-        // are the same thing: you press it to fetch, and the thing you pressed fills with
-        // progress (Mido, 2026-10-19). A ready model is a plain row again, so the control
-        // only exists while there is something to do.
-        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
-        // Read the switch once. When the AI is off this row must NOT offer a download: the whole
-        // point of the option is that nothing is fetched and no model sits resident, so a
-        // "tap to download" button here would be advertising the exact behaviour that was turned
-        // off. The row states the fact and points at where to change it.
-        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(this)
-        val downloading = aiOn && com.mido.phonebridge.ai.ModelProvisioner.running
-        val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
-        if (!aiOn) {
-            statusContainer.addView(
-                Theme.statusRow(
-                    this, "AI model",
-                    "off — no model loaded (Options › AI)",
-                    Theme.ON_SURFACE_VARIANT
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
-            )
-        } else if (downloading) {
-            val pct = progress?.percent ?: 0
-            statusContainer.addView(
-                Theme.progressButton(
-                    this,
-                    "AI MODEL — DOWNLOADING ${pct}%",
-                    pct
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    // Extra breathing room above the model control (Mido, 2026-10-19: *"Add
-                    // more top margin to the model"*). It is the one row that can be a big
-                    // action button, so it reads as a separate thing rather than the next
-                    // line of the checklist. Applied to BOTH branches — the download button
-                    // and the ready row — or the spacing would jump when the download ends.
-                    topMargin = Theme.dp(this@MainActivity, 16)
-                }
-            )
-        } else {
-            statusContainer.addView(
-                Theme.statusRow(
-                    this, "AI model",
-                    if (modelState.ready) "${modelState.detail} — tap to re-download"
-                    else "tap to download — ${modelState.detail}",
-                    if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
-                    // A ready model CONFIRMS before re-fetching 474 MB. Tapping a green row
-                    // used to silently start the download again (Mido, 2026-10-19: *"the
-                    // model downloaded, I touched it it started downloading again"*), and
-                    // the provisioner's idempotence alone only made the tap a no-op — this
-                    // makes the intent explicit instead of guessing it.
-                    onClick = {
-                        if (modelState.ready) confirmRedownload() else startModelDownload()
-                    }
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
-            )
-        }
-
-        // --- account ---
-        if (AuthManager.isLoggedIn(this)) {
-            val email = AuthManager.accountEmail ?: "(email unknown)"
-            accountBanner.text = "👤 $email"
-            accountBanner.setTextColor(Theme.SUCCESS)
-        } else {
-            accountBanner.text = "👤 Not signed in"
-            accountBanner.setTextColor(Theme.ON_SURFACE_VARIANT)
-        }
-
-        loginButton.text = if (AuthManager.isLoggedIn(this)) "RE-LOGIN" else "LOGIN WITH GOOGLE"
-        loginButton.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (AuthManager.isLoggedIn(this)) Theme.SURFACE_VARIANT else Theme.ACCENT
-        )
-        loginButton.setTextColor(if (AuthManager.isLoggedIn(this)) Theme.ON_SURFACE else Theme.ON_COLOR)
+        // The status checklist moved to Settings > Device access. Home now answers one question
+        // — is the bridge running — and offers one control. Everything else is a setting.
 
         renderGate()
 
-        // A gate you cannot audit must be visible without opening the log: this
-        // banner is the only surface that says so on the home screen.
+        // A gate you cannot audit must be visible without opening the log. This stays on Home
+        // even though the log row moved to Settings: a state where every request is being
+        // REFUSED is not a setting, it is the answer to "why is nothing working".
         val degraded = AuditHealth.reason
         if (degraded != null) {
             auditBanner.visibility = TextView.VISIBLE
@@ -822,10 +528,6 @@ class MainActivity : BridgeScreen() {
         } else {
             auditBanner.visibility = TextView.GONE
         }
-
-        logView.text = Debug.dump()
-        logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
-        (logView.parent as? ScrollView)?.post { (logView.parent as? ScrollView)?.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
     /**
@@ -1011,40 +713,8 @@ class MainActivity : BridgeScreen() {
      * A 474 MB download is not something to start on a stray tap, and the model is
      * already working — so the default is to do nothing and the human has to mean it.
      */
-    private fun confirmRedownload() {
-        AlertDialog.Builder(this)
-            .setTitle("Re-download the AI model?")
-            .setMessage(
-                "The model is already downloaded and verified. Re-downloading fetches " +
-                    "~474 MB again and replaces the working copy."
-            )
-            .setNegativeButton("Keep it") { _, _ -> Debug.log("re-download declined") }
-            .setPositiveButton("Re-download") { _, _ -> startModelDownload(force = true) }
-            .show()
-    }
-
-    private fun startModelDownload(force: Boolean = false) {
-        Debug.log("model download requested (force=$force)")
-        // No toast up front. The provisioner is idempotent now, so "Downloading…" would
-        // be a LIE whenever the model is already present and the tap is a no-op (Mido hit
-        // exactly that on device: *"tabbing download again still shows the message"*).
-        // The button itself is the feedback, and the result toast below reports what
-        // actually happened.
-        render()
-        Thread({
-            val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
-                applicationContext,
-                force = force,
-                onProgress = { runOnUiThread { render() } }
-            )
-            runOnUiThread {
-                Debug.log("model provision: ${result.detail}")
-                Toast.makeText(this, result.detail, Toast.LENGTH_LONG).show()
-                render()
-            }
-        }, "model-download").apply { isDaemon = true }.start()
-    }
-
+ 
+ 
     private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {
         try {
             // Carry EVERYTHING across. `Policy(after)` alone would silently delete every
@@ -1068,31 +738,16 @@ class MainActivity : BridgeScreen() {
         render()
     }
 
-    private fun fullWidthButton(
-        label: String,
-        style: Theme.ButtonStyle,
-        onClick: () -> Unit
-    ): MaterialButton = Theme.button(this, label, style, onClick = onClick).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@MainActivity, 6) }
-    }
-
+ 
     /**
      * A compact destination chip for the "Tools" row. The four loose nav buttons used to
      * each be a full-width NEUTRAL button — visually identical to every other button, which
      * is what made the bottom of the home screen read as "labels mixed together". A tool is
-     * a DESTINATION, not live state, so it gets a small chip and a shared spot in [toolsContainer]
+     * a DESTINATION, not live state, so it lives on the Settings screen with the others
      * rather than a full-width row of its own.
      */
     /** One full-width row in the vertical tools list. */
-    private fun toolButton(label: String, onClick: () -> Unit): MaterialButton =
-        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@MainActivity, 6) }
-        }
-
+ 
     // --- actions ---
 
     private fun hasNotifPermission(): Boolean {
@@ -1101,55 +756,19 @@ class MainActivity : BridgeScreen() {
             PackageManager.PERMISSION_GRANTED
     }
 
-    private fun openOverlaySettings() {
-        try {
-            startActivity(
-                Intent(
-                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:$packageName")
-                )
-            )
-            Debug.log("opened draw-over-apps settings")
-        } catch (e: Exception) {
-            Debug.log("cannot open overlay settings: ${e.message}")
-        }
-    }
-
+ 
     /**
      * Doze and app standby suspend background work; Samsung adds app-sleep on top. This
      * exemption is what keeps the server reachable when the screen has been off for a
      * while. It is not a battery-saver bypass — it just says "do not freeze this app".
      */
-    private fun isIgnoringBatteryOptimizations(): Boolean {
-        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        return pm.isIgnoringBatteryOptimizations(packageName)
-    }
-
+ 
     /**
      * The system dialog that grants the exemption. The direct request intent is the one
      * that actually shows a prompt; the settings list is the fallback for OEM builds that
      * do not honour it (the user then toggles the app manually).
      */
-    private fun requestIgnoreBatteryOptimizations() {
-        try {
-            startActivity(
-                Intent(
-                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    android.net.Uri.parse("package:$packageName")
-                )
-            )
-            Debug.log("requested battery-optimization exemption")
-        } catch (e: Exception) {
-            Debug.log("cannot request exemption: ${e.message} — opening settings list")
-            try {
-                startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                Debug.log("opened battery-optimization settings list")
-            } catch (e2: Exception) {
-                Debug.log("cannot open battery settings: ${e2.message}")
-            }
-        }
-    }
-
+ 
     private fun openNotifAccessSettings() {
         try {
             startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
@@ -1308,32 +927,7 @@ class MainActivity : BridgeScreen() {
         }
     }
 
-    private fun openFullScreenIntentSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                startActivity(
-                    Intent("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT").apply {
-                        data = android.net.Uri.parse("package:$packageName")
-                    }
-                )
-                Debug.log("opened full-screen-intent settings")
-            } catch (e: Exception) {
-                Debug.log("cannot open FSI settings: ${e.message}")
-                try {
-                    startActivity(
-                        Intent("android.settings.APP_NOTIFICATION_SETTINGS").apply {
-                            putExtra("android.provider.extra.APP_PACKAGE", packageName)
-                        }
-                    )
-                } catch (e2: Exception) {
-                    Debug.log("fallback settings failed: ${e2.message}")
-                }
-            }
-        } else {
-            Debug.log("FSI permission not required below Android 14")
-        }
-    }
-
+ 
     private fun startGoogleLogin() {
         if (BridgeService.GOOGLE_CLIENT_ID.isBlank()) {
             Debug.log("cannot login: GOOGLE_CLIENT_ID is empty (build not configured)")

@@ -266,10 +266,9 @@ class PluginDetailActivity : BridgeScreen() {
             com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER ->
                 BridgeService.listenerRef != null
             com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
-                Settings.canDrawOverlays(this)
+                com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)
             com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
-                (getSystemService(POWER_SERVICE) as android.os.PowerManager)
-                    .isIgnoringBatteryOptimizations(packageName)
+                com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)
             com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
                 ApprovalGate.canUseFullScreenIntent(this)
         }
@@ -305,33 +304,30 @@ class PluginDetailActivity : BridgeScreen() {
      * unrelated — so they are stated once, here, rather than at every call site that used to
      * repeat them.
      */
+    /**
+     * Delegate to [SystemAccess]: the intents live in one place now.
+     *
+     * They were built here AND in the Home screen, which is two copies of the same four intents
+     * that have to agree. A wrong intent lands the user somewhere unrelated and there is no error
+     * to show, so the copy nobody updated would fail silently.
+     */
     private fun openAccessSettings(access: com.mido.phonebridge.core.SpecialAccess) {
-        val i = when (access) {
-            com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER ->
-                Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
-            com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName"),
-                )
-            com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
-                Intent(
-                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:$packageName"),
-                )
-            com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
-                // API 34+ only; older versions simply cannot revoke it, so nothing to open and
-                // the state above is already correct.
-                Intent("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT").apply {
-                    data = Uri.parse("package:$packageName")
+        when (access) {
+            com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER -> {
+                try {
+                    startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                } catch (e: Exception) {
+                    com.mido.phonebridge.Debug.log(
+                        "cannot open notification-listener settings: ${e.message}"
+                    )
                 }
-        }
-        try {
-            startActivity(i)
-        } catch (e: Exception) {
-            // Reported, not swallowed: a button that silently does nothing is worse than one
-            // that says it could not open the screen.
-            com.mido.phonebridge.Debug.log("cannot open ${access.name} settings: ${e.message}")
+            }
+            com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
+                com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(this)
+            com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
+                com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(this)
+            com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
+                com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(this)
         }
     }
 
