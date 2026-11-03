@@ -5065,373 +5065,65 @@ devDependencies. `node_modules/` is gitignored.
 
 ---
 
-## 0.43.68 — non-ASCII request bodies, and the stuck "summarising…" card (build 222)
-2026-11-03
-
-Two defects, both found by using the thing rather than reading it.
-
-### Request bodies were decoded as US-ASCII
-
-A Todoist task written through the broker came back with `UI ��� when` instead of `UI — when`.
-One em-dash is **three** UTF-8 bytes, and it arrived as exactly **three** U+FFFD — so this was
-byte-level corruption, not a bad decode of one character.
-
-Root cause, confirmed in the shipped 2.3.1 bytecode rather than guessed: `HTTPSession.parseBody`
-builds the string with `new String(bytes, contentType.getEncoding())`, and
-`ContentType.getEncoding()` returns the literal **`"US-ASCII"`** when the header carries no
-`charset=`. US-ASCII cannot represent any byte >= 0x80, so every one becomes U+FFFD. And
-`application/json` has no charset parameter *by definition* — JSON is UTF-8 — so the ordinary
-request was the one that broke. Any accented text, Arabic, emoji or curly quote sent to any route
-was silently corrupted.
-
-`getHeaders()` returns the session's OWN map (bytecode: `getfield headers; areturn`), so
-`forceUtf8` writes `charset=utf-8` there before `parseBody` reads it. A caller that states its own
-charset is honoured — rewriting it would be the same class of lie as the default.
-
-Proven with a real NanoHTTPD round-trip, not a code read: same 25-byte payload,
-`no fix → {"content":"UI ��� dash"}`, `with fix → {"content":"UI — dash"}`.
-
-### The card could sit on "◌ summarising…" forever
-
-The tick's fetching branch had **no deadline of its own**. It held the card at `LEVEL_FULL` and
-relied entirely on a separate backstop `Runnable` to end it. Miss that backstop — a posted
-callback that never ran, a re-attach, a window-service hiccup — and the card stayed on
-"summarising…" with a full bar and a decision clock that had never started. Nothing in the tick
-could end it, and the server thread stayed pinned behind it.
-
-A frozen card is the worst outcome available here: the human reads it as "still working" while
-the request is already dead. The tick now enforces its own bound (`shownAt + fetchCapMs +
-FETCH_DEADLINE_SLACK_MS`) and settles as `AI_FAILED` with `"summary exceeded its budget"`, which
-reaches the caller as `500 ai_unavailable` with that detail in the audit record. Two clocks that
-agree by construction: the fetch has its cap, the display has the same cap.
-
-### The bug was harder to diagnose than it should have been
-
-`RequestCharsetTest` now guards the charset fix — it asserts `forceUtf8` exists, runs BEFORE
-`parseBody`, and does not replace a stated charset. Proved by deleting the call and watching it
-fail, then restoring. 408 tests.
-
----
-
-## 0.43.69 — the MODAL's stuck summary, and risk as a background wash (build 223)
-2026-11-03
-
-Two more, both in the approval MODAL — which is where the report pointed and where I had not
-been looking.
-
-### The stuck "summarising…" was the modal, not the card
-
-Reported again after 0.43.68, and 0.43.68 had fixed the wrong surface: it gave the NOTIFY card's
-tick a deadline, and the report was about the full-screen modal.
-
-`Pending.aiState` **defaults to `Loading`**, and only `startAiFetch`'s worker thread ever moves
-it. Anything that kills that thread before its own `try` — a throw, an OOM, a thread the runtime
-drops — leaves the modal saying "summarising…" with DISABLED buttons. The human could not even
-DENY. That is the same defect shape as the card, and it is worth saying why this one is worse: a
-card that stalls is a five-second annoyance, a modal that stalls is a dialog with no exit.
-
-The bound lives in `ApprovalGate.currentAiState()`, not in the Activity's tick. That is
-deliberate — the accessor is the ONE place any reader can obtain a `Loading`, so a bound placed
-in whichever UI happens to poll would be absent for the next reader. An expired `Loading` becomes
-a stated `Failed` naming the budget, the buttons unlock, and the audit carries the reason.
-
-`fetchStartedAtMs` measures from the real start, not `shownAtMs`: the fetch begins when the
-request becomes the one on screen, which can be seconds after the modal object was built, and
-timing from the wrong zero would expire a fetch that had not begun.
-
-### The risk is a background wash, not a stripe
-
-Mido, 2026-11-03: *"the level result shouldn't be a left border it should affect the bg color
-with a light tint effect"*.
-
-`Theme.riskSurface` maps a bucket to the existing `_SURFACE` tints — the muted ink re-tints
-already used elsewhere — rather than inventing a second, paler palette that only this screen
-would know. `null` returns the plain sheet: an absent assessment is NOT "safe", and a green modal
-would say it was, which is the same lie as a green APPROVE after a failed summary.
-
-`applyRiskSurface` is one named function all four AI states call, not four inline assignments —
-four copies is how one of them ends up forgetting to clear the tint. It swaps the sheet drawable
-without touching layout, so the wash can never change the modal's size.
-
-The risk line keeps the REASON and loses the colour: "risk: high" is now redundant with the wash,
-while "sends mail to an external address" is the part a background cannot say.
-
-Tests: `ApprovalAiDeadlineTest` proves an expired `Loading` becomes a stated failure with unlocked
-buttons (and that a fresh one is NOT killed by impatience); `RiskSurfaceTest` pins the four-way
-mapping including the null case. 417 tests.
-
----
-
-## 0.43.70 — a failure states its REAL cause, in seconds (build 224)
-2026-11-03
-
-Mido, 2026-11-03: *"I got couldn't summarize in 10000ms but it was never full 10 seconds. and write
-the message in seconds"*. Two defects in one sentence, and the first was a lie.
-
-### The message named a cause that never happened
-
-```kotlin
-lastEngineError.ifBlank { "the model did not answer within ${cap}ms" }
-```
-
-`lastEngineError` is only set by **engine** faults. A guard rejection, a budget overrun, an
-unparseable reply and a contradiction all return `null` without touching it — so every one of them
-fell through to that fallback and reported a timeout. The real failure took **1.4 seconds**; the
-modal said ten. A wrong cause is worse than no cause: it aims the next debugging session at the
-wrong subsystem, and this project has now paid for that twice.
-
-`SummaryFailure` replaces it. Every null-return path **states its own reason** — the model's
-quoted sentence when it contradicted the verb, the real elapsed time when it overran, the specific
-exception when it threw. There is no fallback: a path that forgets gets `UNSTATED`, which names
-itself as a defect in the app rather than inventing a plausible cause. `clear()` runs before each
-attempt, because a reason left over from a previous request would describe a fresh failure with
-stale evidence.
-
-### Durations are seconds
-
-`10000ms` reads as a measurement of something invisible. `10s` reads as a wait you can judge.
-`humanMs` keeps one decimal for fractions (`1.5s`), drops it for whole numbers (`10s`, not
-`10.0s`), and stays in milliseconds below one second (`250ms`) — because "0s" would say nothing
-happened, which is the same lie in the other direction.
-
-### What this makes debuggable
-
-The modal now answers the question a human actually has, and the log line names the same cause. For
-the contacts route the answer is currently *the model described a READ as "Creating contacts"* —
-which is `SummaryGuard` doing its job on a model that is genuinely wrong, and is a prompt problem
-to fix rather than a timeout to chase.
-
-424 tests, 0 failures.
-
----
-
-## 0.43.71 — SummaryGuard removed, and the prompt stops supplying a verb (build 225)
-2026-11-03
-
-Mido, 2026-11-03: *"remove this stupid summary guard shit, i never asked for it"*. Removed.
-
-**What it was.** A lexical veto between the model and the screen: any description containing a
-mutation stem (`creat`, `add`, `send`…) on a READ request was thrown away, on the theory that a
-misleading approval prompt is worse than none.
-
-**Why that was the wrong answer.** On the contacts route the model's answer was discarded EVERY
-time, so every modal showed a red failure line instead of a summary — a filter that deleted the
-feature in order to protect it. And it was policing a symptom: the model said *"Creating
-contacts"* because the prompt told it to.
-
-### The real cause was a parroted example
-
-The system prompt said:
-
-```
-say what is being done TO IT, e.g. Creating "<that exact value>"
-```
-
-`Creating` is a verb baked into a worked example, and a 0.6B model treats an example as a
-template. On a READ with no body there is nothing to quote, so it emitted `Creating <plugin>` —
-exactly the string the guard then rejected. The comment three lines above that example already
-warned that a concrete example becomes a template; the example had been reintroduced by a later
-edit and nobody noticed.
-
-**Thirteen releases of fighting the output instead of fixing the input.** The example now carries
-NO verb, and the verb is stated as a constraint: *"READ means nothing changes and your description
-must say what is being READ, never that something is being created".*
-
-### What was deliberately kept
-
-`SummaryFailure` stays — the real-cause reporting from 0.43.70 is unaffected and still answers
-*why* a summary failed. What went is only the `allows()` filter, its file, and its 13 tests.
-
-**The trade, stated so nobody re-adds it by accident:** a misleading summary is now possible. What
-still holds is that the modal renders every deterministic row beside the model's sentence, so the
-human reads the facts and the paraphrase together. If a bad summary appears, the fix is the prompt
-— where the wording comes from — not a veto over the output.
-
-416 tests, 0 failures.
-
----
-
-## 0.43.72 — CI was broken before it ever reached the secrets (build 226)
-2026-11-03
-
-Three workflow runs, all failed in 26 seconds. Not one of them got as far as a secret.
-
-    > sdkmanager tools
-    Warning: Failed to find package 'tools'
-    Error: The process '.../sdkmanager' failed with exit code 1
-
-`android-actions/setup-android@v3` defaults to `packages: tools platform-tools`, and **Google
-removed the `tools` package from the SDK repository**. The action's own default now fails on every
-runner, so the job died at "Set up Android SDK" before the keystore guard, the version guard or
-anything else had a chance to speak.
-
-**How this was found is the part worth recording.** I spent ten minutes polling `git ls-remote`
-for a tag, which can only show a RESULT — a failed run and a run still going look identical from
-there. The GitHub access that would have answered it in one command was sitting on `evox2` the
-whole time: `gh` is installed and authenticated there, reachable over STMP's `/ssh/evox2` route.
-`gh run list` named the three failures immediately and `gh run view --log-failed` printed the
-cause. Polling a side-effect instead of reading the thing that produces it cost more than the fix.
-
-Two further consequences of using the right tool, both fixed in the same pass:
-
-- the platform is now installed BY the action (`packages:` explicitly) instead of a separate
-  `sdkmanager --install` step, so there is one owner of the SDK state rather than two
-- every failure message from here names its step, because `gh run view` reports per-step
-
-Applied to all three jobs that need an SDK (ci.yml ×2, release.yml ×1). Version 0.43.72.
-
----
-
-## 0.43.73 — lint found eight real bugs, one of them a shipped crash (build 227)
-2026-11-03
-
-CI's first real run got past the SDK and failed on **lint**. All eight errors were real, and this
-is the first time lint has ever run — the local build never called `lintDebug`, so these shipped.
-
-**The serious one: ed25519 was broken on every device below API 33.**
-
-`BigInteger.TWO` is a static field added in **API 33**. `Ed25519` is an `object`, so its
-properties initialise at class-load — meaning on Android 8 through 12 the reference threw
-`NoSuchFieldError` before any runtime version check could have helped. Key generation and signing
-were simply dead on most devices, and nothing in the app could catch it. Replaced with
-`BigInteger.valueOf(2)`, defined once as `TWO`.
-
-**The rest, all API-level errors against `minSdk = 26`:**
-
-- `SecretVault` caught `StrongBoxUnavailableException` (API 28) **by type**. Naming it in an `is`
-  check puts the class in the verified bytecode, so on API 26–27 the verifier resolves it and the
-  whole catch dies with `NoClassDefFoundError` — turning a recoverable "no StrongBox here" into a
-  crash on the devices least able to take one. Now checked by `javaClass.simpleName`.
-- `DrivePlugin.saveToDownloads` used `MediaStore.Downloads` (API 29). The caller already refuses
-  below API 29, but lint cannot see across the call, so the method now carries
-  `@RequiresApi(29)`.
-- `NotifStore` read `StatusBarNotification.isAppGroup` (API 30) unguarded. Now written as
-  `JSONObject.NULL` below API 30 — an absent fact, not a `false` claim.
-- `ApprovalActivity.onBackPressed` did not call `super`. Added **after** `finishWith`, because
-  `finishWith` is what settles the gate; letting the platform tear the Activity down first would
-  leave the request pending until its own timeout.
-
-**The lesson is not "lint found things".** It is that adding `lint` to CI without ever running it
-locally meant the first CI run in the project's life was also the first lint run — and it found a
-class-load crash that had been shipping since ed25519 landed. A check that only runs in CI is a
-check that has never been read.
-
-416 tests, 0 failures. Lint clean.
-
----
-
-## 0.43.74 — lint actually blocks the build now, and the guard checks the remote (build 228)
-2026-11-03
-
-### Why lint never caught anything before
-
-Not an environment difference. **`assembleDebug` has ZERO lint tasks in its graph** — verified with
-`--dry-run` — and `assembleRelease` runs only `lintVital`, a narrow correctness subset. So the
-build this project used for every handover could not fail on lint at all. `abortOnError = true` was
-already set and did nothing, because the task never ran. AGP 8.7.3, JDK 21, same SDK: local and CI
-were identical. The difference was that CI was the first thing in the project's life to invoke
-`lintDebug`.
-
-A severity setting cannot make a task participate. Only the task graph can.
-
-**`check` now depends on `lintDebug`.** Deliberately not attached to `assembleDebug`: a debug build
-is the fast inner loop, and blocking it on a full lint pass would teach people to write `-x lint`.
-`check` is the gate, and it is what CI runs.
-
-**Severity raised for rules that have already cost real bugs or would crash a device:** `NewApi`,
-`InlinedApi`, `MissingSuperCall`, `Recycle`, `StaticFieldLeak`, `MissingApplicationIcon`,
-`DataExtractionRules`.
-
-### What the stricter severities found immediately
-
-Six errors, of which **three were real and three were lint not following `use {}`**:
-
-- **`StampOverlay`** built an `AnimatorSet` and called `start()` inside the same `apply {}` block.
-  Binding and starting in one expression is exactly the readability problem the check exists for;
-  now built, wired, then started.
-- **`TtsSpeaker`** holds `Job` instances in a static `ArrayDeque`. `StaticFieldLeak` flagged it,
-  but the only construction site is `Job(ctx.applicationContext, ...)` — an application context
-  lives as long as the process. Suppressed with that reasoning recorded, rather than threading a
-  context-free handle through the queue to satisfy a check already satisfied.
-- **`ContactsPlugin` ×3 and `DrivePlugin` ×1** are direct lint false positives: every cursor and
-  stream is closed by `use {}`, which is a `finally`. Lint cannot see it across the `?: throw` on
-  the line between acquisition and use. Suppressed at the function with the reason, because
-  wrapping the acquisition in a second `use` would nest two close mechanisms for one handle.
-
-### The guard now asks the REMOTE
-
-`version-check.ts` consulted local refs only. CI clones with `fetch-depth: 0` and saw every tag; a
-laptop that had not fetched since a release saw none — so for `v0.43.73` local said "unused" while
-the tag was on origin and a release existed. The next local build would have re-released it.
-
-It now falls back to `git ls-remote --tags origin`. A network failure is NOT read as "absent": the
-check refuses rather than reporting a version unreleased on the strength of a failed lookup.
-
-416 tests, 0 failures. `check` green including lint.
-
----
-
-## 0.43.75 — the release body is the changelog entry (build 229) — CURRENT
-2026-11-03
-
-Mido, 2026-11-03: *"the release description should be the change log, lost the upgrade note it's for
-me not the users"*.
-
-The release body used to be one fixed sentence:
-
-> Beta build of vX.Y.Z. Promote with the Promote workflow to move this exact artifact to stable.
-
-That is an instruction to the **maintainer**, written on a page a reader opens to learn what
-changed. It says nothing about the release and it will never be read by the person it was
-addressed to, because they already know — they wrote the workflow.
-
-`tools/release-notes.ts` extracts the entry for the current version from `CHANGELOG.md` and the
-publish step passes it with `--notes-file`. The changelog is the right source and not merely a
-convenient one: it is written **at commit time by whoever made the change**, so it cannot drift
-from the code the way a hand-written release note does. It is also where the *why* lives, which is
-the part a future reader actually needs.
-
-**It fails hard rather than publishing a placeholder.** Two conditions stop the workflow before
-anything becomes public:
-
-- no entry for this version — the version was bumped without a changelog line, which is already an
-  incomplete change
-- an entry that is a heading and nothing underneath
-
-The second check exists because a body that only restates its own title is a placeholder in a
-different costume, and this pipeline's whole point is that a green run must not mean "close
-enough".
-
-The `— CURRENT` marker is stripped: it describes `CHANGELOG.md`'s own bookkeeping, not the release.
-
-Promotion (`promote.yml`) deliberately does not touch the body. Flipping prerelease to stable is a
-channel change, and the notes describing the build are still true.
-
-416 tests, 0 failures.
-
----
+## 0.43.68 (build 222) — 2026-11-03
+- Fixed non-ASCII request bodies being corrupted. NanoHTTPD decodes as US-ASCII when no charset is declared, so any UTF-8 byte became U+FFFD. Bodies are now forced to UTF-8 before parsing.
+- Fixed the notification card sitting on "summarising…" forever when the summary fetch never returned. The card now ends at its own deadline.
+
+## 0.43.69 (build 223) — 2026-11-03
+- Fixed the approval modal hanging on "summarising…" with disabled buttons when the summary fetch died. The loading state now expires and the buttons unlock.
+- Changed the risk indicator from a coloured left stripe to a tinted card background.
+
+## 0.43.70 (build 224) — 2026-11-03
+- Fixed summary failures reporting a false cause: every failure claimed a 10-second timeout, including ones that finished in 1.4s. Each failure now states its real reason.
+- Durations in user-facing messages read as seconds instead of raw milliseconds.
+
+## 0.43.71 (build 225) — 2026-11-03
+- Removed the summary filter that discarded the model's description whenever its wording contradicted the request verb, which rejected every answer on some routes.
+- Fixed the prompt: a worked example contained the verb "Creating", which the model copied onto read requests.
+
+## 0.43.72 (build 226) — 2026-11-03
+- Fixed CI failing before it reached any build step: the Android SDK action installs a `tools` package Google no longer publishes. The SDK platform is now installed explicitly.
+
+## 0.43.73 (build 227) — 2026-11-03
+- Fixed eight lint errors, including ed25519 key generation crashing on Android 12 and below: `BigInteger.TWO` requires API 33 and the class initialises at load time.
+- Fixed a keystore exception caught by type, which crashed on API 26–27.
+- Added the missing API guards for MediaStore Downloads and notification group flags.
+- Fixed the approval modal not calling `super.onBackPressed()`.
+
+## 0.43.74 (build 228) — 2026-11-03
+- Lint now runs as part of `check` and fails the build on errors. It previously never ran during a normal build, so eight errors shipped unnoticed.
+- Raised severity for API-level misuse, missing super calls, and resource leaks.
+- Fixed the version guard only checking local tags, which let an already-released version appear unreleased.
+
+## 0.43.75 (build 229) — 2026-11-03
+- Release notes are now the changelog entry for that version, instead of a fixed sentence addressed to the maintainer.
+- Publishing fails if the changelog has no entry for the version, or an entry with no content.
+## 0.43.76 (build 230) — 2026-11-03 — CURRENT
+- Changelog format fixed: `## <version> (build <n>) — <date>` with one bullet per change.
+- Removed names, history and essays from entries; those belong in commit messages.
+- Release notes for 0.43.68–0.43.75 rewritten in the new format.
 
 ## Keeping this file honest
 
-- **Every commit updates this file.** If a change alters behaviour, adds or removes a feature, or
-  fixes a bug, the entry goes in **in the same commit** as the change — not a later one.
-- **A version bump without a changelog line is an incomplete change.** The version rule
-  (`versionCode` +1, `versionName` semver on every change) and this file travel together.
-- **Newest entry at the BOTTOM.** This file is chronological (oldest first) so it reads as a
-  history; add the new release under the last one, above this section.
-- **Write the WHY, not just the what.** The reasoning is what stops a future change from undoing a
-  fix that was paid for. "Fixed the flash" is useless; "the fade drove `View.alpha` while the
-  window alpha stayed 1, so the opaque buffer flashed at teardown" is the entry that prevents a
-  regression.
-- **Do NOT write the entry's own commit hash.** A commit's hash is computed FROM its content, so
-  writing the hash in changes the hash — it cannot contain itself, and amending only produces a
-  new hash the file would then contradict. The entry lands **in the same commit as the change**
-  and records the **date**; find the commit later with:
-  `git log --oneline --grep "0.25.0"`. A hash already in an entry (from before this rule) points
-  at the commit that CHANGED THE APP, which is the useful one to `git show`.
-- **`— CURRENT` lives on the newest entry and nowhere else.** A stale marker makes shipped
-  releases look unshipped. `tools/changelog-check.py` enforces this, that the version and build
-  match `app/build.gradle.kts`, and that no `<hash>` placeholder survives — and a `pre-commit`
-  hook runs it and BLOCKS any commit that touches `app/` without also touching this file.
-- **Do not rewrite history here.** If a release is later corrected, add a new entry that names the
-  correction; do not edit the old one into being right.
+- **Format, always:**
+
+  ```
+  ## 0.43.70 (build 224) — 2026-11-03
+  - Fixed summary failures reporting a false cause.
+  - Durations in user-facing messages read as seconds.
+  ```
+
+  Heading: `## <version> (build <n>) — <date>`. Body: bullet lines. Nothing else.
+
+- **No names.** Not mine, not anyone's. Release notes describe the software.
+- **No history.** Not what was tried, not what failed, not what the old behaviour used to be,
+  not how many releases it took. If a reader needs the archaeology, it is in the commit message.
+- **No essays.** One bullet per change, one or two sentences. Say what changed and, briefly, why
+  it mattered. If a bullet runs past two sentences, it is a paragraph pretending to be a bullet.
+- **Newest entry at the BOTTOM**, above this section.
+- **Every commit updates this file** — a version bump without an entry is an incomplete change.
+- **`— CURRENT` on the newest entry only.** `tools/changelog-check.ts` enforces that, plus the
+  version/build match with `app/build.gradle.kts`.
+- **No commit hash in an entry.** A hash is computed from its content, so it cannot contain
+  itself. Find the commit later with `git log --oneline --grep "<version>"`.
+- **Do not rewrite old entries** when a release is corrected; add a new one.
