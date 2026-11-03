@@ -225,13 +225,7 @@ object NotifyOverlay {
         /** The card's background layer, restroked with the risk colour on arrival. */
         var cardBg: GradientDrawable? = null
 
-        /**
-         * The risk band — a background LAYER, transparent until a risk is known.
-         *
-         * A layer, not a `View`, on purpose: a tint that is laid out can change the card's
-         * height, which is the defect that shipped twice (0.6.2, 0.25.1).
-         */
-        var riskBand: com.mido.phonebridge.ui.EdgeBand? = null
+
     }
 
     /**
@@ -320,20 +314,6 @@ object NotifyOverlay {
             cornerRadius = radius
         }
 
-        // The risk tint is a LAYER, not a child view. See [EdgeBand] for why: a child view
-        // with a height made the card's size depend on the tint, which is the defect that
-        // shipped in 0.6.2 and again in 0.25.1 — the card measured fine, then grew the
-        // instant the AI summary made the strip VISIBLE. A background layer cannot be laid
-        // out, so the summary can now change pixels and text but never geometry.
-        val riskBand = com.mido.phonebridge.ui.EdgeBand(
-            widthPx = dp(3).toFloat(),
-            cornerPx = radius,
-        ).apply {
-            // No assessment yet is the initial state, and it is a TRANSPARENT band rather
-            // than hidden geometry: alpha 0 draws nothing and moves nothing.
-            alpha = 0
-        }
-
         val card = FrameLayout(ctx).apply {
             // Rounded corners come from the LAYERS themselves (both carry `cornerRadius`),
             // so `clipToOutline` is not needed — and here it was actively dangerous. Its
@@ -346,7 +326,6 @@ object NotifyOverlay {
                 arrayOf(
                     cardBg,
                     drain,
-                    riskBand,
                     // Grain on the NOTIFY card too. Without this the one surface a user actually
                     // touches in AUTOMATIC mode was the only untextured thing on screen.
                     com.mido.phonebridge.ui.GrainOverlay(radius)
@@ -355,7 +334,6 @@ object NotifyOverlay {
             isClickable = true
         }
         entry.cardBg = cardBg
-        entry.riskBand = riskBand
 
         val column = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -849,10 +827,11 @@ object NotifyOverlay {
         line.text = result.description
         line.visibility = View.VISIBLE
         line.setTextColor(TEXT)
-        // The risk tint: a band down the card's edge, coloured by consequence. One call, and
-        // it touches only paint — never the card's size, never a posted re-measure. There is
-        // deliberately nothing else here: the summary is text and colour, not layout.
-        entry.riskBand?.set(riskColor(result.risk))
+        // The risk tints the CARD ITSELF, not a stripe down its edge (Mido, 2026-11-03:
+        // *"remove left green border"* ... *"the hint bg to match the level"*). `cardBg` is a
+        // GradientDrawable already in the card's LayerDrawable, so recolouring it repaints
+        // without touching geometry — the same property that made the old band safe, kept.
+        entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(result.risk))
     }
 
     /**

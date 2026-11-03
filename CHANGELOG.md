@@ -5098,10 +5098,14 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.75 (build 229) — 2026-11-03
 - Release notes are now the changelog entry for that version, instead of a fixed sentence addressed to the maintainer.
 - Publishing fails if the changelog has no entry for the version, or an entry with no content.
-## 0.43.76 (build 230) — 2026-11-03 — CURRENT
+## 0.43.76 (build 230) — 2026-11-03
 - Changelog format fixed: `## <version> (build <n>) — <date>` with one bullet per change.
 - Removed names, history and essays from entries; those belong in commit messages.
 - Release notes for 0.43.68–0.43.75 rewritten in the new format.
+
+## 0.43.77 (build 231) — 2026-11-03 — CURRENT
+- Removed the notification posted when an approval modal appears. It only existed to carry the full-screen intent, and the modal replaced it immediately.
+- Changed the notification card's risk indicator from a coloured left stripe to a tinted card background, matching the modal.
 
 ## Keeping this file honest
 

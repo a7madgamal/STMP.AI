@@ -1,6 +1,7 @@
 package com.mido.phonebridge
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -50,23 +51,28 @@ class NotifyCardLayoutTest {
     }
 
     @Test
-    fun `the risk tint is a layer, not a view`() {
+    fun `the risk tint is a background colour, never a stripe`() {
         val source = overlay.readText()
 
+        // The tint must live on the card's existing background layer. `cardBg` is already
+        // inside the card's LayerDrawable, so recolouring it repaints without touching
+        // geometry — the property that makes any tint safe on a WRAP_CONTENT card.
         assertTrue(
-            "the risk tint must be a Drawable layer (ui/EdgeBand): a View with a height makes " +
-                "the card's size depend on whether the AI summary arrived, which is the defect " +
-                "that shipped twice. If the tint needs to return as a View, it needs a " +
-                "different fix, not a reintroduction.",
-            source.contains("var riskBand: com.mido.phonebridge.ui.EdgeBand?")
+            "the risk must tint the card background (entry.cardBg), so it can never change " +
+                "the card's measured height",
+            source.contains("entry.cardBg?.setColor(")
         )
-        assertTrue(
-            "no child view named riskStrip may exist on the card",
-            !source.contains("var riskStrip")
+
+        // Mido, 2026-11-03: *"remove left green border"* / *"the hint bg to match the level"*.
+        // An edge band draws a stripe down one side, which is what was asked to go away.
+        assertFalse(
+            "no EdgeBand may be layered into the NOTIFY card — the risk is the background " +
+                "colour now, not a stripe down the edge",
+            source.contains("EdgeBand(")
         )
-        assertTrue(
-            "EdgeBand must be layered into the card background",
-            source.contains("riskBand,")
+        assertFalse(
+            "no riskBand field may exist; the tint is carried by cardBg",
+            source.contains("var riskBand")
         )
     }
 }

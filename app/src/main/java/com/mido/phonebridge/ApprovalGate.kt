@@ -660,29 +660,22 @@ object ApprovalGate {
         // human could first see this request. Stamped here, once, for the modal and
         // for the record.
         p.shownAtMs = p.createdAtMs
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // minSdk is 26, so NotificationChannel is always available.
-        //
-        // The channel carries the SECURE alert sound, and it is deliberately a
-        // NOTIFICATION-class channel: it uses the default notification sound, so it
-        // respects silent and DND (Mido's choice, option B, 2026-10-18). The
-        // consequence was stated and accepted — on silent the request is unheard and
-        // auto-denies at 60s; the full-screen prompt still turns the screen on, so
-        // the visual path survives. Enable vibration on the channel too; the app also
-        // fires an explicit haptic pattern (SoundAlerts.secureVibration) for a device
-        // whose channel vibration is off.
-        val ch = NotificationChannel(
-            CHANNEL_ID, "Approval requests", NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-            setShowBadge(true)
-            enableVibration(true)
-        }
-        nm.createNotificationChannel(ch)
 
-        // Haptic + audible nudge, both notification-class. The sound itself comes from
-        // the channel above (posting the notification plays it); this adds the short
-        // double-tap vibration the channel may not provide.
+        // **NO POSTED NOTIFICATION.** Mido, 2026-11-03: *"I asked before NO NOTIFICATION when
+        // showing the modal, it hides it and adds no value"*.
+        //
+        // It was posted purely to carry a full-screen intent that launches the Activity. That
+        // intent then fired the Activity anyway, so the notification only ever existed for the
+        // second it took to be replaced by the modal — and while it existed it occupied a
+        // notification slot and showed a lock icon for a prompt the human was already reading.
+        //
+        // The launch below is a direct `startActivity`, which needs no notification at all: the
+        // app holds SYSTEM_ALERT_WINDOW, which is a listed background-activity-start exemption.
+        // Sound and haptics are fired explicitly further down, so removing the notification
+        // does not silence the prompt either.
+
+        // Haptic + audible nudge. The sound used to come from the notification channel; it is
+        // now fired explicitly, which is why it survives the notification's removal.
         com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
 
         // The paper-creasing sound as the modal ARRIVES — a separate moment from the stamp,
@@ -695,27 +688,6 @@ object ApprovalGate {
         }
 
         val intent = buildApprovalIntent(ctx, p)
-
-        val pi = PendingIntent.getActivity(
-            ctx,
-            p.requestId.toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        @Suppress("DEPRECATION")
-        val notif = Notification.Builder(ctx, CHANNEL_ID)
-            .setContentTitle("🔐 PhoneBridge approval required")
-            .setContentText(p.summary)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setCategory(Notification.CATEGORY_ALARM)
-            .setContentIntent(pi)
-            .setFullScreenIntent(pi, true)   // pop the activity immediately
-            .setAutoCancel(false)
-            .setOngoing(true)
-            .build()
-
-        nm.notify(p.requestId.toInt(), notif)
 
         // The summary fetch starts when this request becomes the one ON SCREEN — not at
         // enqueue. A queued request nobody can see yet has no business burning an
