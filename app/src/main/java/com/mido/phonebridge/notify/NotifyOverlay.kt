@@ -281,6 +281,28 @@ object NotifyOverlay {
 
     /** Build and attach one card. Called for the head of the line only. */
     private fun present(entry: Entry) {
+        // **AN ENTRY IS PRESENTED AT MOST ONCE.** Mido, 2026-11-03: *"touching the hints still
+        // freezes them"*.
+        //
+        // The device log shows the defect exactly: `notify[5014] attached` appears TWICE, 896ms
+        // apart, for one entry. The first came from `queue.admit` returning `Now`; the second
+        // from `teardown(5013)` calling `promoteNext()`, which asks the queue for the current item
+        // — still 5014 — and presents something already on screen.
+        //
+        // The second attach overwrote `entry.root` with a fresh view, ORPHANING the first window.
+        // Nothing holds a reference to an orphan, so `teardown` could never remove it: it stayed
+        // on screen forever, swallowing every touch, while the live card underneath was invisible
+        // behind it. That is the freeze — the thing being touched was a corpse.
+        //
+        // Return here rather than patching `promoteNext`: a guard at the one place that attaches a
+        // window covers every road into it, including ones added later.
+        if (entry.root != null) {
+            com.mido.phonebridge.Debug.log(
+                "notify[${entry.id}] present ignored: already attached"
+            )
+            return
+        }
+
         // Retry anything that previously refused to leave. Runs before the new card is built so a
         // stranded window cannot sit under a fresh one and swallow its touches.
         sweepStranded()
@@ -1089,7 +1111,13 @@ object NotifyOverlay {
      * and retire, which recurses back here.
      */
     private fun promoteNext() {
-        queue.currentItem()?.let { present(it) }
+        val next = queue.currentItem() ?: return
+        // Already on screen. `promoteNext` runs from every teardown, so a teardown that is not
+        // for the head of the queue would otherwise re-present a card that is already attached —
+        // which attaches a SECOND window and orphans the first. The guard in `present` stops the
+        // damage; this stops the attempt, so the log stays honest about what happened.
+        if (next.root != null) return
+        present(next)
     }
 
     /**

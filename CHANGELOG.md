@@ -5141,9 +5141,12 @@ devDependencies. `node_modules/` is gitignored.
 - Made the Tools list vertical; five buttons across the screen truncated their own labels.
 - Removed the Setup header and the Server row from Home; the hero already states both.
 
-## 0.43.85 (build 239) — 2026-11-03 — CURRENT
+## 0.43.85 (build 239) — 2026-11-03
 - Added the stamp mark to the Home hero.
 - Moved the fingerprint-for-modals toggle from Settings to the gate card on Home, so the mode picker and the proof it requires sit together.
+
+## 0.43.86 (build 240) — 2026-11-03 — CURRENT
+- Fixed notification cards freezing after being touched. A teardown could re-present the card already on screen, attaching a second window and orphaning the first, which then could not be removed and swallowed every touch.
 
 ## Keeping this file honest
 
