@@ -242,8 +242,18 @@ jobs:
 
       # --- Publish -----------------------------------------------------------
       #
-      # prerelease: true -> this is BETA. Promotion flips the flag (promote.yml);
-      # the artifact is untouched.
+      # The release BODY is the changelog entry for this version (Mido, 2026-11-03:
+      # *"the release description should be the change log"*). CHANGELOG.md is written at
+      # commit time by whoever made the change, so it cannot drift from the code the way a
+      # hand-written note does.
+      #
+      # The old body was "Beta build of vX. Promote with the Promote workflow..." — an
+      # instruction to the maintainer, not release notes (*"lost the upgrade note it's for me
+      # not the users"*). That note is gone: promotion is a workflow you run, and it does not
+      # belong on a page a reader opens to learn what changed.
+      #
+      # prerelease: true -> this is BETA. Promotion flips the flag (promote.yml); the artifact
+      # is untouched.
       - name: Publish beta release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -255,7 +265,15 @@ jobs:
             echo "::error::release $TAG already exists -- refusing to overwrite a published artifact."
             exit 1
           fi
+
+          # Fails hard when the changelog has no entry for this version, or has a heading and
+          # nothing under it. A release with no notes is a defect in the commit, not an occasion
+          # for a placeholder.
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          node tools/release-notes.ts > "$NOTES_FILE"
+          echo "release body: $(wc -l < "$NOTES_FILE") lines"
+
           gh release create "$TAG" "stmp-v${NAME}.apk" \
             --title "v${NAME}" \
             --prerelease \
-            --notes "Beta build of v${NAME}. Promote with the Promote workflow to move this exact artifact to stable."
+            --notes-file "$NOTES_FILE"

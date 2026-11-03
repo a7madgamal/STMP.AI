@@ -5320,7 +5320,7 @@ check that has never been read.
 
 ---
 
-## 0.43.74 — lint actually blocks the build now, and the guard checks the remote (build 228) — CURRENT
+## 0.43.74 — lint actually blocks the build now, and the guard checks the remote (build 228)
 2026-11-03
 
 ### Why lint never caught anything before
@@ -5368,6 +5368,46 @@ It now falls back to `git ls-remote --tags origin`. A network failure is NOT rea
 check refuses rather than reporting a version unreleased on the strength of a failed lookup.
 
 416 tests, 0 failures. `check` green including lint.
+
+---
+
+## 0.43.75 — the release body is the changelog entry (build 229) — CURRENT
+2026-11-03
+
+Mido, 2026-11-03: *"the release description should be the change log, lost the upgrade note it's for
+me not the users"*.
+
+The release body used to be one fixed sentence:
+
+> Beta build of vX.Y.Z. Promote with the Promote workflow to move this exact artifact to stable.
+
+That is an instruction to the **maintainer**, written on a page a reader opens to learn what
+changed. It says nothing about the release and it will never be read by the person it was
+addressed to, because they already know — they wrote the workflow.
+
+`tools/release-notes.ts` extracts the entry for the current version from `CHANGELOG.md` and the
+publish step passes it with `--notes-file`. The changelog is the right source and not merely a
+convenient one: it is written **at commit time by whoever made the change**, so it cannot drift
+from the code the way a hand-written release note does. It is also where the *why* lives, which is
+the part a future reader actually needs.
+
+**It fails hard rather than publishing a placeholder.** Two conditions stop the workflow before
+anything becomes public:
+
+- no entry for this version — the version was bumped without a changelog line, which is already an
+  incomplete change
+- an entry that is a heading and nothing underneath
+
+The second check exists because a body that only restates its own title is a placeholder in a
+different costume, and this pipeline's whole point is that a green run must not mean "close
+enough".
+
+The `— CURRENT` marker is stripped: it describes `CHANGELOG.md`'s own bookkeeping, not the release.
+
+Promotion (`promote.yml`) deliberately does not touch the body. Flipping prerelease to stable is a
+channel change, and the notes describing the build are still true.
+
+416 tests, 0 failures.
 
 ---
 
