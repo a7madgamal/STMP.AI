@@ -5178,8 +5178,11 @@ devDependencies. `node_modules/` is gitignored.
 - Fixed cards drawing two outlines along different curves, which read as the paper effect printed twice.
 - Made section headers larger and gave them a bottom margin.
 
-## 0.43.95 (build 249) — 2026-11-03 — CURRENT
+## 0.43.95 (build 249) — 2026-11-03
 - Added a torn top edge and a shadow above the bottom bar.
+
+## 0.43.96 (build 250) — 2026-11-03 — CURRENT
+- Moved the on-screen debug log out of `MainActivity` into its own file, ahead of the navigation change.
 
 ## Keeping this file honest
 
