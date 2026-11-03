@@ -87,7 +87,8 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -120,15 +121,8 @@
             android:name=".ExceptionsActivity"
             android:exported="false" />
 
-        <activity
-            android:name=".OptionsActivity"
-            android:exported="false" />
-
-        <!-- The capability inventory. Separate from Home because a list of twelve plugins
-             pushed the only thing Home is for — is the bridge running — off the first screen. -->
-        <activity
-            android:name=".PluginsActivity"
-            android:exported="false" />
+        <!-- Settings and Plugins are no longer Activities: they are fragments inside
+             MainActivity's shell, so the bottom bar is never recreated on a tab switch. -->
 
         <!-- One plugin: its switch, its permissions, its settings. -->
         <activity

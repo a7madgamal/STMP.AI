@@ -27,28 +27,28 @@ import com.mido.phonebridge.ui.Theme
  * Collapsing those two into one grey row is the easiest possible mistake here and the one that
  * makes the screen useless.
  */
-class PluginsActivity : BridgeScreen() {
+class PluginsFragment : BridgeFragment() {
 
     override val tab = Theme.Tab.PLUGINS
 
     private lateinit var list: LinearLayout
 
     override fun buildContent(container: LinearLayout) {
-        container.addView(Theme.text(this, "PLUGINS", 20f).apply {
-            typeface = Theme.handFont(this@PluginsActivity)
+        container.addView(Theme.text(ctx, "PLUGINS", 20f).apply {
+            typeface = Theme.handFont(ctx)
             setTextColor(Theme.ON_SURFACE)
         })
         container.addView(Theme.text(
-            this,
+            ctx,
             "Each plugin owns its own routes, settings and permissions. Turning one off " +
                 "keeps its routes answering — with a refusal that says it is off.",
             13f,
         ).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(this@PluginsActivity, 4), 0, 0)
+            setPadding(0, Theme.dp(ctx, 4), 0, 0)
         })
 
-        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(list)
 
         render()
@@ -76,15 +76,15 @@ class PluginsActivity : BridgeScreen() {
     private fun render() {
         list.removeAllViews()
 
-        val store = PluginSettingsStore.from(applicationContext)
+        val store = PluginSettingsStore.from(requireContext())
         val plugins = PluginRegistry.all()
 
         if (plugins.isEmpty()) {
             // Real state: the service has not registered yet. Say so rather than showing a blank
             // page that reads as "no plugins exist".
-            list.addView(Theme.text(this, "No plugins registered yet.", 13f).apply {
+            list.addView(Theme.text(ctx, "No plugins registered yet.", 13f).apply {
                 setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(this@PluginsActivity, 16), 0, 0)
+                setPadding(0, Theme.dp(ctx, 16), 0, 0)
             })
             return
         }
@@ -97,7 +97,7 @@ class PluginsActivity : BridgeScreen() {
             if (members.isEmpty()) continue
             claimed += members.map { it.id }
 
-            list.addView(Theme.sectionHeader(this, heading))
+            list.addView(Theme.sectionHeader(ctx, heading))
             for (plugin in members) list.addView(row(plugin, store))
 
             // The SSH connections hang off the Secrets group: each stored `ssh-<name>` secret IS
@@ -112,7 +112,7 @@ class PluginsActivity : BridgeScreen() {
         val unlisted = plugins.filter { it.id !in claimed }.sortedBy { it.displayName }
         if (unlisted.isNotEmpty()) {
             Debug.log("plugins: ungrouped ids ${unlisted.map { it.id }}")
-            list.addView(Theme.sectionHeader(this, "Other"))
+            list.addView(Theme.sectionHeader(ctx, "Other"))
             for (plugin in unlisted) list.addView(row(plugin, store))
         }
     }
@@ -124,7 +124,7 @@ class PluginsActivity : BridgeScreen() {
      * vault's name index is plaintext precisely so this works while it is locked.
      */
     private fun sshConnectionNames(): List<String> = try {
-        com.mido.phonebridge.core.SecretVault.names(applicationContext)
+        com.mido.phonebridge.core.SecretVault.names(requireContext())
             .filter { it.startsWith("ssh-") }
             .map { it.removePrefix("ssh-") }
     } catch (e: Exception) {
@@ -136,18 +136,18 @@ class PluginsActivity : BridgeScreen() {
 
     /** One SSH connection, as its own row opening that connection's detail screen. */
     private fun sshRow(name: String): LinearLayout {
-        val card = LinearLayout(this).apply {
+        val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
-                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
             )
-            background = Theme.tornCard(this@PluginsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
             isClickable = true
             contentDescription = "SSH connection $name"
             setOnClickListener {
                 go(
-                    Intent(this@PluginsActivity, PluginDetailActivity::class.java)
+                    Intent(ctx, PluginDetailActivity::class.java)
                         .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
                         .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name)
                 )
@@ -157,23 +157,23 @@ class PluginsActivity : BridgeScreen() {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
         // Set as a statement, not inside `.apply`: there `this` is the LayoutParams, so
-        // `Theme.dp(this, ...)` would be handed a params object where it wants a Context.
-        lp.topMargin = Theme.dp(this, 10)
+        // `Theme.dp(ctx, ...)` would be handed a params object where it wants a Context.
+        lp.topMargin = Theme.dp(ctx, 10)
         card.layoutParams = lp
 
-        val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(Theme.text(this, name, 16f).apply {
+        val titleRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        titleRow.addView(Theme.text(ctx, name, 16f).apply {
             setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(this@PluginsActivity)
+            typeface = Theme.handFont(ctx)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.addView(Theme.text(this, "SSH", 12f).apply {
+        titleRow.addView(Theme.text(ctx, "SSH", 12f).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
         })
         card.addView(titleRow)
 
-        card.addView(Theme.text(this, "One connection. POST /ssh/$name", 12f).apply {
+        card.addView(Theme.text(ctx, "One connection. POST /ssh/$name", 12f).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(this@PluginsActivity, 4), 0, 0)
+            setPadding(0, Theme.dp(ctx, 4), 0, 0)
         })
         return card
     }
@@ -188,13 +188,13 @@ class PluginsActivity : BridgeScreen() {
         // switch that is off is the confusion this screen exists to remove.
         val status = if (on) plugin.status() else null
 
-        val card = LinearLayout(this).apply {
+        val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
-                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
             )
-            background = Theme.tornCard(this@PluginsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
             isClickable = true
             contentDescription = "${plugin.displayName}: ${stateLabel(on, status)}"
             setOnClickListener { openDetail(plugin.id) }
@@ -202,27 +202,27 @@ class PluginsActivity : BridgeScreen() {
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        lp.topMargin = Theme.dp(this, 10)
+        lp.topMargin = Theme.dp(ctx, 10)
         card.layoutParams = lp
 
-        val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(Theme.text(this, plugin.displayName, 16f).apply {
+        val titleRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        titleRow.addView(Theme.text(ctx, plugin.displayName, 16f).apply {
             setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(this@PluginsActivity)
+            typeface = Theme.handFont(ctx)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         // The state chip. Colour carries the meaning and the WORD carries it too, because a
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
-        titleRow.addView(Theme.text(this, stateLabel(on, status), 12f).apply {
+        titleRow.addView(Theme.text(ctx, stateLabel(on, status), 12f).apply {
             setTextColor(stateColour(on, status))
         })
         card.addView(titleRow)
 
         val detail = stateDetail(on, status)
         if (detail.isNotEmpty()) {
-            card.addView(Theme.text(this, detail, 12f).apply {
+            card.addView(Theme.text(ctx, detail, 12f).apply {
                 setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(this@PluginsActivity, 4), 0, 0)
+                setPadding(0, Theme.dp(ctx, 4), 0, 0)
             })
         }
         return card
@@ -257,7 +257,7 @@ class PluginsActivity : BridgeScreen() {
 
     private fun openDetail(pluginId: String) {
         go(
-            Intent(this, PluginDetailActivity::class.java)
+            Intent(ctx, PluginDetailActivity::class.java)
                 .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
         )
     }

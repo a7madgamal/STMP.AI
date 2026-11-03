@@ -91,7 +91,11 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         root.addView(center, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
-        val bar = Theme.bottomNav(this, tab)
+        // A non-tab screen (the plugin detail) still draws the bar, and tapping an unselected
+        // tab must leave it for that tab's screen. It does so by asking the SHELL, not by
+        // starting an Activity directly -- once the tabs are fragments there is no Activity per
+        // tab to start.
+        val bar = Theme.bottomNav(this, tab) { selected -> openTab(selected) }
         root.addView(bar)
 
         // Insets split by owner, which is the whole reason this is not `Theme.inset`:
@@ -108,6 +112,15 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         setContentView(root)
 
         buildContent(body)
+    }
+
+    /** Leave a non-tab screen for the tab that was tapped. */
+    private fun openTab(tab: Theme.Tab) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(Tabs.EXTRA_TAB, tab.name)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        )
     }
 
     override fun onResume() {
