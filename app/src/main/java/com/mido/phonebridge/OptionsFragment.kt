@@ -32,9 +32,8 @@ import com.mido.phonebridge.ui.Theme
  * The screen exists so the NEXT setting has a home instead of becoming another row on the home
  * checklist, which is already long.
  */
-class OptionsActivity : BridgeScreen() {
+class OptionsFragment : BridgeFragment() {
 
-    private var logExpanded = false
     private lateinit var logView: TextView
 
     private lateinit var container: LinearLayout
@@ -49,20 +48,22 @@ class OptionsActivity : BridgeScreen() {
         render()
     }
 
+    override fun repaint() = render()
+
     private fun render() {
         container.removeAllViews()
 
-        container.addView(Theme.text(this, "OPTIONS", 20f).apply {
-            typeface = Theme.handFont(this@OptionsActivity)
+        container.addView(Theme.text(ctx, "OPTIONS", 20f).apply {
+            typeface = Theme.handFont(ctx)
         })
 
-        val store = PolicyStore.from(applicationContext)
+        val store = PolicyStore.from(requireContext())
         val policy = try {
             store.get()
         } catch (e: PolicyException) {
             container.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     "⚠ policy unreadable: ${e.message}\n\nThe server will not start until this " +
                         "file is fixed or removed.",
                     12f, Theme.DANGER
@@ -72,7 +73,7 @@ class OptionsActivity : BridgeScreen() {
         }
 
         // --- BRIDGE: how the server behaves ---
-        container.addView(Theme.sectionHeader(this, "Bridge"))
+        container.addView(Theme.sectionHeader(ctx, "Bridge"))
 
         // --- auto-start ---
         container.addView(
@@ -97,7 +98,7 @@ class OptionsActivity : BridgeScreen() {
         // asked, and how you prove it — so splitting them across two screens meant neither could
         // be reasoned about in full.
 
-        container.addView(Theme.sectionHeader(this, "AI"))
+        container.addView(Theme.sectionHeader(ctx, "AI"))
 
         // --- AI backend: off / local / external ---
         //
@@ -113,78 +114,74 @@ class OptionsActivity : BridgeScreen() {
         // Speak — so the settings sit with the routes they govern instead of in a second list
         // that had to be kept in step by hand.
 
-        container.addView(Theme.sectionHeader(this, "Device access"))
+        container.addView(Theme.sectionHeader(ctx, "Device access"))
 
         // These five rows came OFF Home (Mido, 2026-11-03: *"rethink each button screen"*).
         // They are device and service state, not live answers about whether the bridge is
         // running — which is the one question Home now answers. Kept in the same order the
         // right-hand bracket in Mido's drawing ran down the screen.
-        container.addView(Theme.statusRow(
-            this, "Lock-screen popup",
-            if (ApprovalGate.canUseFullScreenIntent(this)) "granted (wakes a locked screen)"
+        container.addView(Theme.statusRow(ctx, "Lock-screen popup",
+            if (ApprovalGate.canUseFullScreenIntent(ctx)) "granted (wakes a locked screen)"
             else "optional — tap if approvals miss on a locked screen",
-            if (ApprovalGate.canUseFullScreenIntent(this)) Theme.SUCCESS
+            if (ApprovalGate.canUseFullScreenIntent(ctx)) Theme.SUCCESS
             else Theme.ON_SURFACE_VARIANT,
-            onClick = { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(this) }
+            onClick = { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(ctx) }
         ))
-        container.addView(Theme.statusRow(
-            this, "Draw over apps",
-            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)) "granted" else "tap to grant",
-            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)) Theme.SUCCESS
+        container.addView(Theme.statusRow(ctx, "Draw over apps",
+            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx)) "granted" else "tap to grant",
+            if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx)) Theme.SUCCESS
             else Theme.WARNING,
-            onClick = { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(this) }
+            onClick = { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(ctx) }
         ))
-        container.addView(Theme.statusRow(
-            this, "Battery optimization",
-            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)) "exempt"
+        container.addView(Theme.statusRow(ctx, "Battery optimization",
+            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) "exempt"
             else "tap to allow background",
-            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)) Theme.SUCCESS
+            if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) Theme.SUCCESS
             else Theme.WARNING,
-            onClick = { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(this) }
+            onClick = { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(ctx) }
         ))
         // The vault: locked on every new process, one scan opens it for the session. Shown here
         // because a locked vault is why a secret call answers `secret_locked`.
-        container.addView(Theme.statusRow(
-            this, "Secret vault",
+        container.addView(Theme.statusRow(ctx, "Secret vault",
             if (SecretVault.isUnlocked()) "unlocked (this session)" else "locked — tap to unlock",
             if (SecretVault.isUnlocked()) Theme.SUCCESS else Theme.WARNING,
-            onClick = { VaultUnlock.ensureUnlocked(this, force = true) { render() } }
+            onClick = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
         ))
         container.addView(aiModelRow(store, policy))
 
         // --- TOOLS: the destinations that are not tabs ---
-        container.addView(Theme.sectionHeader(this, "Tools"))
+        container.addView(Theme.sectionHeader(ctx, "Tools"))
         container.addView(toolRow("Get started") {
-            startActivity(Intent(this, OnboardingActivity::class.java))
+            go(Intent(ctx, OnboardingActivity::class.java))
         })
         container.addView(toolRow("Request log") {
-            startActivity(Intent(this, LogActivity::class.java))
+            go(Intent(ctx, LogActivity::class.java))
         })
         container.addView(toolRow("Exceptions") {
-            startActivity(Intent(this, ExceptionsActivity::class.java))
+            go(Intent(ctx, ExceptionsActivity::class.java))
         })
         container.addView(toolRow("SSH") {
-            startActivity(Intent(this, SshActivity::class.java))
+            go(Intent(ctx, SshActivity::class.java))
         })
 
         // --- DEBUG ---
-        container.addView(Theme.sectionHeader(this, "Debug"))
-        container.addView(Theme.button(this, "SHOW LOG", Theme.ButtonStyle.GHOST) {
-            logExpanded = !logExpanded
-            logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
+        container.addView(Theme.sectionHeader(ctx, "Debug"))
+        container.addView(Theme.button(ctx, "SHOW LOG", Theme.ButtonStyle.GHOST) {
+            DebugLogOpen.open = !DebugLogOpen.open
+            logView.visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
         })
-        logView = TextView(this).apply {
+        logView = TextView(ctx).apply {
             textSize = 11f
             setTextColor(Theme.ON_SURFACE_VARIANT)
             typeface = android.graphics.Typeface.MONOSPACE
             setTextIsSelectable(true)
-            visibility = TextView.GONE
+            visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
             text = Debug.dump()
         }
         container.addView(logView)
 
         // --- CALLERS: who may reach the bridge at all ---
-        container.addView(Theme.sectionHeader(this, "Callers"))
+        container.addView(Theme.sectionHeader(ctx, "Callers"))
 
         // --- who may reach the bridge ---
         //
@@ -193,10 +190,10 @@ class OptionsActivity : BridgeScreen() {
         // trap, and because a misheard name should be fixable without a rebuild.
         container.addView(callerRows())
 
-        container.addView(Theme.spacer(this, 16))
+        container.addView(Theme.spacer(ctx, 16))
         container.addView(
             Theme.text(
-                this,
+                ctx,
                 "These are preferences, not gate rules. To change WHEN you are asked, use " +
                     "EXCEPTIONS.",
                 12f, Theme.ON_SURFACE_VARIANT
@@ -213,14 +210,14 @@ class OptionsActivity : BridgeScreen() {
      * came through.
      */
     private fun callerRows(): LinearLayout {
-        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val block = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
 
         val entries = try {
-            com.mido.phonebridge.callers.CallerStore.from(applicationContext).all()
+            com.mido.phonebridge.callers.CallerStore.from(requireContext()).all()
         } catch (e: Exception) {
             block.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     "\u26a0 caller registry unreadable: ${e.message}\n\nEvery request is refused " +
                         "until this file is fixed or removed.",
                     12f, Theme.DANGER
@@ -232,7 +229,7 @@ class OptionsActivity : BridgeScreen() {
         if (entries.isEmpty()) {
             block.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     "No callers yet. The first request from another machine will ask you to " +
                         "name it.",
                     12f, Theme.ON_SURFACE_VARIANT
@@ -242,14 +239,14 @@ class OptionsActivity : BridgeScreen() {
         }
 
         for (entry in entries.values.sortedBy { it.ip }) {
-            val row = LinearLayout(this).apply {
+            val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
                 )
                 background = Theme.outlined(
-                    this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD
+                    ctx, Theme.SURFACE, Theme.RADIUS_CARD
                 )
             }
             val label = when (val st = entry.state) {
@@ -261,32 +258,30 @@ class OptionsActivity : BridgeScreen() {
                 com.mido.phonebridge.callers.CallerState.Denied -> Theme.DANGER
             }
             row.addView(
-                Theme.text(this, "$label\n${entry.ip}", 14f, colour).apply {
+                Theme.text(ctx, "$label\n${entry.ip}", 14f, colour).apply {
                     layoutParams = LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                     )
                 }
             )
             row.addView(
-                Theme.button(this, "forget", Theme.ButtonStyle.NEUTRAL, small = true) {
+                Theme.button(ctx, "forget", Theme.ButtonStyle.NEUTRAL, small = true) {
                     try {
                         com.mido.phonebridge.callers.CallerStore
-                            .from(applicationContext).forget(entry.ip)
-                        com.mido.phonebridge.audit.AuditLog.from(applicationContext).append(
+                            .from(requireContext()).forget(entry.ip)
+                        com.mido.phonebridge.audit.AuditLog.from(requireContext()).append(
                             com.mido.phonebridge.audit.PolicyAudit.record(
                                 policy().global, policy().global, "options"
                             )
                         )
                     } catch (e: Exception) {
-                        Toast.makeText(
-                            this, "could not forget: ${e.message}", Toast.LENGTH_LONG
-                        ).show()
+                        toast("could not forget: ${e.message}")
                     }
                     render()
                 }
             )
             block.addView(row)
-            block.addView(Theme.spacer(this, 8))
+            block.addView(Theme.spacer(ctx, 8))
         }
         return block
     }
@@ -311,14 +306,14 @@ class OptionsActivity : BridgeScreen() {
         integer: Boolean,
         commit: (String) -> String?,
     ): LinearLayout {
-        val row = LinearLayout(this).apply {
+        val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, Theme.dp(this@OptionsActivity, 12), 0, 0)
+            setPadding(0, Theme.dp(ctx, 12), 0, 0)
         }
         row.addView(
-            Theme.text(this, label, 13f, Theme.ON_SURFACE)
+            Theme.text(ctx, label, 13f, Theme.ON_SURFACE)
         )
-        val field = EditText(this).apply {
+        val field = EditText(ctx).apply {
             setText(value)
             this.hint = hint
             inputType = if (integer) {
@@ -334,25 +329,25 @@ class OptionsActivity : BridgeScreen() {
             highlightColor = Theme.ACCENT
             typeface = android.graphics.Typeface.MONOSPACE
             textSize = 14f
-            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+            background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
             setPadding(
-                Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
-                Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                Theme.dp(ctx, 12), Theme.dp(ctx, 10)
             )
         }
         row.addView(field)
         row.addView(
-            Theme.text(this, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
-                setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+            Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
         )
-        val error = Theme.text(this, "", 12f, Theme.DANGER).apply {
-            setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+        val error = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
+            setPadding(0, Theme.dp(ctx, 6), 0, 0)
             visibility = android.view.View.GONE
         }
         row.addView(error)
         row.addView(
-            Theme.button(this, "save", Theme.ButtonStyle.NEUTRAL, small = true) {
+            Theme.button(ctx, "save", Theme.ButtonStyle.NEUTRAL, small = true) {
                 val problem = commit(field.text.toString().trim())
                 if (problem != null) {
                     error.text = problem
@@ -362,12 +357,12 @@ class OptionsActivity : BridgeScreen() {
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) }
+            ).apply { topMargin = Theme.dp(ctx, 8) }
         )
         return row
     }
 
-    private fun policy() = com.mido.phonebridge.policy.PolicyStore.from(applicationContext).get()
+    private fun policy() = com.mido.phonebridge.policy.PolicyStore.from(requireContext()).get()
 
     /**
      * The AI backend block: current state, what it costs, and one button per alternative.
@@ -385,18 +380,18 @@ class OptionsActivity : BridgeScreen() {
         policy: com.mido.phonebridge.policy.Policy,
     ): LinearLayout {
         val current = policy.aiBackend
-        val block = LinearLayout(this).apply {
+        val block = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12),
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12)
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12)
             )
-            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         header.addView(
-            Theme.text(this, "AI summaries", 15f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OptionsActivity)
+            Theme.text(ctx, "AI summaries", 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(ctx)
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 )
@@ -404,7 +399,7 @@ class OptionsActivity : BridgeScreen() {
         )
         header.addView(
             Theme.text(
-                this,
+                ctx,
                 when (current) {
                     com.mido.phonebridge.policy.AiBackend.OFF -> "OFF"
                     com.mido.phonebridge.policy.AiBackend.LOCAL -> "LOCAL"
@@ -421,7 +416,7 @@ class OptionsActivity : BridgeScreen() {
         block.addView(header)
         block.addView(
             Theme.text(
-                this,
+                ctx,
                 when (current) {
                     com.mido.phonebridge.policy.AiBackend.OFF ->
                         "No model is loaded, no request is described, and nothing is downloaded. " +
@@ -436,13 +431,13 @@ class OptionsActivity : BridgeScreen() {
                             "approved without a description. Nothing is loaded on the phone."
                 },
                 12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0) }
+            ).apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
         )
 
         // One button per state that is not the current one.
-        val choices = LinearLayout(this).apply {
+        val choices = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, Theme.dp(this@OptionsActivity, 10), 0, 0)
+            setPadding(0, Theme.dp(ctx, 10), 0, 0)
         }
         for (target in com.mido.phonebridge.policy.AiBackend.values()) {
             if (target == current) continue
@@ -452,13 +447,13 @@ class OptionsActivity : BridgeScreen() {
                 com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "use external"
             }
             choices.addView(
-                Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true) {
+                Theme.button(ctx, label, Theme.ButtonStyle.NEUTRAL, small = true) {
                     save(store, policy.withAiBackend(target))
                 },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = Theme.dp(this@OptionsActivity, 8) }
+                ).apply { marginEnd = Theme.dp(ctx, 8) }
             )
         }
         block.addView(choices)
@@ -473,13 +468,13 @@ class OptionsActivity : BridgeScreen() {
         if (current == com.mido.phonebridge.policy.AiBackend.EXTERNAL) {
             block.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     "Server URL",
                     13f, Theme.ON_SURFACE
-                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 14), 0, Theme.dp(this@OptionsActivity, 6)) }
+                ).apply { setPadding(0, Theme.dp(ctx, 14), 0, Theme.dp(ctx, 6)) }
             )
 
-            val urlField = EditText(this).apply {
+            val urlField = EditText(ctx).apply {
                 setText(policy.aiExternalUrl)
                 hint = "http://host:port  (no trailing slash)"
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
@@ -491,18 +486,18 @@ class OptionsActivity : BridgeScreen() {
                 highlightColor = Theme.ACCENT
                 typeface = android.graphics.Typeface.MONOSPACE
                 textSize = 14f
-                background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
                 setPadding(
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
                 )
             }
 
             // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
             // route fail, and saving it would hide the mistake behind a "not reachable" that
             // looks like the server's fault rather than the address's.
-            val errorLine = Theme.text(this, "", 12f, Theme.DANGER).apply {
-                setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+            val errorLine = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
+                setPadding(0, Theme.dp(ctx, 6), 0, 0)
                 visibility = android.view.View.GONE
             }
 
@@ -519,13 +514,13 @@ class OptionsActivity : BridgeScreen() {
             // Authorization header makes some servers reject the request outright.
             block.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     "Token (optional)",
                     13f, Theme.ON_SURFACE
-                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 12), 0, Theme.dp(this@OptionsActivity, 6)) }
+                ).apply { setPadding(0, Theme.dp(ctx, 12), 0, Theme.dp(ctx, 6)) }
             )
 
-            val tokenField = EditText(this).apply {
+            val tokenField = EditText(ctx).apply {
                 setText(policy.aiExternalToken)
                 hint = "leave empty if the server trusts this device"
                 // Masking applied AFTER inputType, for the reason recorded in ApprovalActivity:
@@ -542,10 +537,10 @@ class OptionsActivity : BridgeScreen() {
                 highlightColor = Theme.ACCENT
                 typeface = android.graphics.Typeface.MONOSPACE
                 textSize = 14f
-                background = Theme.outlined(this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
                 setPadding(
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10),
-                    Theme.dp(this@OptionsActivity, 12), Theme.dp(this@OptionsActivity, 10)
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
                 )
                 // Set LAST, after inputType: `setInputType` re-derives the transformation from
                 // the type and silently clears anything assigned before it — the bug recorded in
@@ -563,11 +558,11 @@ class OptionsActivity : BridgeScreen() {
             // unknown tag with its loaded default instead of failing, so a wrong name is not an
             // error a human sees — it is a silent substitution.
             block.addView(
-                Theme.text(this, "Model", 13f, Theme.ON_SURFACE)
+                Theme.text(ctx, "Model", 13f, Theme.ON_SURFACE)
                     .apply {
                         setPadding(
-                            0, Theme.dp(this@OptionsActivity, 14), 0,
-                            Theme.dp(this@OptionsActivity, 6)
+                            0, Theme.dp(ctx, 14), 0,
+                            Theme.dp(ctx, 6)
                         )
                     }
             )
@@ -578,7 +573,7 @@ class OptionsActivity : BridgeScreen() {
             var listed: com.mido.phonebridge.ai.ModelCatalogue? = null
 
             val modelStatus = Theme.text(
-                this,
+                ctx,
                 if (policy.aiExternalModel.isBlank()) {
                     "No model selected. Press refresh to ask the server — EXTERNAL refuses " +
                         "until one is chosen."
@@ -588,16 +583,16 @@ class OptionsActivity : BridgeScreen() {
                 },
                 12f,
                 if (policy.aiExternalModel.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 8), 0, 0) }
+            ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
 
-            val modelSpinner = android.widget.Spinner(this).apply {
+            val modelSpinner = android.widget.Spinner(ctx).apply {
                 visibility = android.view.View.GONE
                 background = Theme.outlined(
-                    this@OptionsActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL
+                    ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL
                 )
             }
 
-            val refresh = Theme.button(this, "refresh models", Theme.ButtonStyle.NEUTRAL, small = true) {
+            val refresh = Theme.button(ctx, "refresh models", Theme.ButtonStyle.NEUTRAL, small = true) {
                 val url = urlField.text.toString().trim()
                 val problem = validateEndpoint(url)
                 if (problem != null) {
@@ -614,7 +609,7 @@ class OptionsActivity : BridgeScreen() {
                 modelStatus.text = "asking $url …"
 
                 // Off the main thread: this is a network call and the UI thread is not allowed
-                // to block on one. The result comes back through runOnUiThread so every view
+                // to block on one. The result comes back through ui { } so every view
                 // touch happens where Android requires it.
                 Thread {
                     // An explicit outcome, NOT a Pair that has to be re-cast.
@@ -635,18 +630,18 @@ class OptionsActivity : BridgeScreen() {
                             IllegalStateException(e.message ?: e.javaClass.simpleName, e)
                         )
                     }
-                    runOnUiThread {
+                    ui {
                         val catalogue = outcome.getOrNull()
                         if (catalogue == null) {
                             val why = outcome.exceptionOrNull()?.message ?: "no answer"
                             modelStatus.text = "could not list models — $why"
                             modelStatus.setTextColor(Theme.DANGER)
                             modelSpinner.visibility = android.view.View.GONE
-                            return@runOnUiThread
+                            return@ui
                         }
                         listed = catalogue
                         modelSpinner.adapter = android.widget.ArrayAdapter(
-                            this@OptionsActivity,
+                            ctx,
                             android.R.layout.simple_spinner_dropdown_item,
                             catalogue.models
                         )
@@ -665,17 +660,17 @@ class OptionsActivity : BridgeScreen() {
             block.addView(refresh, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) })
+            ).apply { topMargin = Theme.dp(ctx, 8) })
             block.addView(modelSpinner, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OptionsActivity, 8) })
+            ).apply { topMargin = Theme.dp(ctx, 8) })
             block.addView(modelStatus)
 
             block.addView(errorLine)
 
             block.addView(
-                Theme.button(this, "save", Theme.ButtonStyle.PRIMARY, small = true) {
+                Theme.button(ctx, "save", Theme.ButtonStyle.PRIMARY, small = true) {
                     val raw = urlField.text.toString().trim()
                     val problem = validateEndpoint(raw)
                     if (problem != null) {
@@ -720,12 +715,12 @@ class OptionsActivity : BridgeScreen() {
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = Theme.dp(this@OptionsActivity, 10) }
+                ).apply { topMargin = Theme.dp(ctx, 10) }
             )
 
             block.addView(
                 Theme.text(
-                    this,
+                    ctx,
                     if (policy.aiExternalUrl.isBlank()) {
                         "No server set, so EXTERNAL refuses every request.\n\n" +
                             "Format: http://host:port — no trailing slash, no path.\n" +
@@ -740,7 +735,7 @@ class OptionsActivity : BridgeScreen() {
                     },
                     12f,
                     if (policy.aiExternalUrl.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
-                ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 8), 0, 0) }
+                ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
         }
 
@@ -785,35 +780,35 @@ class OptionsActivity : BridgeScreen() {
         colour: Int,
         onToggle: () -> Unit,
     ): LinearLayout {
-        val block = LinearLayout(this).apply {
+        val block = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12),
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12)
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12)
             )
-            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
-        val header = LinearLayout(this).apply {
+        val header = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
         }
         header.addView(
-            Theme.text(this, title, 15f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OptionsActivity)
+            Theme.text(ctx, title, 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(ctx)
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 )
             }
         )
-        header.addView(Theme.text(this, state, 13f, colour))
+        header.addView(Theme.text(ctx, state, 13f, colour))
         block.addView(header)
         block.addView(
-            Theme.text(this, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
-                setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0)
+            Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
         )
         block.addView(
             Theme.button(
-                this,
+                ctx,
                 if (state == "ON") "turn off" else "turn on",
                 Theme.ButtonStyle.NEUTRAL,
                 small = true,
@@ -822,7 +817,7 @@ class OptionsActivity : BridgeScreen() {
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OptionsActivity, 10) }
+            ).apply { topMargin = Theme.dp(ctx, 10) }
         )
         return block
     }
@@ -839,19 +834,15 @@ class OptionsActivity : BridgeScreen() {
         try {
             store.set(next)
         } catch (e: Exception) {
-            Toast.makeText(this, "could not save: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("could not save: ${e.message}")
             return
         }
         try {
-            AuditLog.from(applicationContext).append(
+            AuditLog.from(requireContext()).append(
                 PolicyAudit.record(next.global, next.global, "options")
             )
         } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "saved, but the audit log could not record it: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            toast("saved, but the audit log could not record it: ${e.message}")
         }
         // Re-render from the stored value rather than from what we just sent: if the write
         // silently failed, the screen must show the truth, not the intent.
@@ -868,26 +859,24 @@ class OptionsActivity : BridgeScreen() {
         store: PolicyStore,
         policy: com.mido.phonebridge.policy.Policy,
     ): android.view.View {
-        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(this)
-        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(this)
+        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
+        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(ctx)
         val downloading = aiOn && com.mido.phonebridge.ai.ModelProvisioner.running
         val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
 
         // With the AI off there is nothing to fetch, so offering a download would advertise the
         // exact behaviour that was turned off above on this same screen.
         if (!aiOn) {
-            return Theme.statusRow(
-                this, "AI model",
+            return Theme.statusRow(ctx, "AI model",
                 "off — no model loaded",
                 Theme.ON_SURFACE_VARIANT
             )
         }
         if (downloading) {
             val pct = progress?.percent ?: 0
-            return Theme.progressButton(this, "AI MODEL — DOWNLOADING $pct%", pct)
+            return Theme.progressButton(ctx, "AI MODEL — DOWNLOADING $pct%", pct)
         }
-        return Theme.statusRow(
-            this, "AI model",
+        return Theme.statusRow(ctx, "AI model",
             if (modelState.ready) "${modelState.detail} — tap to re-download"
             else "tap to download — ${modelState.detail}",
             if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
@@ -900,15 +889,14 @@ class OptionsActivity : BridgeScreen() {
     }
 
     private fun confirmRedownload() {
-        AlertDialog.Builder(this)
-            .setTitle("Re-download the AI model?")
-            .setMessage(
-                "The model is already downloaded and verified. Re-downloading fetches ~474 MB " +
-                    "again and replaces the working copy."
-            )
-            .setNegativeButton("Keep it") { _, _ -> Debug.log("re-download declined") }
-            .setPositiveButton("Re-download") { _, _ -> startModelDownload(force = true) }
-            .show()
+        confirm(
+            title = "Re-download the AI model?",
+            message = "The model is already downloaded and verified. Re-downloading fetches " +
+                "~474 MB again and replaces the working copy.",
+            positive = "Re-download",
+            negative = "Keep it",
+            onNegative = { Debug.log("re-download declined") },
+        ) { startModelDownload(force = true) }
     }
 
     private fun startModelDownload(force: Boolean = false) {
@@ -916,13 +904,13 @@ class OptionsActivity : BridgeScreen() {
         render()
         Thread({
             val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
-                applicationContext,
+                requireContext(),
                 force = force,
-                onProgress = { runOnUiThread { render() } },
+                onProgress = { ui { render() } },
             )
-            runOnUiThread {
+            ui {
                 Debug.log("model provision: ${result.detail}")
-                Toast.makeText(this, result.detail, Toast.LENGTH_LONG).show()
+                toast(result.detail)
                 render()
             }
         }, "model-download").apply { isDaemon = true }.start()
@@ -930,10 +918,10 @@ class OptionsActivity : BridgeScreen() {
 
     /** One full-width destination row. Vertical, because five across truncated their labels. */
     private fun toolRow(label: String, onClick: () -> Unit): android.view.View =
-        Theme.button(this, label.uppercase(), Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
+        Theme.button(ctx, label.uppercase(), Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(this@OptionsActivity, 6) }
+            ).apply { topMargin = Theme.dp(ctx, 6) }
         }
 }

@@ -20,9 +20,6 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
-import com.mido.phonebridge.MainActivity
-import com.mido.phonebridge.OptionsActivity
-import com.mido.phonebridge.PluginsActivity
 import com.mido.phonebridge.R
 
 /**
@@ -253,7 +250,7 @@ object Theme {
      * The selected tab is passed in, not stored. Each screen knows which tab it IS, which is a
      * fact that cannot go stale the way a shared "current tab" could.
      */
-    fun bottomNav(ctx: Context, current: Tab): View {
+    fun bottomNav(ctx: Context, current: Tab, onSelect: (Tab) -> Unit): View {
         val shadowDp = BAR_SHADOW_DP
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -266,12 +263,20 @@ object Theme {
         }
         for (tab in Tab.entries) {
             val selected = tab == current
-            bar.addView(tabView(ctx, tab, selected), LinearLayout.LayoutParams(0, dp(ctx, 52), 1f))
+            bar.addView(
+                tabView(ctx, tab, selected, onSelect),
+                LinearLayout.LayoutParams(0, dp(ctx, 52), 1f),
+            )
         }
         return bar
     }
 
-    private fun tabView(ctx: Context, tab: Tab, selected: Boolean): View {
+    private fun tabView(
+        ctx: Context,
+        tab: Tab,
+        selected: Boolean,
+        onSelect: (Tab) -> Unit,
+    ): View {
         // The label is wrapped in a column so the rule can hug the TEXT rather than span the
         // whole tab.
         //
@@ -326,21 +331,15 @@ object Theme {
             atBottom = true,
         )
 
+        // A callback, not an Intent.
+        //
+        // The bar used to name the three screen Activities itself, which made the bar the thing
+        // that knew the navigation model. That is the wrong owner twice over: the bar cannot be
+        // reused by a host that swaps fragments, and the tab -> Activity mapping had to be
+        // repeated anywhere else that wanted to navigate. The caller knows what a selection
+        // means; the bar only reports that it happened.
         if (!selected) {
-            column.setOnClickListener {
-                val target = when (tab) {
-                    Tab.HOME -> MainActivity::class.java
-                    Tab.PLUGINS -> PluginsActivity::class.java
-                    Tab.SETTINGS -> OptionsActivity::class.java
-                }
-                // `singleTop` + clearing what is above: tapping a tab must not stack a second
-                // copy of a screen already open. Without FLAG_ACTIVITY_CLEAR_TOP, ten taps on
-                // Plugins build ten activities and Back walks through all of them.
-                val i = Intent(ctx, target).apply {
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                ctx.startActivity(i)
-            }
+            column.setOnClickListener { onSelect(tab) }
         }
         return column
     }

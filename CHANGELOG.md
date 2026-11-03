@@ -5181,8 +5181,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.95 (build 249) — 2026-11-03
 - Added a torn top edge and a shadow above the bottom bar.
 
-## 0.43.96 (build 250) — 2026-11-03 — CURRENT
+## 0.43.96 (build 250) — 2026-11-03
 - Moved the on-screen debug log out of `MainActivity` into its own file, ahead of the navigation change.
+
+## 0.43.97 (build 251) — 2026-11-03
+- Screens no longer call Activity APIs directly; they go through a `ScreenHost` interface, so the host can become a fragment without touching them.
+
+## 0.43.98 (build 252) — 2026-11-03 — CURRENT
+- The three tabs are now fragments inside one Activity, so the bottom bar is created once and no longer moves when switching tabs.
+- App startup, the vault prompt and the once-per-process auto-start now belong to the shell instead of the Home screen.
 
 ## Keeping this file honest
 

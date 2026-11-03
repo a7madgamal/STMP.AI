@@ -1,6 +1,9 @@
 package com.mido.phonebridge
 
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -27,7 +30,7 @@ import com.mido.phonebridge.ui.Theme
  * reserve space manually, and a screen that got the reservation wrong would have its last row
  * permanently hidden under the bar.
  */
-abstract class BridgeScreen : AppCompatActivity() {
+abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
 
     /** Which tab this screen is. Subclasses state it once; the bar cannot disagree. */
     protected abstract val tab: Theme.Tab
@@ -88,7 +91,11 @@ abstract class BridgeScreen : AppCompatActivity() {
         root.addView(center, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
-        val bar = Theme.bottomNav(this, tab)
+        // A non-tab screen (the plugin detail) still draws the bar, and tapping an unselected
+        // tab must leave it for that tab's screen. It does so by asking the SHELL, not by
+        // starting an Activity directly -- once the tabs are fragments there is no Activity per
+        // tab to start.
+        val bar = Theme.bottomNav(this, tab) { selected -> openTab(selected) }
         root.addView(bar)
 
         // Insets split by owner, which is the whole reason this is not `Theme.inset`:
@@ -107,11 +114,55 @@ abstract class BridgeScreen : AppCompatActivity() {
         buildContent(body)
     }
 
+    /** Leave a non-tab screen for the tab that was tapped. */
+    private fun openTab(tab: Theme.Tab) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .putExtra(Tabs.EXTRA_TAB, tab.name)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        )
+    }
+
     override fun onResume() {
         super.onResume()
         // See the class comment: this is the reason the base class exists.
         ApprovalGate.relaunchCurrent(this)
     }
+
+    // --- ScreenHost -------------------------------------------------------------------------
+    //
+    // Straight delegations, so adopting the interface changes no behaviour. A screen that calls
+    // `go(...)` gets exactly `startActivity(...)`. The point is not the indirection itself but
+    // that the SCREEN no longer names an Activity API, so the host can later be something else.
+
+    override fun go(intent: Intent) = startActivity(intent)
+
+    override fun toast(message: String, duration: Int) =
+        Toast.makeText(this, message, duration).show()
+
+    override fun ui(block: () -> Unit) = runOnUiThread(block)
+
+    override fun confirm(
+        title: String,
+        message: String,
+        positive: String,
+        negative: String,
+        onNegative: (() -> Unit)?,
+        onPositive: () -> Unit,
+    ) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setNegativeButton(negative) { _, _ -> onNegative?.invoke() }
+            .setPositiveButton(positive) { _, _ -> onPositive() }
+            .show()
+    }
+
+    override fun hasPermission(permission: String): Boolean =
+        checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    override fun askPermission(permission: String, requestCode: Int) =
+        requestPermissions(arrayOf(permission), requestCode)
 }
 
 /**
