@@ -629,66 +629,18 @@ class MainActivity : BridgeScreen() {
                 onClick = { requestNotifPermission() }
             )
         )
-        // Contacts: search is a route, but the PERMISSION can only be granted by a tap here.
+        // **The Contacts permission row moved to the Contacts plugin.**
         //
-        // A route handler has no Activity and no way to show a dialog, so `GET /contacts` refuses
-        // with `contacts_unavailable` until this row is tapped. Shown only while missing — a
-        // permanent row saying "granted" is the kind of furniture that trains people to stop
-        // reading the list, which is how a real warning gets missed.
-        val contactsOk = checkSelfPermission(Manifest.permission.READ_CONTACTS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!contactsOk) {
-            // THREE states, because "tap to grant" is a lie after a denial.
-            //
-            // Reported on device 2026-11-02: the row said "tap to grant", the tap fired the
-            // request (the log proves a dialog was up for ~5s), the answer came back DENIED —
-            // and the row went straight back to "tap to grant" as if nothing had happened. So a
-            // human who declined once had no way to tell whether the tap registered, whether the
-            // dialog appeared, or whether Android had stopped asking. That is the misleading
-            // part, not the dialog.
-            //
-            // `shouldShowRequestPermissionRationale` is the authoritative "may I ask again"
-            // signal, but it is FALSE both before the first ask and after a permanent denial —
-            // so the persisted "asked once" flag is what separates those two. Without it the
-            // first-ever state would wrongly read as blocked.
-            val asked = contactsAskedBefore()
-            val canAskAgain = shouldShowRequestPermissionRationale(
-                Manifest.permission.READ_CONTACTS
-            )
-            // **The rule: the label must describe what the TAP will actually do.**
-            //
-            // Reported three times on device (2026-11-02) as "misleading", and the reason was
-            // structural rather than cosmetic: a button saying "tap to grant" is a promise that a
-            // dialog will appear, and once Android has decided not to show one, the promise is
-            // false — the tap returns DENIED in ~0ms with nothing on screen at all. A label that
-            // cannot be wrong is worth more than a label that is usually right.
-            //
-            // `shouldShowRequestPermissionRationale` is false in TWO different situations — never
-            // asked, and asked-and-refused-forever — so it alone cannot pick the label. The
-            // persisted flag separates them, and after ANY denial this app treats the permission
-            // as blocked, which is the conservative direction: worst case it opens Settings for
-            // someone who could have re-prompted, instead of promising a dialog that never comes.
-            val (detail, tint) = when {
-                !asked -> "not granted — tap to allow" to Theme.WARNING
-                canAskAgain -> "declined — tap to allow" to Theme.WARNING
-                else -> "blocked — tap to fix in Settings" to Theme.DANGER
-            }
-            // **The tap ALWAYS opens a modal that says what is true.** Reported 2026-11-02:
-            // *"As a user I wouldn't know this shit didn't work, I want to know that I need to
-            // give the permission in the same fucking modal."*
-            //
-            // So the row never silently calls `requestPermissions` and hopes. The modal states the
-            // situation, names the button that will fix it, and only then acts. And when the answer
-            // comes back DENIED, the modal returns with the failure instead of a Toast that fades.
-            // A permission flow the user cannot see the outcome of is a permission flow that
-            // looks broken.
-            statusContainer.addView(
-                Theme.statusRow(
-                    this, "Contacts search", detail, tint,
-                    onClick = { showContactsPermissionDialog() }
-                )
-            )
-        }
+        // It was here because Home was the only screen that could request a permission. Now the
+        // plugin declares it (ContactsPlugin.permissions()) and Plugins → Contacts requests it
+        // with the reason attached, which is where someone looking for "why does search fail"
+        // actually goes.
+        //
+        // Keeping both would be two places that must agree about one permission — the exact
+        // defect class this epic exists to remove. The remaining rows here are app-wide health
+        // (server, notification access, overlay, battery, vault, model), which no single plugin
+        // owns and which therefore still belong on Home.
+
         // Full-screen popup: NOT a checklist requirement any more.
         //
         // Measured on device 2026-10-19 with FSI revoked and draw-over-apps granted: a SECURE

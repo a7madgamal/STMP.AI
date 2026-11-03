@@ -5119,13 +5119,16 @@ devDependencies. `node_modules/` is gitignored.
 - Changed CI to run tests, lint and the APK build as parallel jobs instead of one chain. Publishing still requires all three to pass.
 - Tests now use two forks on CI, where four cores are available; local runs stay at one.
 
-## 0.43.81 (build 235) — 2026-11-03 — CURRENT
+## 0.43.81 (build 235) — 2026-11-03
 - Split the app into three screens behind a bottom bar: Home, Plugins and Settings.
 - Moved the approval gate settings from Home to Settings, and the plugin list from Home to its own screen.
 - Plugins can now be switched off individually. A disabled plugin still answers its routes, refusing with `plugin_disabled` instead of `not_found`.
 - Plugins declare their own settings and permissions, so each gets a settings screen without one being hand-built for it.
 - TTS settings moved from the global options screen to the Speak plugin that owns them.
 - Help, Debug and Logs cannot be disabled: they are how the rest of the bridge is discovered and diagnosed.
+
+## 0.43.82 (build 236) — 2026-11-03 — CURRENT
+- Removed the Contacts permission row from Home; the Contacts plugin now owns requesting it, with the reason shown at the point of need.
 
 ## Keeping this file honest
 
