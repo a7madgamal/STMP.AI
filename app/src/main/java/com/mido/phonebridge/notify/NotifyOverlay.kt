@@ -567,20 +567,21 @@ object NotifyOverlay {
         // the window on screen with every control dead (reported on device 2026-10-19:
         // "doesn't even dismiss on x click").
         close.setOnClickListener {
-            // Same guard as the tap-to-approve: dismissing is also a decision about the request
-            // (it answers REJECTED), so a stray touch in the first second must not perform it
-            // either. Mido, 2026-10-24: "before ANY touch event on the notification works so that
-            // I don't approve or cancel by mistake".
+            // **THE ✕ IS NEVER GATED.** Mido, 2026-11-03: *"ensure the x IS ALWAYS CLICKABLE and
+            // dismisses the card under any fucking circumstances"*.
             //
-            // Same undim-before-decide as the tap path: a dismiss that lands in the unpainted gap
-            // must not act while the card still reads as unarmed.
-            undim(entry)
-            if (!ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
-                com.mido.phonebridge.Debug.log(
-                    "notify[${entry.id}] dismiss ignored: still in the misclick guard"
-                )
-                return@setOnClickListener
-            }
+            // It used to share the misclick guard with the tap-to-approve (2026-10-24: "don't
+            // approve or cancel by mistake"), and that was the wrong trade. A guarded APPROVE
+            // protects something; a guarded DISMISS protects nothing and strands a card the human
+            // has explicitly asked to be rid of. Worse, the guard reads `decisionsAllowed`, which
+            // also refuses when `shownAt == 0` — so a card attached in a bad state had a ✕ that
+            // could never work at all.
+            //
+            // Dismissing is now unconditional on purpose. Every other path in this file assumes
+            // the ✕ works, and `settle` + `teardown` are each idempotent, so this is safe to call
+            // in any state: before the guard, after it, mid-fetch, after the card already settled,
+            // or while a window removal is being retried.
+            com.mido.phonebridge.Debug.log("notify[${entry.id}] dismiss tapped")
             settle(entry, Reason.TAPPED)
             teardown(entry)
         }
@@ -901,6 +902,17 @@ object NotifyOverlay {
         // full window height (the 0.6.1 bug this file documents) and a fixed-size child
         // would make a small card grow to fit the stamp.
         if (reason == Reason.APPROVED || reason == Reason.TAPPED) {
+            // **THE STAMP HAS A DEADLINE, because it is now the ONLY exit on this path.**
+            // Mido, 2026-11-03: *"all the notification cards are stuck on summarizing after I
+            // touched to accept them"*.
+            //
+            // This branch returns early and leaves removal to `stampDecision`'s `onFinished`,
+            // which fires from an animator listener. That is not a guarantee: `StampOverlay`
+            // starts its animation from `onSizeChanged`, so a stamp whose window is added but
+            // never laid out never starts, never ends, and never calls back — and the card sits
+            // there reading "◌ summarising…" with every control inert, because `settled` is
+            // already true. `teardown` is idempotent, so a second caller is harmless.
+            main.postDelayed({ teardown(entry) }, STAMP_BACKSTOP_MS)
             stampDecision(entry, approved = reason == Reason.APPROVED)
             // The stamp is ~1.1s (slam + bleed + settle + fade) and the card's own fade-out is
             // 200ms — so tearing the card down on its normal schedule left the stamp drawing over
@@ -1137,17 +1149,43 @@ object NotifyOverlay {
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT
         )
-        overlay.onFinished = {
-            // A failure here would strand the overlay on screen forever, so it is reported loudly
-            // rather than swallowed — but teardown still runs, because a stuck card is worse.
-            try {
-                wm(ctx).removeView(overlay)
-            } catch (e: Exception) {
-                Log.e(TAG, "STAMP OVERLAY REMOVE FAILED: ${e.message}", e)
+        // **THE STAMP MUST FINISH EXACTLY ONCE, AND MUST ALWAYS FINISH.**
+        //
+        // `onFinished` is driven by an animator listener, and the animation only starts from
+        // `onSizeChanged` — so a stamp whose window is added but never laid out never starts,
+        // never ends, and never calls back. That is not hypothetical: it is the same shape that
+        // left cards frozen at "◌ summarising…" (Mido, 2026-11-03). An overlay is a full-screen
+        // window, so a stamp that never finishes is worse than a card that does not.
+        //
+        // `finished` makes it idempotent in both directions: the animator calling back twice,
+        // the deadline firing first, and a throw inside the animator all converge on one removal.
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+        val finish = {
+            if (finished.compareAndSet(false, true)) {
+                try {
+                    wm(ctx).removeView(overlay)
+                } catch (e: Exception) {
+                    // "View not attached" means the platform already dropped it — the outcome we
+                    // wanted. Anything else is reported, because it is the only clue that the
+                    // overlay is still on screen.
+                    if (e !is IllegalArgumentException) {
+                        Log.e(TAG, "STAMP OVERLAY REMOVE FAILED: ${e.message}", e)
+                    }
+                }
+                // The stamp is the exit. Only now does the card go away.
+                teardown(entry)
             }
-            // The stamp is the exit. Only now does the card go away.
-            teardown(entry)
         }
+        overlay.onFinished = { finish() }
+        // The deadline, posted before the window is even added so no ordering can skip it.
+        // Longer than the stamp's own ~740ms sequence, short enough that a stamp which failed to
+        // start does not sit over the screen.
+        main.postDelayed({
+            if (!finished.get()) {
+                Log.w(TAG, "stamp for id=${entry.id} never reported finished; forcing removal")
+                finish()
+            }
+        }, STAMP_BACKSTOP_MS)
         try {
             wm(ctx).addView(overlay, lp)
             // Reported, not substituted: no beep, no silence-by-accident.
@@ -1261,6 +1299,15 @@ object NotifyOverlay {
 
     /** Extra time past the fetch cap before the backstop fires. Never the normal path. */
     private const val BACKSTOP_SLACK_MS = 2_000L
+
+    /**
+     * How long the stamp may hold the card before its removal is forced.
+     *
+     * The stamp's own sequence sums to ~1.1s (150 + 45 + 220 + 260 + 260 + 180ms, chained).
+     * This is that plus a second of slack — long enough never to cut a working stamp short,
+     * short enough that a stamp which failed to start still releases the card quickly.
+     */
+    private const val STAMP_BACKSTOP_MS = 2_200L
 
     /**
      * How long past its own budget the fetch may still be on screen before the tick ends

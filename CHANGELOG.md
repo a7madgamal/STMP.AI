@@ -5107,9 +5107,13 @@ devDependencies. `node_modules/` is gitignored.
 - Removed the notification posted when an approval modal appears. It only existed to carry the full-screen intent, and the modal replaced it immediately.
 - Changed the notification card's risk indicator from a coloured left stripe to a tinted card background, matching the modal.
 
-## 0.43.78 (build 232) — 2026-11-03 — CURRENT
+## 0.43.78 (build 232) — 2026-11-03
 - Removed the hardcoded device name from the taildrop script; the target node is now an argument or `STMP_NODE`, and missing it is an error instead of a default.
 - Taildrop is now opt-in in `release.sh`, so a local build no longer sends anything to a device.
+
+## 0.43.79 (build 233) — 2026-11-03 — CURRENT
+- Fixed the ✕ on a notification card being ignored during the misclick guard, and being dead entirely on a card that never got stamped. Dismissing is now unconditional.
+- Fixed cards freezing at "summarising…" after being accepted. The stamp that removes them could never finish if its window was added but not laid out, so removal now has a deadline.
 
 ## Keeping this file honest
 
