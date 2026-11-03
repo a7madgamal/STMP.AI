@@ -27,6 +27,16 @@ object ApprovalGate {
     const val TIMEOUT_SECONDS = 60L
 
     /**
+     * How long past its own budget a summary may still report as Loading before the gate
+     * declares it failed.
+     *
+     * Positive so a fetch that answers at exactly its budget is not killed by scheduling
+     * jitter — the summary should win a photo finish. Small, because everything past the
+     * budget is time the human spends staring at disabled buttons with no way to decide.
+     */
+    const val AI_DEADLINE_SLACK_MS = 2_000L
+
+    /**
      * How a request left the gate. Returned, never thrown: the caller has to write
      * an audit record for every outcome, and an exception path is a place a record
      * gets forgotten. One call site today, and R2 (the `OFF` switch, removed in 0.12.0)
@@ -271,6 +281,16 @@ object ApprovalGate {
          * is coming, and is set to NotNeeded at post time when it is not.
          */
         @Volatile var aiState: AiState = AiState.Loading,
+
+        /**
+         * When [startAiFetch] actually began, or 0 before it did.
+         *
+         * Exists so the Loading deadline is measured from the real start rather than from
+         * `shownAtMs`: the fetch begins when the request becomes the one on screen, which can
+         * be seconds after the modal object was built, and timing from the wrong zero would
+         * expire a fetch that had not started yet.
+         */
+        @Volatile var fetchStartedAtMs: Long = 0L,
         /**
          * When the decision buttons went live — the instant the human could actually
          * decide. 0 until then, which is the UI's signal to show the loading state instead
@@ -333,6 +353,21 @@ object ApprovalGate {
     private var current: Pending? = null
 
     /**
+     * Install a Pending as the on-screen request, for tests only.
+     *
+     * A seam rather than reflection: [currentAiState] is now the place a stuck Loading is
+     * detected, and that logic is only worth having if it can be exercised. Reaching it
+     * through `post()` would need a real Activity, a notification channel and a screen —
+     * which is precisely the setup that made this bug invisible for so long.
+     *
+     * Takes a nullable argument so a test can also clear the slot.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun setCurrentForTest(p: Pending?) {
+        current = p
+    }
+
+    /**
      * FIFO queue of requests waiting for the human. The head is [current] (on
      * screen); the tail waits its turn. Sized by demand, no cap.
      */
@@ -362,7 +397,45 @@ object ApprovalGate {
      * NotNeeded when nothing is pending, so a stale modal cannot show a loading state for
      * a request that is already gone.
      */
-    fun currentAiState(): AiState = current?.aiState ?: AiState.NotNeeded
+    fun currentAiState(): AiState {
+        val p = current ?: return AiState.NotNeeded
+        val state = p.aiState
+        if (state !is AiState.Loading) return state
+
+        // **A LOADING STATE WITH NO DEADLINE IS A DEAD END.** `aiState` starts as Loading and
+        // only [startAiFetch] ever moves it, from inside a worker thread. Anything that kills
+        // that thread before its own try block — or leaves it parked on something the model's
+        // internal budget does not cover — leaves the modal saying "summarising…" with disabled
+        // buttons and no way out. The human cannot even deny: the buttons are dead.
+        //
+        // This is the same defect the NOTIFY card had (fixed 0.43.68 by giving its tick a
+        // deadline), and it is worth stating why the fix lives HERE rather than in the
+        // Activity's tick: the Activity is one of several readers, and a bound enforced by
+        // whichever UI happens to poll would be absent for every other reader. The state
+        // accessor is the single place a reader can get a Loading that has expired.
+        val startedAt = p.fetchStartedAtMs
+        if (startedAt > 0L) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed > p.aiFetchCapMs + AI_DEADLINE_SLACK_MS) {
+                com.mido.phonebridge.Debug.log(
+                    "approval[${p.requestId}] summary still Loading after ${elapsed}ms " +
+                        "(cap ${p.aiFetchCapMs}ms); unlocking the modal with a stated failure"
+                )
+                // Not a silent downgrade: the modal shows this, and the buttons unlock so the
+                // human can still decide. Same shape as a normal Failed, so nothing downstream
+                // needs to know this one came from a watchdog.
+                val failed = AiState.Failed(
+                    "the model did not answer within ${p.aiFetchCapMs}ms"
+                )
+                p.aiState = failed
+                if (p.enabledAtMs == 0L) {
+                    p.enabledAtMs = ArmGuard.armAt(p.shownAtMs, System.currentTimeMillis())
+                }
+                return failed
+            }
+        }
+        return state
+    }
 
     /** When the on-screen request's buttons went live, or 0 while still loading. */
     fun currentEnabledAtMs(): Long = current?.enabledAtMs ?: 0L
@@ -698,6 +771,7 @@ object ApprovalGate {
      */
     private fun startAiFetch(ctx: Context, p: Pending) {
         val facts = p.aiFacts ?: return
+        p.fetchStartedAtMs = System.currentTimeMillis()
         Thread({
             val result = try {
                 com.mido.phonebridge.ai.AiGateway.summarize(ctx, facts, p.aiFetchCapMs)

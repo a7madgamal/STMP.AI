@@ -5065,7 +5065,7 @@ devDependencies. `node_modules/` is gitignored.
 
 ---
 
-## 0.43.68 — non-ASCII request bodies, and the stuck "summarising…" card (build 222) — CURRENT
+## 0.43.68 — non-ASCII request bodies, and the stuck "summarising…" card (build 222)
 2026-11-03
 
 Two defects, both found by using the thing rather than reading it.
@@ -5110,6 +5110,55 @@ agree by construction: the fetch has its cap, the display has the same cap.
 `RequestCharsetTest` now guards the charset fix — it asserts `forceUtf8` exists, runs BEFORE
 `parseBody`, and does not replace a stated charset. Proved by deleting the call and watching it
 fail, then restoring. 408 tests.
+
+---
+
+## 0.43.69 — the MODAL's stuck summary, and risk as a background wash (build 223) — CURRENT
+2026-11-03
+
+Two more, both in the approval MODAL — which is where the report pointed and where I had not
+been looking.
+
+### The stuck "summarising…" was the modal, not the card
+
+Reported again after 0.43.68, and 0.43.68 had fixed the wrong surface: it gave the NOTIFY card's
+tick a deadline, and the report was about the full-screen modal.
+
+`Pending.aiState` **defaults to `Loading`**, and only `startAiFetch`'s worker thread ever moves
+it. Anything that kills that thread before its own `try` — a throw, an OOM, a thread the runtime
+drops — leaves the modal saying "summarising…" with DISABLED buttons. The human could not even
+DENY. That is the same defect shape as the card, and it is worth saying why this one is worse: a
+card that stalls is a five-second annoyance, a modal that stalls is a dialog with no exit.
+
+The bound lives in `ApprovalGate.currentAiState()`, not in the Activity's tick. That is
+deliberate — the accessor is the ONE place any reader can obtain a `Loading`, so a bound placed
+in whichever UI happens to poll would be absent for the next reader. An expired `Loading` becomes
+a stated `Failed` naming the budget, the buttons unlock, and the audit carries the reason.
+
+`fetchStartedAtMs` measures from the real start, not `shownAtMs`: the fetch begins when the
+request becomes the one on screen, which can be seconds after the modal object was built, and
+timing from the wrong zero would expire a fetch that had not begun.
+
+### The risk is a background wash, not a stripe
+
+Mido, 2026-11-03: *"the level result shouldn't be a left border it should affect the bg color
+with a light tint effect"*.
+
+`Theme.riskSurface` maps a bucket to the existing `_SURFACE` tints — the muted ink re-tints
+already used elsewhere — rather than inventing a second, paler palette that only this screen
+would know. `null` returns the plain sheet: an absent assessment is NOT "safe", and a green modal
+would say it was, which is the same lie as a green APPROVE after a failed summary.
+
+`applyRiskSurface` is one named function all four AI states call, not four inline assignments —
+four copies is how one of them ends up forgetting to clear the tint. It swaps the sheet drawable
+without touching layout, so the wash can never change the modal's size.
+
+The risk line keeps the REASON and loses the colour: "risk: high" is now redundant with the wash,
+while "sends mail to an external address" is the part a background cannot say.
+
+Tests: `ApprovalAiDeadlineTest` proves an expired `Loading` becomes a stated failure with unlocked
+buttons (and that a fresh one is NOT killed by impatience); `RiskSurfaceTest` pins the four-way
+mapping including the null case. 417 tests.
 
 ---
 

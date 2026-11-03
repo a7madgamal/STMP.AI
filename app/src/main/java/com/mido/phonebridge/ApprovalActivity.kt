@@ -222,6 +222,10 @@ class ApprovalActivity : FragmentActivity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 10))
         }
+        // The bucket is no longer painted on this line — it tints the sheet (see
+        // `applyRiskSurface`). What remains here is the REASON, which a background colour
+        // cannot state: "risk: high — sends mail to an external address" is the part a human
+        // actually needs, and it stays readable on every tint because it uses ON_SURFACE_VARIANT.
         val aiRiskLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             visibility = ViewGroup.GONE
@@ -378,6 +382,29 @@ class ApprovalActivity : FragmentActivity() {
          * resting colour instead of leaving a stale one behind.
          */
         var applyRisk: (com.mido.phonebridge.ai.Risk?) -> Unit = {}
+
+        /**
+         * Paint the risk as a background WASH on the whole sheet.
+         *
+         * Rebuilt rather than mutated because the sheet is a `LayerDrawable` (base colour plus
+         * grain); changing its colour means a new drawable, and `setBackgroundDrawable` is the
+         * one call that swaps it without touching layout. Geometry is untouched: the modal is
+         * already measured, and a background cannot change its size — the same rule that made
+         * the NOTIFY card's tint a layer instead of a child view.
+         *
+         * Lives here as a named function rather than inline in the tick so all four AI states
+         * call the SAME thing. Four copy-pasted `content.background = ...` lines is how one of
+         * them ends up forgetting to clear the tint when the state changes.
+         */
+        var lastRiskSurface: Int = Theme.BG
+
+        fun applyRiskSurface(risk: com.mido.phonebridge.ai.Risk?) {
+            val color = Theme.riskSurface(risk)
+            if (lastRiskSurface == color) return
+            lastRiskSurface = color
+            content.background = Theme.sheet(color)
+        }
+
         val tick = object : Runnable {
             override fun run() {
                 // The AI block is LIVE: read the gate's current state every tick rather
@@ -393,6 +420,7 @@ class ApprovalActivity : FragmentActivity() {
                         aiLine.text = word + ".".repeat(dotCount)
                         aiLine.setTextColor(Theme.ON_SURFACE_VARIANT)
                         aiRiskLine.visibility = ViewGroup.GONE
+                        applyRiskSurface(null)
                         // Back to the resting colour while we do not yet know the risk —
                         // otherwise a previous assessment's colour would linger on the button.
                         applyRisk(null)
@@ -404,11 +432,16 @@ class ApprovalActivity : FragmentActivity() {
                         aiLine.text = ai.summary.description
                         aiLine.setTextColor(Theme.ON_SURFACE)
                         val reason = ai.summary.reason
-                        aiRiskLine.text = "risk: ${ai.summary.risk.name.lowercase()}" +
-                            (if (reason.isNotBlank()) " — $reason" else "")
-                        // One mapping, shared with the NOTIFY card's strip (Theme.riskColor).
-                        aiRiskLine.setTextColor(Theme.riskColor(ai.summary.risk))
-                        aiRiskLine.visibility = ViewGroup.VISIBLE
+                        aiRiskLine.text = if (reason.isNotBlank()) reason else ""
+                        // Tint the sheet itself (Mido, 2026-11-03: *"the level result shouldn't
+                        // be a left border it should affect the bg color with a light tint
+                        // effect"*). One mapping in Theme.riskSurface, shared with anything else
+                        // that wants the wash, so the modal cannot disagree with the card about
+                        // what HIGH looks like — the failure that made a second palette a bad idea.
+                        applyRiskSurface(ai.summary.risk)
+                        aiRiskLine.setTextColor(Theme.ON_SURFACE_VARIANT)
+                        aiRiskLine.visibility =
+                            if (reason.isNotBlank()) ViewGroup.VISIBLE else ViewGroup.GONE
 
                         // APPROVE carries the risk colour too (Mido, 2026-10-19: *"make the
                         // approve button color match the risk label color"*). The risk is the
@@ -429,6 +462,9 @@ class ApprovalActivity : FragmentActivity() {
                         aiLine.text = "⚠ could not summarise — ${ai.detail}"
                         aiLine.setTextColor(Theme.DANGER)
                         aiRiskLine.visibility = ViewGroup.GONE
+                        // No assessment, so no tint: an absent risk is not "safe", and a green
+                        // sheet would say it was.
+                        applyRiskSurface(null)
                         // No risk was assessed, so the button must not wear a risk colour —
                         // an absent assessment is not "safe", and painting it green would say
                         // it was. Resting colour, with the error stated above it.
@@ -440,6 +476,7 @@ class ApprovalActivity : FragmentActivity() {
                         aiHeader.visibility = ViewGroup.GONE
                         aiLine.visibility = ViewGroup.GONE
                         aiRiskLine.visibility = ViewGroup.GONE
+                        applyRiskSurface(null)
                     }
                 }
 

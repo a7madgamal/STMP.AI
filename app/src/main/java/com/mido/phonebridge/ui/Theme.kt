@@ -110,6 +110,26 @@ object Theme {
         com.mido.phonebridge.ai.Risk.HIGH -> DANGER
     }
 
+    /**
+     * The risk as a BACKGROUND WASH, for surfaces that should carry it as a tint rather
+     * than a mark (Mido, 2026-11-03: *"the level result shouldn't be a left border it should
+     * affect the bg color with a light tint effect"*).
+     *
+     * The `_SURFACE` colours already exist for exactly this purpose — they are the muted
+     * ink re-tints, chosen so a filled area still reads as paper with ink on it rather than
+     * as a coloured panel. Reusing them keeps the tint consistent with the rest of the app
+     * instead of introducing a second, paler palette that only this screen knows about.
+     *
+     * `null` (no assessment yet) returns [BG], the untouched sheet — an absent risk is not
+     * "safe", so it must not wear the green.
+     */
+    fun riskSurface(risk: com.mido.phonebridge.ai.Risk?): Int = when (risk) {
+        com.mido.phonebridge.ai.Risk.LOW -> SUCCESS_SURFACE
+        com.mido.phonebridge.ai.Risk.MEDIUM -> WARNING_SURFACE
+        com.mido.phonebridge.ai.Risk.HIGH -> DANGER_SURFACE
+        null -> BG
+    }
+
     /** Text/icons on a filled coloured control. On paper the only filled controls are the
      *  stamp red and the ink-tinted semantic buttons, so this stays cream-white for legibility. */
     const val ON_COLOR = 0xFFFBF6EA.toInt()
