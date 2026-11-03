@@ -20,7 +20,7 @@ import org.json.JSONObject
  * request, and they are exactly what the summary kept omitting.
  *
  * Pure and Context-free so the extraction is unit-testable — the same split as `PayloadShape`,
- * `PromptBudget`, `OutboundVerb` and `SummaryGuard`.
+ * `PromptBudget` and `OutboundVerb`.
  */
 object BodyDetail {
 

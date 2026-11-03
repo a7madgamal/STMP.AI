@@ -5162,7 +5162,7 @@ mapping including the null case. 417 tests.
 
 ---
 
-## 0.43.70 — a failure states its REAL cause, in seconds (build 224) — CURRENT
+## 0.43.70 — a failure states its REAL cause, in seconds (build 224)
 2026-11-03
 
 Mido, 2026-11-03: *"I got couldn't summarize in 10000ms but it was never full 10 seconds. and write
@@ -5202,6 +5202,52 @@ which is `SummaryGuard` doing its job on a model that is genuinely wrong, and is
 to fix rather than a timeout to chase.
 
 424 tests, 0 failures.
+
+---
+
+## 0.43.71 — SummaryGuard removed, and the prompt stops supplying a verb (build 225) — CURRENT
+2026-11-03
+
+Mido, 2026-11-03: *"remove this stupid summary guard shit, i never asked for it"*. Removed.
+
+**What it was.** A lexical veto between the model and the screen: any description containing a
+mutation stem (`creat`, `add`, `send`…) on a READ request was thrown away, on the theory that a
+misleading approval prompt is worse than none.
+
+**Why that was the wrong answer.** On the contacts route the model's answer was discarded EVERY
+time, so every modal showed a red failure line instead of a summary — a filter that deleted the
+feature in order to protect it. And it was policing a symptom: the model said *"Creating
+contacts"* because the prompt told it to.
+
+### The real cause was a parroted example
+
+The system prompt said:
+
+```
+say what is being done TO IT, e.g. Creating "<that exact value>"
+```
+
+`Creating` is a verb baked into a worked example, and a 0.6B model treats an example as a
+template. On a READ with no body there is nothing to quote, so it emitted `Creating <plugin>` —
+exactly the string the guard then rejected. The comment three lines above that example already
+warned that a concrete example becomes a template; the example had been reintroduced by a later
+edit and nobody noticed.
+
+**Thirteen releases of fighting the output instead of fixing the input.** The example now carries
+NO verb, and the verb is stated as a constraint: *"READ means nothing changes and your description
+must say what is being READ, never that something is being created".*
+
+### What was deliberately kept
+
+`SummaryFailure` stays — the real-cause reporting from 0.43.70 is unaffected and still answers
+*why* a summary failed. What went is only the `allows()` filter, its file, and its 13 tests.
+
+**The trade, stated so nobody re-adds it by accident:** a misleading summary is now possible. What
+still holds is that the modal renders every deterministic row beside the model's sentence, so the
+human reads the facts and the paraphrase together. If a bad summary appears, the fix is the prompt
+— where the wording comes from — not a veto over the output.
+
+416 tests, 0 failures.
 
 ---
 

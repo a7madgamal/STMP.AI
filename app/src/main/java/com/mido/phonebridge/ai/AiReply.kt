@@ -49,7 +49,6 @@ object AiReply {
             // came back "Adding 8 todos", including a READ that added nothing. A concrete
             // example is a template to a small model, not an illustration (Mido,
             // 2026-10-19: *"still says adding 8 todos which is VERY misleading"*).
-            // The rule is stated abstractly instead, and [SummaryGuard] enforces it.
             // HARD REQUIREMENT, not a style suggestion (Mido, 2026-10-20: *"I want FUCKING
             // DETAILS FROM THE BODY"*). Saying "be specific" produced "Create task with
             // content and description" — a restatement of STRUCTURE. The description must
@@ -57,9 +56,20 @@ object AiReply {
             "ALWAYS include the literal text from the body that is being acted on — copy it " +
             "character for character, inside quotes. If the body has a content, subject, " +
             "body, text, name, title or query field, that field's value IS the description's " +
-            "object: say what is being done TO IT, e.g. Creating \"<that exact value>\". " +
+            "object: say what is being done TO IT, quoting <that exact value>. " +
+            // NO VERB IN THAT EXAMPLE. It used to read `e.g. Creating "<that exact value>"`
+            // and a 0.6B model parroted the verb: every READ came back "Creating contacts",
+            // which is both wrong and the string that made SummaryGuard reject every summary.
+            // The verb is already supplied above as `verb: ...`; the example must not supply a
+            // second, competing one. This is the same lesson as the removed "Adding 8 todos"
+            // example, and it was reintroduced by a later edit — hence stating it here.
             "Never describe the shape of the request (never say 'with content and " +
             "description'); describe the actual thing. " +
+            // The verb is stated as a CONSTRAINT rather than left to be inferred from context,
+            // because inference from context is what produced the mutation verb on a read.
+            "The verb line above is the action: READ means nothing changes and your " +
+            "description must say what is being READ (searching, listing, fetching), never " +
+            "that something is being created, added, sent, updated or deleted. " +
             "Do not state a quantity unless it appears in the body. " +
             "risk is low for reads, medium for edits, high for deletes or anything " +
             "sent outside the account. Never invent names or values that are not given."
@@ -138,23 +148,20 @@ object AiReply {
                 return null
             }
         }
-        // LAST LINE OF DEFENCE: a model parrots its prompt and invents quantities, and a
-        // misleading approval prompt is worse than none — the human approves what they were
-        // told. A rejected summary yields NO AI line rather than a corrected one; the modal
-        // still renders every deterministic row (Mido, 2026-10-19).
-        if (!com.mido.phonebridge.core.SummaryGuard.allows(description, verb, factsText)) {
-            com.mido.phonebridge.Debug.log(
-                "ai[REJECTED verb=$verb] said=\"${description.take(140)}\""
-            )
-            Log.w("AiReply", "summary contradicts the request (verb=$verb): ${description.take(90)}")
-            // The model's OWN sentence, quoted: this is the one failure a human can act on,
-            // because the fix is a prompt or a model change, not a timeout.
-            SummaryFailure.record(
-                "the model described a $verb as \"${description.take(80)}\", which contradicts " +
-                    "the request"
-            )
-            return null
-        }
+        // NO SUMMARY GUARD (Mido, 2026-11-03: *"remove this stupid summary guard shit, i
+        // never asked for it"*). The model's sentence is shown as it wrote it.
+        //
+        // What it did: rejected any description whose wording contradicted the verb — a READ
+        // containing "creat" or "add" was thrown away. The intent was to stop a small model
+        // claiming "Adding 8 todos" for a read. The effect, measured on the contacts route, was
+        // that the model's every answer was discarded and every modal showed a red failure line
+        // instead of a summary: a filter that removed the feature to protect it.
+        //
+        // The honest trade, stated so nobody re-adds it by accident: a misleading summary is now
+        // possible. What still holds is that the modal renders every deterministic row beside the
+        // model's sentence, so the human reads the facts and the paraphrase together rather than
+        // the paraphrase alone. If a bad summary ever appears, the fix is the prompt — which is
+        // where the model's wording actually comes from — not a lexical veto over its output.
         return RequestSummary(
             description = description.take(160),
             risk = risk,
