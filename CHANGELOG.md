@@ -5174,9 +5174,12 @@ devDependencies. `node_modules/` is gitignored.
 - Grouped the Plugins screen into Google, Phone, Secrets and Misc sections.
 - Added a row per SSH connection under Secrets, each opening its own detail screen.
 
-## 0.43.94 (build 248) — 2026-11-03 — CURRENT
+## 0.43.94 (build 248) — 2026-11-03
 - Fixed cards drawing two outlines along different curves, which read as the paper effect printed twice.
 - Made section headers larger and gave them a bottom margin.
+
+## 0.43.95 (build 249) — 2026-11-03 — CURRENT
+- Added a torn top edge and a shadow above the bottom bar.
 
 ## Keeping this file honest
 
