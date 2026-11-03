@@ -29,8 +29,20 @@ import java.security.SecureRandom
  */
 object Ed25519 {
 
+    /**
+     * The constant 2, spelled out.
+     *
+     * `BigInteger.TWO` is a static field added in **API 33**, and this object's properties
+     * initialise at class-load — so on Android 8 through 12 the reference threw
+     * `NoSuchFieldError` before any runtime version check could help. That meant ed25519 key
+     * generation and signing were broken on every device below API 33, which is most of them.
+     * Caught by Android Lint's NewApi check in CI (2026-11-03); it had been shipping because
+     * the local build never ran `lint`.
+     */
+    private val TWO: BigInteger = BigInteger.valueOf(2)
+
     /** 2^255 - 19, the field prime. */
-    private val P: BigInteger = BigInteger.TWO.pow(255).subtract(BigInteger.valueOf(19))
+    private val P: BigInteger = TWO.pow(255).subtract(BigInteger.valueOf(19))
 
     /** Curve constant d = -121665/121666 mod p. */
     private val D: BigInteger = run {
@@ -43,7 +55,7 @@ object Ed25519 {
     private val D2: BigInteger = D.shiftLeft(1).mod(P)
 
     /** The group order L = 2^252 + 27742317777372353535851937790883648493. */
-    internal val L: BigInteger = BigInteger.TWO.pow(252)
+    internal val L: BigInteger = TWO.pow(252)
         .add(BigInteger("27742317777372353535851937790883648493"))
 
     /** Base point y = 4/5, and the matching x (the root with the low bit clear). */
@@ -169,7 +181,7 @@ object Ed25519 {
         x = x.modPow(exp, P)
         val check = x.multiply(x).mod(P)
         if (check != num.multiply(den.modInverse(P)).mod(P)) {
-            val sqrtMinus1 = BigInteger.TWO.modPow(P.subtract(BigInteger.ONE).shiftRight(2), P)
+            val sqrtMinus1 = TWO.modPow(P.subtract(BigInteger.ONE).shiftRight(2), P)
             x = x.multiply(sqrtMinus1).mod(P)
         }
         if (x.multiply(x).mod(P) != num.multiply(den.modInverse(P)).mod(P)) return null
@@ -206,7 +218,7 @@ object Ed25519 {
         val a = p.y.subtract(p.x).multiply(q.y.subtract(q.x)).mod(P)
         val b = p.y.add(p.x).multiply(q.y.add(q.x)).mod(P)
         val c = p.t.multiply(D2).multiply(q.t).mod(P)
-        val d = p.z.multiply(BigInteger.TWO).multiply(q.z).mod(P)
+        val d = p.z.multiply(TWO).multiply(q.z).mod(P)
         val e = b.subtract(a).mod(P)
         val f = d.subtract(c).mod(P)
         val g = d.add(c).mod(P)

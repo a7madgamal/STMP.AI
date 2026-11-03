@@ -612,10 +612,21 @@ object SecretVault {
             val k = gen.generateKey()
             Log.i(TAG, "vault key created (strongBox=$strongBox)")
             k
-        } catch (e: StrongBoxUnavailableException) {
-            Log.i(TAG, "StrongBox unavailable; falling back to TEE")
-            null
         } catch (e: Exception) {
+            // **Checked by CLASS NAME, never by TYPE.** `StrongBoxUnavailableException` was
+            // added in API 28, and naming it in an `is` check puts it in the verified bytecode:
+            // on API 26-27 the verifier resolves every type in the method and the whole catch
+            // fails with NoClassDefFoundError — turning a recoverable "no StrongBox here" into a
+            // crash on exactly the devices least able to handle it. Lint's NewApi flagged this;
+            // it had been shipping because the local build never ran `lint`.
+            //
+            // A string compare is honest here: the class name is stable, the value is only used
+            // to choose between two log lines, and a miss falls through to the general handler
+            // below rather than changing behaviour.
+            if (e.javaClass.simpleName == "StrongBoxUnavailableException") {
+                Log.i(TAG, "StrongBox unavailable; falling back to TEE")
+                return null
+            }
             if (strongBox) {
                 Log.i(TAG, "StrongBox key failed (${e.javaClass.simpleName}); falling back to TEE")
                 null

@@ -1282,6 +1282,11 @@ class ApprovalActivity : FragmentActivity() {
         // Back == deny. Never leave a request dangling open by accident.
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         finishWith(id, approved = false)
+        // super AFTER the decision, not instead of it. Lint requires the call; the ordering
+        // matters because `finishWith` is what settles the gate — letting the platform tear
+        // the Activity down first would leave the request pending until its own timeout.
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
     }
 
     /**

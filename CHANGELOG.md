@@ -5251,7 +5251,7 @@ human reads the facts and the paraphrase together. If a bad summary appears, the
 
 ---
 
-## 0.43.72 — CI was broken before it ever reached the secrets (build 226) — CURRENT
+## 0.43.72 — CI was broken before it ever reached the secrets (build 226)
 2026-11-03
 
 Three workflow runs, all failed in 26 seconds. Not one of them got as far as a secret.
@@ -5279,6 +5279,44 @@ Two further consequences of using the right tool, both fixed in the same pass:
 - every failure message from here names its step, because `gh run view` reports per-step
 
 Applied to all three jobs that need an SDK (ci.yml ×2, release.yml ×1). Version 0.43.72.
+
+---
+
+## 0.43.73 — lint found eight real bugs, one of them a shipped crash (build 227) — CURRENT
+2026-11-03
+
+CI's first real run got past the SDK and failed on **lint**. All eight errors were real, and this
+is the first time lint has ever run — the local build never called `lintDebug`, so these shipped.
+
+**The serious one: ed25519 was broken on every device below API 33.**
+
+`BigInteger.TWO` is a static field added in **API 33**. `Ed25519` is an `object`, so its
+properties initialise at class-load — meaning on Android 8 through 12 the reference threw
+`NoSuchFieldError` before any runtime version check could have helped. Key generation and signing
+were simply dead on most devices, and nothing in the app could catch it. Replaced with
+`BigInteger.valueOf(2)`, defined once as `TWO`.
+
+**The rest, all API-level errors against `minSdk = 26`:**
+
+- `SecretVault` caught `StrongBoxUnavailableException` (API 28) **by type**. Naming it in an `is`
+  check puts the class in the verified bytecode, so on API 26–27 the verifier resolves it and the
+  whole catch dies with `NoClassDefFoundError` — turning a recoverable "no StrongBox here" into a
+  crash on the devices least able to take one. Now checked by `javaClass.simpleName`.
+- `DrivePlugin.saveToDownloads` used `MediaStore.Downloads` (API 29). The caller already refuses
+  below API 29, but lint cannot see across the call, so the method now carries
+  `@RequiresApi(29)`.
+- `NotifStore` read `StatusBarNotification.isAppGroup` (API 30) unguarded. Now written as
+  `JSONObject.NULL` below API 30 — an absent fact, not a `false` claim.
+- `ApprovalActivity.onBackPressed` did not call `super`. Added **after** `finishWith`, because
+  `finishWith` is what settles the gate; letting the platform tear the Activity down first would
+  leave the request pending until its own timeout.
+
+**The lesson is not "lint found things".** It is that adding `lint` to CI without ever running it
+locally meant the first CI run in the project's life was also the first lint run — and it found a
+class-load crash that had been shipping since ed25519 landed. A check that only runs in CI is a
+check that has never been read.
+
+416 tests, 0 failures. Lint clean.
 
 ---
 

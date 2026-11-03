@@ -216,7 +216,14 @@ object NotifStore {
             // isGroup(): "is part of a group" (any member). isAppGroup(): the app
             // itself asked to group. Both come straight from StatusBarNotification.
             put("isGroup", sbn.isGroup)
-            put("isAppGroup", sbn.isAppGroup)
+            // isAppGroup() arrived in API 30. Below that the fact does not exist, and reporting
+            // `false` would be a claim rather than an absence — so the key is `null`. A reader
+            // can then tell "not app-grouped" from "this platform cannot say".
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                put("isAppGroup", sbn.isAppGroup)
+            } else {
+                put("isAppGroup", org.json.JSONObject.NULL)
+            }
             put("isOngoing", (n.flags and Notification.FLAG_ONGOING_EVENT) != 0)
             put("isGroupSummary", (n.flags and Notification.FLAG_GROUP_SUMMARY) != 0)
             @Suppress("DEPRECATION")

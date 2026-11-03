@@ -396,6 +396,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * truncated file with no indication it was our fault. `delete` on the URI we just created is
      * the only cleanup that cannot misfire on someone else's file.
      */
+    @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
     private fun saveToDownloads(stream: java.io.InputStream, name: String, mimeType: String): Saved {
         val resolver = ctx.contentResolver
         val values = android.content.ContentValues().apply {
