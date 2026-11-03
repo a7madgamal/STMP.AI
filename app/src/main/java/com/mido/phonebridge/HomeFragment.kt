@@ -42,9 +42,36 @@ class HomeFragment : BridgeFragment(), BridgeControl {
          * own 60s schedule, off the main thread.
          */
         const val UI_TICK_MS = 5_000L
+
+        /**
+         * How long the knob shows a pending look after a tap.
+         *
+         * Long enough to cover a bind on a slow device, short enough that a start which silently
+         * failed does not leave the knob looking busy forever. After this the knob simply reflects
+         * whatever the service says, including "still down".
+         */
+        const val PENDING_WINDOW_MS = 3_000L
     }
 
-    private lateinit var serverButton: MaterialButton
+    /**
+     * The server switch.
+     *
+     * A toggle rather than a button: the old control had to say "START SERVER" or "STOP SERVER"
+     * and be recomputed on every render, so a stale label could claim the server was stopped
+     * while it was running. The knob's POSITION is the state, so it cannot disagree with itself.
+     */
+    private lateinit var serverToggle: com.mido.phonebridge.ui.RuggedToggle
+
+    /**
+     * When the last start/stop tap was made, so the knob can show a PENDING look while the
+     * service is still binding.
+     *
+     * The server is a live service, not a stored value: starting takes a moment and can fail. The
+     * knob therefore must not slide on the tap — it would be showing intent, and would slide back
+     * on a failure. It stays where the last known state put it and takes on the pending colour
+     * until `render()` sees the real value.
+     */
+    private var pendingSince: Long = 0L
     private lateinit var auditBanner: TextView
     private lateinit var gateCard: LinearLayout
     private lateinit var gateTitle: TextView
@@ -151,19 +178,46 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         container.addView(heroCard)
 
         // --- 2. CONTROLS: the primary action ---
-        serverButton = Theme.button(ctx, "START SERVER", Theme.ButtonStyle.SUCCESS) {
-            if (BridgeService.serverUp) {
+        //
+        // A row, not a full-width button: a switch sized to the whole screen would be a bar with a
+        // knob at one end, and the label is what tells you what is being switched.
+        val serveRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, Theme.dp(ctx, 16), 0, 0)
+        }
+        val serveLabel = TextView(ctx).apply {
+            text = "Server"
+            textSize = 18f
+            typeface = Theme.handFont(ctx)
+            setTextColor(Theme.ON_SURFACE)
+        }
+        serveRow.addView(serveLabel, LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+        ))
+
+        serverToggle = Theme.toggle(
+            ctx,
+            on = BridgeService.serverUp,
+            pending = pendingSince > 0L,
+        ) { want ->
+            // Record the tap and repaint for the pending look, then act. The knob is NOT flipped
+            // here: `render()` moves it once `BridgeService.serverUp` actually changes.
+            pendingSince = android.os.SystemClock.elapsedRealtime()
+            render()
+            if (want) {
+                Debug.log("server start requested")
+                startBridge()
+            } else {
                 Debug.log("stop requested")
                 stopBridge()
-            } else {
-                startBridge()
             }
+            // The service binds asynchronously; a re-render after a beat picks up the result
+            // without waiting for the 5s tick. The tick covers the case where it takes longer.
             uiTickHandler.postDelayed({ render() }, 600)
         }
-        serverButton.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = Theme.dp(ctx, 16) }
-        container.addView(serverButton)
+        serveRow.addView(serverToggle)
+        container.addView(serveRow)
 
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
         // account part to the google plugin"*). Signing in is a precondition the Google plugins
@@ -442,16 +496,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // Tint, never `setBackgroundColor`: assigning a background drawable to a
         // MaterialButton replaces the ripple/state-list machinery. `backgroundTintList`
         // recolours the same component and keeps the feedback.
-        if (BridgeService.serverUp) {
-            serverButton.text = "STOP SERVER"
-            serverButton.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(Theme.SURFACE_VARIANT)
-            serverButton.setTextColor(Theme.ON_SURFACE)
+        // The knob renders the STORED state, never the tap. `pendingSince` only suppresses the
+        // "settled" look for a moment so a slow bind does not flick the knob back and forth.
+        val up = BridgeService.serverUp
+        val stillPending = pendingSince > 0L &&
+            android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
+        if (stillPending) {
+            // The knob is left where the last real state put it; only the colour says "working".
+            serverToggle.pending = true
         } else {
-            serverButton.text = "START SERVER"
-            serverButton.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(Theme.SUCCESS)
-            serverButton.setTextColor(Theme.ON_COLOR)
+            pendingSince = 0L
+            serverToggle.pending = false
+            if (serverToggle.checked != up) serverToggle.setCheckedAnimated(up)
         }
 
         // The status checklist moved to Settings > Device access. Home now answers one question

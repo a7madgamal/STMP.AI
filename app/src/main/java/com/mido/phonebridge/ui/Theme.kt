@@ -853,6 +853,38 @@ object Theme {
         button(ctx, label, if (selected) ButtonStyle.PRIMARY else ButtonStyle.NEUTRAL, small = true, onClick = onClick)
 
     /**
+     * An on/off switch, drawn as paper with a sliding knob.
+     *
+     * **Why this returns a custom View and not a styled `SwitchCompat`.** Material's switch is a
+     * capsule with a circular thumb and a ripple. All three are wrong here: this app is paper and
+     * ink, and a switch has to look cut from the same sheet as the cards. See [RuggedToggle].
+     *
+     * **State, not action.** The knob's position IS the answer — left off, right on. There is no
+     * label to recompute, so the control cannot go stale and claim the server is stopped while it
+     * is running.
+     *
+     * The callback fires ONLY on a tap. Callers must render from stored truth and let this be
+     * driven by it; calling [RuggedToggle.setCheckedAnimated] from the callback would show the
+     * tapped intent before it was real.
+     */
+    fun toggle(
+        ctx: Context,
+        on: Boolean,
+        pending: Boolean = false,
+        onChange: (Boolean) -> Unit,
+    ): RuggedToggle = RuggedToggle(ctx).apply {
+        // No animation on the first paint: a switch that slides as the screen opens is animating
+        // something the human did not do.
+        setCheckedImmediately(on)
+        this.pending = pending
+        setOnClickListener {
+            // Do NOT flip the knob here. The knob is driven by the stored value once the change
+            // lands, so a refused or failed write leaves it showing the truth rather than the tap.
+            onChange(!on)
+        }
+    }
+
+    /**
      * A button whose own background fills with progress — the "downloading" control.
      *
      * **Why a button and not a separate bar.** The action and its feedback are the same

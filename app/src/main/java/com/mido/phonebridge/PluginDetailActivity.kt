@@ -112,15 +112,13 @@ class PluginDetailActivity : BridgeScreen() {
                 13f,
             ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
         } else {
-            val toggle = Theme.button(
-                this,
-                if (on) "TURN OFF" else "TURN ON",
-                if (on) Theme.ButtonStyle.NEUTRAL else Theme.ButtonStyle.SUCCESS,
-            ) {
-                store.setEnabled(plugin, !on)
+            // A toggle, not a "TURN OFF" button: the knob's position is the state, so the screen
+            // cannot claim the plugin is off while it is serving.
+            content.addView(Theme.toggle(this, on) { want ->
+                store.setEnabled(plugin, want)
+                Debug.log("plugin ${plugin.id}: enabled=$want")
                 render()
-            }
-            content.addView(toggle)
+            })
 
             if (on) {
                 content.addView(Theme.text(
@@ -376,12 +374,8 @@ class PluginDetailActivity : BridgeScreen() {
                 row.addView(Theme.text(this, setting.label, 14f).apply {
                     setTextColor(Theme.ON_SURFACE)
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(Theme.button(
-                    this, if (on) "ON" else "OFF",
-                    if (on) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL,
-                    small = true,
-                ) {
-                    store.putBoolean(plugin.id, setting.id, !on)
+                row.addView(Theme.toggle(this, on) { want ->
+                    store.putBoolean(plugin.id, setting.id, want)
                     render()
                 })
                 block.addView(row)

@@ -5191,11 +5191,16 @@ devDependencies. `node_modules/` is gitignored.
 - The three tabs are now fragments inside one Activity, so the bottom bar is created once and no longer moves when switching tabs.
 - App startup, the vault prompt and the once-per-process auto-start now belong to the shell instead of the Home screen.
 
-## 0.43.99 (build 253) — 2026-11-03 — CURRENT
+## 0.43.99 (build 253) — 2026-11-03
 - Bottom bar spans the full width, so the tabs are evenly spaced instead of huddled left.
 - Bottom bar shadow is real elevation rather than a painted grey band, so it is a genuine transparent blur.
 - Removed the thin grey outline around the bar and the empty margin below it, so the paper meets the screen edge.
 - Tab labels stay on one line instead of wrapping.
+
+## 0.44.0 (build 254) — 2026-11-03 — CURRENT
+- New paper toggle: a grained rectangular track with a sliding knob, matching the cards.
+- The server, every plugin row, the plugin detail switch and plugin settings all use it.
+- The server knob shows a pending look while the service binds instead of sliding on the tap.
 
 ## Keeping this file honest
 

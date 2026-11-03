@@ -215,7 +215,36 @@ class PluginsFragment : BridgeFragment() {
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
         titleRow.addView(Theme.text(ctx, stateLabel(on, status), 12f).apply {
             setTextColor(stateColour(on, status))
-        })
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { marginEnd = Theme.dp(ctx, 10) })
+
+        // The switch. Only for plugins that can actually be turned off: a required plugin gets no
+        // knob rather than a knob that cannot move, which would be a control that lies about what
+        // it can do.
+        if (plugin.canBeDisabled) {
+            val toggle = Theme.toggle(ctx, on) { want ->
+                // Write, then repaint from what was written. The knob is NOT flipped optimistically:
+                // a failed write would leave it showing a state the store does not hold.
+                store.setEnabled(plugin, want)
+                Debug.log("plugin ${plugin.id}: enabled=$want")
+                render()
+            }
+            // **The knob must not become the row's click.**
+            //
+            // The card opens the detail screen on tap, and the knob sits inside it. A clickable
+            // child wins the touch in Android, so tapping the knob flips the switch and does NOT
+            // navigate -- which is what we want. This line makes that explicit rather than
+            // accidental: the knob refuses to let its parent intercept a drag that starts on it,
+            // so a slightly sloppy tap cannot be stolen mid-gesture by the row above.
+            toggle.setOnTouchListener { v, event ->
+                v.parent?.requestDisallowInterceptTouchEvent(true)
+                false
+            }
+            titleRow.addView(toggle)
+        }
+
         card.addView(titleRow)
 
         val detail = stateDetail(on, status)
