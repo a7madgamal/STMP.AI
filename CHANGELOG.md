@@ -4929,7 +4929,7 @@ entry, exactly as intended.
 
 ---
 
-## 0.43.65 — the real stamp becomes the launcher icon (build 219) — CURRENT
+## 0.43.65 — the real stamp becomes the launcher icon (build 219)
 2026-11-03
 
 Mido supplied the actual artwork: a distressed rubber stamp, STMP inside a bordered frame, on
@@ -4964,6 +4964,66 @@ old glyph. It now uses `drawable-nodpi/logo_mark.png`, the tight crop with no sa
 forcing a 2:1 mark into a square box letterboxes it into a smear.
 
 `drawable/ic_launcher.xml` stays: it is the pre-26 fallback path and the source of the old glyph.
+
+---
+
+## 0.43.66 — CI: every push to main builds a beta release (build 220) — CURRENT
+2026-11-03
+
+A push to `main` now builds, verifies and publishes a BETA GitHub Release tagged
+`v<versionName>` with the APK attached. Promotion to stable is a metadata flip, not a rebuild.
+
+**The pipeline is a strict chain, and every step is a hard failure.** Mido, 2026-11-03:
+*"no fucking fallbacks of any kind, if I catch you setting a hidden fallback value anywhere in
+this pipeline you'll be fired."* So each guard below fails before the next step spends time, and
+none of them degrades to "probably fine":
+
+1. decode `STMP_KEYSTORE_B64` → **verify the SHA-1 is the expected key** → fail on mismatch
+2. tag guard → fail if `v<versionName>` already exists
+3. three Google values → **any empty = fail** before compiling
+4. `assembleRelease` → read the APK's OWN badging → packaged version AND signer SHA-1 must match
+5. publish, refusing to overwrite an existing release
+
+**Why step 3 exists at all.** `local.properties` is gitignored and `localProp()` returns `""` for
+a missing key — non-fatal by design, so the build succeeds and login answers "build not
+configured". Gmail, Calendar and Drive would be dead in a release that looked perfectly healthy.
+
+**Why step 4 exists at all.** A filename is not evidence. The last point before an artifact goes
+public is the only place that can prove the APK is the one the repo describes.
+
+**The debug-keystore fallback is gone from `build.gradle.kts`.** It silently produced BUILD
+SUCCESS with the wrong identity — an APK that will not install over existing STMP, whose SHA-1 is
+not the one registered in Google Cloud Console, so OAuth rejects it. Wrong artifact, every signal
+green. The replacement guard is scoped by `taskGraph.whenReady` to tasks that actually sign, so
+`testDebugUnitTest` and `lint` still run on a machine with no keystore (exactly a CI PR job) while
+`assemble*`/`bundle*` fail before compiling. Proven both ways: tests pass with the keystore moved
+away, `assembleDebug` fails.
+
+Two bugs in that guard, both found by testing rather than reading:
+- a bare `allTasks` inside `whenReady` resolves to `project.allTasks` (every registered task,
+  `assemble` included), so it fired on `testDebugUnitTest` — fixed with `graph.allTasks`
+- a loose `startsWith("bundle")` matched AGP's internal `bundleDebugClassesToCompileJar`, which
+  appears in a plain test graph — fixed by anchoring on a `Debug`/`Release` suffix
+
+**`version-check.py` is rewritten to a tag rule.** The old check compared the working tree against
+`HEAD`, which only asks "did you edit this file since the last commit" — and in CI both sides are
+identical by definition, so it failed EVERY run. That is not a stricter check, it is a broken one.
+The real invariant is that two releases must never share a version, and a release is identified by
+its tag, so the tag is what gets checked.
+
+**Beta and stable are the same bytes.** `master` publishes with `prerelease: true`;
+`tools/promote.sh` (or the Promote workflow) sends a REST `PATCH` with `prerelease=false`. Not
+`gh release edit --prerelease=false` — the CLI's boolean flags have historically ignored an
+explicit value, leaving the release a prerelease while exiting 0. A false success is the one
+outcome this pipeline must never report, so promotion also re-reads the state afterwards and fails
+if it did not take.
+
+**PRs run tests and lint only.** No keystore, no credentials, no build, no release — and notably
+no version guard, because a PR legitimately carries the version of the tag it branched from.
+
+Still required before the first run: four repo secrets (`STMP_KEYSTORE_B64`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_SERVER_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Until they exist the release job fails at step
+1, which is the guard doing its job rather than a defect.
 
 ---
 

@@ -1,0 +1,155 @@
+name: Promote
+
+# Move an existing BETA release to STABLE.
+#
+# This changes NOTHING about the artifact. Promotion flips one metadata field —
+# `prerelease: false` — so the bytes, the tag, the signature and the versionCode
+# are all identical to what beta testers already installed. Rebuilding here would
+# be worse than useless: a second build is not bit-for-bit reproducible, so the
+# promoted APK would differ from the one that was tested.
+#
+# That is the pattern established projects use (Electron, Flutter, Rust): one
+# immutable artifact per version, a mutable marker saying which channel it is in.
+#
+# Designed to be driven by an agent or a human: it takes a tag, verifies the
+# preconditions, and fails loudly rather than guessing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to promote, e.g. v0.43.66'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: promote beta to stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # --- Preconditions, all hard failures -----------------------------------
+      #
+      # Refusing a bad input is the whole job here. Each check below exists
+      # because its absence would produce a "successful" promotion of something
+      # that was never released, or of a tarball with no APK in it.
+      - name: Check release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # The tag must exist as a git tag. A release can exist without the tag
+          # being fetched locally, but the release itself must exist upstream.
+          if ! git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "::error::tag $TAG does not exist in this repository"
+            exit 1
+          fi
+
+          # The release must exist, must not be a draft (drafts are invisible to
+          # the update checker, so promoting one would ship nothing), and must
+          # actually carry an installable APK.
+          gh release view "$TAG" --json isDraft,isPrerelease,assets > release.json
+
+          DRAFT=$(python3 -c "import json;print(json.load(open('release.json'))['isDraft'])")
+          PRE=$(python3 -c "import json;print(json.load(open('release.json'))['isPrerelease'])")
+          APKS=$(python3 -c "
+          import json
+          a = json.load(open('release.json'))['assets']
+          print(sum(1 for x in a if x['name'].endswith('.apk')))
+          ")
+
+          echo "draft=$DRAFT prerelease=$PRE apk_assets=$APKS"
+
+          if [ "$DRAFT" = "True" ]; then
+            echo "::error::$TAG is a DRAFT release. Drafts are invisible to the updater, so promoting one would ship nothing."
+            exit 1
+          fi
+          if [ "$PRE" = "False" ]; then
+            echo "::error::$TAG is already a stable release — refusing to promote it twice."
+            exit 1
+          fi
+          if [ "$APKS" -ne 1 ]; then
+            echo "::error::$TAG carries $APKS APK assets; expected exactly 1."
+            exit 1
+          fi
+
+      # --- Verify the artifact before it becomes the stable channel -----------
+      #
+      # Promotion publishes this build to everyone on the stable channel, so its
+      # signer is checked here too. If the release were tampered with between
+      # build and promotion, this is the step that notices.
+      - name: Download and verify the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          EXPECTED_SHA1: "87DDD5DEFA068933F44EC699533A1B00ED313103"
+        run: |
+          set -euo pipefail
+          mkdir -p promote && cd promote
+          gh release download "$TAG" --pattern '*.apk'
+          APK=$(ls *.apk | head -1)
+          echo "downloaded: $APK"
+
+          # `keytool -printcert -jarfile` reads the signer straight out of the APK,
+          # so this job needs no Android SDK at all — only a JDK.
+          SIGNER=$(keytool -printcert -jarfile "$APK" 2>/dev/null \
+                    | grep -oE 'SHA1: [0-9A-F:]+' | head -1 | sed 's/SHA1: //; s/://g' || true)
+          echo "signer SHA-1: ${SIGNER:-<none>}"
+          if [ -z "$SIGNER" ] || [ "$SIGNER" != "$EXPECTED_SHA1" ]; then
+            echo "::error::APK in $TAG is not signed by the expected key (got ${SIGNER:-none}, expected $EXPECTED_SHA1)"
+            exit 1
+          fi
+
+      # Use the REST API rather than `gh release edit --prerelease=false`.
+      # The CLI's bool flags historically did not accept an explicit value, so the
+      # "false" was ignored and the release stayed a prerelease while the command
+      # exited 0 — the exact class of false success this pipeline forbids. PATCH is
+      # unambiguous, and `make_latest` is set explicitly so the stable pointer moves
+      # to this release rather than to whatever GitHub guesses is newest.
+      - name: Flip prerelease to false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          ID=$(gh release view "$TAG" --json databaseId -q .databaseId)
+          if [ -z "$ID" ]; then
+            echo "::error::could not resolve a release id for $TAG"
+            exit 1
+          fi
+          gh api -X PATCH "repos/${{ github.repository }}/releases/$ID" \
+            -F prerelease=false -F make_latest=true > /dev/null
+          echo "promoted $TAG to stable"
+
+      - name: Confirm the new state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json isPrerelease,isLatest > after.json
+          PRE=$(python3 -c "import json;print(json.load(open('after.json'))['isPrerelease'])")
+          LATEST=$(python3 -c "import json;print(json.load(open('after.json'))['isLatest'])")
+          echo "prerelease=$PRE latest=$LATEST"
+          if [ "$PRE" != "False" ]; then
+            echo "::error::promotion did not take: $TAG is still marked prerelease"
+            exit 1
+          fi

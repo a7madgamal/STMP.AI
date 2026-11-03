@@ -37,42 +37,44 @@ android {
      * so an update preserves permissions and data.
      */
     /*
-     * Signing, with a fallback so a fresh clone BUILDS.
+     * Signing. ONE keystore, and a missing one is a hard error.
      *
-     * The project's own keystore is gitignored (it is the app's identity, and committing it would
-     * let anyone ship an update as this app). But pointing `storeFile` at a file that does not
-     * exist makes `assembleDebug` fail before a single line of code is compiled — which is the
-     * worst possible first experience for someone opening the repo. So: use the project keystore
-     * when it is present, otherwise fall back to the standard debug keystore that the Android SDK
-     * generates on first use.
+     * This used to fall back to `~/.android/debug.keystore` so a fresh clone would still build.
+     * That fallback was removed (Mido, 2026-11-03: *"no fucking fallbacks of any kind"*), and the
+     * reason is the one a fallback always hides: it produced a BUILD SUCCESS with the wrong
+     * identity. A different signing key is a different app to Android — an APK signed with the
+     * debug keystore will not install over one signed with the project key, and its SHA-1 is not
+     * the one registered in Google Cloud Console, so OAuth rejects it. Everything about the
+     * artifact would be wrong while every signal said it was fine.
      *
-     * The two are NOT equivalent, and the difference matters: a different signing key is a
-     * different app to Android, so an APK signed with the fallback will not install over one
-     * signed with the project key. That is why this is a fallback for building, not for shipping.
+     * A missing keystore is a setup problem with exactly one fix — restore the keystore — so the
+     * build says that, immediately, instead of shipping something that looks right.
+     *
+     * The keystore is deliberately gitignored: it IS the app's identity, and committing it would
+     * let anyone publish an update as this app. Restore it from the password manager or the
+     * documented outage copy; never commit it.
      */
     signingConfigs {
         create("stable") {
-            val projectKeystore = file("../keystore/stmp.jks")
-            if (projectKeystore.exists()) {
-                storeFile = projectKeystore
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            } else {
-                storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
+            // NOTE: no existence check here, deliberately — see `requireKeystoreForSigning`
+            // below. Throwing from this block runs at CONFIGURATION time, so it would also
+            // fail `testDebugUnitTest` and `lint`, which need no keystore at all. A check
+            // in the wrong place is not a stricter check, it is a broken build for tasks
+            // that never sign anything.
+            storeFile = file("../keystore/stmp.jks")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
+
 
     defaultConfig {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 219
-        versionName = "0.43.65"
+        versionCode = 220
+        versionName = "0.43.66"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -247,3 +249,50 @@ dependencies {
     // the classpath and re-open exactly the hole this is closing.
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
+
+/*
+ * The signing keystore is REQUIRED — for tasks that actually sign, and nowhere else.
+ *
+ * SCOPE IS THE POINT. This lives at the top level and fires from `taskGraph.whenReady`, so it
+ * runs once the requested tasks are known:
+ *
+ *   - `testDebugUnitTest`, `lint`, `compileDebugKotlin`  -> pass on a machine with no keystore
+ *     (exactly a CI pull-request job, which has no secrets by design)
+ *   - `assembleRelease`, `assembleDebug`, `bundle*`      -> FAIL BEFORE COMPILING if the key
+ *     is missing
+ *
+ * A throw inside `signingConfigs { }` would run at CONFIGURATION time and fail the test and
+ * lint tasks too. That is not a stricter check, it is a broken build for tasks that never
+ * sign anything.
+ *
+ * WHAT THIS REPLACES: a silent fallback to `~/.android/debug.keystore`. It produced BUILD
+ * SUCCESS with the wrong identity — an APK that will not install over existing STMP, whose
+ * SHA-1 is not the one registered in Google Cloud Console, so OAuth rejects it. Wrong
+ * artifact, every signal green. Removed 2026-11-03 (Mido: "no fucking fallbacks of any kind").
+ */
+gradle.taskGraph.whenReady(object : org.gradle.api.Action<org.gradle.api.execution.TaskExecutionGraph> {
+    override fun execute(graph: org.gradle.api.execution.TaskExecutionGraph) {
+        // Anchor on a BUILD TYPE suffix. A loose `startsWith("bundle")` also matches AGP's
+        // internal `bundleDebugClassesToCompileJar` / `bundleDebugClassesToRuntimeJar`, which
+        // appear in a plain `testDebugUnitTest` graph and produce no signed artifact — so the
+        // guard fired on the test job and a keystore-less CI pull request could never pass.
+        // `assembleDebug`, `assembleRelease`, `bundleRelease` all end in a build type; nothing
+        // that only compiles or packages classes does.
+        val artifactTask = Regex("^(assemble|bundle)[A-Za-z]*?(Debug|Release)$")
+        val signsSomething = graph.allTasks.any { artifactTask.matches(it.name) }
+        if (!signsSomething) return
+
+        val key = rootProject.file("keystore/stmp.jks")
+        if (!key.isFile) {
+            throw GradleException(
+                "Signing keystore not found: " + key.absolutePath + "\n" +
+                    "This build has NO fallback key on purpose. A debug-signed APK is a " +
+                    "different app identity: it will not install over an existing STMP, and its " +
+                    "SHA-1 does not match the one registered in Google Cloud Console, so OAuth " +
+                    "would fail.\n" +
+                    "Restore keystore/stmp.jks (alias androiddebugkey, password android, " +
+                    "SHA-1 87:DD:D5:DE:FA:06:89:33:F4:4E:C6:99:53:3A:1B:00:ED:31:31:03)."
+            )
+        }
+    }
+})

@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-Version-bump guard — a NEW change must be a NEW version. Enforced, not remembered.
+Version guard — a released version must never be released twice.
 
 WHY THIS EXISTS
-    "Never use the last version" is a standing rule (Mido), and it was violated by building a
-    change without bumping `versionName`/`versionCode`, so the APK came out as the SAME
-    version the user already had. That is mechanical, so a script enforces it: compare the
-    working-tree version against the last COMMITTED version (`HEAD`), and fail if they are
-    equal. A change with no version bump can never ship.
+    The old check compared the working tree against `HEAD`, which only answers
+    "did you edit this file since the last commit". That is not the invariant
+    anyone cares about, and in CI it is worse than useless: on a clean checkout
+    the two are identical by definition, so it failed on EVERY run.
+
+    The real invariant is: **two releases must never carry the same version.**
+    A release is identified by its tag, so the tag is what this checks.
 
 WHAT IT CHECKS
-    1. `app/build.gradle.kts` has a `versionCode` and `versionName` in `defaultConfig`.
-    2. The working-tree values differ from `HEAD`'s values. Equal -> FAIL ("you reused the
-       last version").
-       - On the very first commit (no HEAD version to read) it passes with a note: there is
-         no prior version to collide with.
+    1. `app/build.gradle.kts` declares `versionCode` and `versionName`.
+    2. No tag `v<versionName>` already exists.
+
+    Both are facts about the repository, so the check behaves identically on a
+    laptop and in CI — no flags, no event payload, no `--base`.
+
+EXIT
+    0 — this version has never been released
+    1 — it has, or the version is unreadable
 
 USAGE
-    python3 tools/version-check.py        # exit 0 = bumped (or first commit), 1 = reused
-
-Note: this checks the VERSION, not the changelog or the filename. `changelog-check.py` covers
-the changelog; the filename is produced mechanically from `versionName` by the Gradle build,
-and `taildrop-s22.sh` refuses any filename that is not `stmp-vX.Y.Z.apk`.
+    python3 tools/version-check.py
 """
 
 import re
@@ -34,6 +36,8 @@ GRADLE = ROOT / "app" / "build.gradle.kts"
 
 VERSION_CODE_RE = re.compile(r"\bversionCode\s*=\s*(\d+)")
 VERSION_NAME_RE = re.compile(r'\bversionName\s*=\s*"([^"]+)"')
+
+TAG_PREFIX = "v"
 
 
 def fail(msg: str) -> None:
@@ -49,43 +53,49 @@ def read_version(text: str) -> tuple[str, str]:
     return code.group(1), name.group(1)
 
 
-def head_version() -> tuple[str, str] | None:
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(ROOT), "show", "HEAD:app/build.gradle.kts"],
-            capture_output=True, text=True, check=True,
-        ).stdout
-    except subprocess.CalledProcessError:
-        # No committed copy — this is the first commit; nothing to collide with.
-        return None
-    code = VERSION_CODE_RE.search(out)
-    name = VERSION_NAME_RE.search(out)
-    if not code or not name:
-        return None
-    return code.group(1), name.group(1)
+def tag_exists(tag: str) -> bool:
+    """Is `tag` already in this repo?
+
+    `git rev-parse --verify` is the check rather than parsing `git tag`, because
+    it is exact: `refs/tags/v1.0` matches only that ref, while a text search
+    would also match `v1.0.1` and `v1.0-rc1`.
+
+    A NON-EXISTENT-REF exit code is the answer "no"; any OTHER failure is a real
+    error (not a git repo, corrupt object store) and must not be read as "no".
+    """
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+         f"refs/tags/{tag}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        # 1 means "no such ref" — the only failure that is a legitimate answer.
+        return False
+    fail(
+        f"could not query git for tag {tag!r} (exit {result.returncode}): "
+        f"{result.stderr.strip() or 'no stderr'}"
+    )
+    raise AssertionError("unreachable")
 
 
 def main() -> None:
     if not GRADLE.is_file():
         fail(f"{GRADLE} not found")
 
-    work = read_version(GRADLE.read_text(encoding="utf-8"))
-    head = head_version()
+    code, name = read_version(GRADLE.read_text(encoding="utf-8"))
+    tag = f"{TAG_PREFIX}{name}"
 
-    if head is None:
-        print("version-check: ok — no committed version to collide with")
-        return
-
-    if work == head:
+    if tag_exists(tag):
         fail(
-            f"working version {work[1]} (code {work[0]}) is unchanged from HEAD — "
-            "a new change must bump versionCode and versionName"
+            f"tag {tag} already exists — version {name} (code {code}) has been "
+            f"released. Two releases must never share a version: bump "
+            f"versionCode and versionName in app/build.gradle.kts."
         )
 
-    print(
-        f"version-check: ok — {head[1]} (code {head[0]}) -> "
-        f"{work[1]} (code {work[0]})"
-    )
+    print(f"version-check: ok — {name} (code {code}); tag {tag} is unused")
 
 
 if __name__ == "__main__":

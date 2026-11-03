@@ -1,0 +1,249 @@
+name: Release
+
+# Every push to `main` produces a BETA release: a GitHub Release tagged
+# `v<versionName>` with the APK attached and `prerelease: true`.
+#
+# Promoting is a metadata change on that same release (see promote.yml) — the
+# artifact is never rebuilt, re-tagged or re-signed. That is how Electron, Flutter
+# and Rust ship channels: one immutable artifact per version, a mutable marker
+# saying which channel it is in.
+#
+# Every step below is a HARD FAILURE on bad input. There are no fallbacks in this
+# pipeline by design (Mido, 2026-11-03): a guard that degrades to "probably fine"
+# produces a green run and a wrong artifact, which is worse than a red run.
+
+on:
+  push:
+    branches: [main]
+  # Manual re-run of the same commit. Useful after fixing a secret, and it must
+  # obey the same guards — including the version tag check, which will refuse a
+  # version that already has a release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_SHA1: "87DDD5DEFA068933F44EC699533A1B00ED313103"
+
+jobs:
+  release:
+    name: build and publish beta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 fetches tags too, which the version guard needs. There is no
+          # `fetch-tags` input on this action -- passing one is silently ignored, and a
+          # silently-ignored input is precisely what this pipeline is not allowed to rely on.
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
+      # --- Guard 1: the keystore must exist, decode, and be the RIGHT key ------
+      #
+      # The SHA-1 check is the point. A decode that produces *a* keystore is not
+      # success: a different key is a different app identity, so the APK would not
+      # install over existing STMP and its fingerprint would not match the one
+      # registered in Google Cloud Console, breaking OAuth. Verifying the
+      # fingerprint here turns that into a pre-build failure instead of a release
+      # nobody can install.
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.STMP_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::STMP_KEYSTORE_B64 is not set. It must be the base64 of keystore/stmp.jks."
+            exit 1
+          fi
+          mkdir -p keystore
+          printf '%s' "$KEYSTORE_B64" | base64 -d > keystore/stmp.jks
+          if [ ! -s keystore/stmp.jks ]; then
+            echo "::error::keystore decoded to an empty file — the secret is not valid base64 of a keystore."
+            exit 1
+          fi
+          chmod 600 keystore/stmp.jks
+
+      - name: Verify keystore fingerprint
+        run: |
+          set -euo pipefail
+          # Exactly one SHA-1, or fail. A keystore can carry several certs, and
+          # `| head -1` would silently verify whichever keytool printed first.
+          mapfile -t SHA1S < <(keytool -list -v -keystore keystore/stmp.jks \
+                    -storepass android -alias androiddebugkey 2>/dev/null \
+                    | grep -oE 'SHA1: [0-9A-F:]+' || true)
+          if [ "${#SHA1S[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 certificate in the keystore, found ${#SHA1S[@]}"
+            exit 1
+          fi
+          ACTUAL=$(printf '%s' "${SHA1S[0]}" | sed 's/SHA1: //; s/://g')
+          echo "keystore SHA-1: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED_SHA1" ]; then
+            echo "::error::wrong signing key. Expected $EXPECTED_SHA1 but the secret holds $ACTUAL."
+            echo "::error::A different key is a different app identity: the APK would not install over existing STMP and OAuth would reject it."
+            exit 1
+          fi
+
+      # --- Guard 2: this version must never have been released ----------------
+      - name: Version guard (tag must be unused)
+        run: python3 tools/version-check.py
+
+      - name: Read version
+        id: v
+        run: |
+          set -euo pipefail
+          # Exactly one match each, or this fails. `| head -1` would pick a winner
+          # out of several silently, which is how a build ends up releasing a
+          # version that is not the one the file mostly says.
+          NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts || true)
+          CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts || true)
+          for pair in "versionName:$NAME" "versionCode:$CODE"; do
+            label="${pair%%:*}"; val="${pair#*:}"
+            count=$(printf '%s\n' "$val" | grep -c . || true)
+            if [ "$count" -ne 1 ]; then
+              echo "::error::expected exactly one $label in app/build.gradle.kts, found $count"
+              exit 1
+            fi
+          done
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NAME" >> "$GITHUB_OUTPUT"
+
+      # --- Guard 3: Google OAuth credentials must be present ------------------
+      #
+      # local.properties is gitignored and localProp() returns "" for a missing
+      # key, which does NOT fail the build — it produces an APK that starts and
+      # then answers "build not configured" on login. Gmail, Calendar and Drive
+      # would be dead in a release that looked perfectly fine. So the absence is
+      # checked before compiling.
+      - name: Write local.properties from secrets
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          n=0
+          for v in GOOGLE_CLIENT_ID GOOGLE_SERVER_CLIENT_ID GOOGLE_CLIENT_SECRET; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::$v is not set. A release built without it has working Google sign-in DISABLED."
+              n=$((n+1))
+            fi
+          done
+          if [ "$n" -ne 0 ]; then exit 1; fi
+
+          {
+            echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+            echo "google.clientId=$GOOGLE_CLIENT_ID"
+            echo "google.serverClientId=$GOOGLE_SERVER_CLIENT_ID"
+            echo "google.clientSecret=$GOOGLE_CLIENT_SECRET"
+          } > local.properties
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
+      - name: Lint
+        run: ./gradlew :app:lintDebug --console=plain
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --console=plain
+
+      # --- Guard 4: the APK must be what the repo says it is ------------------
+      #
+      # A filename is not evidence. Read the packaged badging and the APK's own
+      # signer, and compare both against the values this run is supposed to
+      # produce. This is the last point before the artifact becomes public.
+      - name: Verify the built APK
+        env:
+          EXPECTED_NAME: ${{ steps.v.outputs.name }}
+          EXPECTED_CODE: ${{ steps.v.outputs.code }}
+        run: |
+          set -euo pipefail
+          # Exactly one APK, or fail. `head -1` would quietly verify one file and
+          # publish it while a second, different APK sat beside it.
+          mapfile -t APKS < <(ls app/build/outputs/apk/release/*.apk 2>/dev/null || true)
+          if [ "${#APKS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 release APK, found ${#APKS[@]}: ${APKS[*]:-none}"
+            exit 1
+          fi
+          APK="${APKS[0]}"
+          echo "APK: $APK"
+
+          # Do not trust an env var to name the SDK. setup-android exports it, but reading
+          # the tools from the runner's own SDK root is the fact, not the convention.
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK" ] || [ ! -d "$SDK/build-tools/35.0.0" ]; then
+            echo "::error::build-tools/35.0.0 not found under '${SDK:-<unset>}'"
+            exit 1
+          fi
+          BADGING=$("$SDK"/build-tools/35.0.0/aapt dump badging "$APK")
+          GOT_NAME=$(printf '%s' "$BADGING" | grep -oP "^package:.*versionName='\K[^']+")
+          GOT_CODE=$(printf '%s' "$BADGING" | grep -oP "^package:.*versionCode='\K[^']+")
+          echo "packaged: $GOT_NAME (code $GOT_CODE)"
+          if [ "$GOT_NAME" != "$EXPECTED_NAME" ] || [ "$GOT_CODE" != "$EXPECTED_CODE" ]; then
+            echo "::error::packaged version does not match the repo: expected $EXPECTED_NAME (code $EXPECTED_CODE), got $GOT_NAME (code $GOT_CODE)"
+            exit 1
+          fi
+
+          # One signer, or fail. A multi-signed APK is not something this project
+          # produces, and picking a winner out of several would verify the wrong key.
+          mapfile -t SIGNERS < <("$SDK"/build-tools/35.0.0/apksigner verify --print-certs "$APK" \
+                    | grep -oE 'certificate SHA-1 digest: [0-9a-f]+' || true)
+          if [ "${#SIGNERS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 signing certificate in the APK, found ${#SIGNERS[@]}"
+            exit 1
+          fi
+          SIGNER=$(printf '%s' "${SIGNERS[0]}" | awk '{print toupper($NF)}')
+          echo "signer SHA-1: $SIGNER"
+          if [ "$SIGNER" != "$EXPECTED_SHA1" ]; then
+            echo "::error::APK is not signed by the expected key (got ${SIGNER:-none}, expected $EXPECTED_SHA1)"
+            exit 1
+          fi
+
+          # The asset name must be the house pattern, so a consumer can rely on it.
+          cp "$APK" "stmp-v${EXPECTED_NAME}.apk"
+          echo "staged stmp-v${EXPECTED_NAME}.apk"
+
+      # --- Publish -----------------------------------------------------------
+      #
+      # prerelease: true -> this is BETA. Promotion flips the flag (promote.yml);
+      # the artifact is untouched.
+      - name: Publish beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          NAME: ${{ steps.v.outputs.name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists -- refusing to overwrite a published artifact."
+            exit 1
+          fi
+          gh release create "$TAG" "stmp-v${NAME}.apk" \
+            --title "v${NAME}" \
+            --prerelease \
+            --notes "Beta build of v${NAME}. Promote with the Promote workflow to move this exact artifact to stable."
