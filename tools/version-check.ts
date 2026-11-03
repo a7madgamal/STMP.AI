@@ -68,7 +68,7 @@ function readVersion(text: string): Version {
  * answer. Anything else (not a repo, corrupt object store) is a real error and
  * must not be read as "no".
  */
-function tagExists(tag: string): boolean {
+function tagExistsLocally(tag: string): boolean {
   try {
     execFileSync("git", ["-C", ROOT, "rev-parse", "--verify", "--quiet", `refs/tags/${tag}`], {
       stdio: ["ignore", "pipe", "pipe"],
@@ -83,6 +83,44 @@ function tagExists(tag: string): boolean {
         `${stderr === undefined ? "no stderr" : stderr.toString().trim()}`,
     );
   }
+}
+
+/**
+ * Is `tag` published to origin, whether or not this clone knows about it?
+ *
+ * **This is the check that actually matters, and its absence was a real bug.** The guard used
+ * to consult only LOCAL refs. CI clones with `fetch-depth: 0` so it saw every tag; a laptop that
+ * had not fetched since the release saw none — so the same version produced two different
+ * verdicts. Locally it said "tag is unused" for `v0.43.73` while the tag was demonstrably on
+ * origin and a release already existed. The next local build would have re-released it, and the
+ * check that was supposed to prevent exactly that said OK.
+ *
+ * Asking the REMOTE makes the verdict a fact about the repository rather than about when this
+ * clone last talked to it. Local refs are still consulted first as a cheap positive, since a
+ * local tag is proof enough and avoids a network call.
+ *
+ * A network failure is NOT read as "absent" — that would turn an unreachable remote into a
+ * silent green light on the one check whose job is refusing a duplicate release.
+ */
+function tagExists(tag: string): boolean {
+  if (tagExistsLocally(tag)) return true;
+
+  let out: string;
+  try {
+    out = execFileSync("git", ["-C", ROOT, "ls-remote", "--tags", "origin", `refs/tags/${tag}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 20_000,
+    });
+  } catch (error: unknown) {
+    const stderr = (error as { stderr?: Buffer }).stderr;
+    fail(
+      `could not ask origin whether tag '${tag}' exists: ` +
+        `${stderr === undefined ? String(error) : stderr.toString().trim()}\n` +
+        "Refusing to report this version as unreleased on the strength of a failed lookup.",
+    );
+  }
+  return out.trim().length > 0;
 }
 
 function main(): void {

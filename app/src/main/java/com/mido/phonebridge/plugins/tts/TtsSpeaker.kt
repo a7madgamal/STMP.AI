@@ -43,7 +43,18 @@ object TtsSpeaker {
     class TtsFailed(message: String) : RuntimeException(message)
 
     private class Job(
-        /** Kept per job because a job may outlive the call that enqueued it. */
+        /**
+         * The APPLICATION context, never an Activity one.
+         *
+         * `StaticFieldLeak` flags this because [TtsSpeaker] is an `object` and the field is a
+         * Context — but the reference is application-scoped by construction: the only
+         * constructor call is `Job(ctx.applicationContext, ...)` in [speak]. An application
+         * context lives as long as the process, so holding it in a static is not a leak.
+         *
+         * Suppressed rather than restructured: threading a context-free handle through the
+         * queue would add indirection to satisfy a check that is already satisfied.
+         */
+        @Suppress("StaticFieldLeak")
         val ctx: Context,
         val text: String,
         val settings: TtsSettings,
@@ -62,9 +73,11 @@ object TtsSpeaker {
     private val lock = Any()
 
     /** Waiting jobs, in arrival order. */
+    @Suppress("StaticFieldLeak")
     private val line = ArrayDeque<Job>()
 
     /** The job the engine is currently speaking, or null when idle. */
+    @Suppress("StaticFieldLeak")
     private var speaking: Job? = null
 
     /**

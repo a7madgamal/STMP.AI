@@ -396,6 +396,10 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * truncated file with no indication it was our fault. `delete` on the URI we just created is
      * the only cleanup that cannot misfire on someone else's file.
      */
+    // Lint's Recycle check does not follow `use {}` across the `?: throw` on the line above it,
+    // so it reports the stream as unclosed. It is closed by `out.use { }` below, on every path
+    // including the throw.
+    @Suppress("Recycle")
     @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.Q)
     private fun saveToDownloads(stream: java.io.InputStream, name: String, mimeType: String): Saved {
         val resolver = ctx.contentResolver

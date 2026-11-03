@@ -220,13 +220,15 @@ class StampOverlay(
                 }
             })
         }
-        AnimatorSet().apply {
-            play(slam).with(fadeIn).with(flatten)
-            play(bleedAnim).after(slam)
-            play(settle).after(bleedAnim)
-            play(fadeOut).after(settle)
-            start()
-        }
+        // Built, then started — NOT `apply { ... start() }`. Starting a set from inside the
+        // block that is still wiring it reads as a side effect in a constructor, and lint's
+        // Recycle check is right to flag it: the reader cannot tell binding from starting.
+        val set = android.animation.AnimatorSet()
+        set.play(slam).with(fadeIn).with(flatten)
+        set.play(bleedAnim).after(slam)
+        set.play(settle).after(bleedAnim)
+        set.play(fadeOut).after(settle)
+        set.start()
     }
 
     override fun onDraw(canvas: Canvas) {

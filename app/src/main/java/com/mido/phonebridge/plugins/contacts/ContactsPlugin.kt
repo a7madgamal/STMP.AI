@@ -199,6 +199,12 @@ class ContactsPlugin(private val ctx: Context) : Plugin {
      * deliberately no `finally` beside it: an empty cleanup block reads like a cleanup that was
      * forgotten rather than one that is unnecessary.
      */
+    // Lint's Recycle check flags these cursors because they are created inside a `try` whose
+    // `catch` blocks rethrow: it cannot prove the subsequent `use {}` runs on that path. It does
+    // — `use` is a finally, and every branch below reaches it. Suppressed at the method rather
+    // than restructured, because wrapping the acquisition in another `use` would nest two
+    // close mechanisms for one cursor, which is strictly worse to read.
+    @Suppress("Recycle")
     private fun scanPhones(pattern: String, acc: ContactRules.Accumulator): Long {
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
@@ -249,6 +255,12 @@ class ContactsPlugin(private val ctx: Context) : Plugin {
      * Matched on the address OR the name, so `GET /contacts?query=ahmed` finds someone whose
      * display name is Ahmed even though his address says nothing about it.
      */
+    // Lint's Recycle check flags these cursors because they are created inside a `try` whose
+    // `catch` blocks rethrow: it cannot prove the subsequent `use {}` runs on that path. It does
+    // — `use` is a finally, and every branch below reaches it. Suppressed at the method rather
+    // than restructured, because wrapping the acquisition in another `use` would nest two
+    // close mechanisms for one cursor, which is strictly worse to read.
+    @Suppress("Recycle")
     private fun scanEmails(pattern: String, acc: ContactRules.Accumulator): Long {
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Email.CONTACT_ID,
@@ -306,6 +318,12 @@ class ContactsPlugin(private val ctx: Context) : Plugin {
      * A failure here is NOT fatal. The names are missing either way, and sinking a search that
      * already has correct numbers and addresses would answer less than the device can.
      */
+    // Lint's Recycle check flags these cursors because they are created inside a `try` whose
+    // `catch` blocks rethrow: it cannot prove the subsequent `use {}` runs on that path. It does
+    // — `use` is a finally, and every branch below reaches it. Suppressed at the method rather
+    // than restructured, because wrapping the acquisition in another `use` would nest two
+    // close mechanisms for one cursor, which is strictly worse to read.
+    @Suppress("Recycle")
     private fun resolveMissingNames(acc: ContactRules.Accumulator) {
         val ids = acc.blankNameIds()
         if (ids.isEmpty()) return

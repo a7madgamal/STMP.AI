@@ -73,8 +73,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 227
-        versionName = "0.43.73"
+        versionCode = 228
+        versionName = "0.43.74"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -142,11 +142,28 @@ android {
      * cannot silently accumulate.
      */
     lint {
-        // Real correctness issues fail the build. Stylistic/i18n noise for a
-        // single-user dev app is reported as warnings instead.
+        // **`abortOnError` alone was not enough, and that is what let 8 errors ship.**
+        // `assembleDebug` does not run lint at all — verified: zero lint tasks in its graph —
+        // and `assembleRelease` runs only `lintVital`, which is a narrow subset. So a build
+        // that succeeded said nothing about lint, and the first time it ever ran was in CI.
+        //
+        // The fix is not a setting, it is participation: `check` now depends on lint below, and
+        // `check` is what CI and any future `./gradlew check` runs.
         warningsAsErrors = false
         abortOnError = true
         checkReleaseBuilds = true
+        // Treat these as ERRORS even though they are warnings by default: each has already
+        // caused a real defect in this project, or guards something that would crash a device
+        // rather than merely look wrong.
+        error += setOf(
+            "NewApi",              // caught BigInteger.TWO on API 33 — ed25519 was dead below 33
+            "InlinedApi",          // the same class of bug, via inlined constants
+            "MissingSuperCall",    // caught the missing super.onBackPressed()
+            "Recycle",             // a leaked cursor/typed-array is a slow leak, always a bug
+            "StaticFieldLeak",     // a static Context outlives the Activity that owned it
+            "MissingApplicationIcon",
+            "DataExtractionRules",
+        )
         disable += setOf(
             "GradleDependency",
             "OldTargetApi",
@@ -294,5 +311,30 @@ gradle.taskGraph.whenReady(object : org.gradle.api.Action<org.gradle.api.executi
                     "SHA-1 87:DD:D5:DE:FA:06:89:33:F4:4E:C6:99:53:3A:1B:00:ED:31:31:03)."
             )
         }
+    }
+})
+
+/*
+ * Make `check` actually run lint.
+ *
+ * `assembleDebug` has ZERO lint tasks in its graph (verified) and `assembleRelease` runs only
+ * `lintVital` — a narrow subset. So `./gradlew assembleDebug`, which is the build this project
+ * used for every release handover, could never fail on lint. Eight lint errors shipped that way,
+ * including a class-load crash on API < 33.
+ *
+ * `abortOnError = true` was already set and did nothing, because the task never ran. A severity
+ * setting cannot make a task participate; only the graph can.
+ *
+ * This wires `lintDebug` in front of `check` for the app module. Deliberately NOT attached to
+ * `assembleDebug`: a debug build is the fast inner loop, and blocking it on a full lint pass
+ * would push people to `-x lint`. `check` is the gate, and it is what CI runs.
+ */
+gradle.taskGraph.whenReady(object : org.gradle.api.Action<org.gradle.api.execution.TaskExecutionGraph> {
+    override fun execute(graph: org.gradle.api.execution.TaskExecutionGraph) {
+        val wantsCheck = graph.allTasks.any { it.name == "check" }
+        if (!wantsCheck) return
+        val lintDebug = project(":app").tasks.findByName("lintDebug") ?: return
+        val check = graph.allTasks.firstOrNull { it.name == "check" } ?: return
+        check.dependsOn(lintDebug)
     }
 })

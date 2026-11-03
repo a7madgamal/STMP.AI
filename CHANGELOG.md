@@ -5282,7 +5282,7 @@ Applied to all three jobs that need an SDK (ci.yml ×2, release.yml ×1). Versio
 
 ---
 
-## 0.43.73 — lint found eight real bugs, one of them a shipped crash (build 227) — CURRENT
+## 0.43.73 — lint found eight real bugs, one of them a shipped crash (build 227)
 2026-11-03
 
 CI's first real run got past the SDK and failed on **lint**. All eight errors were real, and this
@@ -5317,6 +5317,57 @@ class-load crash that had been shipping since ed25519 landed. A check that only 
 check that has never been read.
 
 416 tests, 0 failures. Lint clean.
+
+---
+
+## 0.43.74 — lint actually blocks the build now, and the guard checks the remote (build 228) — CURRENT
+2026-11-03
+
+### Why lint never caught anything before
+
+Not an environment difference. **`assembleDebug` has ZERO lint tasks in its graph** — verified with
+`--dry-run` — and `assembleRelease` runs only `lintVital`, a narrow correctness subset. So the
+build this project used for every handover could not fail on lint at all. `abortOnError = true` was
+already set and did nothing, because the task never ran. AGP 8.7.3, JDK 21, same SDK: local and CI
+were identical. The difference was that CI was the first thing in the project's life to invoke
+`lintDebug`.
+
+A severity setting cannot make a task participate. Only the task graph can.
+
+**`check` now depends on `lintDebug`.** Deliberately not attached to `assembleDebug`: a debug build
+is the fast inner loop, and blocking it on a full lint pass would teach people to write `-x lint`.
+`check` is the gate, and it is what CI runs.
+
+**Severity raised for rules that have already cost real bugs or would crash a device:** `NewApi`,
+`InlinedApi`, `MissingSuperCall`, `Recycle`, `StaticFieldLeak`, `MissingApplicationIcon`,
+`DataExtractionRules`.
+
+### What the stricter severities found immediately
+
+Six errors, of which **three were real and three were lint not following `use {}`**:
+
+- **`StampOverlay`** built an `AnimatorSet` and called `start()` inside the same `apply {}` block.
+  Binding and starting in one expression is exactly the readability problem the check exists for;
+  now built, wired, then started.
+- **`TtsSpeaker`** holds `Job` instances in a static `ArrayDeque`. `StaticFieldLeak` flagged it,
+  but the only construction site is `Job(ctx.applicationContext, ...)` — an application context
+  lives as long as the process. Suppressed with that reasoning recorded, rather than threading a
+  context-free handle through the queue to satisfy a check already satisfied.
+- **`ContactsPlugin` ×3 and `DrivePlugin` ×1** are direct lint false positives: every cursor and
+  stream is closed by `use {}`, which is a `finally`. Lint cannot see it across the `?: throw` on
+  the line between acquisition and use. Suppressed at the function with the reason, because
+  wrapping the acquisition in a second `use` would nest two close mechanisms for one handle.
+
+### The guard now asks the REMOTE
+
+`version-check.ts` consulted local refs only. CI clones with `fetch-depth: 0` and saw every tag; a
+laptop that had not fetched since a release saw none — so for `v0.43.73` local said "unused" while
+the tag was on origin and a release existed. The next local build would have re-released it.
+
+It now falls back to `git ls-remote --tags origin`. A network failure is NOT read as "absent": the
+check refuses rather than reporting a version unreleased on the strength of a failed lookup.
+
+416 tests, 0 failures. `check` green including lint.
 
 ---
 
