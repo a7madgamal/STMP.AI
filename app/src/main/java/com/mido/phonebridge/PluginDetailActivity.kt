@@ -133,6 +133,18 @@ class PluginDetailActivity : BridgeScreen() {
             for (p in perms) content.addView(permissionRow(p))
         }
 
+        // --- 2b. SPECIAL ACCESS ---
+        //
+        // Separate from permissions because the REMEDY is different: these are Settings screens,
+        // not dialogs. A permission button that called `requestPermissions` for one of these
+        // would close silently and do nothing, which is the exact failure this distinction
+        // exists to prevent.
+        val access = plugin.specialAccess()
+        if (access.isNotEmpty()) {
+            content.addView(Theme.sectionHeader(this, "System access"))
+            for (a in access) content.addView(accessRow(a))
+        }
+
         // --- 3. SETTINGS ---
         val settings = plugin.settings()
         if (settings.isNotEmpty()) {
@@ -241,6 +253,86 @@ class PluginDetailActivity : BridgeScreen() {
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.fromParts("package", packageName, null),
         ))
+    }
+
+    /**
+     * One special access: state, what it is, and the only thing that can grant it.
+     *
+     * Every branch opens an Android Settings screen. There is deliberately no "request" path
+     * here because none exists — the system shows no dialog for any of these.
+     */
+    private fun accessRow(access: com.mido.phonebridge.core.SpecialAccess): LinearLayout {
+        val granted = when (access) {
+            com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER ->
+                BridgeService.listenerRef != null
+            com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
+                Settings.canDrawOverlays(this)
+            com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
+                (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+                    .isIgnoringBatteryOptimizations(packageName)
+            com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
+                ApprovalGate.canUseFullScreenIntent(this)
+        }
+
+        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(Theme.text(this, access.label, 14f).apply {
+            setTextColor(Theme.ON_SURFACE)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(Theme.text(this, if (granted) "GRANTED" else "NEEDED", 12f).apply {
+            setTextColor(if (granted) Theme.SUCCESS else Theme.WARNING)
+        })
+        block.addView(row)
+
+        if (!granted) {
+            block.addView(Theme.button(this, "OPEN SETTINGS", Theme.ButtonStyle.PRIMARY, small = true) {
+                openAccessSettings(access)
+            })
+        }
+
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        lp.topMargin = Theme.dp(this, 10)
+        block.layoutParams = lp
+        return block
+    }
+
+    /**
+     * The Settings screen for each access.
+     *
+     * Each one is a different intent, and getting them wrong means the button lands somewhere
+     * unrelated — so they are stated once, here, rather than at every call site that used to
+     * repeat them.
+     */
+    private fun openAccessSettings(access: com.mido.phonebridge.core.SpecialAccess) {
+        val i = when (access) {
+            com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER ->
+                Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+            com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                )
+            com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName"),
+                )
+            com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
+                // API 34+ only; older versions simply cannot revoke it, so nothing to open and
+                // the state above is already correct.
+                Intent("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT").apply {
+                    data = Uri.parse("package:$packageName")
+                }
+        }
+        try {
+            startActivity(i)
+        } catch (e: Exception) {
+            // Reported, not swallowed: a button that silently does nothing is worse than one
+            // that says it could not open the screen.
+            com.mido.phonebridge.Debug.log("cannot open ${access.name} settings: ${e.message}")
+        }
     }
 
     /** One declared setting, rendered by its type. */

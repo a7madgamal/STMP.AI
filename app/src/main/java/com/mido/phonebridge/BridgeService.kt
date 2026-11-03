@@ -722,6 +722,11 @@ class BridgeService : Service() {
         if (PluginRegistry.get("notifications") == null) {
             PluginRegistry.register(NotificationsPlugin(applicationContext))
         }
+        // The account is a plugin because it is a precondition the Google plugins share, and
+        // because "signed in as X" belongs next to the thing that changes it.
+        if (PluginRegistry.get("google") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.google.GooglePlugin(applicationContext))
+        }
         if (PluginRegistry.get("gmail") == null) {
             PluginRegistry.register(GmailPlugin(applicationContext))
         }

@@ -351,6 +351,16 @@ interface Plugin {
      */
     fun permissions(): List<PluginPermission> = emptyList()
 
+    /**
+     * System accesses this plugin needs that are NOT runtime permissions.
+     *
+     * Each of these is a screen in Android Settings, not a dialog, so a `requestPermissions`
+     * call for one does nothing at all. Declared separately from [permissions] for exactly that
+     * reason: the remedy differs, and a representation that could serve both would produce a
+     * button that silently fails.
+     */
+    fun specialAccess(): List<SpecialAccess> = emptyList()
+
     /** The routes this plugin contributes. */
     fun routes(): List<Route>
 

@@ -158,31 +158,17 @@ class MainActivity : BridgeScreen() {
         ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
         container.addView(serverButton)
 
-        // --- 3. CHECKLIST: compact status rows, each actionable ---
-        container.addView(Theme.sectionHeader(this, "Setup"))
+        // --- 3. CHECKLIST: app-wide health, each row actionable ---
+        //
+        // The "Setup" header and the Server row are gone (Mido, 2026-11-03): the hero above
+        // already says "Running · address", so the row repeated the only fact most visits need.
         statusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         container.addView(statusContainer)
 
-        // --- accounts / plugins ---
-        container.addView(Theme.sectionHeader(this, "Account"))
-        accountBanner = TextView(this).apply {
-            textSize = 15f
-            setTextColor(Theme.ON_SURFACE)
-        }
-        container.addView(accountBanner)
-        loginButton = Theme.button(this, "LOGIN WITH GOOGLE", Theme.ButtonStyle.PRIMARY) { startGoogleLogin() }
-        loginButton.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
-        container.addView(loginButton)
-
-        secretsButton = Theme.button(this, "SECRETS & HOSTS", Theme.ButtonStyle.NEUTRAL) {
-            startActivity(Intent(this@MainActivity, SecretsActivity::class.java))
-        }
-        secretsButton.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
-        container.addView(secretsButton)
+        // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
+        // account part to the google plugin"*). Signing in is a precondition the Google plugins
+        // share, so it belongs with them: Plugins → Google account holds the email, the token
+        // state and the sign-in button.
 
         // --- 3b. GATE SWITCH: the one control that decides whether anything is
         // asked of a human at all. Above the plugins, below Setup, because it is
@@ -228,14 +214,18 @@ class MainActivity : BridgeScreen() {
         // the audit-degraded banner lives NEXT TO the log button it explains instead of
         // floating above the group.
         container.addView(Theme.sectionHeader(this, "Tools"))
-        toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // A VERTICAL list, not a row of five squeezed buttons (Mido, 2026-11-03: *"make tools a
+        // vertical list it's too narrow now"*). Five labels across a phone width left each one
+        // ~60dp, which truncated "REQUEST LOG" and "OPTIONS" into unreadable stubs.
+        toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         container.addView(toolsContainer)
         // GET STARTED first: it is the only entry a new user needs, and the whole point of
         // the screen is that nobody has to be told where it is.
         toolsContainer.addView(toolButton("START") { startActivity(Intent(this, OnboardingActivity::class.java)) })
         toolsContainer.addView(toolButton("REQUEST LOG") { startActivity(Intent(this, LogActivity::class.java)) })
         toolsContainer.addView(toolButton("EXCEPTIONS") { startActivity(Intent(this, ExceptionsActivity::class.java)) })
-        toolsContainer.addView(toolButton("OPTIONS") { startActivity(Intent(this, OptionsActivity::class.java)) })
+        // No OPTIONS button: OptionsActivity IS the Settings tab, so a button to it here was a
+        // loop back to the screen you already had a tab for.
         toolsContainer.addView(toolButton("SSH") { startActivity(Intent(this, SshActivity::class.java)) })
 
         // --- 4b. AUDIT BANNER: sits with the log button it explains, not mid-list ---
@@ -600,35 +590,12 @@ class MainActivity : BridgeScreen() {
         }
 
         statusContainer.removeAllViews()
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Server",
-                ServerStatus.checklistValue(state, BridgeService.bindAddress, BridgeService.PORT),
-                when (state) {
-                    ServerStatus.State.RUNNING_HEALTHY,
-                    ServerStatus.State.RUNNING_ATTENTION -> Theme.SUCCESS
-                    ServerStatus.State.UNRESPONSIVE -> Theme.DANGER
-                    ServerStatus.State.FAILED -> Theme.DANGER
-                    ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
-                }
-            )
-        )
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Notification access",
-                if (listenerOk) "connected" else "tap to grant",
-                if (listenerOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { openNotifAccessSettings() }
-            )
-        )
-        statusContainer.addView(
-            Theme.statusRow(
-                this, "Notifications permission",
-                if (notifOk) "granted" else "tap to grant",
-                if (notifOk) Theme.SUCCESS else Theme.WARNING,
-                onClick = { requestNotifPermission() }
-            )
-        )
+        // **Both notification rows moved to the Notifications plugin** (Mido, 2026-11-03:
+        // *"notification related access belong with the notification plugin"*). The plugin
+        // declares them now, so the screen that shows why a notification call failed is the
+        // same screen that fixes it. `listenerOk`/`notifOk` are still read above because
+        // `ServerStatus` uses them to decide whether a healthy bridge can actually serve — the
+        // fact is still needed here, only the controls moved.
         // **The Contacts permission row moved to the Contacts plugin.**
         //
         // It was here because Home was the only screen that could request a permission. Now the
@@ -1001,11 +968,12 @@ class MainActivity : BridgeScreen() {
      * a DESTINATION, not live state, so it gets a small chip and a shared spot in [toolsContainer]
      * rather than a full-width row of its own.
      */
+    /** One full-width row in the vertical tools list. */
     private fun toolButton(label: String, onClick: () -> Unit): MaterialButton =
-        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true, onClick = onClick).apply {
+        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
             layoutParams = LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginEnd = Theme.dp(this@MainActivity, 6) }
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@MainActivity, 6) }
         }
 
     // --- actions ---

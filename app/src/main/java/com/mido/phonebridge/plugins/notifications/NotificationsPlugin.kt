@@ -17,6 +17,30 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
     override val id = "notifications"
     override val displayName = "Notifications"
 
+    /**
+     * Both notification-related accesses live with the notification plugin, on Mido's
+     * instruction (2026-11-03): *"notification related access belong with the notification
+     * plugin"*.
+     *
+     * The split between the two is not cosmetic. `POST_NOTIFICATIONS` is a runtime permission
+     * with a system dialog. The listener is a Settings screen the human must navigate to
+     * themselves, so a `requestPermissions` call for it does nothing whatsoever — which is why
+     * it is declared as [SpecialAccess] rather than pretending to be a permission.
+     */
+    override fun permissions(): List<PluginPermission> = listOf(
+        PluginPermission(
+            permission = "android.permission.POST_NOTIFICATIONS",
+            label = "Notifications",
+            why = "Posting and dismissing notifications on your behalf needs this. Without it " +
+                "the routes still answer, but nothing appears in the shade.",
+            optional = false,
+        )
+    )
+
+    override fun specialAccess(): List<SpecialAccess> = listOf(
+        SpecialAccess.NOTIFICATION_LISTENER
+    )
+
     override fun routes(): List<Route> = listOf(
         Route(
             "GET", "/notifications", "List your notifications", Verb.READ,

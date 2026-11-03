@@ -93,6 +93,29 @@ sealed interface PluginSetting {
 }
 
 /**
+ * Accesses that are NOT runtime permissions.
+ *
+ * A runtime permission is granted by a dialog. These are not: each one is a screen in Settings
+ * that the user must navigate to themselves, so the request that works for a runtime permission
+ * does nothing at all here. Modelling them as permissions would produce a button that silently
+ * fails — which is the defect class `PluginPermission` exists to remove, so they get their own
+ * representation rather than a flag pretending to be one.
+ */
+enum class SpecialAccess(val label: String) {
+    /** Notification listener: reading the notification shade. Settings > notification access. */
+    NOTIFICATION_LISTENER("Notification access"),
+
+    /** Draw over other apps. Needed for the overlay card and the modal. */
+    OVERLAY("Draw over apps"),
+
+    /** Exempt from battery optimisation, so the service survives a doze. */
+    BATTERY_EXEMPT("Battery optimization"),
+
+    /** Full-screen intent: what wakes a LOCKED screen for an approval. */
+    FULL_SCREEN_INTENT("Lock-screen popup"),
+}
+
+/**
  * An Android runtime permission a plugin needs, with the reason the human is shown.
  *
  * **Why this lives on the plugin.** Permission handling is currently scattered: `ContactsPlugin`

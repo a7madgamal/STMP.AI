@@ -5130,10 +5130,16 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.82 (build 236) — 2026-11-03
 - Removed the Contacts permission row from Home; the Contacts plugin now owns requesting it, with the reason shown at the point of need.
 
-## 0.43.83 (build 237) — 2026-11-03 — CURRENT
+## 0.43.83 (build 237) — 2026-11-03
 - Fixed the section header rule striking through its own text; it now sits under the text and spans the full width.
 - Made section headers larger.
 - Fixed the bottom bar underline spanning a third of the screen instead of the width of the label.
+
+## 0.43.84 (build 238) — 2026-11-03 — CURRENT
+- Added a Google account plugin holding the signed-in email, token state and sign-in button.
+- Moved both notification accesses to the Notifications plugin, which now declares runtime permissions and system access separately.
+- Made the Tools list vertical; five buttons across the screen truncated their own labels.
+- Removed the Setup header and the Server row from Home; the hero already states both.
 
 ## Keeping this file honest
 
