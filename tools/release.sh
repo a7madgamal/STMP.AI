@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# One command for the whole STMP ship path. Nothing is trusted to memory.
+# Local ship path: version-check -> changelog-check -> build -> optional taildrop.
 #
-#   version-check  -> fails if this version's tag already exists
-#   changelog-check -> fails if CHANGELOG.md is stale or has a <hash>
-#   assembleDebug  -> builds stmp-v<version>.apk (name is automatic)
-#   taildrop       -> refuses any filename that is not stmp-vX.Y.Z.apk
+# CI is the real release path (`.github/workflows/release.yml` publishes a beta
+# release on every push to main). This script exists for the other job: getting a
+# build onto a phone without waiting for CI.
 #
-# When this succeeds, the ONLY thing printed to stdout is the APK filename — the
-# handover is one line, no hash, no size, no warnings. If anything fails, it stops
-# before a single byte leaves the box.
+#   tools/release.sh                 build only; print the APK name
+#   STMP_NODE=<node> tools/release.sh  build, then taildrop to <node>
+#
+# The node is never hardcoded. Nothing is trusted to memory: both guards run, and
+# the APK name is enforced by taildrop.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+version_name() {
+  grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1
+}
 
 echo "== version-check ==" >&2
 node tools/version-check.ts
@@ -22,10 +27,16 @@ node tools/changelog-check.ts
 echo "== build ==" >&2
 ./gradlew :app:assembleDebug --console=plain >&2
 
-APK="app/build/outputs/apk/debug/stmp-v$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1).apk"
+APK="app/build/outputs/apk/debug/stmp-v$(version_name).apk"
 
-echo "== taildrop ==" >&2
-tools/taildrop-s22.sh "$APK" >&2
+# Taildrop only when asked. A build that silently phones home to a device is a
+# build you cannot run in CI or on a machine without Tailscale.
+if [[ -n "${STMP_NODE:-}" ]]; then
+  echo "== taildrop ==" >&2
+  tools/taildrop.sh "$STMP_NODE" "$APK" >&2
+else
+  echo "== no STMP_NODE set — skipping taildrop ==" >&2
+fi
 
-# The one true handover line. stdout only. Everything else above went to stderr.
-printf '%s\n' "stmp-v$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1).apk"
+# The one true handover line. stdout only; everything above went to stderr.
+printf '%s\n' "$(basename "$APK")"

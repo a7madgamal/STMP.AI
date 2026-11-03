@@ -5103,9 +5103,13 @@ devDependencies. `node_modules/` is gitignored.
 - Removed names, history and essays from entries; those belong in commit messages.
 - Release notes for 0.43.68–0.43.75 rewritten in the new format.
 
-## 0.43.77 (build 231) — 2026-11-03 — CURRENT
+## 0.43.77 (build 231) — 2026-11-03
 - Removed the notification posted when an approval modal appears. It only existed to carry the full-screen intent, and the modal replaced it immediately.
 - Changed the notification card's risk indicator from a coloured left stripe to a tinted card background, matching the modal.
+
+## 0.43.78 (build 232) — 2026-11-03 — CURRENT
+- Removed the hardcoded device name from the taildrop script; the target node is now an argument or `STMP_NODE`, and missing it is an error instead of a default.
+- Taildrop is now opt-in in `release.sh`, so a local build no longer sends anything to a device.
 
 ## Keeping this file honest
 
