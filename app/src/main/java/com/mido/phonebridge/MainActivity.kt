@@ -55,9 +55,6 @@ class MainActivity : BridgeScreen() {
     private lateinit var gateButtons: LinearLayout
     private lateinit var gateFingerprint: MaterialButton
     private lateinit var gateFingerprintWhy: TextView
-    private lateinit var secretsButton: MaterialButton
-    private lateinit var loginButton: MaterialButton
-    private lateinit var accountBanner: TextView
     private lateinit var heroCard: LinearLayout
     private lateinit var heroTitle: TextView
     private lateinit var heroSub: TextView
@@ -244,6 +241,28 @@ class MainActivity : BridgeScreen() {
         // Tools and Debug moved to Settings (Mido, 2026-11-03: *"rethink each button screen"*).
         // They are destinations and diagnostics, not live state — and REQUEST LOG / SSH were
         // sitting on Home purely because there was nowhere else to put them.
+
+        // **The audit banner keeps its home here, and it must be CREATED here.**
+        //
+        // This is the row that crashed 0.43.90 on open: `render()` has always painted it, but
+        // removing the Debug block took the construction with it and left the `lateinit` field
+        // unset. Home is the launch screen, so every open threw
+        // `UninitializedPropertyAccessException` before anything else could run.
+        //
+        // The lesson is narrower than "remember to clean up": a `lateinit` field is a promise the
+        // compiler cannot check. `render()` and `buildContent` are far enough apart that nothing
+        // links them, so deleting one side compiles cleanly and fails on the device.
+        auditBanner = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Theme.ON_COLOR)
+            background = Theme.surface(this@MainActivity, Theme.DANGER_SURFACE, Theme.RADIUS_CONTROL)
+            setPadding(
+                Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10),
+                Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10)
+            )
+            visibility = TextView.GONE
+        }
+        container.addView(auditBanner)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
