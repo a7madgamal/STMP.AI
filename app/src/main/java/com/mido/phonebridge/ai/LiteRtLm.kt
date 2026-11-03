@@ -237,7 +237,10 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
     fun isLoaded(): Boolean = engine != null
 
     override fun summarize(ctx: Context, facts: RequestFacts, budgetMs: Long): RequestSummary? {
-        if (!isAvailable(ctx)) return null
+        if (!isAvailable(ctx)) {
+            SummaryFailure.record("no model is loaded")
+            return null
+        }
         return try {
             // ENGINE LOAD IS NOT INFERENCE TIME. The first request after a cold start pays the
             // whole model-map + OpenCL-init cost (~15s on the 1.7B, measured 2026-10-19), and
@@ -254,6 +257,10 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             // gone and the human decided without it.
             if (elapsed > budgetMs) {
                 Log.w(TAG, "inference ${elapsed}ms exceeded budget ${budgetMs}ms; discarding")
+                SummaryFailure.record(
+                    "the model took ${SummaryFailure.humanMs(elapsed)} and the budget is " +
+                        "${SummaryFailure.humanMs(budgetMs)}"
+                )
                 return null
             }
             // The guard checks the summary against what the model ACTUALLY saw: the raw body
@@ -300,6 +307,7 @@ class LiteRtLm(private val modelFile: File) : SummaryModel {
             // retry: the GPU is the only accepted path, so a failure here is reported by
             // the caller as `ai_unavailable` rather than papered over with a slow answer.
             lastEngineError = "inference failed: ${e.message}"
+            SummaryFailure.record("inference failed: ${e.message}")
             Log.e(TAG, lastEngineError)
             null
         }

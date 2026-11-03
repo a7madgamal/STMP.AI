@@ -425,7 +425,8 @@ object ApprovalGate {
                 // human can still decide. Same shape as a normal Failed, so nothing downstream
                 // needs to know this one came from a watchdog.
                 val failed = AiState.Failed(
-                    "the model did not answer within ${p.aiFetchCapMs}ms"
+                    "the model did not answer within " +
+                        com.mido.phonebridge.ai.SummaryFailure.humanMs(p.aiFetchCapMs)
                 )
                 p.aiState = failed
                 if (p.enabledAtMs == 0L) {
@@ -772,6 +773,9 @@ object ApprovalGate {
     private fun startAiFetch(ctx: Context, p: Pending) {
         val facts = p.aiFacts ?: return
         p.fetchStartedAtMs = System.currentTimeMillis()
+        // Clear first: a reason left from the previous attempt would describe THIS failure
+        // with yesterday's cause, which is the same lie as the old timeout fallback.
+        com.mido.phonebridge.ai.SummaryFailure.clear()
         Thread({
             val result = try {
                 com.mido.phonebridge.ai.AiGateway.summarize(ctx, facts, p.aiFetchCapMs)
@@ -782,8 +786,15 @@ object ApprovalGate {
             // The gate's own reason if it has one, else a plain statement. Never blank:
             // the modal has to say something, and "failed" with no cause is the dead end
             // this whole change exists to remove.
-            val failureDetail = com.mido.phonebridge.ai.LiteRtLm.lastEngineError
-                .ifBlank { "the model did not answer within ${p.aiFetchCapMs}ms" }
+            // NO FALLBACK HERE. `SummaryFailure.take()` returns the reason the failing path
+            // actually recorded, or an explicit "nobody stated a reason — this is a defect".
+            // The old line was `lastEngineError.ifBlank { "did not answer within <cap>ms" }`,
+            // and `lastEngineError` is only set by ENGINE faults — so a guard rejection, a
+            // budget overrun and an unparseable reply ALL reported a timeout that never
+            // happened. Mido, 2026-11-03: *"I got couldn't summarize in 10000ms but it was
+            // never full 10 seconds"*. A wrong cause is worse than none: it aims the next
+            // debugging session at the wrong subsystem.
+            val failureDetail = if (result == null) com.mido.phonebridge.ai.SummaryFailure.take() else ""
             p.aiState = if (result != null) AiState.Ready(result) else AiState.Failed(failureDetail)
             // Same guard, applied to the moment the summary landed. A summary takes ~1.2s, so the
             // floor usually wins and the guard costs ~1.8s; a slow one is unaffected because

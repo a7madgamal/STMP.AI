@@ -711,7 +711,9 @@ object NotifyOverlay {
                     val fetchDeadline = entry.shownAt + entry.fetchCapMs + FETCH_DEADLINE_SLACK_MS
                     if (now >= fetchDeadline) {
                         com.mido.phonebridge.Debug.log(
-                            "notify[${entry.id}] fetch exceeded ${entry.fetchCapMs}ms on screen " +
+                            "notify[${entry.id}] fetch exceeded " +
+                                "${com.mido.phonebridge.ai.SummaryFailure.humanMs(entry.fetchCapMs)} " +
+                                "on screen " +
                                 "(${now - entry.shownAt}ms); withdrawing card rather than " +
                                 "leaving it stuck at summarising"
                         )
@@ -802,10 +804,12 @@ object NotifyOverlay {
             return
         }
         Thread({
+            com.mido.phonebridge.ai.SummaryFailure.clear()
             val result = try {
                 com.mido.phonebridge.ai.AiGateway.summarize(entry.ctx, facts, entry.fetchCapMs)
             } catch (e: Exception) {
                 Log.w(TAG, "fetch failed for id=${entry.id}: ${e.message}")
+                com.mido.phonebridge.ai.SummaryFailure.record("the summary fetch threw: ${e.message}")
                 null
             }
             main.post {
@@ -817,7 +821,10 @@ object NotifyOverlay {
                     com.mido.phonebridge.Debug.log(
                         "notify[${entry.id}] AI failed within ${entry.fetchCapMs}ms; withdrawing card"
                     )
-                    settle(entry, Reason.AI_FAILED, "summary unavailable")
+                    settle(
+                        entry, Reason.AI_FAILED,
+                        com.mido.phonebridge.ai.SummaryFailure.take()
+                    )
                     return@post
                 }
                 applyAi(entry, result)

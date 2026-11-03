@@ -65,19 +65,29 @@ object SummaryProvider {
         facts: RequestFacts,
         budgetMs: Long,
     ): RequestSummary? {
-        if (!model.isAvailable(ctx)) return null
+        if (!model.isAvailable(ctx)) {
+            SummaryFailure.record("no model is available")
+            return null
+        }
         return try {
             val future = pool.submit<RequestSummary?> { model.summarize(ctx, facts, budgetMs) }
             val result = future.get(budgetMs + SLACK_MS, TimeUnit.MILLISECONDS)
             if (result == null) {
                 Log.w(TAG, "${model.id} produced no summary; the caller fails the request")
+                // The model layer normally states its own reason. If it returned null without
+                // one, say THAT — do not substitute a plausible cause.
             }
             result
         } catch (e: java.util.concurrent.TimeoutException) {
             Log.w(TAG, "${model.id} exceeded ${budgetMs}ms wall; abandoning")
+            SummaryFailure.record(
+                "the model was still running at " +
+                    "${SummaryFailure.humanMs(budgetMs + SLACK_MS)} and was abandoned"
+            )
             null
         } catch (e: Exception) {
             Log.w(TAG, "summary failed: ${e.message}")
+            SummaryFailure.record("the summary call failed: ${e.message}")
             null
         }
     }

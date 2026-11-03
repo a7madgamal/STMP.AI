@@ -3,6 +3,7 @@ package com.mido.phonebridge
 import com.mido.phonebridge.ai.RequestFacts
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,7 +69,12 @@ class ApprovalAiDeadlineTest {
         val failed = state as ApprovalGate.AiState.Failed
         assertTrue(
             "the failure must NAME the budget, or the human sees a dead modal with no reason",
-            failed.detail.contains(cap.toString())
+            failed.detail.contains(com.mido.phonebridge.ai.SummaryFailure.humanMs(cap))
+        )
+        assertFalse(
+            "the budget must be phrased in seconds, not raw milliseconds " +
+                "(Mido, 2026-11-03: \"write the message in seconds\")",
+            failed.detail.contains("10000ms")
         )
         assertNotEquals(
             "the buttons must unlock so the human can still decide",

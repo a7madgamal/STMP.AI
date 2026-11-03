@@ -5113,7 +5113,7 @@ fail, then restoring. 408 tests.
 
 ---
 
-## 0.43.69 — the MODAL's stuck summary, and risk as a background wash (build 223) — CURRENT
+## 0.43.69 — the MODAL's stuck summary, and risk as a background wash (build 223)
 2026-11-03
 
 Two more, both in the approval MODAL — which is where the report pointed and where I had not
@@ -5159,6 +5159,49 @@ while "sends mail to an external address" is the part a background cannot say.
 Tests: `ApprovalAiDeadlineTest` proves an expired `Loading` becomes a stated failure with unlocked
 buttons (and that a fresh one is NOT killed by impatience); `RiskSurfaceTest` pins the four-way
 mapping including the null case. 417 tests.
+
+---
+
+## 0.43.70 — a failure states its REAL cause, in seconds (build 224) — CURRENT
+2026-11-03
+
+Mido, 2026-11-03: *"I got couldn't summarize in 10000ms but it was never full 10 seconds. and write
+the message in seconds"*. Two defects in one sentence, and the first was a lie.
+
+### The message named a cause that never happened
+
+```kotlin
+lastEngineError.ifBlank { "the model did not answer within ${cap}ms" }
+```
+
+`lastEngineError` is only set by **engine** faults. A guard rejection, a budget overrun, an
+unparseable reply and a contradiction all return `null` without touching it — so every one of them
+fell through to that fallback and reported a timeout. The real failure took **1.4 seconds**; the
+modal said ten. A wrong cause is worse than no cause: it aims the next debugging session at the
+wrong subsystem, and this project has now paid for that twice.
+
+`SummaryFailure` replaces it. Every null-return path **states its own reason** — the model's
+quoted sentence when it contradicted the verb, the real elapsed time when it overran, the specific
+exception when it threw. There is no fallback: a path that forgets gets `UNSTATED`, which names
+itself as a defect in the app rather than inventing a plausible cause. `clear()` runs before each
+attempt, because a reason left over from a previous request would describe a fresh failure with
+stale evidence.
+
+### Durations are seconds
+
+`10000ms` reads as a measurement of something invisible. `10s` reads as a wait you can judge.
+`humanMs` keeps one decimal for fractions (`1.5s`), drops it for whole numbers (`10s`, not
+`10.0s`), and stays in milliseconds below one second (`250ms`) — because "0s" would say nothing
+happened, which is the same lie in the other direction.
+
+### What this makes debuggable
+
+The modal now answers the question a human actually has, and the log line names the same cause. For
+the contacts route the answer is currently *the model described a READ as "Creating contacts"* —
+which is `SummaryGuard` doing its job on a model that is genuinely wrong, and is a prompt problem
+to fix rather than a timeout to chase.
+
+424 tests, 0 failures.
 
 ---
 

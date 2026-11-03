@@ -113,20 +113,30 @@ object AiReply {
      * half-answer.
      */
     fun parse(reply: String, factsText: String, verb: Verb): RequestSummary? {
-        val json = extractJson(reply) ?: return null
+        val json = extractJson(reply) ?: run {
+            SummaryFailure.record("the model replied with no JSON object at all")
+            return null
+        }
         val obj = try {
             JSONObject(json)
         } catch (e: org.json.JSONException) {
             Log.w("AiReply", "reply not JSON: ${reply.take(120)}")
+            SummaryFailure.record("the model's reply was not valid JSON")
             return null
         }
         val description = obj.optString("description").trim()
-        if (description.isBlank()) return null
+        if (description.isBlank()) {
+            SummaryFailure.record("the model returned an empty description")
+            return null
+        }
         val risk = when (obj.optString("risk").trim().lowercase()) {
             "low" -> Risk.LOW
             "medium", "med" -> Risk.MEDIUM
             "high" -> Risk.HIGH
-            else -> return null // an unlabelled risk is a failed answer, not a guess
+            else -> { // an unlabelled risk is a failed answer, not a guess
+                SummaryFailure.record("the model gave no usable risk level")
+                return null
+            }
         }
         // LAST LINE OF DEFENCE: a model parrots its prompt and invents quantities, and a
         // misleading approval prompt is worse than none — the human approves what they were
@@ -137,6 +147,12 @@ object AiReply {
                 "ai[REJECTED verb=$verb] said=\"${description.take(140)}\""
             )
             Log.w("AiReply", "summary contradicts the request (verb=$verb): ${description.take(90)}")
+            // The model's OWN sentence, quoted: this is the one failure a human can act on,
+            // because the fix is a prompt or a model change, not a timeout.
+            SummaryFailure.record(
+                "the model described a $verb as \"${description.take(80)}\", which contradicts " +
+                    "the request"
+            )
             return null
         }
         return RequestSummary(
