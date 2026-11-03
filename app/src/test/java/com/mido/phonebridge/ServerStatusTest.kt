@@ -150,7 +150,7 @@ class ServerStatusTest {
 
     @Test
     fun `the failed title and detail say what happened`() {
-        val err = "No Tailscale address on this phone. Open the Tailscale app and connect it."
+        val err = com.mido.phonebridge.BridgeService.NO_ADDRESS_MESSAGE
         val state = ServerStatus.state(
             serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = err,
         )

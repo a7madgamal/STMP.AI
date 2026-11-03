@@ -67,6 +67,17 @@ class BridgeService : Service() {
 
     companion object {
         const val PORT = 8787
+
+        /**
+         * The one wording for "there is nothing to bind to".
+         *
+         * Tailscale is a RECOMMENDATION, not a precondition (see `BindAddress`): a phone on plain
+         * Wi-Fi has a perfectly good address. The old message named Tailscale as the cause, which
+         * sent anyone on LAN, WireGuard or ZeroTier to look at an app they had not installed.
+         * Stated once as a constant because it is shown in two places and they must not drift.
+         */
+        const val NO_ADDRESS_MESSAGE =
+            "No reachable network address. Connect to Wi-Fi or start Tailscale." 
         const val CHANNEL_ID = "bridge_service"
         const val NOTIF_ID = 4242
 
@@ -375,7 +386,10 @@ class BridgeService : Service() {
         // The wording is user-facing: it lands verbatim in the hero card when a start
         // fails, so it names the CAUSE and the FIX rather than the bind decision. A
         // user reading "refusing to bind 0.0.0.0" learns nothing they can act on.
-        lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
+        // The CAUSE is "no reachable address", not "Tailscale is off" (Mido's call, 2026-11-03:
+        // Tailscale is a recommendation, not a precondition — see `BindAddress`). The old wording
+        // sent anyone on plain Wi-Fi, WireGuard or ZeroTier to look at an app they never installed.
+        lastError = NO_ADDRESS_MESSAGE
         val delay = StartupRetry.delayFor(retryAttempt)
         if (delay == null) {
             // NOT stopSelf(). The service has to outlive the ladder to notice Tailscale coming
@@ -619,8 +633,8 @@ class BridgeService : Service() {
         markRunning(false)
         val bind = chooseBindAddress()
         if (bind == null) {
-            lastError = "No Tailscale address on this phone. Open the Tailscale app and connect it."
-            Debug.log("watchdog: cannot rebind — no tailnet address")
+            lastError = NO_ADDRESS_MESSAGE
+            Debug.log("watchdog: cannot rebind — no reachable address")
             // The watchdog cannot fix this one, so hand over to the same wait path the start
             // ladder uses rather than posting a dead-end notice: Tailscale coming back is the
             // only thing that resolves it, and that is exactly what the wait watches for.
