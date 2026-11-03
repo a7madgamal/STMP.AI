@@ -1,0 +1,19 @@
+{
+  "name": "stmp-tools",
+  "private": true,
+  "type": "module",
+  "description": "Repository guard scripts. TypeScript, executed directly by Node — no build step.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "version-check": "node tools/version-check.ts",
+    "changelog-check": "node tools/changelog-check.ts",
+    "test-summary": "node tools/test-summary.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

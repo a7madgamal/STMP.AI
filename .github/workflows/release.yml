@@ -42,6 +42,13 @@ jobs:
           # silently-ignored input is precisely what this pipeline is not allowed to rely on.
           fetch-depth: 0
 
+      # Node 24, explicitly: ubuntu-latest ships Node 20, which cannot execute a
+      # .ts file. Both guards below (`version-check.ts`) need it.
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -101,7 +108,7 @@ jobs:
 
       # --- Guard 2: this version must never have been released ----------------
       - name: Version guard (tag must be unused)
-        run: python3 tools/version-check.py
+        run: node tools/version-check.ts
 
       - name: Read version
         id: v

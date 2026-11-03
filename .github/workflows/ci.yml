@@ -26,6 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 24, explicitly: ubuntu-latest ships Node 20, which cannot execute a
+      # .ts file at all. `tools/test-summary.ts` runs under it.
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -47,35 +54,35 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
+      # The guard scripts are TypeScript executed directly by Node. Typechecking
+      # them here means a broken guard fails CI rather than failing silently at
+      # the moment it is needed to block a bad release.
+      - name: Install tooling
+        run: npm ci --silent --no-audit --no-fund
+
+      - name: Typecheck guard scripts
+        run: npx tsc --noEmit -p tsconfig.json
+
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --console=plain
 
       # A test job that greps for "BUILD SUCCESSFUL" can pass having run zero
-      # tests. Read the XML reports and assert the count is non-zero.
+      # tests. Read the XML reports and assert a real run happened.
       - name: Assert tests actually ran
-        run: |
-          python3 - <<'PY'
-          import glob, sys, xml.etree.ElementTree as ET
-          files = glob.glob('app/build/test-results/testDebugUnitTest/*.xml')
-          if not files:
-              sys.exit('no test result XML found — the test task produced nothing')
-          total = failures = 0
-          for f in files:
-              r = ET.parse(f).getroot()
-              total += int(r.get('tests', 0))
-              failures += int(r.get('failures', 0)) + int(r.get('errors', 0))
-          print(f'tests={total} failures={failures}')
-          if total == 0:
-              sys.exit('zero tests ran — that is a broken harness, not a pass')
-          if failures:
-              sys.exit(f'{failures} failing test(s)')
-          PY
+        run: node tools/test-summary.ts
 
   lint:
     name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Node 24, explicitly: ubuntu-latest ships Node 20, which cannot execute a
+      # .ts file at all. `tools/test-summary.ts` runs under it.
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4

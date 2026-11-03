@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One command for the whole STMP ship path. Nothing is trusted to memory.
 #
-#   version-check  -> fails if the version was NOT bumped from HEAD
+#   version-check  -> fails if this version's tag already exists
 #   changelog-check -> fails if CHANGELOG.md is stale or has a <hash>
 #   assembleDebug  -> builds stmp-v<version>.apk (name is automatic)
 #   taildrop       -> refuses any filename that is not stmp-vX.Y.Z.apk
@@ -14,10 +14,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "== version-check ==" >&2
-python3 tools/version-check.py
+node tools/version-check.ts
 
 echo "== changelog-check ==" >&2
-python3 tools/changelog-check.py
+node tools/changelog-check.ts
 
 echo "== build ==" >&2
 ./gradlew :app:assembleDebug --console=plain >&2

@@ -4967,7 +4967,7 @@ forcing a 2:1 mark into a square box letterboxes it into a smear.
 
 ---
 
-## 0.43.66 — CI: every push to main builds a beta release (build 220) — CURRENT
+## 0.43.66 — CI: every push to main builds a beta release (build 220)
 2026-11-03
 
 A push to `main` now builds, verifies and publishes a BETA GitHub Release tagged
@@ -5024,6 +5024,44 @@ no version guard, because a PR legitimately carries the version of the tag it br
 Still required before the first run: four repo secrets (`STMP_KEYSTORE_B64`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_SERVER_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`). Until they exist the release job fails at step
 1, which is the guard doing its job rather than a defect.
+
+---
+
+## 0.43.67 — guard scripts are TypeScript, not Python (build 221) — CURRENT
+2026-11-03
+
+Mido, 2026-11-03: *"avoid python prefer ts"*. All repository tooling moved to TypeScript.
+
+**No build step, and that is the reason this is cheap.** Node 22.6+ executes `.ts` files
+directly by stripping types, so `node tools/version-check.ts` is a real command — no bundler, no
+`tsc` in the run path, nothing to keep in sync between source and output. `tsconfig.json` carries
+`"noEmit": true` for the same reason.
+
+**`erasableSyntaxOnly` is the flag that makes this safe.** Node's stripping only handles syntax it
+can delete: no `enum`, no parameter properties, no `namespace`. Without that flag a file can
+typecheck cleanly and then fail to RUN, which would be the worst kind of guard — one that reports
+success by crashing. With it, `tsc` rejects anything Node cannot execute, so a green typecheck
+means a runnable script. Verified by writing an `enum` and watching tsc answer `TS1294`.
+
+**Strict everywhere**, matching the app's own rule: `strict`, `noUncheckedIndexedAccess`,
+`exactOptionalPropertyTypes`, `noUnusedLocals`, `noUnusedParameters`. `noUncheckedIndexedAccess`
+earns its keep immediately — every `regex[1]` is `string | undefined`, so each capture is narrowed
+explicitly instead of trusted. Same reason the project bans `as any` in Kotlin.
+
+**One implementation, not two.** `tools/promote.ts` replaces both `promote.sh` and the duplicated
+YAML in `promote.yml`. The workflow now calls the script. Two copies of "is this promotable?"
+would drift, and the one that ran fewer checks is the one nobody notices.
+
+**CI must pin Node 24.** `ubuntu-latest` ships Node 20, which cannot execute a `.ts` file at all —
+the guards would fail with a parse error rather than a useful message. Every workflow that runs a
+guard now sets `node-version: '24'` explicitly.
+
+`tools/test-summary.ts` replaces the Python heredoc that read the JUnit XML. It parses with one
+regex against the `<testsuite>` attributes rather than pulling in an XML library to read three
+integers; a shape mismatch fails loudly instead of guessing.
+
+`package.json` carries no runtime dependencies — only `typescript` and `@types/node` as
+devDependencies. `node_modules/` is gitignored.
 
 ---
 

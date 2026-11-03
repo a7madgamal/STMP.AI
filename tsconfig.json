@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    // Strict everywhere. A guard script that silently accepts `undefined` is not
+    // a guard — it is a script that passes. No `any`, no implicit nulls.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // Node executes these files directly by stripping types, so nothing is
+    // emitted and no declaration files are produced.
+    "noEmit": true,
+
+    // Node's type stripping only handles ERASABLE syntax: no enums, no
+    // parameter properties, no namespaces. This flag makes tsc reject anything
+    // that would need a transform, so a file that typechecks is a file Node can
+    // actually run.
+    "erasableSyntaxOnly": true,
+
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["tools/**/*.ts"]
+}
