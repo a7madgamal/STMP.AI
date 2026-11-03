@@ -303,9 +303,53 @@ interface Plugin {
     /** Human label for the UI. */
     val displayName: String
 
+    /**
+     * Whether this plugin is ON for a human who has never touched the toggle.
+     *
+     * Applies only to a FIRST run. Once a choice is stored that choice wins — including
+     * "off" — so an update can never re-enable something the human deliberately turned off.
+     *
+     * Defaults to true: a plugin that arrives switched off is a plugin nobody finds. A plugin
+     * whose default should be off says so here rather than having the UI decide.
+     */
+    val enabledByDefault: Boolean
+        get() = true
+
+    /**
+     * Whether the human may turn this plugin off at all.
+     *
+     * True for three plugins only (`help`, `debug`, `logs`), and the reason is structural
+     * rather than sentimental: `help` is how a caller DISCOVERS routes, so disabling it makes
+     * the rest undiscoverable; `debug` and `logs` are how a broken bridge is diagnosed, so
+     * disabling them removes the tool that explains the failure. A capability that can only be
+     * repaired by the thing it disables is not a preference.
+     *
+     * Enforced by the store, not by the screen: the UI hides the toggle, and the store still
+     * refuses the write, so a future screen cannot reintroduce the hole.
+     */
+    val canBeDisabled: Boolean
+        get() = true
+
     /** OAuth scopes this plugin needs. Empty for local-only plugins. */
     val scopes: List<String>
         get() = emptyList()
+
+    /**
+     * The settings this plugin owns, as DATA for one shared renderer.
+     *
+     * Empty is the normal case: most plugins have nothing to configure. A plugin that returns
+     * entries gets a settings screen without writing any UI — see [PluginSetting] for why these
+     * are descriptors rather than views.
+     */
+    fun settings(): List<PluginSetting> = emptyList()
+
+    /**
+     * The Android runtime permissions this plugin needs, with the reason shown to the human.
+     *
+     * Declared rather than discovered, so the request can be raised the moment a route needs it
+     * and the explanation comes from the same place as the requirement.
+     */
+    fun permissions(): List<PluginPermission> = emptyList()
 
     /** The routes this plugin contributes. */
     fun routes(): List<Route>

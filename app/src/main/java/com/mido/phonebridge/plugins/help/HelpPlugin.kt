@@ -44,6 +44,20 @@ import org.json.JSONObject
 class HelpPlugin(private val ctx: Context) : Plugin {
 
     override val id = "help"
+
+    
+
+    /**
+
+     * **Required. Not a preference.**
+
+     *
+
+     * `help` is how a caller DISCOVERS every other route. Switch it off and the rest of the bridge becomes undiscoverable — an agent would have to guess paths that exist. There is no way to ask what is available without it, which makes it the one capability that must answer in order for the others to be usable.
+
+     */
+
+    override val canBeDisabled: Boolean get() = false
     override val displayName = "Help"
 
     override fun routes(): List<Route> = listOf(

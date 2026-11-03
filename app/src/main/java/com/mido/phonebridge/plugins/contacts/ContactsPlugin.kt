@@ -7,6 +7,7 @@ import android.provider.ContactsContract
 import android.util.Log
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
 import com.mido.phonebridge.core.Req
@@ -49,6 +50,23 @@ class ContactsPlugin(private val ctx: Context) : Plugin {
 
     override val id = "contacts"
     override val displayName = "Contacts"
+
+    /**
+     * The need is declared HERE, once, rather than only checked inline in [search].
+     *
+     * The inline check still exists and must: it is the runtime boundary that stops a read
+     * without permission. This declaration is what lets the UI say what is needed and why
+     * BEFORE a caller ever asks, instead of reporting a 503 after the fact.
+     */
+    override fun permissions(): List<PluginPermission> = listOf(
+        PluginPermission(
+            permission = Manifest.permission.READ_CONTACTS,
+            label = "Contacts",
+            why = "Searching your contacts needs read access. Without it, every lookup answers " +
+                "503 and the plugin cannot serve at all.",
+            optional = false,
+        )
+    )
 
     override fun routes(): List<Route> = listOf(
         Route(

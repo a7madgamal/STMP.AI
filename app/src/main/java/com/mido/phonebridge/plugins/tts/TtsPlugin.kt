@@ -3,6 +3,7 @@ package com.mido.phonebridge.plugins.tts
 import android.content.Context
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.core.PluginSetting
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
 import com.mido.phonebridge.core.Req
@@ -44,6 +45,59 @@ class TtsPlugin(private val ctx: Context) : Plugin {
     override val id = "tts"
     override val displayName = "Speak"
 
+    /**
+     * Speak's settings, declared here.
+     *
+     * **These write to the POLICY file, not to `PluginSettingsStore`** — and that is deliberate.
+     * A cap that bounds what a caller may send is a rule, not a preference, and it lives beside
+     * the approval rules that already govern this route. Splitting it would mean two places
+     * decide what a request may contain.
+     *
+     * The renderer does not care which backing store a plugin uses; it only renders descriptors
+     * and calls [PluginSetting.Action] for anything live. That is what keeps the settings screen
+     * generic while letting each plugin keep its values where they already belong.
+     */
+    override fun settings(): List<PluginSetting> = listOf(
+        PluginSetting.Text(
+            id = "maxChars",
+            label = "Character cap",
+            description = "Longer text is refused, never truncated, so a caller always knows " +
+                "the whole message was spoken or not spoken at all.",
+            default = ttsPolicy().maxChars.toString(),
+            numeric = true,
+        ),
+        PluginSetting.Text(
+            id = "rate",
+            label = "Speech rate",
+            description = "Multiplier. Clamped to the range the engine will honour.",
+            default = ttsPolicy().rate.toString(),
+            placeholder = "1.0",
+        ),
+        PluginSetting.Text(
+            id = "pitch",
+            label = "Pitch",
+            description = "Multiplier. Clamped to the range the engine will honour.",
+            default = ttsPolicy().pitch.toString(),
+            placeholder = "1.0",
+        ),
+        PluginSetting.Text(
+            id = "queueDepth",
+            label = "Queue depth",
+            description = "How many utterances may wait behind the one speaking. Beyond it the " +
+                "route answers busy rather than queueing forever.",
+            default = ttsPolicy().queueDepth.toString(),
+            numeric = true,
+        ),
+        PluginSetting.Action(
+            id = "sample",
+            label = "Speak a sample",
+            description = "Hear the current rate and pitch without sending a request.",
+            run = { c ->
+                com.mido.phonebridge.alert.SoundAlerts.secureVibration(c)
+            },
+        ),
+    )
+
     override fun routes(): List<Route> = listOf(
         Route(
             "POST", "/tts", "SAY TEXT ALOUD", Verb.EXECUTE,
@@ -57,7 +111,7 @@ class TtsPlugin(private val ctx: Context) : Plugin {
     )
 
     override fun status(): PluginStatus {
-        val settings = settings()
+        val settings = ttsPolicy()
         return PluginStatus(
             "Speak",
             PluginStatus.State.OK,
@@ -67,7 +121,7 @@ class TtsPlugin(private val ctx: Context) : Plugin {
     }
 
     /** The stored preferences, clamped. Read per call so a change in Options takes effect at once. */
-    private fun settings() = PolicyStore.from(ctx).get().tts.clamped()
+    private fun ttsPolicy() = PolicyStore.from(ctx).get().tts.clamped()
 
     /**
      * The text, validated against the CURRENT cap.
@@ -80,7 +134,7 @@ class TtsPlugin(private val ctx: Context) : Plugin {
         if (text.isEmpty() && !req.body.has("text")) {
             throw PluginError("bad_request", "missing required 'text'")
         }
-        val settings = settings()
+        val settings = ttsPolicy()
         TtsLimits.rejectReason(text, settings.maxChars)?.let { reason ->
             // `text_too_long` is its own code rather than a generic `bad_request`, because the
             // fix is specific (shorten it) and the caller needs the two numbers to do that.
@@ -94,7 +148,7 @@ class TtsPlugin(private val ctx: Context) : Plugin {
 
     private fun speak(req: Req): Resp {
         val text = requireWithinCap(req)
-        val settings = settings()
+        val settings = ttsPolicy()
         try {
             TtsSpeaker.speak(ctx, text, settings)
         } catch (e: TtsSpeaker.TtsBusy) {

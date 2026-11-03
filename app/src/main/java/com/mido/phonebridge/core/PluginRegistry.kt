@@ -25,6 +25,33 @@ object PluginRegistry {
     @Synchronized
     fun all(): List<Plugin> = plugins.values.toList()
 
+    /**
+     * Every registered plugin, ON or OFF.
+     *
+     * The registry deliberately does NOT filter by enabled state. A disabled plugin must still
+     * RESOLVE, so a caller gets `plugin_disabled` instead of `not_found` — telling someone the
+     * capability does not exist when they merely turned it off is a different, wrong answer.
+     * Filtering happens at dispatch, once, where the refusal can carry a reason.
+     */
+    @Synchronized
+    fun isEnabled(pluginId: String): Boolean {
+        val plugin = plugins[pluginId] ?: return false
+        return enabledLookup?.invoke(plugin) ?: plugin.enabledByDefault
+    }
+
+    /**
+     * How the registry learns whether a plugin is on.
+     *
+     * Injected rather than read from a store the registry owns, because the registry is a core
+     * object with no `Context` — and giving it one would make the whole routing table untestable
+     * on a bare JVM. `BridgeService` installs the lookup at startup; until then every plugin
+     * answers from its own default, which is the correct answer for a process that has not read
+     * the store yet.
+     */
+    @Volatile
+    var enabledLookup: ((Plugin) -> Boolean)? = null
+
+
     @Synchronized
     fun get(id: String): Plugin? = plugins[id]
 

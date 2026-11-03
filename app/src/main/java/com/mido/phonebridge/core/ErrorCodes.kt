@@ -75,6 +75,11 @@ object ErrorCodes {
 
         // --- the target is gone or not what the caller thinks it is ---
         "not_found" to NOT_FOUND,
+        // A plugin that exists but is switched off. 409 CONFLICT rather than 404: the route is
+        // real, the bridge knows exactly what it is, and saying "not found" would send a caller
+        // looking for a typo in a path that is spelled correctly. Caller-actionable, so it sits
+        // on the 4xx side and stays out of the incident list.
+        "plugin_disabled" to CONFLICT,
         "notification_gone" to GONE,
         "not_clearable" to CONFLICT,
 
@@ -245,6 +250,9 @@ object ErrorCodes {
         "vault_exists" to "A vault is already set up; it cannot be created twice.",
 
         // --- target gone or misidentified ---
+        // Facts only, and it names the remedy: the human can turn it back on, and the caller
+        // cannot, so "enable it in the app" is the whole truth.
+        "plugin_disabled" to "The plugin serving this route is switched off. It must be enabled in the STMP app's Plugins screen before these calls can run.",
         "not_found" to "No route matches that method and path, or the target id does not exist.",
         "notification_gone" to "The notification is no longer present; it was dismissed or cleared.",
         "not_clearable" to "That notification cannot be dismissed.",

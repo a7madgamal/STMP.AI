@@ -29,6 +29,20 @@ import java.util.concurrent.TimeUnit
 class LogcatPlugin(private val ctx: Context) : Plugin {
 
     override val id = "logs"
+
+    
+
+    /**
+
+     * **Required. Not a preference.**
+
+     *
+
+     * `logs` is the same argument as `debug`: it is read-only diagnosis. A bridge that will not serve is diagnosed through this route, so it cannot be behind a switch that a caller has no way to throw.
+
+     */
+
+    override val canBeDisabled: Boolean get() = false
     override val displayName = "Logs"
 
     override fun routes(): List<Route> = listOf(

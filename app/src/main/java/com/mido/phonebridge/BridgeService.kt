@@ -711,6 +711,14 @@ class BridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun registerPlugins() {
+        // Teach the registry how to answer "is this plugin on". Installed BEFORE any plugin is
+        // registered so a request arriving during startup cannot see an empty lookup and treat
+        // every plugin as defaulted. The store read is cheap (one SharedPreferences get) and the
+        // lookup runs once per request, not per route match.
+        if (PluginRegistry.enabledLookup == null) {
+            val store = com.mido.phonebridge.core.PluginSettingsStore.from(applicationContext)
+            PluginRegistry.enabledLookup = { plugin -> store.isEnabled(plugin) }
+        }
         if (PluginRegistry.get("notifications") == null) {
             PluginRegistry.register(NotificationsPlugin(applicationContext))
         }
@@ -1084,6 +1092,29 @@ class HttpServer(
             // Fill the label BEFORE anything can fail: a rejected request still has
             // a plugin and a verb, and the log is far more useful with them.
             draft.bindRoute(resolved.plugin.id, resolved.route.verb, resolved.route.path)
+
+            // A DISABLED PLUGIN STILL ANSWERS, AND IT ANSWERS `plugin_disabled`.
+            //
+            // The route exists and the caller spelled it correctly, so `not_found` would be a
+            // lie that sends them hunting for an unrelated typo. This is checked BEFORE the
+            // model gate and before validation: a capability the human turned off has no
+            // business waiting on a model download, and telling a caller their input is bad
+            // when the feature is simply switched off is the wrong correction to make.
+            //
+            // 409 rather than 403: it is a conflict between the request and the app's current
+            // configuration state, and it is fixable by a human. Recorded as REJECTED_INVALID
+            // (a 4xx, so noise) — a disabled plugin is configuration, not a fault.
+            if (!PluginRegistry.isEnabled(resolved.plugin.id)) {
+                draft.outcome(AuditOutcome.REJECTED_INVALID)
+                draft.error("plugin_disabled")
+                val obj = err(
+                    "plugin_disabled",
+                    "the '${resolved.plugin.displayName}' plugin is switched off. " +
+                        "Enable it in the app's Plugins screen to use this route."
+                )
+                draft.response(409, obj.toString())
+                return Dispatched(Response.Status.CONFLICT, obj)
+            }
 
             // MODEL READINESS. The AI is core functionality (Mido, 2026-10-19), so the
             // bridge does not serve without it: a missing model is a NOT-READY state,

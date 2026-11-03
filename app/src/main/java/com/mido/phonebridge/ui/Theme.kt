@@ -1,6 +1,7 @@
 package com.mido.phonebridge.ui
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
@@ -18,6 +19,9 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
+import com.mido.phonebridge.MainActivity
+import com.mido.phonebridge.OptionsActivity
+import com.mido.phonebridge.PluginsActivity
 import com.mido.phonebridge.R
 
 /**
@@ -214,6 +218,93 @@ object Theme {
             insets
         }
         return root
+    }
+
+    // --- bottom navigation ---
+
+    /** The three top-level screens. Order is the order they appear in the bar. */
+    enum class Tab(val label: String) {
+        HOME("Home"),
+        PLUGINS("Plugins"),
+        SETTINGS("Settings"),
+    }
+
+    /**
+     * The bottom bar.
+     *
+     * **Hand-built, not `BottomNavigationView`.** That component wants a menu resource and vector
+     * icons, and this app has neither — every control in it is constructed in code and the visual
+     * language is paper and ink, not Material. Fighting the component to fit would cost more than
+     * these forty lines and would still look borrowed.
+     *
+     * **A `LinearLayout` of three equal weights**, so the bar cannot be a thing a screen forgets
+     * to size: each label takes a third regardless of text length, and the tap target is the full
+     * third.
+     *
+     * The selected tab is passed in, not stored. Each screen knows which tab it IS, which is a
+     * fact that cannot go stale the way a shared "current tab" could.
+     */
+    fun bottomNav(ctx: Context, current: Tab): View {
+        val bar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = sheet(BG)
+            setPadding(0, dp(ctx, 6), 0, dp(ctx, 6))
+        }
+        for (tab in Tab.entries) {
+            val selected = tab == current
+            bar.addView(tabView(ctx, tab, selected), LinearLayout.LayoutParams(0, dp(ctx, 52), 1f))
+        }
+        return bar
+    }
+
+    private fun tabView(ctx: Context, tab: Tab, selected: Boolean): View {
+        val label = TextView(ctx).apply {
+            text = tab.label
+            textSize = 13f
+            gravity = Gravity.CENTER
+            typeface = handFont(ctx)
+            setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (selected) "${tab.label}, selected" else tab.label
+            // The selected tab is marked with the same drawn rule a section header uses, so the
+            // bar reads as part of the same page rather than a widget bolted to the bottom. An
+            // unselected tab has a transparent background of the same type, so nothing shifts.
+            background = if (selected) {
+                SquiggleRule(
+                    color = ACCENT,
+                    strokePx = dpF(ctx, 2f),
+                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                    spanFraction = 0.55f,
+                )
+            } else {
+                // A no-op drawable of the SAME class and geometry: switching a tab then changes
+                // paint only, never layout, so the bar cannot twitch as selection moves.
+                SquiggleRule(
+                    color = Color.TRANSPARENT,
+                    strokePx = dpF(ctx, 2f),
+                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                    spanFraction = 0.55f,
+                )
+            }
+        }
+        if (!selected) {
+            label.setOnClickListener {
+                val target = when (tab) {
+                    Tab.HOME -> MainActivity::class.java
+                    Tab.PLUGINS -> PluginsActivity::class.java
+                    Tab.SETTINGS -> OptionsActivity::class.java
+                }
+                // `singleTop` + clearing what is above: tapping a tab must not stack a second
+                // copy of a screen already open. Without FLAG_ACTIVITY_CLEAR_TOP, ten taps on
+                // Plugins build ten activities and Back walks through all of them.
+                val i = Intent(ctx, target).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                ctx.startActivity(i)
+            }
+        }
+        return label
     }
 
     // --- surfaces ---

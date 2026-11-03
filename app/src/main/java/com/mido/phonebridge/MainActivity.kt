@@ -31,7 +31,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : FragmentActivity() {
+class MainActivity : BridgeScreen() {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
@@ -57,7 +57,6 @@ class MainActivity : FragmentActivity() {
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
     private lateinit var secretsButton: MaterialButton
-    private lateinit var pluginContainer: LinearLayout
     private lateinit var loginButton: MaterialButton
     private lateinit var toolsContainer: LinearLayout
     private lateinit var accountBanner: TextView
@@ -113,34 +112,16 @@ class MainActivity : FragmentActivity() {
     /** Guards the unrecoverable-vault reset dialog so it does not stack. */
     private var resetOffered = false
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override val tab = Theme.Tab.HOME
 
-        // Load the OAuth config + account email from disk BEFORE anything else.
-        // This is what makes an update-without-wipe keep working: the config and
-        // identity no longer depend on BridgeService having run since boot.
-        com.mido.phonebridge.core.AuthManager.init(
-            applicationContext,
-            BridgeService.GOOGLE_CLIENT_ID,
-            BridgeService.GOOGLE_SERVER_CLIENT_ID,
-            BridgeService.GOOGLE_CLIENT_SECRET
-        )
-        Debug.log("config loaded; clientId len=${com.mido.phonebridge.core.AuthManager.clientId.length}")
-
-        val pad = Theme.dp(this, 20)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            // The whole sheet, not a flat colour. This is the largest surface on the screen, and
-            // leaving it flat is why the homepage still read as beige UI after the cards got
-            // grain.
-            background = com.mido.phonebridge.ui.PaperSheet(Theme.BG)
-        }
-
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content)
-
+    /**
+     * Home's rows: hero, start/stop, the setup checklist, account, tools, audit, debug.
+     *
+     * Called by [BridgeScreen] with the container already inside the bar layout. Everything here
+     * is built once; `render()` updates in place afterwards, which is what keeps a press from
+     * being destroyed underneath the finger by the 5s tick.
+     */
+    override fun buildContent(container: LinearLayout) {
         // --- 1. HERO: the one thing you need to know ---
         heroCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -160,7 +141,7 @@ class MainActivity : FragmentActivity() {
         }
         heroCard.addView(heroTitle)
         heroCard.addView(heroSub)
-        content.addView(heroCard)
+        container.addView(heroCard)
 
         // --- 2. CONTROLS: the primary action ---
         serverButton = Theme.button(this, "START SERVER", Theme.ButtonStyle.SUCCESS) {
@@ -175,25 +156,25 @@ class MainActivity : FragmentActivity() {
         serverButton.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = Theme.dp(this@MainActivity, 16) }
-        content.addView(serverButton)
+        container.addView(serverButton)
 
         // --- 3. CHECKLIST: compact status rows, each actionable ---
-        content.addView(Theme.sectionHeader(this, "Setup"))
+        container.addView(Theme.sectionHeader(this, "Setup"))
         statusContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(statusContainer)
+        container.addView(statusContainer)
 
         // --- accounts / plugins ---
-        content.addView(Theme.sectionHeader(this, "Account"))
+        container.addView(Theme.sectionHeader(this, "Account"))
         accountBanner = TextView(this).apply {
             textSize = 15f
             setTextColor(Theme.ON_SURFACE)
         }
-        content.addView(accountBanner)
+        container.addView(accountBanner)
         loginButton = Theme.button(this, "LOGIN WITH GOOGLE", Theme.ButtonStyle.PRIMARY) { startGoogleLogin() }
         loginButton.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
-        content.addView(loginButton)
+        container.addView(loginButton)
 
         secretsButton = Theme.button(this, "SECRETS & HOSTS", Theme.ButtonStyle.NEUTRAL) {
             startActivity(Intent(this@MainActivity, SecretsActivity::class.java))
@@ -201,12 +182,12 @@ class MainActivity : FragmentActivity() {
         secretsButton.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = Theme.dp(this@MainActivity, 8) }
-        content.addView(secretsButton)
+        container.addView(secretsButton)
 
         // --- 3b. GATE SWITCH: the one control that decides whether anything is
         // asked of a human at all. Above the plugins, below Setup, because it is
         // the second question after "is it running?" — "is it still asking me?".
-        content.addView(Theme.sectionHeader(this, "Approval gate"))
+        container.addView(Theme.sectionHeader(this, "Approval gate"))
         gateCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(Theme.dp(this@MainActivity, 14), Theme.dp(this@MainActivity, 12),
@@ -230,11 +211,11 @@ class MainActivity : FragmentActivity() {
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
         gateCard.addView(gateButtons)
-        content.addView(gateCard)
+        container.addView(gateCard)
 
-        content.addView(Theme.sectionHeader(this, "Plugins"))
-        pluginContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(pluginContainer)
+        // The plugin list used to live here and made Home a wall: twelve status cards between
+        // the server control and the tools, pushing "is the bridge running" off the first
+        // screen. It moved to the Plugins tab, where capability inventory belongs.
 
         // --- 4. TOOLS: the scattered nav, collapsed into one tidy row. ---
         //
@@ -246,9 +227,9 @@ class MainActivity : FragmentActivity() {
         // DESTINATIONS (open another screen), so they belong under one section, compact, and
         // the audit-degraded banner lives NEXT TO the log button it explains instead of
         // floating above the group.
-        content.addView(Theme.sectionHeader(this, "Tools"))
+        container.addView(Theme.sectionHeader(this, "Tools"))
         toolsContainer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        content.addView(toolsContainer)
+        container.addView(toolsContainer)
         // GET STARTED first: it is the only entry a new user needs, and the whole point of
         // the screen is that nobody has to be told where it is.
         toolsContainer.addView(toolButton("START") { startActivity(Intent(this, OnboardingActivity::class.java)) })
@@ -266,11 +247,11 @@ class MainActivity : FragmentActivity() {
                 Theme.dp(this@MainActivity, 12), Theme.dp(this@MainActivity, 10))
             visibility = TextView.GONE
         }
-        content.addView(auditBanner)
+        container.addView(auditBanner)
 
         // --- 5. Debug: collapsed by default, out of the main flow ---
-        content.addView(Theme.sectionHeader(this, "Debug"))
-        content.addView(fullWidthButton("SHOW LOG", Theme.ButtonStyle.GHOST) {
+        container.addView(Theme.sectionHeader(this, "Debug"))
+        container.addView(fullWidthButton("SHOW LOG", Theme.ButtonStyle.GHOST) {
             logExpanded = !logExpanded
             logView.visibility = if (logExpanded) TextView.VISIBLE else TextView.GONE
             render()
@@ -282,10 +263,22 @@ class MainActivity : FragmentActivity() {
             setTextIsSelectable(true)
             visibility = TextView.GONE
         }
-        content.addView(logView)
+        container.addView(logView)
+    }
 
-        root.addView(scroll)
-        setContentView(Theme.inset(root))
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Load the OAuth config + account email from disk BEFORE anything else.
+        // This is what makes an update-without-wipe keep working: the config and
+        // identity no longer depend on BridgeService having run since boot.
+        com.mido.phonebridge.core.AuthManager.init(
+            applicationContext,
+            BridgeService.GOOGLE_CLIENT_ID,
+            BridgeService.GOOGLE_SERVER_CLIENT_ID,
+            BridgeService.GOOGLE_CLIENT_SECRET
+        )
+        Debug.log("config loaded; clientId len=${com.mido.phonebridge.core.AuthManager.clientId.length}")
 
         Debug.init(applicationContext)
         Debug.log("=== PhoneBridge ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}) ===")
@@ -502,11 +495,6 @@ class MainActivity : FragmentActivity() {
         append(AuthManager.isLoggedIn(this@MainActivity)).append('|')
         append(AuthManager.accountEmail ?: "").append('|')
         append(AuditHealth.reason ?: "").append('|')
-        // Plugin rows: title plus state is what the row actually paints.
-        for (p in PluginRegistry.all()) {
-            val st = p.status()
-            append(st.title).append(':').append(st.state).append(';')
-        }
     }
 
     /**
@@ -851,23 +839,6 @@ class MainActivity : FragmentActivity() {
         loginButton.setTextColor(if (AuthManager.isLoggedIn(this)) Theme.ON_SURFACE else Theme.ON_COLOR)
 
         renderGate()
-
-        pluginContainer.removeAllViews()
-        val plugins = PluginRegistry.all()
-        if (plugins.isEmpty()) {
-            pluginContainer.addView(Theme.text(this, "no plugins registered (start the server)", 13f, Theme.ON_SURFACE_VARIANT))
-        } else {
-            for (p in plugins) {
-                val st = p.status()
-                val color = when (st.state) {
-                    com.mido.phonebridge.core.PluginStatus.State.OK -> Theme.SUCCESS
-                    com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION -> Theme.WARNING
-                    com.mido.phonebridge.core.PluginStatus.State.ERROR -> Theme.DANGER
-                    com.mido.phonebridge.core.PluginStatus.State.OFF -> Theme.ON_SURFACE_VARIANT
-                }
-                pluginContainer.addView(Theme.statusRow(this, st.title, st.detail.ifBlank { st.state.name }, color))
-            }
-        }
 
         // A gate you cannot audit must be visible without opening the log: this
         // banner is the only surface that says so on the home screen.

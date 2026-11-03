@@ -5115,9 +5115,17 @@ devDependencies. `node_modules/` is gitignored.
 - Fixed the ✕ on a notification card being ignored during the misclick guard, and being dead entirely on a card that never got stamped. Dismissing is now unconditional.
 - Fixed cards freezing at "summarising…" after being accepted. The stamp that removes them could never finish if its window was added but not laid out, so removal now has a deadline.
 
-## 0.43.80 (build 234) — 2026-11-03 — CURRENT
+## 0.43.80 (build 234) — 2026-11-03
 - Changed CI to run tests, lint and the APK build as parallel jobs instead of one chain. Publishing still requires all three to pass.
 - Tests now use two forks on CI, where four cores are available; local runs stay at one.
+
+## 0.43.81 (build 235) — 2026-11-03 — CURRENT
+- Split the app into three screens behind a bottom bar: Home, Plugins and Settings.
+- Moved the approval gate settings from Home to Settings, and the plugin list from Home to its own screen.
+- Plugins can now be switched off individually. A disabled plugin still answers its routes, refusing with `plugin_disabled` instead of `not_found`.
+- Plugins declare their own settings and permissions, so each gets a settings screen without one being hand-built for it.
+- TTS settings moved from the global options screen to the Speak plugin that owns them.
+- Help, Debug and Logs cannot be disabled: they are how the rest of the bridge is discovered and diagnosed.
 
 ## Keeping this file honest
 

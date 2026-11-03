@@ -124,6 +124,17 @@
             android:name=".OptionsActivity"
             android:exported="false" />
 
+        <!-- The capability inventory. Separate from Home because a list of twelve plugins
+             pushed the only thing Home is for — is the bridge running — off the first screen. -->
+        <activity
+            android:name=".PluginsActivity"
+            android:exported="false" />
+
+        <!-- One plugin: its switch, its permissions, its settings. -->
+        <activity
+            android:name=".PluginDetailActivity"
+            android:exported="false" />
+
         <!-- "How do I use this?" — a copyable starting prompt for any agent, plus what to
              expect. No API documentation: /help serves that, live. -->
         <activity

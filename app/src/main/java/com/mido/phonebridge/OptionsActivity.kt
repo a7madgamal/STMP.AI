@@ -29,27 +29,17 @@ import com.mido.phonebridge.ui.Theme
  * The screen exists so the NEXT setting has a home instead of becoming another row on the home
  * checklist, which is already long.
  */
-class OptionsActivity : Activity() {
+class OptionsActivity : BridgeScreen() {
 
     private lateinit var container: LinearLayout
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    // This screen IS the Settings tab. It inherits the bar and the insets from BridgeScreen,
+    // which also carries the `ApprovalGate.relaunchCurrent` call that MainActivity used to own —
+    // sitting here while a request was pending used to strand the modal off-screen.
+    override val tab = Theme.Tab.SETTINGS
 
-        val scroll = ScrollView(this)
-        container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OptionsActivity, 16), Theme.dp(this@OptionsActivity, 16),
-                Theme.dp(this@OptionsActivity, 16), Theme.dp(this@OptionsActivity, 32)
-            )
-            background = Theme.sheet(Theme.BG)
-        }
-        scroll.addView(container)
-        // Edge-to-edge: without this the first row renders under the status bar. Same call as
-        // every other screen — see Theme.inset.
-        setContentView(Theme.inset(scroll))
-
+    override fun buildContent(container: LinearLayout) {
+        this.container = container
         render()
     }
 
@@ -129,9 +119,9 @@ class OptionsActivity : Activity() {
             aiBackendRow(store, policy)
         )
 
-        container.addView(Theme.sectionHeader(this, "Speak"))
-
-        container.addView(ttsRows(store, policy))
+        // Speak used to be configured here. It now lives on the plugin that owns it — Plugins →
+        // Speak — so the settings sit with the routes they govern instead of in a second list
+        // that had to be kept in step by hand.
 
         container.addView(Theme.sectionHeader(this, "Callers"))
 
@@ -251,129 +241,6 @@ class OptionsActivity : Activity() {
      * Every value is saved through [TtsSettings.clamped], so the field cannot store something the
      * engine would refuse — a rate of 0 is accepted by the UI, clamped on save, and read back as
      * the value actually in force.
-     */
-    private fun ttsRows(
-        store: com.mido.phonebridge.policy.PolicyStore,
-        policy: com.mido.phonebridge.policy.Policy,
-    ): LinearLayout {
-        val block = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12),
-                Theme.dp(this@OptionsActivity, 14), Theme.dp(this@OptionsActivity, 12)
-            )
-            background = Theme.outlined(this@OptionsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
-        }
-        val tts = policy.tts.clamped()
-
-        block.addView(
-            Theme.text(this, "POST /tts", 15f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OptionsActivity)
-            }
-        )
-        block.addView(
-            Theme.text(
-                this,
-                "A named caller can make the phone say a sentence, and the call returns only " +
-                    "once it has finished. Silent mode silences it — it uses the notification " +
-                    "stream, so there is no separate switch to remember.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OptionsActivity, 6), 0, 0) }
-        )
-
-        // One numeric field per setting. Each saves on its own so a half-typed neighbour cannot
-        // be dragged into a save it did not ask for.
-        block.addView(
-            numberRow(
-                label = "Cap (characters)",
-                value = tts.maxChars.toString(),
-                hint = "1–${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_CHARS_CEILING}",
-                detail = "Longer text is REFUSED with 400 text_too_long, naming both numbers. " +
-                    "It is never truncated, because a truncated utterance would still answer ok.",
-                integer = true,
-                commit = { raw ->
-                    val n = raw.toIntOrNull()
-                        ?: return@numberRow "not a whole number"
-                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampCap(n)
-                    if (clamped != n) "clamped to $clamped"
-                    else {
-                        save(store, policy.withTts(tts.copy(maxChars = clamped)))
-                        null
-                    }
-                }
-            )
-        )
-
-        block.addView(
-            numberRow(
-                label = "Rate",
-                value = tts.rate.toString(),
-                hint = "${com.mido.phonebridge.plugins.tts.TtsLimits.MIN_RATE}–" +
-                    "${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_RATE}",
-                detail = "1.0 is normal speed. The engine's own range is 0.5–2.0.",
-                integer = false,
-                commit = { raw ->
-                    val f = raw.toFloatOrNull() ?: return@numberRow "not a number"
-                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampRate(f)
-                    if (clamped != f) "clamped to $clamped"
-                    else {
-                        save(store, policy.withTts(tts.copy(rate = clamped)))
-                        null
-                    }
-                }
-            )
-        )
-
-        block.addView(
-            numberRow(
-                label = "Pitch",
-                value = tts.pitch.toString(),
-                hint = "${com.mido.phonebridge.plugins.tts.TtsLimits.MIN_PITCH}–" +
-                    "${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_PITCH}",
-                detail = "1.0 is the voice's natural pitch.",
-                integer = false,
-                commit = { raw ->
-                    val f = raw.toFloatOrNull() ?: return@numberRow "not a number"
-                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampPitch(f)
-                    if (clamped != f) "clamped to $clamped"
-                    else {
-                        save(store, policy.withTts(tts.copy(pitch = clamped)))
-                        null
-                    }
-                }
-            )
-        )
-
-        block.addView(
-            numberRow(
-                label = "Line depth",
-                value = tts.queueDepth.toString(),
-                hint = "1–${com.mido.phonebridge.plugins.tts.TtsLimits.MAX_QUEUE_DEPTH}",
-                detail = "How many utterances may wait behind the one speaking. Beyond that a " +
-                    "caller gets 503 tts_busy instead of waiting forever.",
-                integer = true,
-                commit = { raw ->
-                    val n = raw.toIntOrNull() ?: return@numberRow "not a whole number"
-                    val clamped = com.mido.phonebridge.plugins.tts.TtsLimits.clampQueueDepth(n)
-                    if (clamped != n) "clamped to $clamped"
-                    else {
-                        save(store, policy.withTts(tts.copy(queueDepth = clamped)))
-                        null
-                    }
-                }
-            )
-        )
-
-        return block
-    }
-
-    /**
-     * A labelled numeric field with its own save button.
-     *
-     * [commit] returns an error message, or null when it saved. Returning the message instead of
-     * showing a Toast inside it keeps the parsing and the clamping together and lets every field
-     * report "clamped to 2.0" in one place — which matters, because a value silently changed
-     * under the user is the failure this screen exists to avoid.
      */
     private fun numberRow(
         label: String,

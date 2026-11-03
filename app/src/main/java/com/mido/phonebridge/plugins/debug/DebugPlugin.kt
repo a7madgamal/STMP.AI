@@ -39,7 +39,43 @@ import org.json.JSONObject
 class DebugPlugin(private val ctx: Context) : Plugin {
 
     override val id = "debug"
+
+    
+
+    /**
+
+     * **Required. Not a preference.**
+
+     *
+
+     * `debug` explains a broken bridge from outside the phone. Disabling it removes the tool that would report why something else is not working, and the moment you need it is exactly the moment you cannot turn it back on from a caller.
+
+     */
+
+    override val canBeDisabled: Boolean get() = false
     override val displayName = "Debug"
+
+    /**
+     * Declared here, and still checked at the route.
+     *
+     * The inline check is the boundary that stops the action; this declaration is what lets the
+     * UI ask at the right moment with the right reason, rather than a caller discovering it as a
+     * runtime failure.
+     */
+    override fun permissions(): List<com.mido.phonebridge.core.PluginPermission> = listOf(
+        com.mido.phonebridge.core.PluginPermission(
+            // The literal, not `Manifest.permission.POST_NOTIFICATIONS`: that constant is API 33
+            // and this app supports API 26, where referencing it at class-load time is the exact
+            // failure pattern that once killed ed25519 on older devices. The permission still
+            // exists as a string on every API — only the constant is gated.
+            permission = "android.permission.POST_NOTIFICATIONS",
+            label = "Notifications",
+            // Optional is a fact about this plugin: the diagnostic routes work regardless, and
+            // only the notification-post route needs it.
+            why = "Posting a test notification needs this. The diagnostic routes work without it.",
+            optional = true,
+        )
+    )
 
     override fun routes(): List<Route> = listOf(
         Route(
