@@ -4906,7 +4906,7 @@ person actually has.
 
 ---
 
-## 0.43.64 — email-only contacts came back nameless (build 218) — CURRENT
+## 0.43.64 — email-only contacts came back nameless (build 218)
 2026-11-02
 
 Found by testing 217 on the device rather than by reading it back: `GET /contacts?query=gmail`
@@ -4926,6 +4926,44 @@ and failing the whole search would answer less than the device can.
 Also confirmed on device in the same run: `numbers` comes back as an array per person, deduped and
 collapsed by contact id — *Ahmed Aly Luxor* carries seven numbers across four countries in one
 entry, exactly as intended.
+
+---
+
+## 0.43.65 — the real stamp becomes the launcher icon (build 219) — CURRENT
+2026-11-03
+
+Mido supplied the actual artwork: a distressed rubber stamp, STMP inside a bordered frame, on
+warm paper. The launcher icon was still the placeholder — a vector disc with four letters drawn
+as strokes, which stood in for a logo that did not exist yet.
+
+**Adaptive icon, and `minSdk = 26` is why that is enough.** 26 is the release that introduced
+adaptive icons, so `mipmap-anydpi-v26` covers every supported device and no legacy density-bucket
+fallbacks are needed at all. Before this the manifest pointed at a single `drawable/`.
+
+**A bitmap foreground, not a traced vector — deliberately.** The house rule is to trace, because
+launchers scale the foreground and a raster goes soft. That rule assumes a mark made of a few
+dozen shapes. This one is a distressed stamp whose character IS the ink speckle: tracing it means
+either thousands of paths or a clean logo that is no longer the brand. So the foreground ships as
+a PNG at the five exact density buckets (108/162/216/324/432), each rendered at its own size so
+the launcher scales 1:1 and never resamples. The monochrome layer is the same silhouette in flat
+white for Android 13 themed icons.
+
+**The frame was kept** (Mido, 2026-11-03: *"A"*). I recommended dropping it — a 2:1 framed mark
+inscribed in the circular safe zone spans about 55% of the width, and at 48dp the frame competes
+with the launcher's own shape. He chose the framed mark because the frame is the brand, which is
+his call to make and the preview let him make it by looking.
+
+The mark fits the safe circle on its DIAGONAL, not its width: a 906x452 rectangle inscribed in a
+66dp circle has a half-diagonal of 505px against a 132dp radius, so scaling by width alone would
+have clipped the corners. `0.96` of that fit leaves a hairline margin.
+
+**The approval modal was still showing the placeholder disc.** Rendering what actually shipped is
+what caught it: the launcher would have been the new stamp while every approval card carried the
+old glyph. It now uses `drawable-nodpi/logo_mark.png`, the tight crop with no safe-zone padding
+(this is an in-app image, not a launcher icon), sized `WRAP_CONTENT` + `adjustViewBounds` because
+forcing a 2:1 mark into a square box letterboxes it into a smear.
+
+`drawable/ic_launcher.xml` stays: it is the pre-26 fallback path and the source of the old glyph.
 
 ---
 

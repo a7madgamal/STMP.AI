@@ -190,9 +190,14 @@ class ApprovalActivity : FragmentActivity() {
                 setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
                 addView(
                     android.widget.ImageView(this@ApprovalActivity).apply {
-                        setImageResource(R.drawable.ic_launcher)
+                        // The real stamp mark, not the old disc-with-letters placeholder.
+                        // Width is WRAP_CONTENT + adjustViewBounds because the mark is 2:1:
+                        // forcing it into a square box letterboxes it into a 40x20 smear.
+                        setImageResource(R.drawable.logo_mark)
+                        adjustViewBounds = true
+                        scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                         layoutParams = LinearLayout.LayoutParams(
-                            Theme.dp(this@ApprovalActivity, 40),
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
                             Theme.dp(this@ApprovalActivity, 40)
                         ).apply { marginEnd = Theme.dp(this@ApprovalActivity, 12) }
                     }
