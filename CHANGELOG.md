@@ -5167,8 +5167,12 @@ devDependencies. `node_modules/` is gitignored.
 - Added a build-time check that every `lateinit` field is assigned in its own file, so an unassigned view fails the build instead of the phone.
 - Removed three dead view declarations left behind by moving the account section.
 
-## 0.43.92 (build 246) — 2026-11-03 — CURRENT
+## 0.43.92 (build 246) — 2026-11-03
 - Removed the account email from the Home hero; the Google plugin reports it.
+
+## 0.43.93 (build 247) — 2026-11-03 — CURRENT
+- Grouped the Plugins screen into Google, Phone, Secrets and Misc sections.
+- Added a row per SSH connection under Secrets, each opening its own detail screen.
 
 ## Keeping this file honest
 

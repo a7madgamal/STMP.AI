@@ -3,6 +3,7 @@ package com.mido.phonebridge
 import android.content.Intent
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.mido.phonebridge.Debug
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSettingsStore
 import com.mido.phonebridge.core.PluginStatus
@@ -53,11 +54,30 @@ class PluginsActivity : BridgeScreen() {
         render()
     }
 
+    /**
+     * The groups, in the order Mido asked for (2026-11-03): *"group related plugins... all google
+     * in one large group with header / phone data like notifications and sound etc / misc like
+     * debug and help / group secrets"*.
+     *
+     * Grouped by WHAT THE PLUGIN IS ABOUT rather than by its id or its display name, because the
+     * list is a map of the phone: the Google services share an account, the phone ones share
+     * device permissions, and the misc ones are the machinery that explains the rest.
+     *
+     * An id in no group is a DEFECT, not a plugin to hide: `unlisted` below renders it under
+     * Misc and logs it, so a new plugin cannot quietly vanish from the screen.
+     */
+    private val groups: List<Pair<String, Set<String>>> = listOf(
+        "Google" to setOf("google", "gmail", "calendar", "drive"),
+        "Phone" to setOf("notifications", "contacts", "audio", "tts"),
+        "Secrets" to setOf("secrets"),
+        "Misc" to setOf("help", "debug", "logs", "probe"),
+    )
+
     private fun render() {
         list.removeAllViews()
 
         val store = PluginSettingsStore.from(applicationContext)
-        val plugins = PluginRegistry.all().sortedBy { it.displayName }
+        val plugins = PluginRegistry.all()
 
         if (plugins.isEmpty()) {
             // Real state: the service has not registered yet. Say so rather than showing a blank
@@ -69,9 +89,93 @@ class PluginsActivity : BridgeScreen() {
             return
         }
 
-        for (plugin in plugins) {
-            list.addView(row(plugin, store))
+        val byId = plugins.associateBy { it.id }
+        val claimed = mutableSetOf<String>()
+
+        for ((heading, ids) in groups) {
+            val members = ids.mapNotNull { byId[it] }.sortedBy { it.displayName }
+            if (members.isEmpty()) continue
+            claimed += members.map { it.id }
+
+            list.addView(Theme.sectionHeader(this, heading))
+            for (plugin in members) list.addView(row(plugin, store))
+
+            // The SSH connections hang off the Secrets group: each stored `ssh-<name>` secret IS
+            // a connection, and the SSH plugin's own row only reports how many exist.
+            if (heading == "Secrets") {
+                for (name in sshConnectionNames()) list.addView(sshRow(name))
+            }
         }
+
+        // Anything not in a group is still shown. Silently dropping a plugin would make the
+        // screen lie about what the bridge can do.
+        val unlisted = plugins.filter { it.id !in claimed }.sortedBy { it.displayName }
+        if (unlisted.isNotEmpty()) {
+            Debug.log("plugins: ungrouped ids ${unlisted.map { it.id }}")
+            list.addView(Theme.sectionHeader(this, "Other"))
+            for (plugin in unlisted) list.addView(row(plugin, store))
+        }
+    }
+
+    /**
+     * The stored SSH connections, by display name.
+     *
+     * Same source `HelpPlugin` reads: one vault secret named `ssh-<host>` per connection. The
+     * vault's name index is plaintext precisely so this works while it is locked.
+     */
+    private fun sshConnectionNames(): List<String> = try {
+        com.mido.phonebridge.core.SecretVault.names(applicationContext)
+            .filter { it.startsWith("ssh-") }
+            .map { it.removePrefix("ssh-") }
+    } catch (e: Exception) {
+        // A corrupt index must not blank the screen: the SSH plugin's own row still reports the
+        // failure through its status.
+        Debug.log("plugins: cannot read ssh connections: ${e.message}")
+        emptyList()
+    }
+
+    /** One SSH connection, as its own row opening that connection's detail screen. */
+    private fun sshRow(name: String): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
+                Theme.dp(this@PluginsActivity, 14), Theme.dp(this@PluginsActivity, 12),
+            )
+            background = Theme.tornCard(this@PluginsActivity, Theme.SURFACE, Theme.RADIUS_CARD)
+            isClickable = true
+            contentDescription = "SSH connection $name"
+            setOnClickListener {
+                startActivity(
+                    Intent(this@PluginsActivity, PluginDetailActivity::class.java)
+                        .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
+                        .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name)
+                )
+            }
+        }
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        // Set as a statement, not inside `.apply`: there `this` is the LayoutParams, so
+        // `Theme.dp(this, ...)` would be handed a params object where it wants a Context.
+        lp.topMargin = Theme.dp(this, 10)
+        card.layoutParams = lp
+
+        val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        titleRow.addView(Theme.text(this, name, 16f).apply {
+            setTextColor(Theme.ON_SURFACE)
+            typeface = Theme.handFont(this@PluginsActivity)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        titleRow.addView(Theme.text(this, "SSH", 12f).apply {
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+        })
+        card.addView(titleRow)
+
+        card.addView(Theme.text(this, "One connection. POST /ssh/$name", 12f).apply {
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            setPadding(0, Theme.dp(this@PluginsActivity, 4), 0, 0)
+        })
+        return card
     }
 
     private fun row(

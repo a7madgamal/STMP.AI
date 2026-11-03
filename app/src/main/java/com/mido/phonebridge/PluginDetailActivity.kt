@@ -64,11 +64,40 @@ class PluginDetailActivity : BridgeScreen() {
     private fun render() {
         content.removeAllViews()
         val on = store.isEnabled(plugin)
+        val secret = intent.getStringExtra(EXTRA_SECRET_NAME)
 
-        content.addView(Theme.text(this, plugin.displayName.uppercase(), 20f).apply {
+        content.addView(Theme.text(
+            this,
+            if (secret != null) secret.uppercase() else plugin.displayName.uppercase(),
+            20f,
+        ).apply {
             typeface = Theme.handFont(this@PluginDetailActivity)
             setTextColor(Theme.ON_SURFACE)
         })
+
+        // Scoped to ONE connection. Its routes and settings belong to the SSH plugin as a whole,
+        // so repeating them per connection would say the same thing N times; what is specific to
+        // this name is the route it serves and the key it authenticates with.
+        if (secret != null) {
+            content.addView(Theme.text(this, "One connection handled by the SSH plugin.", 13f).apply {
+                setTextColor(Theme.ON_SURFACE_VARIANT)
+                setPadding(0, Theme.dp(this@PluginDetailActivity, 4), 0, 0)
+            })
+            content.addView(Theme.sectionHeader(this, "Route"))
+            content.addView(Theme.text(this, "POST /ssh/$secret", 12f, mono = true).apply {
+                setTextColor(Theme.ON_SURFACE_VARIANT)
+            })
+            content.addView(Theme.sectionHeader(this, "Key"))
+            content.addView(Theme.text(
+                this,
+                "The private key is stored in the vault as `ssh-$secret`. It is never shown here " +
+                    "and never leaves the phone except as a signature.",
+                12f,
+            ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
+            // The plugin's switch is the SSH plugin's, not this connection's: offering it per
+            // connection would imply each one can be turned off independently, which it cannot.
+            content.addView(Theme.sectionHeader(this, "Plugin"))
+        }
 
         // --- 1. THE SWITCH ---
         content.addView(Theme.sectionHeader(this, "Status"))
@@ -454,6 +483,15 @@ class PluginDetailActivity : BridgeScreen() {
 
     companion object {
         const val EXTRA_PLUGIN_ID = "plugin_id"
+
+        /**
+         * The SSH connection this detail screen is scoped to, or absent for a whole plugin.
+         *
+         * One connection is a vault secret named `ssh-<host>`, not a plugin of its own — there is
+         * no per-connection object to register. So the screen takes the plugin AND a name, and
+         * narrows itself to that one connection when the name is present.
+         */
+        const val EXTRA_SECRET_NAME = "secret_name"
         private const val REQ_PERMISSION = 3001
     }
 }
