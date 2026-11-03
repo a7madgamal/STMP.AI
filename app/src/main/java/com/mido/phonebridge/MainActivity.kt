@@ -492,10 +492,12 @@ class MainActivity : BridgeScreen() {
             }
         )
         heroCard.background = Theme.surface(this, heroSurface, Theme.RADIUS_CARD)
+        // No email here (Mido, 2026-11-03: *"move email from home, it belongs to the google
+        // plugin"*). The hero answers "is the bridge running, and where" -- who is signed in is a
+        // fact about the ACCOUNT, and it lives on the screen that can change it.
         heroSub.text = ServerStatus.detail(
             state = state,
             lastError = BridgeService.lastError,
-            email = if (AuthManager.isLoggedIn(this)) (AuthManager.accountEmail ?: "signed in") else null,
             bindAddress = BridgeService.bindAddress,
             port = BridgeService.PORT,
         )

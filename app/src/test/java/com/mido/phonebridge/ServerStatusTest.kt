@@ -64,7 +64,7 @@ class ServerStatusTest {
             serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = "",
         )
         assertEquals(ServerStatus.State.STOPPED, state)
-        assertEquals("Tap START SERVER to begin", ServerStatus.detail(state, "", null, "", 8787))
+        assertEquals("Tap START SERVER to begin", ServerStatus.detail(state, "", "", 8787))
     }
 
     @Test
@@ -142,7 +142,7 @@ class ServerStatusTest {
     @Test
     fun `UNRESPONSIVE detail names the address it should be answering on`() {
         val state = ServerStatus.State.UNRESPONSIVE
-        val detail = ServerStatus.detail(state, "", null, "100.64.0.11", 8787)
+        val detail = ServerStatus.detail(state, "", "100.64.0.11", 8787)
         assertTrue(detail.contains("100.64.0.11:8787"))
         // A stale tailnet address is the likeliest cause, so say it is being handled.
         assertTrue(detail.contains("retrying"))
@@ -157,7 +157,7 @@ class ServerStatusTest {
         assertEquals("● Could not start", ServerStatus.title(state))
         // Verbatim: the reason is the payload. Paraphrasing it would mean two strings to keep
         // in step, and the one on screen would be the one nobody tested.
-        assertEquals(err, ServerStatus.detail(state, err, null, "", 8787))
+        assertEquals(err, ServerStatus.detail(state, err, "", 8787))
     }
 
     @Test

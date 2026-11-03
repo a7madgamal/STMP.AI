@@ -5162,10 +5162,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.90 (build 244) — 2026-11-03
 - Moved the seven design plans into `docs/plans/`, with an index that says they record decisions rather than describing the code.
 
-## 0.43.91 (build 245) — 2026-11-03 — CURRENT
+## 0.43.91 (build 245) — 2026-11-03
 - Fixed the app crashing on open in 0.43.90: the audit banner was still painted by `render()` after the block that created it was removed.
 - Added a build-time check that every `lateinit` field is assigned in its own file, so an unassigned view fails the build instead of the phone.
 - Removed three dead view declarations left behind by moving the account section.
+
+## 0.43.92 (build 246) — 2026-11-03 — CURRENT
+- Removed the account email from the Home hero; the Google plugin reports it.
 
 ## Keeping this file honest
 

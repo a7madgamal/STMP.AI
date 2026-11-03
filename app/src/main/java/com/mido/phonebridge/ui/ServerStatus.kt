@@ -105,7 +105,6 @@ object ServerStatus {
     fun detail(
         state: State,
         lastError: String,
-        email: String?,
         bindAddress: String,
         port: Int,
     ): String = when (state) {
@@ -116,11 +115,15 @@ object ServerStatus {
             "Not answering on ${bindAddress.ifBlank { "?" }}:$port — retrying automatically."
         // A running server that also carries an error is not possible (a successful bind
         // clears it), but if that state ever appears, the error is still the more useful
-        // line to show than the account email. Fail toward information.
+        // line to show than the address. Fail toward information.
         State.RUNNING_HEALTHY, State.RUNNING_ATTENTION ->
+            // The EMAIL is deliberately absent (Mido, 2026-11-03: *"move email from home, it
+            // belongs to the google plugin"*). It is a fact about the ACCOUNT, not about the
+            // server, and Home answers one question — is the bridge running and where. The
+            // Google plugin reports the address on its own row, which is the screen that can also
+            // change it.
             if (lastError.isNotBlank()) lastError
-            else if (email != null) "$email · ${bindAddress.ifBlank { "?" }}:$port"
-            else "Not signed in to Google"
+            else "${bindAddress.ifBlank { "?" }}:$port"
         State.STOPPED -> "Tap START SERVER to begin"
     }
 
