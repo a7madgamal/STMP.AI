@@ -20,6 +20,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
+import com.mido.phonebridge.BottomInset
 import com.mido.phonebridge.R
 
 /**
@@ -151,12 +152,13 @@ object Theme {
     const val SQUIGGLE_DP = 1.5f
 
     /**
-     * Height of the shadow band above the bottom bar, in dp.
+     * The bottom bar's elevation, in dp.
      *
-     * Shared rather than passed literally: `tornBar` draws the gradient into this band and
-     * `bottomNav` pads the same amount, so the two must agree or a label lands under the shadow.
+     * Real elevation rather than a painted gradient: the platform draws a blurred, genuinely
+     * transparent shadow beneath the view. A gradient inside the view's own bounds can only ever
+     * look like a grey rectangle sitting above the paper, which is exactly what it looked like.
      */
-    const val BAR_SHADOW_DP = 10
+    const val BAR_ELEVATION_DP = 8f
 
     /** The pen width of a drawn outline, in dp. Hairline but not invisible. */
     const val SQUIGGLE_STROKE_DP = 1.2f
@@ -251,22 +253,49 @@ object Theme {
      * fact that cannot go stale the way a shared "current tab" could.
      */
     fun bottomNav(ctx: Context, current: Tab, onSelect: (Tab) -> Unit): View {
-        val shadowDp = BAR_SHADOW_DP
         val bar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            // Torn top edge plus the shadow band above it. Both live inside this view's bounds:
-            // a view is clipped to them, so a shadow drawn ABOVE the top edge would not appear.
-            background = tornBar(ctx, BG, shadowDp = shadowDp)
-            // The top padding clears the shadow band, so no tab label sits under the gradient and
-            // the paper starts where the labels do.
-            setPadding(0, dp(ctx, shadowDp) + dp(ctx, 6), 0, dp(ctx, 6))
+            background = tornBar(ctx, BG)
+            // No band above the paper: the shadow is real elevation now, drawn by the platform
+            // OUTSIDE these bounds. The padding here only keeps the labels off the torn edge.
+            setPadding(0, dp(ctx, 8), 0, dp(ctx, 6))
         }
         for (tab in Tab.entries) {
             val selected = tab == current
             bar.addView(
                 tabView(ctx, tab, selected, onSelect),
+                // EQUAL WEIGHTS across the full width. Without this the bar measured as
+                // wrap-content, so the three tabs huddled at the left edge and the bar's paper
+                // stopped wherever the last label ended.
                 LinearLayout.LayoutParams(0, dp(ctx, 52), 1f),
             )
+        }
+
+        // Real shadow, from elevation -- but with a RECTANGULAR outline.
+        //
+        // `elevation` is the only way to get a genuinely transparent, blurred shadow; a painted
+        // gradient in a reserved band is what produced the grey rectangle. Two things:
+        //
+        //  * The outline must be a Path-based one. A torn edge is CONCAVE, and `Outline.setConvexPath`
+        //    throws on a concave path -- so the torn edge itself cannot be the outline. The shadow
+        //    therefore sits under a rectangle, which is correct: a real shadow is a blur of the
+        //    whole silhouette, and a 5dp tear displaced by a blur reads as torn anyway.
+        //
+        //  * `clipToOutline` stays FALSE so the torn path still paints its own ragged edge. Turning
+        //    it on would clip the paper to the rectangle and flatten the tear.
+        // The bottom inset is applied to the BAR, not to its host.
+        //
+        // Padding the host instead leaves the paper stopping above the gesture bar, with the
+        // window's flat background showing underneath -- which reads as the bar floating with a
+        // margin. On the bar itself the inset pads its content while its background still paints
+        // behind the gesture area, so the paper reaches the physical bottom edge.
+        BottomInset.apply(bar)
+
+        bar.elevation = dpF(ctx, BAR_ELEVATION_DP)
+        bar.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                outline.setRect(0, 0, view.width, view.height)
+            }
         }
         return bar
     }
@@ -298,6 +327,13 @@ object Theme {
             gravity = Gravity.CENTER
             typeface = handFont(ctx)
             setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
+            // One line, always. "Settings" wrapped to "Setting / s" as a third of a narrow bar:
+            // the column is only as wide as its share, and the hand font is wide. `maxLines` alone
+            // would clip, so the size shrinks to fit instead.
+            isSingleLine = true
+            maxLines = 1
+            ellipsize = null
+            setAutoSizeTextTypeUniformWithConfiguration(9, 13, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
         }
         column.addView(label)
 
@@ -318,6 +354,11 @@ object Theme {
                 TypedValue.COMPLEX_UNIT_SP, 13f, ctx.resources.displayMetrics
             )
         }
+        // The label auto-sizes down to fit, so measuring at a fixed 13sp would leave a rule wider
+        // than the word it underlines. Measure at the smallest size the label may use.
+        measure.textSize = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_SP, 9f, ctx.resources.displayMetrics
+        )
         val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 4)
         column.addView(rule, LinearLayout.LayoutParams(
             ruleWidth.coerceAtLeast(dp(ctx, 16)),
@@ -550,45 +591,41 @@ object Theme {
     }
 
     /**
-     * The bottom bar's surface: a torn TOP edge with a shadow above it.
+     * The bottom bar's surface: paper with a torn TOP edge.
      *
-     * **Why this is not `TornPaper`.** That class tears the BOTTOM, because it exists for cards
-     * whose tear is where the paper "tore away" below the content. A bar pinned to the bottom of
-     * the screen tears upward — the ragged edge is the one facing the content.
+     * **No shadow is painted here, and no outline is stroked.**
      *
-     * **Why the shadow lives inside these bounds.** A view is clipped to its own bounds, so a
-     * shadow drawn above the bar's top edge would simply not appear. Instead the view reserves
-     * `shadowDp` of its own height at the top, paints the gradient there, and starts the torn edge
-     * at the bottom of that band. The caller must give the bar matching top padding so no tab
-     * lands under the gradient — see `bottomNav`.
+     * It used to reserve a band at the top of its own bounds and paint a gradient into it, because
+     * a view is clipped to its bounds and a shadow above the top edge would not appear. On a light
+     * page that band read as a grey rectangle sitting above the paper — a hard-edged strip, not a
+     * shadow — and stroking the path drew a thin grey line around all four sides.
+     *
+     * The fix is to stop imitating a shadow: the bar's View carries real `elevation`, which the
+     * platform renders as a genuine blurred, transparent shadow outside the view's own drawing.
+     * That needs an outline, which [TornTopBar] now supplies from the torn path, so the shadow
+     * follows the ragged edge instead of a rectangle.
      */
     fun tornBar(
         ctx: Context,
         fill: Int = BG,
-        shadowDp: Int = 10,
         tearDp: Int = 5,
     ): android.graphics.drawable.Drawable = TornTopBar(
         fill = fill,
-        shadowPx = dp(ctx, shadowDp).toFloat(),
         tearPx = dp(ctx, tearDp).toFloat(),
-        shadowColor = withAlpha(0xFF000000.toInt(), 0x40),
     )
 
     /**
-     * A bar with a torn top edge and a vertical shadow in the band above it.
+     * Paper with a torn top edge, and an outline that lets the platform draw the shadow.
      *
-     * See [tornBar] for why the shadow is inside the bounds rather than above them.
+     * See [tornBar] for why nothing is stroked or banded here.
      */
-    private class TornTopBar(
+    class TornTopBar(
         private val fill: Int,
-        private val shadowPx: Float,
         private val tearPx: Float,
-        private val shadowColor: Int,
     ) : android.graphics.drawable.Drawable() {
 
         private val path = android.graphics.Path()
         private val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        private val shadowPaint = android.graphics.Paint()
         private val builtFor = android.graphics.Rect()
         private var built = false
 
@@ -606,21 +643,6 @@ object Theme {
                 built = true
             }
 
-            // The shadow: transparent at the top of the band, opaque where paper begins. Drawn as
-            // a gradient rather than a fixed line so the bar reads as sitting ABOVE the content
-            // rather than having a hard stripe over it.
-            shadowPaint.shader = android.graphics.LinearGradient(
-                0f, b.top.toFloat(), 0f, b.top + shadowPx,
-                intArrayOf(android.graphics.Color.TRANSPARENT, shadowColor),
-                null,
-                android.graphics.Shader.TileMode.CLAMP,
-            )
-            canvas.drawRect(
-                b.left.toFloat(), b.top.toFloat(),
-                b.right.toFloat(), b.top + shadowPx,
-                shadowPaint,
-            )
-
             fillPaint.style = android.graphics.Paint.Style.FILL
             fillPaint.color = fill
             canvas.drawPath(path, fillPaint)
@@ -631,20 +653,15 @@ object Theme {
             canvas.clipPath(path)
             canvas.drawPaint(PaperGrain.paint())
             canvas.restore()
-
-            // Hairline along the tear, so the edge reads as paper with thickness.
-            fillPaint.style = android.graphics.Paint.Style.STROKE
-            fillPaint.strokeWidth = tearPx / 4f
-            fillPaint.color = withAlpha(ON_SURFACE, 0x2E)
-            canvas.drawPath(path, fillPaint)
         }
 
         private fun build(b: android.graphics.Rect) {
             path.reset()
             val left = b.left.toFloat()
             val right = b.right.toFloat()
-            // The paper starts below the shadow band; the tear rides along that line.
-            val top = b.top + shadowPx
+            // The tear rides the very top of the view. No band is reserved above it: the shadow
+            // comes from elevation now, so the paper starts where the bar starts.
+            val top = b.top.toFloat()
             val bottom = b.bottom.toFloat()
             if (top >= bottom) return
 
@@ -658,8 +675,7 @@ object Theme {
             }
             path.lineTo(right, top)
 
-            // Square sides and bottom: the bar is pinned to the window's bottom edge, so a torn
-            // edge there would be clipped by the navigation bar anyway.
+            // Square sides and bottom: the bar is pinned to the window's bottom edge.
             path.lineTo(right, bottom)
             path.lineTo(left, bottom)
             path.close()

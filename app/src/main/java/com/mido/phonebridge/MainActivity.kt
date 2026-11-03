@@ -64,12 +64,16 @@ class MainActivity : AppCompatActivity() {
         // A stable host for the bar, so a tab change replaces one child instead of re-finding
         // the root and guessing which child the bar is.
         barHost = LinearLayout(this)
-        root.addView(barHost)
+        // MATCH_PARENT explicitly: the default layout params are WRAP_CONTENT, which made the bar
+        // measure to its labels and huddle at the left edge instead of spanning the screen.
+        root.addView(barHost, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
 
         // Insets split by owner: top on the root so the first row clears the status bar, bottom
         // on the bar so its paper extends behind the gesture bar instead of leaving a strip.
         TopInset.apply(root)
-        BottomInset.apply(barHost)
 
         setContentView(root)
 
@@ -177,7 +181,16 @@ class MainActivity : AppCompatActivity() {
      */
     private fun rebuildBar(tab: Theme.Tab) {
         barHost.removeAllViews()
-        barHost.addView(Theme.bottomNav(this, tab) { selected -> show(selected) })
+        // MATCH_PARENT again: `addView` with no params defaults to WRAP_CONTENT, so the rebuilt
+        // bar would snap back to hugging the left edge after the first tab switch -- the same
+        // bug, only visible after interacting.
+        barHost.addView(
+            Theme.bottomNav(this, tab) { selected -> show(selected) },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
     }
 
     /** Whatever screen is on screen, for a repaint request that comes from the shell. */

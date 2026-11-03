@@ -96,7 +96,10 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         // starting an Activity directly -- once the tabs are fragments there is no Activity per
         // tab to start.
         val bar = Theme.bottomNav(this, tab) { selected -> openTab(selected) }
-        root.addView(bar)
+        root.addView(bar, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ))
 
         // Insets split by owner, which is the whole reason this is not `Theme.inset`:
         //
@@ -107,7 +110,6 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         // Putting both on one view is what `Theme.inset` does, and on this layout it would pad
         // the body's bottom for a bar that is already below it, leaving a dead gap.
         TopInset.apply(root)
-        BottomInset.apply(bar)
 
         setContentView(root)
 

@@ -5187,9 +5187,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.97 (build 251) — 2026-11-03
 - Screens no longer call Activity APIs directly; they go through a `ScreenHost` interface, so the host can become a fragment without touching them.
 
-## 0.43.98 (build 252) — 2026-11-03 — CURRENT
+## 0.43.98 (build 252) — 2026-11-03
 - The three tabs are now fragments inside one Activity, so the bottom bar is created once and no longer moves when switching tabs.
 - App startup, the vault prompt and the once-per-process auto-start now belong to the shell instead of the Home screen.
+
+## 0.43.99 (build 253) — 2026-11-03 — CURRENT
+- Bottom bar spans the full width, so the tabs are evenly spaced instead of huddled left.
+- Bottom bar shadow is real elevation rather than a painted grey band, so it is a genuine transparent blur.
+- Removed the thin grey outline around the bar and the empty margin below it, so the paper meets the screen edge.
+- Tab labels stay on one line instead of wrapping.
 
 ## Keeping this file honest
 
