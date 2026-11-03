@@ -695,6 +695,29 @@ object NotifyOverlay {
                 if (entry.decisionStartAt == 0L) {
                     // Still fetching: the bar waits at full and the clock has not begun.
                     drain.level = LEVEL_FULL
+                    // **BUT NOT FOREVER.** This branch used to have no deadline at all: it held
+                    // the card at "◌ summarising…" and relied on a separate backstop Runnable
+                    // to end it. When that backstop was missed — a posted callback that never
+                    // ran, a card re-attached, a window service hiccup — the card sat on
+                    // "summarising…" with a full bar and a clock that had never started, and
+                    // nothing in the tick could end it. A frozen card is the worst outcome
+                    // here: the human reads it as "still working" while the server thread is
+                    // pinned behind it.
+                    //
+                    // So the tick now enforces its own bound, derived from the same constant
+                    // the fetch is given. Two independent clocks that agree by construction:
+                    // the fetch has its cap, and the display has the same cap. If the fetch
+                    // thread is wedged, the CARD still ends and says why.
+                    val fetchDeadline = entry.shownAt + entry.fetchCapMs + FETCH_DEADLINE_SLACK_MS
+                    if (now >= fetchDeadline) {
+                        com.mido.phonebridge.Debug.log(
+                            "notify[${entry.id}] fetch exceeded ${entry.fetchCapMs}ms on screen " +
+                                "(${now - entry.shownAt}ms); withdrawing card rather than " +
+                                "leaving it stuck at summarising"
+                        )
+                        settle(entry, Reason.AI_FAILED, "summary exceeded its budget")
+                        return
+                    }
                 } else {
                     val deadline = entry.decisionStartAt + entry.windowMs
                     if (now >= deadline) {
@@ -1252,6 +1275,16 @@ object NotifyOverlay {
 
     /** Extra time past the fetch cap before the backstop fires. Never the normal path. */
     private const val BACKSTOP_SLACK_MS = 2_000L
+
+    /**
+     * How long past its own budget the fetch may still be on screen before the tick ends
+     * the card.
+     *
+     * Positive on purpose so a fetch that answers at exactly its budget is not killed by
+     * frame scheduling — the summary should win a photo finish. Small on purpose too: this
+     * is the window in which the human sees "summarising…" while nothing is coming.
+     */
+    private const val FETCH_DEADLINE_SLACK_MS = 1_500L
 
     /** ~30fps. A 5s countdown does not need more, and this is one small view. */
     private const val TICK_MS = 33L

@@ -5027,7 +5027,7 @@ Still required before the first run: four repo secrets (`STMP_KEYSTORE_B64`, `GO
 
 ---
 
-## 0.43.67 — guard scripts are TypeScript, not Python (build 221) — CURRENT
+## 0.43.67 — guard scripts are TypeScript, not Python (build 221)
 2026-11-03
 
 Mido, 2026-11-03: *"avoid python prefer ts"*. All repository tooling moved to TypeScript.
@@ -5062,6 +5062,54 @@ integers; a shape mismatch fails loudly instead of guessing.
 
 `package.json` carries no runtime dependencies — only `typescript` and `@types/node` as
 devDependencies. `node_modules/` is gitignored.
+
+---
+
+## 0.43.68 — non-ASCII request bodies, and the stuck "summarising…" card (build 222) — CURRENT
+2026-11-03
+
+Two defects, both found by using the thing rather than reading it.
+
+### Request bodies were decoded as US-ASCII
+
+A Todoist task written through the broker came back with `UI ��� when` instead of `UI — when`.
+One em-dash is **three** UTF-8 bytes, and it arrived as exactly **three** U+FFFD — so this was
+byte-level corruption, not a bad decode of one character.
+
+Root cause, confirmed in the shipped 2.3.1 bytecode rather than guessed: `HTTPSession.parseBody`
+builds the string with `new String(bytes, contentType.getEncoding())`, and
+`ContentType.getEncoding()` returns the literal **`"US-ASCII"`** when the header carries no
+`charset=`. US-ASCII cannot represent any byte >= 0x80, so every one becomes U+FFFD. And
+`application/json` has no charset parameter *by definition* — JSON is UTF-8 — so the ordinary
+request was the one that broke. Any accented text, Arabic, emoji or curly quote sent to any route
+was silently corrupted.
+
+`getHeaders()` returns the session's OWN map (bytecode: `getfield headers; areturn`), so
+`forceUtf8` writes `charset=utf-8` there before `parseBody` reads it. A caller that states its own
+charset is honoured — rewriting it would be the same class of lie as the default.
+
+Proven with a real NanoHTTPD round-trip, not a code read: same 25-byte payload,
+`no fix → {"content":"UI ��� dash"}`, `with fix → {"content":"UI — dash"}`.
+
+### The card could sit on "◌ summarising…" forever
+
+The tick's fetching branch had **no deadline of its own**. It held the card at `LEVEL_FULL` and
+relied entirely on a separate backstop `Runnable` to end it. Miss that backstop — a posted
+callback that never ran, a re-attach, a window-service hiccup — and the card stayed on
+"summarising…" with a full bar and a decision clock that had never started. Nothing in the tick
+could end it, and the server thread stayed pinned behind it.
+
+A frozen card is the worst outcome available here: the human reads it as "still working" while
+the request is already dead. The tick now enforces its own bound (`shownAt + fetchCapMs +
+FETCH_DEADLINE_SLACK_MS`) and settles as `AI_FAILED` with `"summary exceeded its budget"`, which
+reaches the caller as `500 ai_unavailable` with that detail in the audit record. Two clocks that
+agree by construction: the fetch has its cap, the display has the same cap.
+
+### The bug was harder to diagnose than it should have been
+
+`RequestCharsetTest` now guards the charset fix — it asserts `forceUtf8` exists, runs BEFORE
+`parseBody`, and does not replace a stated charset. Proved by deleting the call and watching it
+fail, then restoring. 408 tests.
 
 ---
 

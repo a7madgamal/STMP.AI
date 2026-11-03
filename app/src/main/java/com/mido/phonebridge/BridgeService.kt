@@ -2054,11 +2054,41 @@ class HttpServer(
     /**
      * The body as the caller sent it. Never throws on bad content — only on a socket
      * failure, which the caller records as a transport fault rather than a client one.
+     *
+     * **Forces UTF-8 before NanoHTTPD decodes, and that is a correctness fix, not a
+     * preference.** `HTTPSession.parseBody` builds the string with
+     * `new String(bytes, contentType.getEncoding())`, and `ContentType.getEncoding()`
+     * returns the literal **`"US-ASCII"`** when the header carries no `charset=` (verified
+     * in the 2.3.1 bytecode: `getEncoding` does `if (encoding == null) return "US-ASCII"`).
+     * US-ASCII cannot represent any byte >= 0x80, so every such byte becomes U+FFFD — and
+     * one UTF-8 character is up to 4 bytes, which is why an em-dash (3 bytes) arrived as
+     * exactly THREE replacement characters. Any caller sending accented text, Arabic,
+     * emoji or a curly quote got silent corruption, and `application/json` has no charset
+     * parameter precisely because JSON is defined as UTF-8.
+     *
+     * `getHeaders()` hands back the session's OWN map (bytecode: `getfield headers;
+     * areturn`), so writing here changes what `parseBody` will read. That is the only
+     * seam NanoHTTPD offers short of forking the library.
      */
     private fun readRawBody(session: IHTTPSession): String {
+        forceUtf8(session)
         val map = HashMap<String, String>()
         session.parseBody(map)
         return map["postData"] ?: ""
+    }
+
+    /**
+     * Give the request an explicit `charset=UTF-8` when it has none.
+     *
+     * Deliberately does NOT override a charset the caller actually stated: if someone sends
+     * `charset=ISO-8859-1` on purpose, honouring it is correct, and silently rewriting it
+     * would be the same class of lie as the US-ASCII default.
+     */
+    private fun forceUtf8(session: IHTTPSession) {
+        val headers = session.headers ?: return
+        val current = headers["content-type"] ?: return
+        if (current.contains("charset=", ignoreCase = true)) return
+        headers["content-type"] = "$current; charset=utf-8"
     }
 
     /** Parse, failing hard and coded. The raw text is already on the draft by now. */
