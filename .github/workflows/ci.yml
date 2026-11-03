@@ -39,11 +39,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # Install the platform through the ACTION, not a follow-up sdkmanager call.
+      #
+      # `packages:` must be set explicitly. The action defaults to `tools platform-tools`,
+      # and Google REMOVED the `tools` package from the SDK repository — so the default
+      # now fails with "Failed to find package 'tools'" and exit code 1, before the job
+      # does anything useful. Verified on run 41630793088, which died 26s in.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install platform
-        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -90,11 +95,16 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # Install the platform through the ACTION, not a follow-up sdkmanager call.
+      #
+      # `packages:` must be set explicitly. The action defaults to `tools platform-tools`,
+      # and Google REMOVED the `tools` package from the SDK repository — so the default
+      # now fails with "Failed to find package 'tools'" and exit code 1, before the job
+      # does anything useful. Verified on run 41630793088, which died 26s in.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install platform
-        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Cache Gradle
         uses: actions/cache@v4
