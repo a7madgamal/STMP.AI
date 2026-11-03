@@ -28,7 +28,7 @@ import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.ui.Theme
 
-class MainActivity : BridgeScreen() {
+class MainActivity : BridgeScreen(), BridgeControl {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
@@ -164,7 +164,7 @@ class MainActivity : BridgeScreen() {
         serverButton = Theme.button(this, "START SERVER", Theme.ButtonStyle.SUCCESS) {
             if (BridgeService.serverUp) {
                 Debug.log("stop requested")
-                stopService(Intent(this@MainActivity, BridgeService::class.java))
+                stopBridge()
             } else {
                 startBridge()
             }
@@ -642,14 +642,14 @@ class MainActivity : BridgeScreen() {
         val current = try {
             store.get()
         } catch (e: PolicyException) {
-            Toast.makeText(this, "policy unreadable: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("policy unreadable: ${e.message}")
             return
         }
         val next = current.withFingerprintForModals(!current.fingerprintForModals)
         try {
             store.set(next)
         } catch (e: Exception) {
-            Toast.makeText(this, "could not save: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("could not save: ${e.message}")
             return
         }
         try {
@@ -672,7 +672,7 @@ class MainActivity : BridgeScreen() {
         val current = try {
             store.get().global
         } catch (e: PolicyException) {
-            Toast.makeText(this, "policy unreadable: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("policy unreadable: ${e.message}")
             return
         }
         if (next == current) return
@@ -680,16 +680,14 @@ class MainActivity : BridgeScreen() {
         if (next == GlobalMode.NOTIFY) {
             // Not a red-alert confirmation: NOTIFY still asks, just quietly. But it is
             // the value where silence means YES, so it gets one sentence saying so.
-            AlertDialog.Builder(this)
-                .setTitle("Use overlay prompts?")
-                .setMessage(
-                    "Every request shows a small toast for 5 seconds. Doing nothing " +
-                        "approves it. Tap ✕ to reject.\n\nYour custom rules are ignored " +
-                        "while this is selected."
-                )
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Use NOTIFY") { _, _ -> applyGate(store, current, next) }
-                .show()
+            confirm(
+                title = "Use overlay prompts?",
+                message = "Every request shows a small toast for 5 seconds. Doing nothing " +
+                    "approves it. Tap ✕ to reject.\n\nYour custom rules are ignored " +
+                    "while this is selected.",
+                positive = "Use NOTIFY",
+                negative = "Cancel",
+            ) { applyGate(store, current, next) }
         } else {
             applyGate(store, current, next)
         }
@@ -733,7 +731,7 @@ class MainActivity : BridgeScreen() {
             val existing = store.get()
             store.set(existing.withGlobal(after))
         } catch (e: Exception) {
-            Toast.makeText(this, "could not save policy: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("could not save policy: ${e.message}")
             return
         }
         // Audit the change. A policy record that cannot be written is a failure the
@@ -760,8 +758,7 @@ class MainActivity : BridgeScreen() {
 
     private fun hasNotifPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
-        return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
+        return hasPermission(ScreenHost.POST_NOTIFICATIONS)
     }
 
  
@@ -779,7 +776,7 @@ class MainActivity : BridgeScreen() {
  
     private fun openNotifAccessSettings() {
         try {
-            startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+            go(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
             Debug.log("opened notification-access settings")
         } catch (e: Exception) {
             Debug.log("cannot open notif settings: ${e.message}")
@@ -817,7 +814,7 @@ class MainActivity : BridgeScreen() {
     private fun requestNotifPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Debug.log("requesting POST_NOTIFICATIONS")
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_POST_NOTIF)
+            askPermission(ScreenHost.POST_NOTIFICATIONS, REQ_POST_NOTIF)
         } else {
             Debug.log("POST_NOTIFICATIONS not needed on this API level")
         }
@@ -842,10 +839,10 @@ class MainActivity : BridgeScreen() {
             return
         }
         Debug.log("login tapped; client id len=${BridgeService.GOOGLE_CLIENT_ID.length}")
-        startActivity(Intent(this, GoogleLoginActivity::class.java))
+        go(Intent(this, GoogleLoginActivity::class.java))
     }
 
-    private fun startBridge() {
+    override fun startBridge() {
         Debug.log("START SERVER tapped")
         // Clear the previous failure so a retry cannot display a stale reason: the service
         // re-sets this on the way out if it fails again, and a successful bind clears it.
@@ -866,5 +863,16 @@ class MainActivity : BridgeScreen() {
         } catch (e: Exception) {
             Debug.log("FAILED to dispatch service: ${e.javaClass.simpleName}: ${e.message}")
         }
+    }
+
+    /**
+     * Stop the service.
+     *
+     * The intent is built here rather than in the screen so the screen never names a concrete
+     * Service class — the same reason [startBridge] wraps `startForegroundService`.
+     */
+    override fun stopBridge() {
+        Debug.log("stop requested")
+        stopService(Intent(this, BridgeService::class.java))
     }
 }

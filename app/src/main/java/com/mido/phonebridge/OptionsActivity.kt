@@ -155,16 +155,16 @@ class OptionsActivity : BridgeScreen() {
         // --- TOOLS: the destinations that are not tabs ---
         container.addView(Theme.sectionHeader(this, "Tools"))
         container.addView(toolRow("Get started") {
-            startActivity(Intent(this, OnboardingActivity::class.java))
+            go(Intent(this, OnboardingActivity::class.java))
         })
         container.addView(toolRow("Request log") {
-            startActivity(Intent(this, LogActivity::class.java))
+            go(Intent(this, LogActivity::class.java))
         })
         container.addView(toolRow("Exceptions") {
-            startActivity(Intent(this, ExceptionsActivity::class.java))
+            go(Intent(this, ExceptionsActivity::class.java))
         })
         container.addView(toolRow("SSH") {
-            startActivity(Intent(this, SshActivity::class.java))
+            go(Intent(this, SshActivity::class.java))
         })
 
         // --- DEBUG ---
@@ -278,9 +278,7 @@ class OptionsActivity : BridgeScreen() {
                             )
                         )
                     } catch (e: Exception) {
-                        Toast.makeText(
-                            this, "could not forget: ${e.message}", Toast.LENGTH_LONG
-                        ).show()
+                        toast("could not forget: ${e.message}")
                     }
                     render()
                 }
@@ -614,7 +612,7 @@ class OptionsActivity : BridgeScreen() {
                 modelStatus.text = "asking $url …"
 
                 // Off the main thread: this is a network call and the UI thread is not allowed
-                // to block on one. The result comes back through runOnUiThread so every view
+                // to block on one. The result comes back through ui { } so every view
                 // touch happens where Android requires it.
                 Thread {
                     // An explicit outcome, NOT a Pair that has to be re-cast.
@@ -635,14 +633,14 @@ class OptionsActivity : BridgeScreen() {
                             IllegalStateException(e.message ?: e.javaClass.simpleName, e)
                         )
                     }
-                    runOnUiThread {
+                    ui {
                         val catalogue = outcome.getOrNull()
                         if (catalogue == null) {
                             val why = outcome.exceptionOrNull()?.message ?: "no answer"
                             modelStatus.text = "could not list models — $why"
                             modelStatus.setTextColor(Theme.DANGER)
                             modelSpinner.visibility = android.view.View.GONE
-                            return@runOnUiThread
+                            return@ui
                         }
                         listed = catalogue
                         modelSpinner.adapter = android.widget.ArrayAdapter(
@@ -839,7 +837,7 @@ class OptionsActivity : BridgeScreen() {
         try {
             store.set(next)
         } catch (e: Exception) {
-            Toast.makeText(this, "could not save: ${e.message}", Toast.LENGTH_LONG).show()
+            toast("could not save: ${e.message}")
             return
         }
         try {
@@ -847,11 +845,7 @@ class OptionsActivity : BridgeScreen() {
                 PolicyAudit.record(next.global, next.global, "options")
             )
         } catch (e: Exception) {
-            Toast.makeText(
-                this,
-                "saved, but the audit log could not record it: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
+            toast("saved, but the audit log could not record it: ${e.message}")
         }
         // Re-render from the stored value rather than from what we just sent: if the write
         // silently failed, the screen must show the truth, not the intent.
@@ -900,15 +894,14 @@ class OptionsActivity : BridgeScreen() {
     }
 
     private fun confirmRedownload() {
-        AlertDialog.Builder(this)
-            .setTitle("Re-download the AI model?")
-            .setMessage(
-                "The model is already downloaded and verified. Re-downloading fetches ~474 MB " +
-                    "again and replaces the working copy."
-            )
-            .setNegativeButton("Keep it") { _, _ -> Debug.log("re-download declined") }
-            .setPositiveButton("Re-download") { _, _ -> startModelDownload(force = true) }
-            .show()
+        confirm(
+            title = "Re-download the AI model?",
+            message = "The model is already downloaded and verified. Re-downloading fetches " +
+                "~474 MB again and replaces the working copy.",
+            positive = "Re-download",
+            negative = "Keep it",
+            onNegative = { Debug.log("re-download declined") },
+        ) { startModelDownload(force = true) }
     }
 
     private fun startModelDownload(force: Boolean = false) {
@@ -918,11 +911,11 @@ class OptionsActivity : BridgeScreen() {
             val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
                 applicationContext,
                 force = force,
-                onProgress = { runOnUiThread { render() } },
+                onProgress = { ui { render() } },
             )
-            runOnUiThread {
+            ui {
                 Debug.log("model provision: ${result.detail}")
-                Toast.makeText(this, result.detail, Toast.LENGTH_LONG).show()
+                toast(result.detail)
                 render()
             }
         }, "model-download").apply { isDaemon = true }.start()

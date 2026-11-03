@@ -146,7 +146,7 @@ class PluginsActivity : BridgeScreen() {
             isClickable = true
             contentDescription = "SSH connection $name"
             setOnClickListener {
-                startActivity(
+                go(
                     Intent(this@PluginsActivity, PluginDetailActivity::class.java)
                         .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
                         .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name)
@@ -256,7 +256,7 @@ class PluginsActivity : BridgeScreen() {
     }
 
     private fun openDetail(pluginId: String) {
-        startActivity(
+        go(
             Intent(this, PluginDetailActivity::class.java)
                 .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
         )
