@@ -258,38 +258,62 @@ object Theme {
     }
 
     private fun tabView(ctx: Context, tab: Tab, selected: Boolean): View {
+        // The label is wrapped in a column so the rule can hug the TEXT rather than span the
+        // whole tab.
+        //
+        // It used to be the TextView's own background, and that view is a third of the screen
+        // wide — so the "underline" came out as a line spanning a third of the bar with the word
+        // sitting under it, which is what made the menu look broken. A background cannot be
+        // narrower than its view; a sibling can.
+        val column = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (selected) "${tab.label}, selected" else tab.label
+        }
+
         val label = TextView(ctx).apply {
             text = tab.label
             textSize = 13f
             gravity = Gravity.CENTER
             typeface = handFont(ctx)
             setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
-            isClickable = true
-            isFocusable = true
-            contentDescription = if (selected) "${tab.label}, selected" else tab.label
-            // The selected tab is marked with the same drawn rule a section header uses, so the
-            // bar reads as part of the same page rather than a widget bolted to the bottom. An
-            // unselected tab has a transparent background of the same type, so nothing shifts.
-            background = if (selected) {
-                SquiggleRule(
-                    color = ACCENT,
-                    strokePx = dpF(ctx, 2f),
-                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
-                    spanFraction = 0.55f,
-                )
-            } else {
-                // A no-op drawable of the SAME class and geometry: switching a tab then changes
-                // paint only, never layout, so the bar cannot twitch as selection moves.
-                SquiggleRule(
-                    color = Color.TRANSPARENT,
-                    strokePx = dpF(ctx, 2f),
-                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
-                    spanFraction = 0.55f,
-                )
-            }
         }
+        column.addView(label)
+
+        // The rule, under the word and only as wide as the word.
+        //
+        // Always added, in both states, with the unselected one transparent: the bar then changes
+        // PAINT on selection rather than layout, so it cannot twitch as selection moves.
+        val rule = View(ctx)
+        val ruleHeight = dp(ctx, 6)
+        // Measured with the same face and size the label uses, so the rule ends where the word
+        // ends. `TextView.measureText` is not usable here: it lives on the instance, and the
+        // instance has not been laid out yet.
+        val measure = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = handFont(ctx)
+            // sp -> px through TypedValue, which honours the user's font scale. The metric
+            // fields are deprecated and would ignore it.
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP, 13f, ctx.resources.displayMetrics
+            )
+        }
+        val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 4)
+        column.addView(rule, LinearLayout.LayoutParams(
+            ruleWidth.coerceAtLeast(dp(ctx, 16)),
+            ruleHeight,
+        ).apply { topMargin = dp(ctx, 2) })
+        rule.background = SquiggleRule(
+            color = if (selected) ACCENT else Color.TRANSPARENT,
+            strokePx = dpF(ctx, 2f),
+            amplitudePx = dpF(ctx, SQUIGGLE_DP),
+            spanFraction = 1.0f,
+            atBottom = true,
+        )
+
         if (!selected) {
-            label.setOnClickListener {
+            column.setOnClickListener {
                 val target = when (tab) {
                     Tab.HOME -> MainActivity::class.java
                     Tab.PLUGINS -> PluginsActivity::class.java
@@ -304,7 +328,7 @@ object Theme {
                 ctx.startActivity(i)
             }
         }
-        return label
+        return column
     }
 
     // --- surfaces ---
@@ -548,18 +572,27 @@ object Theme {
      *  salmon bar. */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
-        textSize = 12f
+        // 14sp, up from 12. These are the only structural landmarks on a page of body text, so
+        // they have to out-rank it by more than a letter-spacing trick.
+        textSize = 14f
         letterSpacing = 0.12f
         typeface = handFont(ctx)
         setTextColor(ACCENT)
-        setPadding(0, dp(ctx, 20), 0, dp(ctx, 6))
-        // A drawn rule, not a printed one. 60% span so it reads as underlined by hand rather
-        // than set by a layout engine.
+        // Bottom padding is the room the rule lives in. Without it the wave has nowhere to go
+        // inside the view and gets clipped into a straight line.
+        setPadding(0, dp(ctx, 20), 0, dp(ctx, 8))
+        // A drawn rule, not a printed one.
+        //
+        // `atBottom` and a 1.0 span, both deliberate: the rule used to be drawn through the
+        // vertical CENTRE of the view, which struck a line through the text, and it covered only
+        // 60% of the width, which ended mid-word. Now it sits under the text and runs the full
+        // width of the header.
         background = SquiggleRule(
             color = ACCENT,
             strokePx = dpF(ctx, 2f),
             amplitudePx = dpF(ctx, SQUIGGLE_DP),
-            spanFraction = 0.60f,
+            spanFraction = 1.0f,
+            atBottom = true,
         )
     }
 

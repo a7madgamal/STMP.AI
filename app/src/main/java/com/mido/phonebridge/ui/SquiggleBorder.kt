@@ -165,6 +165,15 @@ class SquiggleRule(
     private val amplitudePx: Float,
     /** Fraction of the width to cover, from the left. 1.0 spans the whole rule. */
     private val spanFraction: Float = 1.0f,
+    /**
+     * Draw along the BOTTOM edge instead of through the middle.
+     *
+     * The default (middle) is right for a separator, where the rule IS the content. It is wrong
+     * for an underline: used as a `TextView` background, a centre-line strikes through the text
+     * it was meant to sit under — which is exactly what shipped on the section headers and the
+     * bottom bar.
+     */
+    private val atBottom: Boolean = false,
 ) : Drawable() {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -195,7 +204,11 @@ class SquiggleRule(
         path.reset()
         // Centre the stroke vertically, and never let the wave leave the view.
         val amp = amplitudePx.coerceAtMost((b.height() - strokePx) / 2f).coerceAtLeast(0f)
-        val y = b.centerY()
+        // Room for the wave to swing without leaving the view: half its amplitude plus half the
+        // stroke. On the bottom edge that means the line sits just inside the bounds rather than
+        // being clipped into a straight line.
+        val inset = amp + strokePx / 2f
+        val y = if (atBottom) b.bottom - inset else b.centerY()
         val x1 = b.left + strokePx
         val x2 = b.left + b.width() * spanFraction - strokePx
         if (x2 <= x1) return
