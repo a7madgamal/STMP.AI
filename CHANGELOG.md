@@ -5111,9 +5111,13 @@ devDependencies. `node_modules/` is gitignored.
 - Removed the hardcoded device name from the taildrop script; the target node is now an argument or `STMP_NODE`, and missing it is an error instead of a default.
 - Taildrop is now opt-in in `release.sh`, so a local build no longer sends anything to a device.
 
-## 0.43.79 (build 233) — 2026-11-03 — CURRENT
+## 0.43.79 (build 233) — 2026-11-03
 - Fixed the ✕ on a notification card being ignored during the misclick guard, and being dead entirely on a card that never got stamped. Dismissing is now unconditional.
 - Fixed cards freezing at "summarising…" after being accepted. The stamp that removes them could never finish if its window was added but not laid out, so removal now has a deadline.
+
+## 0.43.80 (build 234) — 2026-11-03 — CURRENT
+- Changed CI to run tests, lint and the APK build as parallel jobs instead of one chain. Publishing still requires all three to pass.
+- Tests now use two forks on CI, where four cores are available; local runs stay at one.
 
 ## Keeping this file honest
 

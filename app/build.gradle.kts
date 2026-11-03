@@ -73,8 +73,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 233
-        versionName = "0.43.79"
+        versionCode = 234
+        versionName = "0.43.80"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -194,6 +194,21 @@ android {
             isIncludeAndroidResources = true
             all { test ->
                 test.systemProperty("robolectric.logging", "stdout")
+
+                // Test parallelism, chosen by MACHINE SIZE rather than guessed once.
+                //
+                // Unset meant ONE fork: all 419 Robolectric tests in a single JVM, which was the
+                // single largest step in CI (2m00 of a 6m run). CI has 4 cores and 16 GB, so two
+                // forks is free there.
+                //
+                // It is NOT free on the dev box. This VM shares 24 GB with the gateway and has
+                // already been OOM-killed by an unbounded compile (see AGENTS.md); Robolectric
+                // loads a full Android runtime per fork, so two forks on a tight box risks the
+                // gateway rather than the build. Hence the explicit branch, not a constant: the
+                // number is a fact about the machine, and the machine is what selects it.
+                //
+                // `CI` is set to "true" by GitHub Actions. Anywhere else stays at 1.
+                test.maxParallelForks = if (System.getenv("CI") == "true") 2 else 1
             }
         }
     }
