@@ -5170,9 +5170,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.43.92 (build 246) — 2026-11-03
 - Removed the account email from the Home hero; the Google plugin reports it.
 
-## 0.43.93 (build 247) — 2026-11-03 — CURRENT
+## 0.43.93 (build 247) — 2026-11-03
 - Grouped the Plugins screen into Google, Phone, Secrets and Misc sections.
 - Added a row per SSH connection under Secrets, each opening its own detail screen.
+
+## 0.43.94 (build 248) — 2026-11-03 — CURRENT
+- Fixed cards drawing two outlines along different curves, which read as the paper effect printed twice.
+- Made section headers larger and gave them a bottom margin.
 
 ## Keeping this file honest
 

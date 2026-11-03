@@ -12,6 +12,7 @@ import android.content.res.ColorStateList
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.EditText
 import android.widget.TextView
@@ -544,23 +545,22 @@ object Theme {
         tearDp: Int = 6
     ): android.graphics.drawable.Drawable {
         val r = radiusPx(ctx, radiusDp)
-        return LayerDrawable(
-            arrayOf(
-                TornPaper(
-                    fill = color,
-                    edge = withAlpha(ON_SURFACE, 0x2E),
-                    cornerPx = r,
-                    tearPx = dp(ctx, tearDp).toFloat()
-                ),
-                // A drawn edge over the torn shape. The tear is the silhouette; the wobble is the
-                // pen. Two separate ideas, so two layers rather than one drawable doing both.
-                SquiggleBorder(
-                    color = withAlpha(ON_SURFACE, 0x3A),
-                    strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
-                    radiusPx = r,
-                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
-                )
-            )
+        // **ONE OUTLINE, NOT TWO.** Mido, 2026-11-03: *"why is the paper effect now seems done
+        // twice in this list?"*
+        //
+        // `TornPaper` already paints a hairline along its own torn path — the exact silhouette the
+        // fill was cut to. Stacking a `SquiggleBorder` on top drew a SECOND outline along a
+        // DIFFERENT curve: a rounded rectangle with a wobble, which does not follow the tear.
+        // Two edges that agree nowhere read as a double-printed card, not as craft.
+        //
+        // The tear wins because it is the shape: the hairline follows the fill's own cut, so the
+        // paper reads as having thickness. A wobble that ignores the tear is decoration on top of
+        // an existing edge.
+        return TornPaper(
+            fill = color,
+            edge = withAlpha(ON_SURFACE, 0x2E),
+            cornerPx = r,
+            tearPx = dp(ctx, tearDp).toFloat()
         )
     }
 
@@ -572,15 +572,24 @@ object Theme {
      *  salmon bar. */
     fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text.uppercase()
-        // 14sp, up from 12. These are the only structural landmarks on a page of body text, so
-        // they have to out-rank it by more than a letter-spacing trick.
-        textSize = 14f
+        // 16sp (Mido, 2026-11-03: *"increase its font size a little"*). These are the only
+        // structural landmarks on a page of body text, so at 14 they competed with the 15sp rows
+        // underneath instead of out-ranking them.
+        textSize = 16f
         letterSpacing = 0.12f
         typeface = handFont(ctx)
         setTextColor(ACCENT)
-        // Bottom padding is the room the rule lives in. Without it the wave has nowhere to go
+        // Bottom padding is the room the RULE lives in. Without it the wave has nowhere to go
         // inside the view and gets clipped into a straight line.
-        setPadding(0, dp(ctx, 20), 0, dp(ctx, 8))
+        setPadding(0, dp(ctx, 22), 0, dp(ctx, 10))
+        // Real margin under the header, so the first row is not crowded against the rule
+        // (Mido, 2026-11-03: *"add a little bit of bottom margin to the headers"*). Padding
+        // cannot do this: it lives INSIDE the measured view, so the rule would sit 10dp above the
+        // row and read as an underline of the first card rather than a heading over it.
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(ctx, 6) }
         // A drawn rule, not a printed one.
         //
         // `atBottom` and a 1.0 span, both deliberate: the rule used to be drawn through the
