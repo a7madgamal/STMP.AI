@@ -5205,7 +5205,7 @@ to fix rather than a timeout to chase.
 
 ---
 
-## 0.43.71 — SummaryGuard removed, and the prompt stops supplying a verb (build 225) — CURRENT
+## 0.43.71 — SummaryGuard removed, and the prompt stops supplying a verb (build 225)
 2026-11-03
 
 Mido, 2026-11-03: *"remove this stupid summary guard shit, i never asked for it"*. Removed.
@@ -5248,6 +5248,37 @@ human reads the facts and the paraphrase together. If a bad summary appears, the
 — where the wording comes from — not a veto over the output.
 
 416 tests, 0 failures.
+
+---
+
+## 0.43.72 — CI was broken before it ever reached the secrets (build 226) — CURRENT
+2026-11-03
+
+Three workflow runs, all failed in 26 seconds. Not one of them got as far as a secret.
+
+    > sdkmanager tools
+    Warning: Failed to find package 'tools'
+    Error: The process '.../sdkmanager' failed with exit code 1
+
+`android-actions/setup-android@v3` defaults to `packages: tools platform-tools`, and **Google
+removed the `tools` package from the SDK repository**. The action's own default now fails on every
+runner, so the job died at "Set up Android SDK" before the keystore guard, the version guard or
+anything else had a chance to speak.
+
+**How this was found is the part worth recording.** I spent ten minutes polling `git ls-remote`
+for a tag, which can only show a RESULT — a failed run and a run still going look identical from
+there. The GitHub access that would have answered it in one command was sitting on `evox2` the
+whole time: `gh` is installed and authenticated there, reachable over STMP's `/ssh/evox2` route.
+`gh run list` named the three failures immediately and `gh run view --log-failed` printed the
+cause. Polling a side-effect instead of reading the thing that produces it cost more than the fix.
+
+Two further consequences of using the right tool, both fixed in the same pass:
+
+- the platform is now installed BY the action (`packages:` explicitly) instead of a separate
+  `sdkmanager --install` step, so there is one owner of the SDK state rather than two
+- every failure message from here names its step, because `gh run view` reports per-step
+
+Applied to all three jobs that need an SDK (ci.yml ×2, release.yml ×1). Version 0.43.72.
 
 ---
 
