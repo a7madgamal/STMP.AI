@@ -523,11 +523,6 @@ object Theme {
         private var built = false
         private var alphaMul = 255
 
-        /** Fixed jaggedness, as a fraction of [tearPx]. Deterministic by construction. */
-        private val tearPattern = floatArrayOf(
-            0.05f, 0.70f, 0.20f, 1.00f, 0.35f, 0.85f, 0.10f, 0.60f, 0.25f
-        )
-
         override fun draw(canvas: android.graphics.Canvas) {
             val b = bounds
             if (b.isEmpty) return
@@ -557,36 +552,19 @@ object Theme {
         }
 
         private fun build(b: android.graphics.Rect) {
-            path.reset()
-            val r = cornerPx.coerceAtMost(minOf(b.width(), b.height()) / 2f)
-            val left = b.left.toFloat()
-            val right = b.right.toFloat()
-            val top = b.top.toFloat()
-            val bottom = b.bottom.toFloat()
-
-            // Top edge, left -> right, with rounded top corners.
-            path.moveTo(left + r, top)
-            path.lineTo(right - r, top)
-            path.quadTo(right, top, right, top + r)
-
-            // Right edge down.
-            path.lineTo(right, bottom - r)
-            path.quadTo(right, bottom, right - r, bottom)
-
-            // The tear: right -> left along the bottom, each step lifted by a fixed amount.
-            val segments = tearPattern.size
-            val span = (right - r) - (left + r)
-            for (i in 1..segments) {
-                val x = right - r - span * (i.toFloat() / segments)
-                val jag = tearPattern[i - 1] * tearPx
-                path.lineTo(x, bottom - jag)
-            }
-
-            // Left edge back up, rounded bottom-left corner first.
-            path.quadTo(left, bottom, left, bottom - r)
-            path.lineTo(left, top + r)
-            path.quadTo(left, top, left + r, top)
-            path.close()
+            // The SHARED torn silhouette. This used to hold its own copy of the pattern and the
+            // path construction; the toggle needed the same effect and grew a second, noisier one,
+            // which is exactly how "one hand" becomes "three slightly different hands". One
+            // implementation now serves cards, the bar and the toggle.
+            TornEdge.path(
+                out = path,
+                left = b.left.toFloat(),
+                top = b.top.toFloat(),
+                right = b.right.toFloat(),
+                bottom = b.bottom.toFloat(),
+                tearPx = tearPx,
+                cornerPx = cornerPx,
+            )
         }
 
         private fun scaled(color: Int): Int {
@@ -644,10 +622,14 @@ object Theme {
         private val builtFor = android.graphics.Rect()
         private var built = false
 
-        /** Same fixed jaggedness as [TornPaper], so the two tears look like one hand. */
-        private val tearPattern = floatArrayOf(
-            0.05f, 0.70f, 0.20f, 1.00f, 0.35f, 0.85f, 0.10f, 0.60f, 0.25f
-        )
+        /**
+         * The same pattern [TornEdge] uses, referenced rather than copied.
+         *
+         * It cannot call `TornEdge.path` directly because that tears the BOTTOM edge and this bar
+         * is pinned to the window's bottom — its ragged edge has to face upward. The shape is the
+         * same; only the side it is applied to differs.
+         */
+        private val tearPattern = TornEdge.PATTERN
 
         override fun draw(canvas: android.graphics.Canvas) {
             val b = bounds

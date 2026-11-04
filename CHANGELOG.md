@@ -5225,8 +5225,12 @@ devDependencies. `node_modules/` is gitignored.
 - Downloads are verified against the published SHA-256 and refused on a mismatch.
 - While the repository is private the check says so plainly instead of showing nothing.
 
-## 0.45.1 (build 258) — 2026-11-04 — CURRENT
+## 0.45.1 (build 258) — 2026-11-04
 - The toggle is flat again: the fake depth is gone and both shapes are drawn as jagged, hand-cut rectangles.
+
+## 0.45.2 (build 259) — 2026-11-04 — CURRENT
+- The toggle uses the app's own torn-paper edge instead of a sharper invented one.
+- The server switch sits on its own at the right of the status card, with no label above it.
 
 ## Keeping this file honest
 

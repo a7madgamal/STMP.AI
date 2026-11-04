@@ -27,8 +27,8 @@ import android.view.animation.DecelerateInterpolator
  * **Flat on purpose.** Mido, 2026-11-04: *"you made the toggle more 3d. I want it more 2d but more
  * rugged looking with jagged lines"*. An earlier version faked depth — an inner gradient along the
  * track, a blurred drop shadow under the knob, a white highlight on its top edge. All three are
- * gone. The ruggedness is now carried entirely by the OUTLINE: both shapes are drawn as wandering,
- * hand-cut rectangles and filled flat. No blur, no gradient, no light direction.
+ * gone, and the ruggedness now comes from [TornEdge]: the SAME torn silhouette the cards and the
+ * bottom bar use, so the whole app reads as cut from one sheet rather than three.
  */
 class RuggedToggle(context: Context) : View(context) {
 
@@ -38,14 +38,14 @@ class RuggedToggle(context: Context) : View(context) {
     private val trackWidthPx = dp(62)
     private val insetPx = dp(4)
     /**
-     * How far each edge strays from the true rectangle.
+     * How deep the tear is, in dp.
      *
-     * Small numbers on purpose: this is a 30ish-dp control, and a wobble big enough to read as
-     * "torn" up close becomes a blob at a glance. The track gets slightly more than the knob so
-     * the outer shape looks hand-cut and the knob looks cut from the same sheet.
+     * Deliberately small: the cards tear 6dp out of a ~90dp block, so the same proportion on a
+     * 34dp track is roughly 2dp. Using the card's absolute 6dp here would eat a fifth of the
+     * control and turn it into a ragged blob.
      */
-    private val trackJagPx = dp(1.6f)
-    private val knobJagPx = dp(1.1f)
+    private val trackTearPx = dp(2f)
+    private val knobTearPx = dp(1.2f)
 
     /**
      * The knob is SQUARE-ish on purpose. A circle would read as a Material thumb; a rectangle with
@@ -62,18 +62,6 @@ class RuggedToggle(context: Context) : View(context) {
     private val knobPath = Path()
     private val rect = RectF()
     private val knobRect = RectF()
-
-    /**
-     * The wobble, as a fixed pattern rather than a random one.
-     *
-     * A `Random` here would re-roll on every `onDraw` and the outline would visibly crawl — the
-     * same trap the torn card edge documents. Values sit in -1..1 and are multiplied by the
-     * per-shape amplitude, so one table serves both the track and the knob at different strengths.
-     */
-    private val jagPattern = floatArrayOf(
-        0.0f, 0.8f, -0.4f, 1.0f, -0.7f, 0.3f,
-        -1.0f, 0.6f, -0.2f, 0.9f, -0.5f, 0.1f,
-    )
 
     /** 0f = left (off), 1f = right (on). Animated; the checked VALUE flips immediately. */
     private var fraction = 0f
@@ -168,11 +156,17 @@ class RuggedToggle(context: Context) : View(context) {
 
         // --- track ---
         //
-        // A wandering rectangle, filled flat. This replaced a `addRoundRect` plus an inner
-        // gradient: the gradient was there to fake a routed channel, and at this size it read as
-        // a grey smear rather than as depth. The jagged edge does that job now, and it does it
-        // without inventing a light direction.
-        jaggedRect(path, rect, trackJagPx)
+        // The app's own torn-paper shape, filled flat. An earlier pass invented a per-vertex
+        // scatter here and at 34dp it came out visibly noisier than every card on the screen —
+        // Mido, 2026-11-04: *"too jagged, can we just use the same exact effect we are using
+        // everywhere else?"*. So this calls [TornEdge] now: the SAME nine-sample pattern and the
+        // SAME rounded-top/square-side construction as `tornCard`, only with a smaller tear.
+        TornEdge.path(
+            out = path,
+            left = rect.left, top = rect.top, right = rect.right, bottom = rect.bottom,
+            tearPx = trackTearPx,
+            cornerPx = dp(2f),
+        )
         fill.style = Paint.Style.FILL
         fill.color = Theme.SURFACE
         canvas.drawPath(path, fill)
@@ -189,7 +183,13 @@ class RuggedToggle(context: Context) : View(context) {
         val knobLeft = rect.left + insetPx + travelPx * fraction
         val knobTop = rect.top + insetPx
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
-        jaggedRect(knobPath, knobRect, knobJagPx)
+        TornEdge.path(
+            out = knobPath,
+            left = knobRect.left, top = knobRect.top,
+            right = knobRect.right, bottom = knobRect.bottom,
+            tearPx = knobTearPx,
+            cornerPx = dp(1.5f),
+        )
 
         fill.style = Paint.Style.FILL
         fill.color = when {
@@ -209,36 +209,6 @@ class RuggedToggle(context: Context) : View(context) {
         // line would make the knob disappear into the paper at a glance.
         edge.color = withAlpha(Theme.ON_SURFACE, 0xAA)
         canvas.drawPath(knobPath, edge)
-    }
-
-    /**
-     * A rectangle whose edges wander, as one closed path.
-     *
-     * Each edge is subdivided into equal steps and every vertex is pushed off the line by
-     * `amplitude * pattern[i]`. Stepped rather than curved on purpose: at 1-2dp the eye reads a
-     * chain of straight segments as cut paper, where a smooth curve reads as a rounded rectangle
-     * and takes the whole thing back to Material.
-     */
-    private fun jaggedRect(out: Path, r: RectF, amplitude: Float) {
-        out.reset()
-        var i = 0
-        fun put(x: Float, y: Float) {
-            val a = amplitude * jagPattern[i % jagPattern.size]
-            i++
-            out.lineTo(x + a, y + a)
-        }
-
-        // 7 steps across and 5 down: enough vertices that the edge is genuinely ragged, few
-        // enough that no two segments average out into a straight line.
-        val stepsX = 7
-        val stepsY = 5
-
-        out.moveTo(r.left, r.top)
-        for (s in 1..stepsX) put(r.left + r.width() * s / stepsX, r.top)
-        for (s in 1..stepsY) put(r.right, r.top + r.height() * s / stepsY)
-        for (s in 1..stepsX) put(r.right - r.width() * s / stepsX, r.bottom)
-        for (s in 1..stepsY) put(r.left, r.bottom - r.height() * s / stepsY)
-        out.close()
     }
 
     override fun performClick(): Boolean {

@@ -180,21 +180,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         //
         // "Is the server up?" and "turn it up" are one subject. As a separate row below, the
         // switch read as another item in a list; inside the card it belongs to the status it
-        // changes. A hairline above it separates without adding a box.
+        // changes.
+        //
+        // No "Server" label. Mido, 2026-11-04: *"remove the word server in header, just put the
+        // toggle on the right and make the header shorter by removing the server label"*.
+        //
+        // The word was doing no work: the card already says STMP and whether the bridge is up, so
+        // the switch sitting under that sentence has exactly one possible meaning. A lone knob
+        // hard right also makes the row shorter, which is the point — the hero is meant to be read
+        // at a glance, not parsed.
         val serveRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, Theme.dp(ctx, 12), 0, 0)
+            // END, not CENTER_VERTICAL with a spacer: with nothing to its left the knob should sit
+            // against the card's right edge rather than float in the middle.
+            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, Theme.dp(ctx, 10), 0, 0)
         }
-        val serveLabel = TextView(ctx).apply {
-            text = "Server"
-            textSize = 16f
-            typeface = Theme.handFont(ctx)
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-        }
-        serveRow.addView(serveLabel, LinearLayout.LayoutParams(
-            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-        ))
 
         serverToggle = Theme.toggle(
             ctx,
