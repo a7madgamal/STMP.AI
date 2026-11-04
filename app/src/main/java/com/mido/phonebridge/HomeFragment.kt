@@ -532,7 +532,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
     // --- rendering ---
 
-    override fun repaint() = render()
+    /**
+     * Repaint everything, INCLUDING the update section.
+     *
+     * `render()` deliberately does not touch that section — rebuilding it there could tear a
+     * control down under a finger, which is what made CHECK NOW look dead. But that means the
+     * one caller that asks "redraw yourself" (the shell, after a background check completes)
+     * would redraw everything except the news it was asking about.
+     */
+    override fun repaint() {
+        render()
+        if (::updatesHost.isInitialized) refreshUpdateSection()
+    }
 
     private fun render() {
         // Baseline the tick's fingerprint. Every render() path — tap, permission result, service

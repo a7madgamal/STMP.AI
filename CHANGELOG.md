@@ -5267,8 +5267,11 @@ devDependencies. `node_modules/` is gitignored.
 - The update card offers a button straight to the releases page, in case checking or installing ever fails.
 - A failed install asks for permission before the download, not after it.
 
-## 0.46.5 (build 266) — 2026-11-04 — CURRENT
+## 0.46.5 (build 266) — 2026-11-04
 - The Updates card is no longer empty on open: it is filled at build time, and refreshed whenever Home returns to the front.
+
+## 0.46.6 (build 267) — 2026-11-04 — CURRENT
+- A background update check now appears on Home without leaving and returning to the screen.
 
 ## Keeping this file honest
 
