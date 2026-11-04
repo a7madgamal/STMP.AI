@@ -137,6 +137,16 @@ class MainActivity : AppCompatActivity() {
         // was never told. Ask the visible one to redraw rather than relying on the 5s tick to
         // notice -- the tick would work, five seconds later, which reads as a dead toggle.
         VaultUnlock.ensureUnlocked(this) { visibleFragment()?.repaint() }
+
+        // A quiet check on open, so the Settings row is populated without anyone asking.
+        //
+        // Deliberately OFF the main thread and deliberately SILENT: a failed check must not
+        // produce a banner or a dialog. The whole feature exists to be invisible until there is
+        // something to install, and a notice that appears every launch when the source is
+        // unreachable is exactly the nagging this design avoids.
+        Thread({
+            com.mido.phonebridge.core.Updater.check(applicationContext)
+        }, "update-check-startup").apply { isDaemon = true }.start()
     }
 
     private fun maybeAutoStart() {

@@ -32,6 +32,10 @@
          Activity can — so the declaration and the refusal code are the two halves of one design. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- Required to hand a downloaded update to the system installer. Android still shows its
+         own confirmation dialog: this permission allows ASKING, never installing silently. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
         <!--
           Keep config across an uninstall, without ever keeping a secret.
 
@@ -123,6 +127,17 @@
 
         <!-- Settings and Plugins are no longer Activities: they are fragments inside
              MainActivity's shell, so the bottom bar is never recreated on a tab switch. -->
+
+        <!-- The outcome of an install session. NOT exported: nothing outside this app may claim
+             an install succeeded, and the session result already arrives through a PendingIntent
+             carrying this app's identity. -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mido.phonebridge.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
 
         <!-- One plugin: its switch, its permissions, its settings. -->
         <activity

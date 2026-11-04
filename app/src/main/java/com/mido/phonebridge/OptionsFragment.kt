@@ -165,6 +165,10 @@ class OptionsFragment : BridgeFragment() {
             go(Intent(ctx, SshActivity::class.java))
         })
 
+        // --- UPDATES ---
+        container.addView(Theme.sectionHeader(ctx, "Updates"))
+        container.addView(updateBlock())
+
         // --- DEBUG ---
         container.addView(Theme.sectionHeader(ctx, "Debug"))
         container.addView(Theme.button(ctx, "SHOW LOG", Theme.ButtonStyle.GHOST) {
@@ -917,4 +921,177 @@ class OptionsFragment : BridgeFragment() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = Theme.dp(ctx, 6) }
         }
+
+    /**
+     * The update rows.
+     *
+     * **Built from `Updater`'s last OUTCOME, never from a stored flag.** A cached "up to date" is
+     * a claim about a question that was answered once, and it stops being true silently. The row
+     * therefore distinguishes three states — current, available, and could-not-ask — because the
+     * third one is the one that matters while the repository is private.
+     */
+    private fun updateBlock(): android.view.View {
+        val block = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val outcome = com.mido.phonebridge.core.Updater.lastOutcome
+        val checking = com.mido.phonebridge.core.Updater.checking
+        val channel = com.mido.phonebridge.core.UpdatePrefs.channel(requireContext())
+
+        val (line, colour) = when {
+            checking -> "checking…" to Theme.ON_SURFACE_VARIANT
+            outcome is com.mido.phonebridge.core.Updater.Outcome.Available ->
+                "version ${outcome.version} is available" +
+                    (if (outcome.isBeta) " (beta)" else "") to Theme.ACCENT
+            outcome is com.mido.phonebridge.core.Updater.Outcome.UpToDate ->
+                "up to date — ${BuildConfig.VERSION_NAME}" to Theme.SUCCESS
+            outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable ->
+                "cannot check: ${outcome.reason}" to Theme.WARNING
+            else -> "not checked yet" to Theme.ON_SURFACE_VARIANT
+        }
+
+        block.addView(Theme.statusRow(ctx, "Version", line, colour))
+
+        // The channel. Free to offer because `promote.yml` already marks stable releases; a beta
+        // is simply a release that was pushed but never promoted.
+        val channelRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(
+                Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12)
+            )
+            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CONTROL)
+        }
+        channelRow.addView(
+            Theme.text(
+                ctx,
+                if (channel == com.mido.phonebridge.core.UpdatePrefs.Channel.BETA) {
+                    "Channel \u2014 beta (every push)"
+                } else {
+                    "Channel \u2014 stable (promoted only)"
+                },
+                14f,
+                Theme.ON_SURFACE,
+            ),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        channelRow.addView(
+            Theme.toggle(ctx, channel == com.mido.phonebridge.core.UpdatePrefs.Channel.BETA) { want ->
+                com.mido.phonebridge.core.UpdatePrefs.setChannel(
+                    requireContext(),
+                    if (want) com.mido.phonebridge.core.UpdatePrefs.Channel.BETA
+                    else com.mido.phonebridge.core.UpdatePrefs.Channel.STABLE,
+                )
+                // The channel changes what counts as an update, so the old answer is void.
+                com.mido.phonebridge.core.Updater.lastOutcome = null
+                render()
+                checkForUpdates()
+            }
+        )
+        block.addView(channelRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, 6) })
+
+        // An available update gets an install button, and the notes above it.
+        if (outcome is com.mido.phonebridge.core.Updater.Outcome.Available) {
+            val notes = com.mido.phonebridge.core.Updater.shortNotes(outcome.notes)
+            if (notes.isNotEmpty()) {
+                block.addView(
+                    Theme.text(ctx, notes, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                        setPadding(0, Theme.dp(ctx, 10), 0, 0)
+                    }
+                )
+            }
+            block.addView(
+                Theme.button(
+                    ctx, "INSTALL ${outcome.version}", Theme.ButtonStyle.SUCCESS,
+                ) { installUpdate(outcome) },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+            )
+        } else {
+            block.addView(
+                Theme.button(
+                    ctx, "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
+                ) { checkForUpdates() },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+            )
+        }
+
+        // When the source cannot be reached, say what will make it work. This is the whole
+        // "handle the unavailable case" requirement: a checker that silently shows nothing is
+        // indistinguishable from a broken one.
+        if (outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable) {
+            block.addView(
+                Theme.text(
+                    ctx,
+                    "The update check reads GitHub releases directly. It starts working once " +
+                        "the repository is public \u2014 nothing else needs to change.",
+                    12f, Theme.ON_SURFACE_VARIANT,
+                ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
+            )
+        }
+        return block
+    }
+
+    /** Check on a worker, then repaint. The main thread is never blocked on this. */
+    private fun checkForUpdates() {
+        com.mido.phonebridge.core.Updater.lastOutcome = null
+        com.mido.phonebridge.core.Updater.checking = true
+        render()
+        Thread({
+            val outcome = com.mido.phonebridge.core.Updater.check(requireContext().applicationContext)
+            Debug.log("update check: ${outcome.javaClass.simpleName}")
+            ui { render() }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Download, verify, then hand to the installer.
+     *
+     * **Verification is not optional.** A digest mismatch deletes the file and refuses; an
+     * update that cannot be checked against what was published is exactly the thing that should
+     * not be installed.
+     */
+    private fun installUpdate(update: com.mido.phonebridge.core.Updater.Outcome.Available) {
+        toast("downloading ${update.version}…")
+        Thread({
+            try {
+                val got = com.mido.phonebridge.core.Updater.download(requireContext().applicationContext, update)
+                val expected = update.sha256
+                if (expected != null) {
+                    val normalized = expected.trim().lowercase().substringAfterLast(" ")
+                    if (!got.sha256.equals(normalized, ignoreCase = true)) {
+                        got.file.delete()
+                        Debug.log("update: digest mismatch, refusing")
+                        ui { toast("download was corrupted — refusing to install") }
+                        return@Thread
+                    }
+                    Debug.log("update: digest verified")
+                } else {
+                    Debug.log("update: no published digest; installing unverified")
+                }
+                ui {
+                    com.mido.phonebridge.core.ApkInstaller.install(requireContext(), got.file) { result ->
+                        ui {
+                            when (result) {
+                                is com.mido.phonebridge.core.ApkInstaller.Result.ConfirmationShown ->
+                                    toast("confirm the install in the dialog")
+                                is com.mido.phonebridge.core.ApkInstaller.Result.Refused ->
+                                    toast(result.reason)
+                            }
+                            render()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Debug.log("update: download failed: ${e.message}")
+                ui { toast("download failed: ${e.message ?: e.javaClass.simpleName}") }
+            }
+        }, "update-download").apply { isDaemon = true }.start()
+    }
 }

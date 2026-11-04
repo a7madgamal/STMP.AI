@@ -5216,8 +5216,14 @@ devDependencies. `node_modules/` is gitignored.
 - SSH connections show their key fingerprint, public key and vault entry.
 - Secret URLs are each on their own line and tappable.
 
-## 0.44.2 (build 256) — 2026-11-04 — CURRENT
+## 0.44.2 (build 256) — 2026-11-04
 - The approval card's countdown now fills the reject button instead of washing the whole card.
+
+## 0.45.0 (build 257) — 2026-11-04 — CURRENT
+- Settings has an Updates section: it checks GitHub releases, shows what changed, and installs in one tap.
+- Stable and beta channels, taken from the promote flag the release pipeline already sets.
+- Downloads are verified against the published SHA-256 and refused on a mismatch.
+- While the repository is private the check says so plainly instead of showing nothing.
 
 ## Keeping this file honest
 
