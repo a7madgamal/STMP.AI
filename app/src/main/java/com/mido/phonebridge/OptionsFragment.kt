@@ -38,6 +38,20 @@ class OptionsFragment : BridgeFragment() {
 
     private lateinit var container: LinearLayout
 
+    /**
+     * Work to run when this screen comes back to the front.
+     *
+     * The install-permission dialog sends the human to Android settings and tells them the install
+     * will carry on when they return. Without this the dialog would be making a promise the code
+     * does not keep — and they would land back on a row that still says "install" with no way to
+     * tell whether their trip to settings worked.
+     *
+     * `onResume` is the right hook: returning from another activity re-enters it, and the permission
+     * check is re-run on the way through, so a refusal that is still refused stays a dialog rather
+     * than looping silently.
+     */
+    private var pendingAfterResume: (() -> Unit)? = null
+
     // This screen IS the Settings tab. It inherits the bar and the insets from BridgeScreen,
     // which also carries the `ApprovalGate.relaunchCurrent` call that MainActivity used to own —
     // sitting here while a request was pending used to strand the modal off-screen.
@@ -49,6 +63,16 @@ class OptionsFragment : BridgeFragment() {
     }
 
     override fun repaint() = render()
+
+    override fun onResume() {
+        super.onResume()
+        val pending = pendingAfterResume ?: return
+        pendingAfterResume = null
+        // Posted, not called inline: this runs during the fragment's resume, and the pending
+        // action may open another dialog or start a download, both of which want a settled frame
+        // first. Calling inline produced "commit already called" style errors in similar screens.
+        container.post(pending)
+    }
 
     private fun render() {
         container.removeAllViews()
@@ -1058,6 +1082,17 @@ class OptionsFragment : BridgeFragment() {
      * not be installed.
      */
     private fun installUpdate(update: com.mido.phonebridge.core.Updater.Outcome.Available) {
+        // **Answered BEFORE the 42 MB download, not after it.**
+        //
+        // Android requires the human to allow installs for this app once. Discovering that after
+        // fetching and verifying a whole APK means the only thing left to show is an error about
+        // a download that was never going to be usable — and that is exactly what happened on
+        // 2026-11-04, as an unreadable toast.
+        if (!com.mido.phonebridge.core.ApkInstaller.canInstall(requireContext())) {
+            showInstallPermissionDialog { installUpdate(update) }
+            return
+        }
+
         toast("downloading ${update.version}…")
         Thread({
             try {
@@ -1081,8 +1116,13 @@ class OptionsFragment : BridgeFragment() {
                             when (result) {
                                 is com.mido.phonebridge.core.ApkInstaller.Result.ConfirmationShown ->
                                     toast("confirm the install in the dialog")
+                                // The permission was revoked between the pre-check and the
+                                // commit, or a managed device forbids it. Same dialog either way:
+                                // the fix is a settings toggle, and it has a button.
+                                is com.mido.phonebridge.core.ApkInstaller.Result.NeedsPermission ->
+                                    showInstallPermissionDialog { installUpdate(update) }
                                 is com.mido.phonebridge.core.ApkInstaller.Result.Refused ->
-                                    toast(result.reason)
+                                    showProblemDialog("Update could not be installed", result.reason)
                             }
                             render()
                         }
@@ -1093,5 +1133,60 @@ class OptionsFragment : BridgeFragment() {
                 ui { toast("download failed: ${e.message ?: e.javaClass.simpleName}") }
             }
         }, "update-download").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * The "allow installs for this app" dialog.
+     *
+     * **A dialog, not a toast.** Mido, 2026-11-04: *"I didn't like that the instructions were a
+     * small popup I couldn't even read. make this case a clear dialog and as easy as possible to
+     * follow. if we can have a button to go to the setting page needed that would be great"*.
+     *
+     * A toast cannot be re-read, cannot be acted on, and disappears while the human is still
+     * squinting at it. This explains WHY the permission is wanted, names the exact switch, and
+     * carries a button that opens that switch's page directly instead of describing the route.
+     *
+     * `retry` is invoked after the human returns, so granting the permission continues the
+     * install they already tapped rather than making them find it again.
+     */
+    private fun showInstallPermissionDialog(retry: () -> Unit) {
+        confirm(
+            title = "Allow STMP to install updates",
+            message = "Android needs your permission once before it will let an app install its " +
+                "own update.\n\n" +
+                "Tap Open settings, then turn on " +
+                "\"Allow from this source\". Come back here and the install carries on " +
+                "by itself.\n\n" +
+                "This does not let anything else install on your phone — the permission is " +
+                "only for STMP.",
+            positive = "Open settings",
+            negative = "Not now",
+        ) {
+            // Remembered BEFORE settings opens: the human may grant the permission and come
+            // straight back, and the resume has to know what it was in the middle of.
+            pendingAfterResume = retry
+            if (!com.mido.phonebridge.core.ApkInstaller.openInstallSettings(requireContext())) {
+                pendingAfterResume = null
+                // Neither settings page could be opened. Saying so beats launching nothing and
+                // leaving the dialog looking broken.
+                showProblemDialog(
+                    "Cannot open settings",
+                    "This build of Android would not open the install-permission page. Go to " +
+                        "Settings → Apps → STMP → Install unknown apps and allow it there.",
+                )
+            } else {
+                Debug.log("update: opened install permission settings")
+            }
+        }
+    }
+
+    /** A plain, readable failure dialog. Long text belongs in a dialog, never a toast. */
+    private fun showProblemDialog(title: String, message: String) {
+        confirm(
+            title = title,
+            message = message,
+            positive = "OK",
+            negative = "Close",
+        ) { }
     }
 }

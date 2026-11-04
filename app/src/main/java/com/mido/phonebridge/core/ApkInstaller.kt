@@ -31,6 +31,16 @@ object ApkInstaller {
         /** Android accepted the session and is showing its own dialog. Not yet installed. */
         data object ConfirmationShown : Result
 
+        /**
+         * This app is not allowed to install packages yet.
+         *
+         * **Its own case, not a [Refused] with different words.** The remedy is not "try again",
+         * it is "flip a switch in Android settings", and it has a button. Folding this into a
+         * generic refusal is how the human ends up staring at a toast that tells them to go into
+         * settings without saying which one or where.
+         */
+        data object NeedsPermission : Result
+
         /** The install was refused with a reason worth showing. */
         data class Refused(val reason: String) : Result
     }
@@ -46,6 +56,36 @@ object ApkInstaller {
         ctx.packageManager.canRequestPackageInstalls()
 
     /**
+     * The Android page where the human allows this app to install packages.
+     *
+     * **App-specific, not the global list.** `ACTION_MANAGE_UNKNOWN_APP_SOURCES` with this app's
+     * package URI opens straight onto the one toggle that matters; the global list makes you find
+     * STMP among every installed app, which is where this kind of instruction loses people. OEM
+     * builds occasionally drop the package-scoped form, so the fallback is `ACTION_APPLICATION_DETAILS_SETTINGS`
+     * — that page always has a Permissions entry.
+     *
+     * Returns false when neither page could be opened, so the caller can say so instead of
+     * launching nothing and leaving the dialog looking broken.
+     */
+    fun openInstallSettings(ctx: Context): Boolean {
+        val packageUri = android.net.Uri.parse("package:${ctx.packageName}")
+        val attempts = listOf(
+            Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri),
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
+        )
+        for (intent in attempts) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                ctx.startActivity(intent)
+                return true
+            } catch (e: Exception) {
+                Debug.log("update: settings page unavailable (${intent.action}): ${e.message}")
+            }
+        }
+        return false
+    }
+
+    /**
      * Start an install.
      *
      * The verification callback deliberately does not re-check the digest: by this point the file
@@ -58,12 +98,7 @@ object ApkInstaller {
             return
         }
         if (!canInstall(ctx)) {
-            onResult(
-                Result.Refused(
-                    "installing updates is not allowed for this app yet — allow it once in " +
-                        "Android settings and try again"
-                )
-            )
+            onResult(Result.NeedsPermission)
             return
         }
 

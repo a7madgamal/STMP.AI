@@ -5228,9 +5228,14 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.45.1 (build 258) — 2026-11-04
 - The toggle is flat again: the fake depth is gone and both shapes are drawn as jagged, hand-cut rectangles.
 
-## 0.45.2 (build 259) — 2026-11-04 — CURRENT
+## 0.45.2 (build 259) — 2026-11-04
 - The toggle uses the app's own torn-paper edge instead of a sharper invented one.
 - The server switch sits on its own at the right of the status card, with no label above it.
+
+## 0.45.3 (build 260) — 2026-11-04 — CURRENT
+- A blocked update install now explains itself in a readable dialog with a button that opens the exact Android setting, instead of a toast that disappears.
+- The install permission is checked before the download, not after it.
+- Returning from that setting continues the install without tapping again.
 
 ## Keeping this file honest
 

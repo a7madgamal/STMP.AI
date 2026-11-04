@@ -80,13 +80,11 @@ class InstallResultReceiver : BroadcastReceiver() {
             }
 
             PackageInstaller.STATUS_FAILURE_BLOCKED -> {
+                // The permission was revoked between the pre-check and the commit, or a managed
+                // device forbids it. Its own result, because the fix is a settings toggle and the
+                // screen offers a button for it -- not a sentence with nowhere to go.
                 Debug.log("update: install blocked (${message ?: "no detail"})")
-                InstallOutcome.deliver(
-                    ApkInstaller.Result.Refused(
-                        "Android blocked the install — allow this app to install unknown apps " +
-                            "in settings, then try again"
-                    )
-                )
+                InstallOutcome.deliver(ApkInstaller.Result.NeedsPermission)
             }
 
             PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> {
