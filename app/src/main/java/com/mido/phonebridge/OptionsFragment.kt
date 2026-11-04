@@ -144,18 +144,10 @@ class OptionsFragment : BridgeFragment() {
 
         container.addView(Theme.sectionHeader(ctx, "AI"))
 
-        // --- AI backend: off / local / external ---
-        //
-        // A three-way choice, not a toggle. "AI on" stopped being one thing when a remote
-        // backend became possible: LOCAL loads the on-device model file, EXTERNAL asks a box on
-        // the tailnet, and they fail differently. A toggle would have to mean one of them and
-        // hide the other behind a second setting that could disagree with it.
-        container.addView(
-            aiBackendRow(store, policy)
-        )
-        // The model row sits with the backend that uses it. It was under Permissions, which put
-        // "which model is loaded" a screen-section away from "which backend runs it".
-        container.addView(aiModelRow(store, policy))
+        // AI summaries: one toggle, then two radio cards when on. The model row is gone — its
+        // content is the on-device card's own state line, because two places showing the same
+        // fact is how they drift apart.
+        container.addView(aiSummariesBlock(store, policy))
 
         // Speak used to be configured here. It now lives on the plugin that owns it — Plugins →
         // Speak — so the settings sit with the routes they govern instead of in a second list
@@ -417,372 +409,235 @@ class OptionsFragment : BridgeFragment() {
      * *"fail"*) and a human choosing EXTERNAL should read it here, not discover it later when the
      * LAN box is asleep.
      */
-    private fun aiBackendRow(
-        store: com.mido.phonebridge.policy.PolicyStore,
+    /**
+     * AI summaries: a master toggle, and — when on — two large radio cards for where the model runs.
+     *
+     * Mido, 2026-11-04: *"AI summaries should have a toggle. off: no buttons visible. on: a clear
+     * selection between on device or remote... maybe large radio cards to contain the options for
+     * each and show clearly which is the current mode"*.
+     *
+     * **Why a toggle AND cards.** The toggle answers "do I want descriptions at all", which is one
+     * question with two answers. The cards answer "where does it run", which is a different
+     * question with two answers — and they hold their own state, so the choice is legible without
+     * tapping. The old screen had three buttons meaning both things at once.
+     *
+     * **OFF shows nothing else.** No cards, no URL field, no model row: every control under OFF
+     * would be one that does nothing, and this app has spent several releases removing exactly
+     * that pattern.
+     */
+    private fun aiSummariesBlock(
+        store: PolicyStore,
         policy: com.mido.phonebridge.policy.Policy,
     ): LinearLayout {
-        val current = policy.aiBackend
+        val backend = policy.aiBackend
+        val on = backend != com.mido.phonebridge.policy.AiBackend.OFF
+
         val block = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
                 Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12)
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
             )
-            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
-        val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+
+        // --- the master toggle ---
+        val header = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
         header.addView(
-            Theme.text(ctx, "AI summaries", 15f, Theme.ON_SURFACE).apply {
+            Theme.text(ctx, "AI summaries", 16f, Theme.ON_SURFACE).apply {
                 typeface = Theme.handFont(ctx)
-                layoutParams = LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
-                )
-            }
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
         header.addView(
-            Theme.text(
-                ctx,
-                when (current) {
-                    com.mido.phonebridge.policy.AiBackend.OFF -> "OFF"
-                    com.mido.phonebridge.policy.AiBackend.LOCAL -> "LOCAL"
-                    com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "EXTERNAL"
-                },
-                13f,
-                if (current == com.mido.phonebridge.policy.AiBackend.OFF) {
-                    Theme.ON_SURFACE_VARIANT
+            Theme.toggle(ctx, on) { want ->
+                // Turning ON lands on the on-device card, which is the default this app can
+                // satisfy without any further setup. Turning OFF is OFF, and unloads the model so
+                // the memory promise is real rather than "after the process dies".
+                if (want) {
+                    save(store, policy.withAiBackend(com.mido.phonebridge.policy.AiBackend.LOCAL))
                 } else {
-                    Theme.SUCCESS
+                    com.mido.phonebridge.ai.AiGateway.release()
+                    save(store, policy.withAiBackend(com.mido.phonebridge.policy.AiBackend.OFF))
                 }
-            )
+            }
         )
         block.addView(header)
+
+        if (!on) {
+            block.addView(
+                Theme.text(
+                    ctx,
+                    "Nothing is described. Rows still show the exact target and payload — they " +
+                        "are built without a model. This also frees the memory the model holds.",
+                    12f, Theme.ON_SURFACE_VARIANT,
+                ).apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
+            )
+            return block
+        }
+
+        // --- ON: two radio cards ---
         block.addView(
-            Theme.text(
-                ctx,
-                when (current) {
-                    com.mido.phonebridge.policy.AiBackend.OFF ->
-                        "No model is loaded, no request is described, and nothing is downloaded. " +
-                            "You still see the exact target and payload — the rows are built " +
-                            "deterministically. This frees the memory the model holds."
-                    com.mido.phonebridge.policy.AiBackend.LOCAL ->
-                        "Each request is described and risk-labelled on the device before you " +
-                            "decide. The model stays loaded, so it costs memory while the server runs."
-                    com.mido.phonebridge.policy.AiBackend.EXTERNAL ->
-                        "Requests are described by a model server on your tailnet. If that box is " +
-                            "unreachable, requests are REFUSED with an error naming it — never " +
-                            "approved without a description. Nothing is loaded on the phone."
-                },
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
+            aiRadioCard(
+                store, policy,
+                target = com.mido.phonebridge.policy.AiBackend.LOCAL,
+                title = "On this phone",
+                state = onDeviceStateLine(),
+                enabled = true,
+            )
         )
-
-        // One button per state that is not the current one.
-        val choices = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, Theme.dp(ctx, 10), 0, 0)
-        }
-        for (target in com.mido.phonebridge.policy.AiBackend.values()) {
-            if (target == current) continue
-            val label = when (target) {
-                com.mido.phonebridge.policy.AiBackend.OFF -> "turn off"
-                com.mido.phonebridge.policy.AiBackend.LOCAL -> "on-device"
-                com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "use external"
-            }
-            choices.addView(
-                Theme.button(ctx, label, Theme.ButtonStyle.NEUTRAL, small = true) {
-                    save(store, policy.withAiBackend(target))
-                },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = Theme.dp(ctx, 8) }
+        block.addView(
+            aiRadioCard(
+                store, policy,
+                target = com.mido.phonebridge.policy.AiBackend.EXTERNAL,
+                title = "Remote server",
+                state = remoteStateLine(policy),
+                enabled = true,
             )
-        }
-        block.addView(choices)
-
-        // --- the external endpoint ---
-        //
-        // **Only shown when EXTERNAL is selected**, because a URL field under a backend that
-        // ignores it is a control that does nothing — the same lie the single-boolean gate told
-        // before `BioStatus`. It is editable rather than a build constant because choosing
-        // EXTERNAL and finding no way to say WHERE is a dead end: the setting promises a remote
-        // server and then refuses for want of an address nobody could enter.
-        if (current == com.mido.phonebridge.policy.AiBackend.EXTERNAL) {
-            block.addView(
-                Theme.text(
-                    ctx,
-                    "Server URL",
-                    13f, Theme.ON_SURFACE
-                ).apply { setPadding(0, Theme.dp(ctx, 14), 0, Theme.dp(ctx, 6)) }
-            )
-
-            val urlField = EditText(ctx).apply {
-                setText(policy.aiExternalUrl)
-                hint = "http://host:port  (no trailing slash)"
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-                isSingleLine = true
-                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
-                setSaveEnabled(false)
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-                typeface = android.graphics.Typeface.MONOSPACE
-                textSize = 14f
-                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-                setPadding(
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-                )
-            }
-
-            // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
-            // route fail, and saving it would hide the mistake behind a "not reachable" that
-            // looks like the server's fault rather than the address's.
-            val errorLine = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
-                setPadding(0, Theme.dp(ctx, 6), 0, 0)
-                visibility = android.view.View.GONE
-            }
-
-            block.addView(urlField)
-
-            // --- optional token ---
-            //
-            // **Masked, because it is a credential.** Unsloth treats a private host as trusted and
-            // answers 401 with `www-authenticate: Bearer` the moment the same server is reached
-            // over a tailnet address, which is not private. Sending a token is the honest fix;
-            // routing around auth with a Host-rewriting proxy is not.
-            //
-            // Optional on purpose: a loopback or LAN server needs none, and sending an empty
-            // Authorization header makes some servers reject the request outright.
-            block.addView(
-                Theme.text(
-                    ctx,
-                    "Token (optional)",
-                    13f, Theme.ON_SURFACE
-                ).apply { setPadding(0, Theme.dp(ctx, 12), 0, Theme.dp(ctx, 6)) }
-            )
-
-            val tokenField = EditText(ctx).apply {
-                setText(policy.aiExternalToken)
-                hint = "leave empty if the server trusts this device"
-                // Masking applied AFTER inputType, for the reason recorded in ApprovalActivity:
-                // setInputType re-derives the transformation and would clear an earlier one.
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                isSingleLine = true
-                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
-                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or
-                    android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-                setSaveEnabled(false)
-                isSaveFromParentEnabled = false
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-                typeface = android.graphics.Typeface.MONOSPACE
-                textSize = 14f
-                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-                setPadding(
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-                )
-                // Set LAST, after inputType: `setInputType` re-derives the transformation from
-                // the type and silently clears anything assigned before it — the bug recorded in
-                // ApprovalActivity. Declared explicitly so the mask is not left to the theme.
-                transformationMethod =
-                    android.text.method.PasswordTransformationMethod.getInstance()
-            }
-            block.addView(tokenField)
-
-            // --- the model, chosen from what the SERVER says it has ---
-            //
-            // **A picker, not a text field, and the list comes from the server.** A model id is
-            // an exact string a server decides; letting it be typed is how "qwen3:8b" ended up
-            // in a constant while the server served something else entirely. Unsloth answers an
-            // unknown tag with its loaded default instead of failing, so a wrong name is not an
-            // error a human sees — it is a silent substitution.
-            block.addView(
-                Theme.text(ctx, "Model", 13f, Theme.ON_SURFACE)
-                    .apply {
-                        setPadding(
-                            0, Theme.dp(ctx, 14), 0,
-                            Theme.dp(ctx, 6)
-                        )
-                    }
-            )
-
-            // The last successful listing, held here because the picker is populated
-            // asynchronously and `save` must store the dialect that produced the choice — the two
-            // travel together or the id goes down a route the server does not implement.
-            var listed: com.mido.phonebridge.ai.ModelCatalogue? = null
-
-            val modelStatus = Theme.text(
-                ctx,
-                if (policy.aiExternalModel.isBlank()) {
-                    "No model selected. Press refresh to ask the server — EXTERNAL refuses " +
-                        "until one is chosen."
-                } else {
-                    "Using ${policy.aiExternalModel}" +
-                        (policy.aiExternalDialect?.let { " (${it.label})" } ?: "")
-                },
-                12f,
-                if (policy.aiExternalModel.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
-
-            val modelSpinner = android.widget.Spinner(ctx).apply {
-                visibility = android.view.View.GONE
-                background = Theme.outlined(
-                    ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL
-                )
-            }
-
-            val refresh = Theme.button(ctx, "refresh models", Theme.ButtonStyle.NEUTRAL, small = true) {
-                val url = urlField.text.toString().trim()
-                val problem = validateEndpoint(url)
-                if (problem != null) {
-                    errorLine.text = problem
-                    errorLine.visibility = android.view.View.VISIBLE
-                    return@button
-                }
-                if (url.isBlank()) {
-                    errorLine.text = "Enter the server URL first, then refresh."
-                    errorLine.visibility = android.view.View.VISIBLE
-                    return@button
-                }
-                errorLine.visibility = android.view.View.GONE
-                modelStatus.text = "asking $url …"
-
-                // Off the main thread: this is a network call and the UI thread is not allowed
-                // to block on one. The result comes back through ui { } so every view
-                // touch happens where Android requires it.
-                Thread {
-                    // An explicit outcome, NOT a Pair that has to be re-cast.
-                    //
-                    // The first version built `null to message` on failure and returned the
-                    // catalogue directly on success, then tried `outcome as? Pair<*, *>` to pull
-                    // them apart — which is null for BOTH, so a working server reported
-                    // "could not list models — no answer" every single time. A success value and
-                    // a failure value that need a cast to tell apart is a type doing two jobs.
-                    val outcome: Result<com.mido.phonebridge.ai.ModelCatalogue> = try {
-                        Result.success(
-                            com.mido.phonebridge.ai.ExternalModels.fetch(
-                                url, tokenField.text.toString().trim()
-                            )
-                        )
-                    } catch (e: Exception) {
-                        Result.failure(
-                            IllegalStateException(e.message ?: e.javaClass.simpleName, e)
-                        )
-                    }
-                    ui {
-                        val catalogue = outcome.getOrNull()
-                        if (catalogue == null) {
-                            val why = outcome.exceptionOrNull()?.message ?: "no answer"
-                            modelStatus.text = "could not list models — $why"
-                            modelStatus.setTextColor(Theme.DANGER)
-                            modelSpinner.visibility = android.view.View.GONE
-                            return@ui
-                        }
-                        listed = catalogue
-                        modelSpinner.adapter = android.widget.ArrayAdapter(
-                            ctx,
-                            android.R.layout.simple_spinner_dropdown_item,
-                            catalogue.models
-                        )
-                        // Preselect the stored model when the server still offers it, so a
-                        // refresh does not silently move a working install to a different model.
-                        val keep = catalogue.models.indexOf(policy.aiExternalModel)
-                        if (keep >= 0) modelSpinner.setSelection(keep)
-                        modelSpinner.visibility = android.view.View.VISIBLE
-                        modelStatus.text = "${catalogue.models.size} model(s) — " +
-                            "picked from a ${catalogue.dialect.label} server. Press save."
-                        modelStatus.setTextColor(Theme.ON_SURFACE_VARIANT)
-                    }
-                }.start()
-            }
-
-            block.addView(refresh, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(ctx, 8) })
-            block.addView(modelSpinner, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(ctx, 8) })
-            block.addView(modelStatus)
-
-            block.addView(errorLine)
-
-            block.addView(
-                Theme.button(ctx, "save", Theme.ButtonStyle.PRIMARY, small = true) {
-                    val raw = urlField.text.toString().trim()
-                    val problem = validateEndpoint(raw)
-                    if (problem != null) {
-                        errorLine.text = problem
-                        errorLine.visibility = android.view.View.VISIBLE
-                        return@button
-                    }
-                    // **A model is REQUIRED**, not defaulted. Without one the app would have to
-                    // invent a name, and an invented name is exactly the fallback that made this
-                    // backend look broken while it was really asking for a model that did not
-                    // exist. Refusing here is the honest failure.
-                    val chosen = (modelSpinner.visibility == android.view.View.VISIBLE)
-                        .let { visible ->
-                            if (visible) modelSpinner.selectedItem?.toString() else null
-                        } ?: listed?.takeIf { policy.aiExternalModel.isNotBlank() }
-                            ?.let { policy.aiExternalModel }
-                    if (chosen.isNullOrBlank()) {
-                        errorLine.text = "Press refresh and pick a model — EXTERNAL cannot " +
-                            "describe requests without one."
-                        errorLine.visibility = android.view.View.VISIBLE
-                        return@button
-                    }
-                    val dialect = listed?.dialect ?: policy.aiExternalDialect
-                    if (dialect == null) {
-                        errorLine.text = "Press refresh first: the model was never listed, so " +
-                            "the server protocol is unknown."
-                        errorLine.visibility = android.view.View.VISIBLE
-                        return@button
-                    }
-                    errorLine.visibility = android.view.View.GONE
-                    // ONE write for URL, token, model and dialect. Four saves would emit four
-                    // policy-change records and leave windows where the stored set is internally
-                    // inconsistent — an address without its credential, or a model without the
-                    // route that can serve it.
-                    save(
-                        store,
-                        policy.withAiExternalUrl(raw)
-                            .withAiExternalToken(tokenField.text.toString().trim())
-                            .withAiExternalModel(chosen, dialect)
-                    )
-                },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = Theme.dp(ctx, 10) }
-            )
-
-            block.addView(
-                Theme.text(
-                    ctx,
-                    if (policy.aiExternalUrl.isBlank()) {
-                        "No server set, so EXTERNAL refuses every request.\n\n" +
-                            "Format: http://host:port — no trailing slash, no path.\n" +
-                            "e.g. http://192.168.1.9:8888  ·  http://100.101.102.103:11434\n\n" +
-                            "The port is the part people get wrong: Unsloth Studio serves 8888, " +
-                            "Ollama serves 11434. The address must be one THIS PHONE can reach — " +
-                            "a LAN address works only on the same network, so a tailnet address " +
-                            "is usually what you want."
-                    } else {
-                        "Requests are described by ${policy.aiExternalUrl}. If it is unreachable " +
-                            "they are refused — never approved without a description."
-                    },
-                    12f,
-                    if (policy.aiExternalUrl.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
-                ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
-            )
-        }
-
+        )
         return block
     }
+
+    /** What the on-device card says about itself. Never a bare "available". */
+    private fun onDeviceStateLine(): String {
+        val readiness = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
+        val downloading = com.mido.phonebridge.ai.ModelProvisioner.running
+        if (downloading) {
+            val pct = com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: 0
+            return "Downloading $pct%"
+        }
+        return if (readiness.ready) readiness.detail else "Needs download · ${readiness.detail}"
+    }
+
+    /** What the remote card says about itself, naming the specific missing piece. */
+    private fun remoteStateLine(policy: com.mido.phonebridge.policy.Policy): String {
+        val problem = com.mido.phonebridge.ai.ExternalModel.problem(ctx)
+        if (problem != null) return problem
+        val model = policy.aiExternalModel
+        return if (model.isBlank()) "Ready — no model picked" else "Ready · $model"
+    }
+
+    /**
+     * One large radio card.
+     *
+     * The selected card gets the accent border and ink text; unselected is hairline and muted, so
+     * "which one is active" is answerable at a glance without reading. Tapping anywhere on the card
+     * selects it — a radio you have to hit precisely is a radio people miss.
+     */
+    private fun aiRadioCard(
+        store: PolicyStore,
+        policy: com.mido.phonebridge.policy.Policy,
+        target: com.mido.phonebridge.policy.AiBackend,
+        title: String,
+        state: String,
+        enabled: Boolean,
+    ): LinearLayout {
+        val selected = policy.aiBackend == target
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+            )
+            background = Theme.outlined(
+                ctx,
+                if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
+                Theme.RADIUS_CONTROL,
+                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
+                strokeDp = if (selected) 2 else 1,
+            )
+            isClickable = true
+            isFocusable = true
+            if (!selected) setOnClickListener {
+                save(store, policy.withAiBackend(target))
+            }
+        }
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, 10) }
+
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        row.addView(Theme.radioDot(ctx, selected))
+        val text = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(Theme.text(ctx, title, 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(ctx)
+            })
+            addView(
+                Theme.text(
+                    ctx, state, 12f,
+                    if (selected) Theme.ON_SURFACE_VARIANT else Theme.ON_SURFACE_VARIANT,
+                ).apply { setPadding(0, Theme.dp(ctx, 2), 0, 0) }
+            )
+        }
+        row.addView(
+            text,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        card.addView(row)
+
+        // --- the action, only on the SELECTED card ---
+        //
+        // A download button on an unselected card would be a control that changes something you
+        // did not choose. It appears where the choice already is.
+        if (selected) {
+            when (target) {
+                com.mido.phonebridge.policy.AiBackend.LOCAL -> {
+                    val readiness = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
+                    val downloading = com.mido.phonebridge.ai.ModelProvisioner.running
+                    if (downloading) {
+                        val pct = com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: 0
+                        card.addView(
+                            Theme.progressButton(ctx, "DOWNLOADING $pct%", pct),
+                            LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                            ).apply { topMargin = Theme.dp(ctx, 10) },
+                        )
+                    } else if (!readiness.ready) {
+                        // **Wait for the tap.** Mido, 2026-11-04: a 345 MB download must not
+                        // begin because a switch moved.
+                        card.addView(
+                            Theme.button(
+                                ctx, "DOWNLOAD MODEL", Theme.ButtonStyle.SUCCESS,
+                            ) { startModelDownload() },
+                            LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                            ).apply { topMargin = Theme.dp(ctx, 10) },
+                        )
+                    } else {
+                        card.addView(
+                            Theme.button(
+                                ctx, "RE-DOWNLOAD", Theme.ButtonStyle.NEUTRAL, small = true,
+                            ) { confirmRedownload() },
+                            LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                                LinearLayout.LayoutParams.WRAP_CONTENT,
+                            ).apply { topMargin = Theme.dp(ctx, 10) },
+                        )
+                    }
+                }
+
+                com.mido.phonebridge.policy.AiBackend.EXTERNAL -> {
+                    // Fields INSIDE the card: a URL below two cards does not say which one it
+                    // configures.
+                    card.addView(externalFields(store, policy))
+                }
+
+                com.mido.phonebridge.policy.AiBackend.OFF -> Unit
+            }
+        }
+        return card
+    }
+
 
     /**
      * Why [raw] is not a usable endpoint, or null when it is.
@@ -888,45 +743,6 @@ class OptionsFragment : BridgeFragment() {
         render()
     }
 
-    /**
-     * The AI model row, moved here from Home.
-     *
-     * Rendered as a BUTTON while it is the thing to press, and as a plain row once ready: the
-     * action and its feedback are the same control, which is why the label carries the progress.
-     */
-    private fun aiModelRow(
-        store: PolicyStore,
-        policy: com.mido.phonebridge.policy.Policy,
-    ): android.view.View {
-        val modelState = com.mido.phonebridge.ai.ModelRegistry.readiness(ctx)
-        val aiOn = com.mido.phonebridge.ai.AiGateway.enabled(ctx)
-        val downloading = aiOn && com.mido.phonebridge.ai.ModelProvisioner.running
-        val progress = com.mido.phonebridge.ai.ModelProvisioner.progress
-
-        // With the AI off there is nothing to fetch, so offering a download would advertise the
-        // exact behaviour that was turned off above on this same screen.
-        if (!aiOn) {
-            return Theme.statusRow(ctx, "AI model",
-                "off — no model loaded",
-                Theme.ON_SURFACE_VARIANT
-            )
-        }
-        if (downloading) {
-            val pct = progress?.percent ?: 0
-            return Theme.progressButton(ctx, "AI MODEL — DOWNLOADING $pct%", pct)
-        }
-        return Theme.statusRow(ctx, "AI model",
-            if (modelState.ready) "${modelState.detail} — tap to re-download"
-            else "tap to download — ${modelState.detail}",
-            if (modelState.ready) Theme.SUCCESS else Theme.WARNING,
-            onClick = {
-                // A ready model CONFIRMS before re-fetching ~474 MB. Tapping a green row used to
-                // silently restart the download (Mido, 2026-10-19).
-                if (modelState.ready) confirmRedownload() else startModelDownload()
-            }
-        )
-    }
-
     private fun confirmRedownload() {
         confirm(
             title = "Re-download the AI model?",
@@ -964,4 +780,291 @@ class OptionsFragment : BridgeFragment() {
             ).apply { topMargin = Theme.dp(ctx, 6) }
         }
 
+    /**
+     * The remote server's fields.
+     *
+     * Extracted so they expand INSIDE the remote radio card. A field that floats below two cards
+     * does not say which backend it configures — the ambiguity this screen keeps removing.
+     */
+    private fun externalFields(
+        store: PolicyStore,
+        policy: com.mido.phonebridge.policy.Policy,
+    ): android.view.View {
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, Theme.dp(ctx, 10), 0, 0)
+        }
+            body.addView(
+                Theme.text(
+                    ctx,
+                    "Server URL",
+                    13f, Theme.ON_SURFACE
+                ).apply { setPadding(0, Theme.dp(ctx, 14), 0, Theme.dp(ctx, 6)) }
+            )
+
+            val urlField = EditText(ctx).apply {
+                setText(policy.aiExternalUrl)
+                hint = "http://host:port  (no trailing slash)"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                isSingleLine = true
+                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+                setSaveEnabled(false)
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 14f
+                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                setPadding(
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
+                )
+            }
+
+            // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
+            // route fail, and saving it would hide the mistake behind a "not reachable" that
+            // looks like the server's fault rather than the address's.
+            val errorLine = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
+                setPadding(0, Theme.dp(ctx, 6), 0, 0)
+                visibility = android.view.View.GONE
+            }
+
+            body.addView(urlField)
+
+            // --- optional token ---
+            //
+            // **Masked, because it is a credential.** Unsloth treats a private host as trusted and
+            // answers 401 with `www-authenticate: Bearer` the moment the same server is reached
+            // over a tailnet address, which is not private. Sending a token is the honest fix;
+            // routing around auth with a Host-rewriting proxy is not.
+            //
+            // Optional on purpose: a loopback or LAN server needs none, and sending an empty
+            // Authorization header makes some servers reject the request outright.
+            body.addView(
+                Theme.text(
+                    ctx,
+                    "Token (optional)",
+                    13f, Theme.ON_SURFACE
+                ).apply { setPadding(0, Theme.dp(ctx, 12), 0, Theme.dp(ctx, 6)) }
+            )
+
+            val tokenField = EditText(ctx).apply {
+                setText(policy.aiExternalToken)
+                hint = "leave empty if the server trusts this device"
+                // Masking applied AFTER inputType, for the reason recorded in ApprovalActivity:
+                // setInputType re-derives the transformation and would clear an earlier one.
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                isSingleLine = true
+                importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or
+                    android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                setSaveEnabled(false)
+                isSaveFromParentEnabled = false
+                setTextColor(Theme.ON_SURFACE)
+                setHintTextColor(Theme.ON_SURFACE_VARIANT)
+                highlightColor = Theme.ACCENT
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 14f
+                background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+                setPadding(
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
+                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
+                )
+                // Set LAST, after inputType: `setInputType` re-derives the transformation from
+                // the type and silently clears anything assigned before it — the bug recorded in
+                // ApprovalActivity. Declared explicitly so the mask is not left to the theme.
+                transformationMethod =
+                    android.text.method.PasswordTransformationMethod.getInstance()
+            }
+            body.addView(tokenField)
+
+            // --- the model, chosen from what the SERVER says it has ---
+            //
+            // **A picker, not a text field, and the list comes from the server.** A model id is
+            // an exact string a server decides; letting it be typed is how "qwen3:8b" ended up
+            // in a constant while the server served something else entirely. Unsloth answers an
+            // unknown tag with its loaded default instead of failing, so a wrong name is not an
+            // error a human sees — it is a silent substitution.
+            body.addView(
+                Theme.text(ctx, "Model", 13f, Theme.ON_SURFACE)
+                    .apply {
+                        setPadding(
+                            0, Theme.dp(ctx, 14), 0,
+                            Theme.dp(ctx, 6)
+                        )
+                    }
+            )
+
+            // The last successful listing, held here because the picker is populated
+            // asynchronously and `save` must store the dialect that produced the choice — the two
+            // travel together or the id goes down a route the server does not implement.
+            var listed: com.mido.phonebridge.ai.ModelCatalogue? = null
+
+            val modelStatus = Theme.text(
+                ctx,
+                if (policy.aiExternalModel.isBlank()) {
+                    "No model selected. Press refresh to ask the server — EXTERNAL refuses " +
+                        "until one is chosen."
+                } else {
+                    "Using ${policy.aiExternalModel}" +
+                        (policy.aiExternalDialect?.let { " (${it.label})" } ?: "")
+                },
+                12f,
+                if (policy.aiExternalModel.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
+
+            val modelSpinner = android.widget.Spinner(ctx).apply {
+                visibility = android.view.View.GONE
+                background = Theme.outlined(
+                    ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL
+                )
+            }
+
+            val refresh = Theme.button(ctx, "refresh models", Theme.ButtonStyle.NEUTRAL, small = true) {
+                val url = urlField.text.toString().trim()
+                val problem = validateEndpoint(url)
+                if (problem != null) {
+                    errorLine.text = problem
+                    errorLine.visibility = android.view.View.VISIBLE
+                    return@button
+                }
+                if (url.isBlank()) {
+                    errorLine.text = "Enter the server URL first, then refresh."
+                    errorLine.visibility = android.view.View.VISIBLE
+                    return@button
+                }
+                errorLine.visibility = android.view.View.GONE
+                modelStatus.text = "asking $url …"
+
+                // Off the main thread: this is a network call and the UI thread is not allowed
+                // to block on one. The result comes back through ui { } so every view
+                // touch happens where Android requires it.
+                Thread {
+                    // An explicit outcome, NOT a Pair that has to be re-cast.
+                    //
+                    // The first version built `null to message` on failure and returned the
+                    // catalogue directly on success, then tried `outcome as? Pair<*, *>` to pull
+                    // them apart — which is null for BOTH, so a working server reported
+                    // "could not list models — no answer" every single time. A success value and
+                    // a failure value that need a cast to tell apart is a type doing two jobs.
+                    val outcome: Result<com.mido.phonebridge.ai.ModelCatalogue> = try {
+                        Result.success(
+                            com.mido.phonebridge.ai.ExternalModels.fetch(
+                                url, tokenField.text.toString().trim()
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Result.failure(
+                            IllegalStateException(e.message ?: e.javaClass.simpleName, e)
+                        )
+                    }
+                    ui {
+                        val catalogue = outcome.getOrNull()
+                        if (catalogue == null) {
+                            val why = outcome.exceptionOrNull()?.message ?: "no answer"
+                            modelStatus.text = "could not list models — $why"
+                            modelStatus.setTextColor(Theme.DANGER)
+                            modelSpinner.visibility = android.view.View.GONE
+                            return@ui
+                        }
+                        listed = catalogue
+                        modelSpinner.adapter = android.widget.ArrayAdapter(
+                            ctx,
+                            android.R.layout.simple_spinner_dropdown_item,
+                            catalogue.models
+                        )
+                        // Preselect the stored model when the server still offers it, so a
+                        // refresh does not silently move a working install to a different model.
+                        val keep = catalogue.models.indexOf(policy.aiExternalModel)
+                        if (keep >= 0) modelSpinner.setSelection(keep)
+                        modelSpinner.visibility = android.view.View.VISIBLE
+                        modelStatus.text = "${catalogue.models.size} model(s) — " +
+                            "picked from a ${catalogue.dialect.label} server. Press save."
+                        modelStatus.setTextColor(Theme.ON_SURFACE_VARIANT)
+                    }
+                }.start()
+            }
+
+            body.addView(refresh, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(ctx, 8) })
+            body.addView(modelSpinner, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(ctx, 8) })
+            body.addView(modelStatus)
+
+            body.addView(errorLine)
+
+            body.addView(
+                Theme.button(ctx, "save", Theme.ButtonStyle.PRIMARY, small = true) {
+                    val raw = urlField.text.toString().trim()
+                    val problem = validateEndpoint(raw)
+                    if (problem != null) {
+                        errorLine.text = problem
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
+                    // **A model is REQUIRED**, not defaulted. Without one the app would have to
+                    // invent a name, and an invented name is exactly the fallback that made this
+                    // backend look broken while it was really asking for a model that did not
+                    // exist. Refusing here is the honest failure.
+                    val chosen = (modelSpinner.visibility == android.view.View.VISIBLE)
+                        .let { visible ->
+                            if (visible) modelSpinner.selectedItem?.toString() else null
+                        } ?: listed?.takeIf { policy.aiExternalModel.isNotBlank() }
+                            ?.let { policy.aiExternalModel }
+                    if (chosen.isNullOrBlank()) {
+                        errorLine.text = "Press refresh and pick a model — EXTERNAL cannot " +
+                            "describe requests without one."
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
+                    val dialect = listed?.dialect ?: policy.aiExternalDialect
+                    if (dialect == null) {
+                        errorLine.text = "Press refresh first: the model was never listed, so " +
+                            "the server protocol is unknown."
+                        errorLine.visibility = android.view.View.VISIBLE
+                        return@button
+                    }
+                    errorLine.visibility = android.view.View.GONE
+                    // ONE write for URL, token, model and dialect. Four saves would emit four
+                    // policy-change records and leave windows where the stored set is internally
+                    // inconsistent — an address without its credential, or a model without the
+                    // route that can serve it.
+                    save(
+                        store,
+                        policy.withAiExternalUrl(raw)
+                            .withAiExternalToken(tokenField.text.toString().trim())
+                            .withAiExternalModel(chosen, dialect)
+                    )
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+            )
+
+            body.addView(
+                Theme.text(
+                    ctx,
+                    if (policy.aiExternalUrl.isBlank()) {
+                        "No server set, so EXTERNAL refuses every request.\n\n" +
+                            "Format: http://host:port — no trailing slash, no path.\n" +
+                            "e.g. http://192.168.1.9:8888  ·  http://100.101.102.103:11434\n\n" +
+                            "The port is the part people get wrong: Unsloth Studio serves 8888, " +
+                            "Ollama serves 11434. The address must be one THIS PHONE can reach — " +
+                            "a LAN address works only on the same network, so a tailnet address " +
+                            "is usually what you want."
+                    } else {
+                        "Requests are described by ${policy.aiExternalUrl}. If it is unreachable " +
+                            "they are refused — never approved without a description."
+                    },
+                    12f,
+                    if (policy.aiExternalUrl.isBlank()) Theme.WARNING else Theme.ON_SURFACE_VARIANT
+                ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
+            )
+        return body
+    }
 }

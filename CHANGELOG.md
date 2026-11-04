@@ -5308,9 +5308,13 @@ devDependencies. `node_modules/` is gitignored.
 - The approval modal's countdown label is gone; the DENY button itself fills as time runs out.
 - The hint card's countdown spans the card again instead of a chip on the right edge.
 
-## 0.47.5 (build 275) — 2026-11-04 — CURRENT
+## 0.47.5 (build 275) — 2026-11-04
 - SSH connections list only on the SSH screen, and secrets only on the Secrets screen.
 - The duplicates in "Other" are gone: each secret no longer appears as its own plugin row.
+
+## 0.48.0 (build 276) — 2026-11-04 — CURRENT
+- AI summaries is one switch. Off shows nothing else; on shows two large radio cards for on-device or remote.
+- Each card states its own condition, and the download button lives only on the card that is selected.
 
 ## Keeping this file honest
 
