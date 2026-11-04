@@ -1228,6 +1228,41 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
         }
+
+        // --- the way out when this mechanism fails ---
+        //
+        // Mido, 2026-11-04: *"in case updates mechanism go wrong, add a small button for github
+        // releases page directly"*.
+        //
+        // Deliberately ALWAYS shown, not only when a check failed. The cases it rescues include
+        // the ones the app cannot detect: a release published without an APK, a version tag this
+        // build's comparison misjudges, an install the system refuses, a download that verifies
+        // here and will not install there. Those all report something other than "unavailable",
+        // so a fallback that only appeared on failure would be missing exactly when it is needed.
+        //
+        // Small and GHOST so it never competes with CHECK NOW: it is a door, not an action.
+        card.addView(
+            Theme.button(
+                ctx, "OPEN RELEASES PAGE", Theme.ButtonStyle.GHOST, small = true,
+            ) {
+                // Handed to the browser rather than fetched: this is the escape hatch, so it must
+                // not depend on any code in this app that could be the thing that is broken.
+                val url = "https://github.com/${com.mido.phonebridge.core.Updater.REPO_OWNER}" +
+                    "/${com.mido.phonebridge.core.Updater.REPO_NAME}/releases"
+                try {
+                    go(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                } catch (e: Exception) {
+                    // No browser installed. Rare, but the one case where a dead button would look
+                    // like the update system failing again.
+                    Debug.log("update: cannot open releases page: ${e.message}")
+                    toast("no browser to open $url")
+                }
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 10) },
+        )
         return card
     }
 

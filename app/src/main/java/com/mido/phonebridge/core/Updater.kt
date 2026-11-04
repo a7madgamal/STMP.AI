@@ -30,8 +30,17 @@ import java.net.URL
 object Updater {
 
     /** The public repository. Change these two together if the project ever moves. */
-    private const val OWNER = "a7madgamal"
-    private const val REPO = "STMP.AI"
+    /**
+     * The repository these URLs point at.
+     *
+     * Public, not private: Home needs them to build the releases-page fallback, and hard-coding
+     * the same pair in two files is exactly how one of them ends up stale after a rename.
+     */
+    const val REPO_OWNER = "a7madgamal"
+    const val REPO_NAME = "STMP.AI"
+
+    private const val OWNER = REPO_OWNER
+    private const val REPO = REPO_NAME
 
     private const val RELEASES_URL =
         "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=20"

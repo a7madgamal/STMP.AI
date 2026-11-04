@@ -5254,12 +5254,18 @@ devDependencies. `node_modules/` is gitignored.
 - Fingerprint for modals can only be flipped after a successful scan, in both directions.
 - With no fingerprint available the switch is disabled and off, and says why.
 
-## 0.46.3 (build 264) — 2026-11-04 — CURRENT
+## 0.46.3 (build 264) — 2026-11-04
 - The update check responds: check, channel switch and install no longer rebuild the control mid-tap.
 - Toggles invert the state they actually show, so settings turn off as well as on.
 - The server switch stays usable after stopping, and the copy no longer names a button that does not exist.
 - Updates are one card, and "Get started" sits on Home above them.
 - The plugin detail toggle is right-aligned, and SSH names its connections instead of counting them.
+
+## 0.46.4 (build 265) — 2026-11-04 — CURRENT
+- The toggle now wears the same material as the buttons, so every input matches.
+- Toggles are 20% smaller, with the same touch target.
+- The update card offers a button straight to the releases page, in case checking or installing ever fails.
+- A failed install asks for permission before the download, not after it.
 
 ## Keeping this file honest
 

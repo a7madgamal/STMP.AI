@@ -29,9 +29,9 @@ class RuggedToggle(context: Context) : View(context) {
 
     // --- geometry, in dp, resolved once ---
 
-    private val trackHeightPx = dp(31)
-    private val trackWidthPx = dp(56)
-    private val insetPx = dp(3.5f)
+    private val trackHeightPx = dp(25)
+    private val trackWidthPx = dp(45)
+    private val insetPx = dp(2.8f)
 
     /** The knob is square-ish on purpose: a circle would read as a Material thumb. */
     private val knobSizePx = trackHeightPx - insetPx * 2
@@ -49,12 +49,44 @@ class RuggedToggle(context: Context) : View(context) {
      * `tearDp` is 2 rather than the card's 6 because the track is 31dp tall: a 6dp tear would eat a
      * fifth of the shape. The PATTERN is shared; only the depth is proportioned.
      */
-    private val track: Drawable = Theme.tornCard(
-        context,
-        color = Theme.SURFACE,
-        radiusDp = 3,
-        tearDp = 2,
-    )
+    /**
+     * The track and knob wear the SAME material as every button.
+     *
+     * Mido, 2026-11-04: *"or even better match the buttons, so that all inputs have the same look
+     * and feel"*.
+     *
+     * Buttons do not use `tornCard`. They use `backgroundTintList` for fill plus a FOREGROUND
+     * `LayerDrawable` holding grain and a `SquiggleBorder` at `SQUIGGLE_STROKE_DP` (1.2dp) with
+     * alpha 0x55. The toggle had been drawing the CARD material instead — 1.5dp at alpha 0x2E,
+     * which is less than half the ink. That is why it read as "toooo light" no matter how the tear
+     * was tuned: it was the wrong material entirely, not the wrong number.
+     *
+     * So the outline is built the same way here, and a switch and a button now differ only in
+     * shape and behaviour rather than in material.
+     */
+    private fun surfaceDrawable(fillColor: Int, radiusDp: Int): Drawable {
+        val radius = Theme.dpF(context, radiusDp.toFloat())
+        val bg = android.graphics.drawable.GradientDrawable().apply {
+            setColor(fillColor)
+            cornerRadius = radius
+        }
+        // Tint-equivalent background, then grain, then the wobbling edge — the same three layers,
+        // in the same order, as `Theme.button`'s foreground.
+        return android.graphics.drawable.LayerDrawable(
+            arrayOf(
+                bg,
+                GrainOverlay(radius),
+                SquiggleBorder(
+                    color = Theme.ON_SURFACE and 0x00FFFFFF or (0x55 shl 24),
+                    strokePx = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP),
+                    radiusPx = radius,
+                    amplitudePx = Theme.dpF(context, Theme.SQUIGGLE_DP),
+                ),
+            )
+        )
+    }
+
+    private val track: Drawable = surfaceDrawable(Theme.SURFACE, 3)
 
     /**
      * The knob, rebuilt only when its colour changes.
@@ -188,12 +220,7 @@ class RuggedToggle(context: Context) : View(context) {
         }
         // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
         val current = knob.let { if (it != null && knobColorKey == color) it else null }
-        val drawable = current ?: Theme.tornCard(
-            context,
-            color = color,
-            radiusDp = 2,
-            tearDp = 1,
-        ).also {
+        val drawable = current ?: surfaceDrawable(color, 2).also {
             knob = it
             knobColorKey = color
         }

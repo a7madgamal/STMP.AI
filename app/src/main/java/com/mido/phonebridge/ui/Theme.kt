@@ -163,6 +163,15 @@ object Theme {
     /** The pen width of a drawn outline, in dp. Hairline but not invisible. */
     const val SQUIGGLE_STROKE_DP = 1.2f
 
+    /**
+     * The edge weight on every torn surface, in dp.
+     *
+     * Derived from what a 6dp tear used to imply (`6 / 4`), now stated once so a caller that
+     * chooses a smaller tear — the toggle, at 2dp — keeps the SAME visible line weight instead of
+     * getting a fainter one by arithmetic accident.
+     */
+    const val CARD_STROKE_DP = 1.5f
+
     /** Minimum touch target. Below this a tap is a coin flip. */
     const val MIN_TARGET_DP = 48
 
@@ -608,7 +617,19 @@ object Theme {
         private val fill: Int,
         private val edge: Int,
         private val cornerPx: Float,
-        private val tearPx: Float
+        private val tearPx: Float,
+        /**
+         * Line thickness, INDEPENDENT of [tearPx].
+         *
+         * **They used to be welded together** (`strokeWidth = tearPx / 4f`), which was invisible
+         * while only cards existed — they all tear 6dp, so they all got the same 1.5dp line. The
+         * toggle tears 2dp to keep its proportions on a 31dp control, and silently got a 0.5dp
+         * line: three times lighter than every card around it. Mido, 2026-11-04: *"toggle border
+         * still not the same as cards, toooo light currently. match the fucking cards exactly"*.
+         *
+         * Depth and weight are separate decisions, so they are separate parameters now.
+         */
+        private val strokePx: Float,
     ) : android.graphics.drawable.Drawable() {
 
         private val path = android.graphics.Path()
@@ -640,7 +661,7 @@ object Theme {
 
             // A hairline on the torn edge so the paper reads as having thickness.
             paint.style = android.graphics.Paint.Style.STROKE
-            paint.strokeWidth = tearPx / 4f
+            paint.strokeWidth = strokePx
             paint.color = scaled(edge)
             canvas.drawPath(path, paint)
         }
@@ -787,8 +808,11 @@ object Theme {
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
-        tearDp: Int = 6
+        tearDp: Int = 6,
     ): android.graphics.drawable.Drawable {
+        // The ONE card stroke, in dp. Every tornCard in the app uses it: 6dp of tear on a card or
+        // 2dp on a 31dp switch, the LINE is the same weight, so the set reads as one hand rather
+        // than as one bold card and one faint control.
         val r = radiusPx(ctx, radiusDp)
         // **ONE OUTLINE, NOT TWO.** Mido, 2026-11-03: *"why is the paper effect now seems done
         // twice in this list?"*
@@ -805,7 +829,10 @@ object Theme {
             fill = color,
             edge = withAlpha(ON_SURFACE, 0x2E),
             cornerPx = r,
-            tearPx = dp(ctx, tearDp).toFloat()
+            tearPx = dp(ctx, tearDp).toFloat(),
+            // The card's own 6dp tear used to imply this; declared so a smaller tear cannot
+            // silently thin it.
+            strokePx = dpF(ctx, CARD_STROKE_DP),
         )
     }
 
