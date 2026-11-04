@@ -5320,9 +5320,12 @@ devDependencies. `node_modules/` is gitignored.
 - The gate card shows all three modes again; only WHITELIST was visible after the rules button moved.
 - Tapping UPDATE shows a loader immediately, until the app restarts or you cancel.
 
-## 0.48.2 (build 278) — 2026-11-04 — CURRENT
+## 0.48.2 (build 278) — 2026-11-04
 - The Edit rules button no longer multiplies: it is built once instead of on every repaint.
 - The gap under the Fingerprint for modals toggle is normal again.
+
+## 0.48.3 (build 279) — 2026-11-04 — CURRENT
+- The gate's three modes are large radio cards, the same shape as the AI backend picker, and each says what it does.
 
 ## Keeping this file honest
 

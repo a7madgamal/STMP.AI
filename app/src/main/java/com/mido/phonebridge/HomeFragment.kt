@@ -289,8 +289,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             setTextColor(Theme.ON_SURFACE_VARIANT)
             setPadding(0, Theme.dp(ctx, 4), 0, 0)
         }
+        // **Vertical, because the modes are radio cards now.**
+        //
+        // Mido, 2026-11-04: *"convert approval gate 3 options into the same radio cards"*. Cards
+        // need height and a full row each, and three across a phone would have been three
+        // unreadable chips — the same problem the mode row already had before it became a row of
+        // three cramped labels.
         gateButtons = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
         }
         // A COLUMN holding two rows: the modes, then EDIT RULES.
         //
@@ -764,15 +770,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateTitle.setTextColor(Theme.ON_SURFACE)
         gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
 
+        // Rebuilt wholesale on every pass: `removeAllViews` then re-add is consistent, which is
+        // the property the EDIT RULES button lacked when it stacked up. That button is built in
+        // `buildContent` and never touched here.
         gateButtons.removeAllViews()
         for (m in GlobalMode.values()) {
-            val on = m == current
-            val b = Theme.button(ctx, m.name, if (on) Theme.ButtonStyle.PRIMARY else Theme.ButtonStyle.NEUTRAL, small = true) {
-                requestGate(m)
-            }
-            gateButtons.addView(b, LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginEnd = Theme.dp(ctx, 4) })
+            gateButtons.addView(gateRadioCard(m, m == current))
         }
 
         // **A way into the rule table from the card that shows it.**
@@ -1623,5 +1626,86 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             minutes < 60L * 24L -> "${minutes / 60L} h ago"
             else -> "${minutes / (60L * 24L)} d ago"
         }
+    }
+
+    /**
+     * One gate mode as a large radio card.
+     *
+     * Mido, 2026-11-04: *"convert approval gate 3 options into the same radio cards"* — the same
+     * shape as the AI backend picker, so the two choice screens in this app read identically.
+     *
+     * Each card states what the mode DOES, not just its name. "WHITELIST" alone is a label; the
+     * consequence is what the human is choosing between, and it was previously only visible in the
+     * card title AFTER selection.
+     */
+    private fun gateRadioCard(mode: GlobalMode, selected: Boolean): LinearLayout {
+        val (title, blurb) = when (mode) {
+            GlobalMode.WHITELIST ->
+                "Whitelist" to "Rules decide. Anything without a rule asks for your stamp."
+            GlobalMode.PARANOID ->
+                "Paranoid" to "Every request needs your stamp. Nothing is quiet."
+            GlobalMode.DONT_DISTURB ->
+                "Don't disturb" to "Small overlay. Doing nothing approves it. Tap ✕ to reject."
+        }
+
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(ctx, 14), Theme.dp(ctx, 10),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 10),
+            )
+            background = Theme.outlined(
+                ctx,
+                if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
+                Theme.RADIUS_CONTROL,
+                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
+                strokeDp = if (selected) 2 else 1,
+            )
+            isClickable = true
+            isFocusable = true
+            // Tapping anywhere selects it. The tap goes through `requestGate`, so NOTIFY keeps its
+            // confirmation — the card is a bigger target, not a faster path past the warning.
+            if (!selected) setOnClickListener { requestGate(mode) }
+        }
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, 8) }
+
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        row.addView(Theme.radioDot(ctx, selected))
+
+        val text = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                Theme.text(
+                    ctx,
+                    if (mode == GlobalMode.DONT_DISTURB) "⚠ $title" else title,
+                    15f,
+                    if (mode == GlobalMode.DONT_DISTURB) Theme.WARNING else Theme.ON_SURFACE,
+                ).apply { typeface = Theme.handFont(ctx) }
+            )
+            addView(
+                Theme.text(ctx, blurb, 12f, Theme.ON_SURFACE_VARIANT)
+                    .apply { setPadding(0, Theme.dp(ctx, 2), 0, 0) }
+            )
+        }
+        row.addView(
+            text,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        card.addView(row)
+
+        // The current rule count only makes sense under WHITELIST — the other two ignore the table.
+        if (selected && mode == GlobalMode.WHITELIST) {
+            card.addView(
+                Theme.text(ctx, rulesSummary(), 12f, Theme.ON_SURFACE_VARIANT)
+                    .apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
+            )
+        }
+        return card
     }
 }
