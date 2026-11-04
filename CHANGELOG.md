@@ -5285,13 +5285,17 @@ devDependencies. `node_modules/` is gitignored.
 - When a check fails, the releases-page button becomes the main action instead of a quiet link.
 - The note under a failed check no longer blames a private repository, which stopped being true when the project opened.
 
-## 0.47.0 (build 270) — 2026-11-04 — CURRENT
+## 0.47.0 (build 270) — 2026-11-04
 - The gate modes are renamed to WHITELIST, PARANOID and DON'T DISTURB, in the app, the policy file and the help payload.
 - The approval gate has a RULES button that opens the rule editor.
 - The server switch sits in the status card's header, top right, so the card is one line shorter.
 - Secrets and SSH are separate sections, each with its own add action.
 - A paper crease plays on screen switch, and sound effects can now be turned off in Settings.
 - The Google plugin can log out.
+
+## 0.47.1 (build 271) — 2026-11-04 — CURRENT
+- Fixes the server refusing to start after the mode rename: an old policy file is upgraded instead of rejected.
+- Anything unreadable now falls back to a safe value, says so in the debug log, and the repaired file is written back.
 
 ## Keeping this file honest
 

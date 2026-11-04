@@ -57,6 +57,27 @@ class PolicyStore(private val dir: File) {
         for (warning in parsed.preferenceWarnings) {
             com.mido.phonebridge.Debug.log("policy: $warning")
         }
+        // **A repaired file is WRITTEN BACK, not just logged.**
+        //
+        // Mido, 2026-11-04: *"if incompatible values appear next time fallback to the default and
+        // store it and add a debug hint"*. Without the write, every read repairs the same file
+        // again and emits the same warning forever — a repair that costs work on every boot is
+        // not a repair. The rewrite also means a downgrade-then-upgrade does not resurrect the
+        // stale value.
+        //
+        // Deliberately AFTER the logging, so the reason is in the ring before the bytes change.
+        if (parsed.repaired) {
+            com.mido.phonebridge.Debug.log(
+                "policy: file repaired and rewritten by this build"
+            )
+            try {
+                write(parsed)
+            } catch (e: Exception) {
+                // A failed rewrite must not lose the parse: the in-memory policy is valid and
+                // the server should start. The file simply gets repaired again next read.
+                com.mido.phonebridge.Debug.log("policy: repair write failed: ${e.message}")
+            }
+        }
         cached = parsed
         return parsed
     }

@@ -171,7 +171,23 @@ class Policy(
      *
      * Not serialized: it describes one read of one file, not a stored fact.
      */
-    val preferenceWarnings: List<String> = emptyList()
+    val preferenceWarnings: List<String> = emptyList(),
+    /**
+     * True when [parse] had to repair something to produce this object.
+     *
+     * **Added after this exact failure took the app down.** The gate modes were renamed
+     * (`SECURE` -> `PARANOID`), and `parse` treated the old name as an unknown value and threw —
+     * so an existing policy file stopped the server from starting at all. Mido, 2026-11-04: *"you
+     * should've asked me instead of breaking the update... if incompatible values appear next time
+     * fallback to the default and store it and add a debug hint"*.
+     *
+     * The flag exists so the repair is not just logged but PERSISTED: a file that has been
+     * repaired once must not pay the parse cost, or emit the warning, on every later read. The
+     * store rewrites the file when this is true.
+     *
+     * Not serialized: it describes one read of one file, not a stored fact.
+     */
+    val repaired: Boolean = false,
 ) {
 
     fun toJson(): JSONObject = JSONObject()
@@ -413,17 +429,44 @@ class Policy(
         const val VERSION = 1
 
         /**
-         * Strict parse. Every failure throws [PolicyException]; nothing falls back.
+         * Names this build used to write, mapped to what they mean now.
          *
-         * The cases worth naming:
-         *  - an unknown `global` value is a parse error, NOT a silent `SECURE`.
-         *    Quietly re-enabling a gate the user turned off is a behaviour change
-         *    they never asked for.
-         *  - a rule this build cannot honour (bad plugin, bad verb, an unknown mode)
-         *    is a parse error, not a dropped rule: running while ignoring a decision
-         *    that sits in the file is the same lie in a different shape.
-         *  - a duplicate `(plugin, verb)` pair is an error, never last-wins. The same
-         *    file must not resolve differently depending on write order.
+         * A rename is not a semantic change: `SECURE` and `PARANOID` are the same gate, so an
+         * old file keeps behaving exactly as it did. Only a genuinely unknown value falls back.
+         */
+        private val GLOBAL_ALIASES: Map<String, GlobalMode> = mapOf(
+            "AUTOMATIC" to GlobalMode.WHITELIST,
+            "SECURE" to GlobalMode.PARANOID,
+            "NOTIFY" to GlobalMode.DONT_DISTURB,
+        )
+
+        private val MODE_ALIASES: Map<String, Mode> = mapOf(
+            "SECURE" to Mode.PARANOID,
+            "NOTIFY" to Mode.DONT_DISTURB,
+        )
+
+        /**
+         * Parse, repairing what it can and REFUSING only what it cannot interpret.
+         *
+         * **This changed after a rename took the app down.** Mido, 2026-11-04: *"you should've
+         * asked me instead of breaking the update... if incompatible values appear next time
+         * fallback to the default and store it and add a debug hint"*.
+         *
+         * The rule now:
+         *  - a value this build knows -> use it, no warning;
+         *  - a LEGACY name we renamed -> use the equivalent, warn, and mark the file repaired so
+         *    the store rewrites it. A rename is not a semantic loss;
+         *  - a genuinely unknown `global` -> fall back to [GlobalMode.WHITELIST] (the mode that
+         *    reads the rules), warn, mark repaired. Never a dead server over one word;
+         *  - a rule with an unknown MODE -> [Mode.PARANOID], the stricter of the two. Guessing
+         *    toward "ask me" can only cost a tap, never an unapproved request;
+         *  - a rule with an unknown PLUGIN or VERB -> dropped, because widening it to match would
+         *    be the one direction that grants more than intended. Dropping falls back to the
+         *    global mode, which still asks a human;
+         *  - a duplicate `(plugin, verb)` pair is still a hard error. That is a structural
+         *    contradiction with no safe reading, and it cannot arise from a rename.
+         *
+         * Nothing here can auto-approve: there is no auto-approve mode to fall back TO.
          */
         fun parse(raw: String): Policy {
             val o = try {
@@ -435,21 +478,47 @@ class Policy(
             if (version != VERSION) {
                 throw PolicyException("policy version $version is not $VERSION")
             }
+            val warnings = ArrayList<String>(4)
+            var repaired = false
+
+            // **An unreadable mode value must never stop the bridge.**
+            //
+            // Three answers, in order of how much they preserve:
+            //   1. A name this build knows -> use it.
+            //   2. A LEGACY name we renamed -> use the equivalent, and say so. `SECURE` and
+            //      `PARANOID` mean the same thing; a rename is not a semantic loss.
+            //   3. Anything else -> the default, recorded, and the file rewritten.
+            //
+            // The old behaviour threw here, which turned a rename into a dead server with a
+            // message on the phone telling the human to fix a file they never wrote.
             val rawGlobal = o.optString("global", "")
-            // No migration, no special case: `OFF` was a <=0.11.0 switch value and is now
-            // just another unrecognised string. The one-way "OFF" -> NOTIFY load that
-            // 0.12.0 carried was itself removed once we agreed there is no backward
-            // compatibility while the app is not live. An unknown global stays a parse
-            // error, exactly like every other unreadable value in this file.
-            val global = GlobalMode.values().firstOrNull { it.name == rawGlobal }
-                ?: throw PolicyException(
-                    "unknown global '$rawGlobal'; this build understands " +
-                        GlobalMode.values().joinToString(", ")
-                )
+            val global: GlobalMode = GlobalMode.values().firstOrNull { it.name == rawGlobal }
+                ?: GLOBAL_ALIASES[rawGlobal]?.also {
+                    warnings.add("global '$rawGlobal' is the old name for ${it.name}; upgraded")
+                    repaired = true
+                }
+                ?: run {
+                    warnings.add(
+                        "global '$rawGlobal' is not a mode this build knows; falling back to " +
+                            "${GlobalMode.WHITELIST.name} and rewriting the file"
+                    )
+                    repaired = true
+                    GlobalMode.WHITELIST
+                }
+
             val arr = o.optJSONArray("rules")
                 ?: throw PolicyException("policy has no 'rules' array")
             val rules = ArrayList<Rule>(arr.length())
-            for (i in 0 until arr.length()) rules.add(parseRule(arr.getJSONObject(i), i))
+            for (i in 0 until arr.length()) {
+                // A rule that produced a WARNING was repaired: dropped, aliased, or mode-fallen-
+                // back. Counting warnings is how `parseRule` reports that without a second return
+                // channel — and my own test caught this being missed, which would have left a
+                // repaired rule unpersisted and re-repaired on every read.
+                val before = warnings.size
+                val rule = parseRule(arr.getJSONObject(i), i, warnings)
+                if (rule == null || warnings.size > before) repaired = true
+                if (rule != null) rules.add(rule)
+            }
             val dupes = rules.groupBy { it.key }.filterValues { it.size > 1 }.keys
             if (dupes.isNotEmpty()) {
                 throw PolicyException(
@@ -457,7 +526,6 @@ class Policy(
                         "exactly one rule, and last-wins would make the file order-dependent"
                 )
             }
-            val warnings = ArrayList<String>(3)
             val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
             val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
             val externalUrl = lenientString(o, "aiExternalUrl", warnings)
@@ -485,7 +553,8 @@ class Policy(
                 autoStartOnBoot = autoStart,
                 soundEffects = sound,
                 tts = ttsSettings,
-                preferenceWarnings = warnings
+                preferenceWarnings = warnings,
+                repaired = repaired,
             )
         }
 
@@ -605,41 +674,57 @@ class Policy(
             }
         }
 
-        private fun parseRule(o: JSONObject, index: Int): Rule {
+        /**
+         * Parse one rule, repairing what it can.
+         *
+         * Returns null when the rule cannot be honoured at all, and the caller then DROPS it.
+         * That is the safe direction: a dropped rule falls back to the global mode, which still
+         * asks a human — it can only make a pair stricter or neutral, never auto-approve, because
+         * no auto-approve mode exists. Refusing to boot over one bad line is the outcome this
+         * function exists to prevent.
+         */
+        private fun parseRule(o: JSONObject, index: Int, warnings: MutableList<String>): Rule? {
             val where = "rule[$index]"
             val plugin = o.optString("plugin", "")
-            if (plugin.isBlank()) throw PolicyException("$where has no 'plugin'")
-            // A wildcard is not a plugin id, and the rule engine has no cascade to
-            // give it meaning. Naming the failure keeps a hand-edited file honest.
-            if (plugin == "*") {
-                throw PolicyException("$where uses '*'; rules are exact, there is no cascade")
+            if (plugin.isBlank()) {
+                warnings.add("$where has no 'plugin'; rule dropped")
+                return null
             }
+            // A wildcard is not a plugin id, and the rule engine has no cascade to
+            // give it meaning. Dropping it is honest: nothing downstream would match.
+            if (plugin == "*") {
+                warnings.add("$where uses '*', which is not a plugin id; rule dropped")
+                return null
+            }
+
             val rawVerb = o.optString("verb", "")
-            // "ANY" is the any-verb token; a real Verb name is an exact rule. Anything
-            // else is a parse error, and a MISSING verb is an error too — never a
-            // silent wildcard, which would turn a truncated file into broad rules.
+            // "ANY" is the any-verb token; a real Verb name is an exact rule. An unknown
+            // verb is dropped rather than widened to ANY — widening would grant the rule to
+            // every verb, which is the one direction that must never happen by accident.
             val verb: Verb? = when {
                 rawVerb == Rule.ANY -> null
-                else -> Verb.values().firstOrNull { it.name == rawVerb }
-                    ?: throw PolicyException(
-                        "$where has unknown verb '$rawVerb'; this build understands " +
-                            (Verb.values().joinToString(", ") + ", or " + Rule.ANY + " for any verb")
+                else -> Verb.values().firstOrNull { it.name == rawVerb } ?: run {
+                    warnings.add(
+                        "$where has unknown verb '$rawVerb'; rule dropped so the pair falls back " +
+                            "to the global mode"
                     )
+                    return null
+                }
             }
+
             val rawMode = o.optString("mode", "")
-            val mode = Mode.values().firstOrNull { it.name == rawMode }
-                ?: throw PolicyException(
-                    "$where has unknown mode '$rawMode'; a rule may carry " +
-                        Rule.ALLOWED_MODES.joinToString(", ")
-                )
-            if (mode !in Rule.ALLOWED_MODES) {
-                // Unreachable while ALLOWED_MODES covers every Mode value, and kept as
-                // the guard for the day one is added without being classified here.
-                throw PolicyException(
-                    "$where sets mode '$rawMode'; a rule may carry " +
-                        Rule.ALLOWED_MODES.joinToString(", ")
-                )
-            }
+            val mode: Mode = Mode.values().firstOrNull { it.name == rawMode }
+                ?: MODE_ALIASES[rawMode]?.also {
+                    warnings.add("$where mode '$rawMode' is the old name for ${it.name}; upgraded")
+                }
+                ?: run {
+                    warnings.add(
+                        "$where has unknown mode '$rawMode'; using ${Mode.PARANOID.name} " +
+                            "because it is the stricter of the two"
+                    )
+                    Mode.PARANOID
+                }
+
             return Rule(plugin, verb, mode)
         }
     }

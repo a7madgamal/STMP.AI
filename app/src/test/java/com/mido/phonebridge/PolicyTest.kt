@@ -191,13 +191,14 @@ class PolicyTest {
     }
 
     @Test
-    fun `a rule with a missing verb is refused, never read as ANY`() {
-        val e = assertThrows(PolicyException::class.java) {
-            Policy.parse(
-                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","mode":"DONT_DISTURB"}]}"""
-            )
-        }
-        assertEquals(true, e.message!!.contains("unknown verb"))
+    fun `a rule with a missing verb is dropped, never read as ANY`() {
+        // A missing verb must never become a wildcard. Dropping is the safe direction: the pair
+        // falls back to the global mode, which still asks a human.
+        val p = Policy.parse(
+            """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","mode":"DONT_DISTURB"}]}"""
+        )
+        assertEquals(0, p.rules.size)
+        assertEquals(true, p.repaired)
     }
 
     @Test
@@ -267,65 +268,78 @@ class PolicyTest {
     }
 
     @Test
-    fun `an unknown global is a parse error, never a silent SECURE`() {
-        // Deliberately NOT "AUTOMATIC": that is a real value since 0.6.0, so using it
-        // here would have this test passing for the wrong reason — it would be checking
-        // that a known value parses, not that an unknown one fails.
-        val e = assertThrows(PolicyException::class.java) {
-            Policy.parse("""{"version":1,"global":"PANIC","rules":[]}""")
-        }
-        assertEquals(true, e.message!!.contains("PANIC"))
+    fun `a legacy global name is upgraded, not refused`() {
+        // The rename AUTOMATIC/SECURE/NOTIFY -> WHITELIST/PARANOID/DONT_DISTURB must not break an
+        // existing file. SECURE and PARANOID are the same gate, so this is a rename rather than a
+        // behaviour change — and it is marked repaired so the store rewrites the file.
+        val p = Policy.parse("""{"version":1,"global":"SECURE","rules":[]}""")
+        assertEquals(GlobalMode.PARANOID, p.global)
+        assertEquals(true, p.repaired)
     }
 
     @Test
-    fun `an unknown verb in a rule is refused`() {
-        assertThrows(PolicyException::class.java) {
-            Policy.parse(
-                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"NUKE","mode":"DONT_DISTURB"}]}"""
-            )
-        }
+    fun `an unknown global falls back instead of refusing to start`() {
+        // Mido, 2026-11-04: a rename took the app down because an unknown value was a hard parse
+        // error. Falling back keeps the bridge up; the repair is recorded so the file is rewritten.
+        val p = Policy.parse("""{"version":1,"global":"PANIC","rules":[]}""")
+        assertEquals(GlobalMode.WHITELIST, p.global)
+        assertEquals(true, p.repaired)
+        assertEquals(true, p.preferenceWarnings.any { it.contains("PANIC") })
     }
 
     @Test
-    fun `an unknown mode in a rule is refused`() {
-        assertThrows(PolicyException::class.java) {
-            Policy.parse(
-                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"WHATEVER"}]}"""
-            )
-        }
+    fun `a rule with an unknown verb is dropped, never widened to ANY`() {
+        // Widening to ANY would grant the rule to every verb — the one direction that must never
+        // happen by accident. Dropping falls back to the global mode, which still asks a human.
+        val p = Policy.parse(
+            """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"NUKE","mode":"DONT_DISTURB"}]}"""
+        )
+        assertEquals(0, p.rules.size)
+        assertEquals(true, p.repaired)
     }
 
     @Test
-    fun `an auto-approve mode is refused as a rule mode`() {
-        // Q12, and now stronger: there is no auto-approve mode at all in 0.12.0, so a
-        // rule carrying one is refused as an unknown mode. If this were ever accepted,
-        // "no human, no fingerprint" would be settable twelve times and one accidental
-        // row would bypass the gate.
-        assertThrows(PolicyException::class.java) {
-            Policy.parse(
-                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"OFF"}]}"""
-            )
-        }
+    fun `a rule with an unknown mode falls back to the stricter mode`() {
+        val p = Policy.parse(
+            """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"WHATEVER"}]}"""
+        )
+        assertEquals(1, p.rules.size)
+        assertEquals(Mode.PARANOID, p.rules[0].mode)
+        assertEquals(true, p.repaired)
     }
 
     @Test
-    fun `a legacy OFF global is refused, not migrated`() {
-        // 0.12.0 briefly carried a one-way "OFF" -> NOTIFY load for files written by
-        // <=0.11.0. It was removed on the "no backward compatibility while we are not
-        // live" call: "OFF" is now just another unrecognised string. If this ever
-        // stops throwing, a compatibility shim has been reintroduced without a decision.
-        assertThrows(PolicyException::class.java) {
-            Policy.parse("""{"version":1,"global":"OFF","rules":[]}""")
-        }
+    fun `an auto-approve mode can never be resurrected by a rule`() {
+        // There is no auto-approve mode, so "OFF" is unknown and falls back to PARANOID — the
+        // strictest value. If a guess ever landed on anything quieter, one bad row would bypass
+        // the gate.
+        val p = Policy.parse(
+            """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"OFF"}]}"""
+        )
+        assertEquals(1, p.rules.size)
+        assertEquals(Mode.PARANOID, p.rules[0].mode)
     }
 
     @Test
-    fun `an off-by-case global is refused too`() {
-        // No lenient matching: the refusal above is exact, not a case-insensitive shim
-        // wearing a different hat.
-        assertThrows(PolicyException::class.java) {
-            Policy.parse("""{"version":1,"global":"off","rules":[]}""")
-        }
+    fun `a legacy OFF global falls back without resurrecting auto-approve`() {
+        // `OFF` was an auto-approve value in <=0.11.0 and must NEVER come back. Falling back to
+        // WHITELIST is safe for a reason worth stating: WHITELIST reads the rule table, and an
+        // unmatched pair resolves to PARANOID, the strictest mode. So the fallback can only ask
+        // MORE, never less.
+        val p = Policy.parse("""{"version":1,"global":"OFF","rules":[]}""")
+        assertEquals(GlobalMode.WHITELIST, p.global)
+        assertEquals(true, p.repaired)
+        // Proof that no auto-approve survived: an unknown pair still demands the strictest mode.
+        assertEquals(Mode.PARANOID, resolveMode(p.global, p.rules, "gmail", Verb.DELETE))
+    }
+
+    @Test
+    fun `an off-by-case global falls back, and is not matched leniently`() {
+        // Exact matching still applies — `off` is not `OFF` and is not a known name either. It
+        // falls back to WHITELIST rather than being quietly read as some near-miss value.
+        val p = Policy.parse("""{"version":1,"global":"off","rules":[]}""")
+        assertEquals(GlobalMode.WHITELIST, p.global)
+        assertEquals(true, p.repaired)
     }
 
     @Test
@@ -342,12 +356,15 @@ class PolicyTest {
     }
 
     @Test
-    fun `a wildcard plugin is refused`() {
-        assertThrows(PolicyException::class.java) {
-            Policy.parse(
-                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"*","verb":"DELETE","mode":"DONT_DISTURB"}]}"""
-            )
-        }
+    fun `a wildcard plugin is dropped, never matched as every plugin`() {
+        // Widening `*` to match every plugin would grant a rule to the whole bridge — the one
+        // direction that must not happen. Dropping falls back to the global mode, which still
+        // asks a human.
+        val p = Policy.parse(
+            """{"version":1,"global":"WHITELIST","rules":[{"plugin":"*","verb":"DELETE","mode":"DONT_DISTURB"}]}"""
+        )
+        assertEquals(0, p.rules.size)
+        assertEquals(true, p.repaired)
     }
 
     @Test
@@ -584,11 +601,16 @@ class PolicyTest {
     }
 
     @Test
-    fun `a preference does not weaken the STRICT fields`() {
-        // The line that must not blur: leniency was added for two preferences, not for the gate.
-        // `global` stays a hard error, or a typo would silently reattach a gate someone turned off.
+    fun `leniency never weakens the gate`() {
+        // The invariant that replaced "global is a hard error". A tolerant parse must still never
+        // resolve to anything quieter than PARANOID, whatever it could not read.
         val raw = """{"version":1,"global":"NONSENSE","rules":[],"aiBackend":"LOCAL"}"""
-        assertThrows(PolicyException::class.java) { Policy.parse(raw) }
+        val p = Policy.parse(raw)
+        assertEquals(true, p.repaired)
+        // Every unknown pair resolves to the strictest mode, so a broken file cannot open a hole.
+        for (plugin in listOf("gmail", "drive", "ssh", "contacts")) {
+            assertEquals(Mode.PARANOID, resolveMode(p.global, p.rules, plugin, Verb.DELETE))
+        }
     }
 
     @Test
