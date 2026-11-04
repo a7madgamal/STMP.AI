@@ -303,6 +303,17 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             orientation = LinearLayout.VERTICAL
             setPadding(0, Theme.dp(ctx, 10), 0, 0)
             addView(gateButtons)
+            // The rules door. Built here, once: `renderGate` refreshes the MODES but must never
+            // add this again, or every repaint stacks another copy.
+            addView(
+                Theme.button(ctx, "EDIT RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
+                    go(Intent(ctx, ExceptionsActivity::class.java))
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 8) },
+            )
         }
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
@@ -315,7 +326,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // "AUTOMATIC" and never learn that a SECURE request will ask for a fingerprint.
         val fpRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, Theme.dp(ctx, 12), 0, 0)
+            // 8dp, not 12: the card already pads its own bottom by 12, so the gap under this row
+            // was 24dp — the "too much bottom padding" reported 2026-11-04. The row only needs
+            // enough to separate the knob from the rules button above it.
+            setPadding(0, Theme.dp(ctx, 8), 0, 0)
         }
         // A switch, not a button. Mido, 2026-11-04: *"make fingerprint for modals a toggle not a
         // button"*. The old control was a button whose LABEL carried the state, so the state had
@@ -349,7 +363,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateFingerprintWhy = TextView(ctx).apply {
             textSize = 12f
             setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 6), 0, 0)
+            // **No padding and no height until it has something to say.**
+            //
+            // It is empty in the normal case (the description was removed on request), and an
+            // empty TextView that still reserves 6dp of top padding plus a line of height is
+            // invisible space under the toggle. Visibility is driven by `render`, which turns it
+            // GONE when there is no text and the reason otherwise.
+            setPadding(0, 0, 0, 0)
+            visibility = TextView.GONE
         }
         fpRow.addView(gateFingerprintWhy)
         gateCard.addView(fpRow)
@@ -766,15 +787,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // from three choices that need to read as one set, which made all four labels cramped.
         // Underneath, the modes get the full width and the rules button reads as the separate verb
         // it is.
-        gateRows.addView(
-            Theme.button(ctx, "EDIT RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
-                go(Intent(ctx, ExceptionsActivity::class.java))
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 8) },
-        )
+        // **Built ONCE, in `buildContent`, and never re-added here.**
+        //
+        // This was inside `renderGate()`, and `renderGate` runs on every repaint while only
+        // `gateButtons` was cleared — so each pass appended another EDIT RULES. Reported
+        // 2026-11-04: *"2 edit rules buttons"*, then *"they keep appearing now 5"*. A view that is
+        // only ever ADDED must be created where the layout is created, not where it is refreshed.
 
         // The fingerprint control, rendered from the STORED value rather than from what we
         // assume: a write that silently failed must not leave the screen claiming otherwise.
@@ -788,7 +806,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             return
         }
         gateFingerprint.visibility = TextView.VISIBLE
-        gateFingerprintWhy.visibility = TextView.VISIBLE
+        // The explanation line is GONE unless it has text: it is normally empty (the description
+        // was removed on request), and a visible empty TextView reserves a line of height under
+        // the toggle — the extra bottom space reported 2026-11-04.
+        gateFingerprintWhy.visibility = TextView.GONE
 
         // **Can this phone even ask for a fingerprint?**
         //
@@ -806,6 +827,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 gateFingerprint.isEnabled = false
                 gateFingerprintWhy.text = status.reason
                 gateFingerprintWhy.setTextColor(Theme.WARNING)
+                gateFingerprintWhy.visibility = TextView.VISIBLE
+                gateFingerprintWhy.setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
 
             Fingerprint.Status.Usable -> {
