@@ -77,11 +77,19 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
-    private lateinit var gateFingerprint: MaterialButton
+    private lateinit var gateFingerprint: com.mido.phonebridge.ui.RuggedToggle
     private lateinit var gateFingerprintWhy: TextView
     private lateinit var heroCard: LinearLayout
     private lateinit var heroTitle: TextView
     private lateinit var heroSub: TextView
+
+    /**
+     * Work to run when this screen comes back to the front.
+     *
+     * The install-permission dialog sends the human to Android settings and promises the install
+     * will carry on when they return. This is what keeps that promise.
+     */
+    private var pendingAfterResume: (() -> Unit)? = null
 
     /**
      * Guards the load prompt so returning to the app (onResume) never re-prompts on
@@ -263,10 +271,31 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             orientation = LinearLayout.VERTICAL
             setPadding(0, Theme.dp(ctx, 12), 0, 0)
         }
-        gateFingerprint = Theme.button(ctx, "", Theme.ButtonStyle.NEUTRAL, small = true) {
+        // A switch, not a button. Mido, 2026-11-04: *"make fingerprint for modals a toggle not a
+        // button"*. The old control was a button whose LABEL carried the state, so the state had
+        // to be re-rendered into text on every pass and a stale render could claim the wrong
+        // thing. A knob's position cannot go stale.
+        val fpHeader = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        fpHeader.addView(
+            Theme.text(ctx, "Fingerprint for modals", 15f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(ctx)
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        gateFingerprint = Theme.toggle(
+            ctx,
+            on = try { PolicyStore.from(requireContext()).get().fingerprintForModals }
+                 catch (e: Exception) { false },
+        ) {
+            // Write, then repaint from what was written — the same rule every other toggle here
+            // follows, so a failed write cannot leave the knob showing the tap instead of the truth.
             toggleFingerprintForModals()
         }
-        fpRow.addView(gateFingerprint)
+        fpHeader.addView(gateFingerprint)
+        fpRow.addView(fpHeader)
         gateFingerprintWhy = TextView(ctx).apply {
             textSize = 12f
             setTextColor(Theme.ON_SURFACE_VARIANT)
@@ -276,6 +305,15 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateCard.addView(fpRow)
 
         container.addView(gateCard)
+
+        // --- UPDATES ---
+        //
+        // On Home, not Settings. Mido, 2026-11-04: *"move the update section to the home page"*.
+        // An available update is news about the app you are looking at, not a preference — and a
+        // preference buried one tab away is one nobody finds. The row stays silent when there is
+        // nothing to say.
+        container.addView(Theme.sectionHeader(ctx, "Updates"))
+        container.addView(updateBlock())
 
         // The plugin list used to live here and made Home a wall: twelve status cards between
         // the server control and the tools, pushing "is the bridge running" off the first
@@ -347,6 +385,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     override fun onResume() {
         super.onResume()
         render()
+
+        // The install-permission dialog promises the install resumes on return. Keep it.
+        // Posted, not called inline: the pending action may open another dialog or start a
+        // download, both of which want a settled frame first.
+        pendingAfterResume?.let { pending ->
+            pendingAfterResume = null
+            uiTickHandler.post(pending)
+        }
         // Re-render while visible, so the hero cannot go stale under the human's eyes.
         //
         // **This is the other half of the 2026-10-25 bug.** `render()` used to run only on
@@ -608,11 +654,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateFingerprint.visibility = TextView.VISIBLE
         gateFingerprintWhy.visibility = TextView.VISIBLE
         val fp = policy.fingerprintForModals
-        gateFingerprint.text = if (fp) "FINGERPRINT FOR MODALS: ON" else "FINGERPRINT FOR MODALS: OFF"
-        gateFingerprint.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (fp) Theme.SUCCESS else Theme.SURFACE_VARIANT
-        )
-        gateFingerprint.setTextColor(if (fp) Theme.ON_COLOR else Theme.ON_SURFACE)
+        // `setCheckedAnimated` only moves when the value actually differs, so a repaint that
+        // changed nothing cannot make the knob twitch.
+        if (gateFingerprint.checked != fp) gateFingerprint.setCheckedAnimated(fp)
         gateFingerprintWhy.text = if (fp) {
             "A SECURE request needs your fingerprint to approve. A denied prompt leaves the " +
                 "request pending so you can retry in its window."
@@ -874,5 +918,253 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     override fun stopBridge() {
         Debug.log("stop requested")
         ctx.stopService(Intent(ctx, BridgeService::class.java))
+    }
+
+    /**
+     * The update rows.
+     *
+     * **Built from `Updater`'s last OUTCOME, never from a stored flag.** A cached "up to date" is
+     * a claim about a question that was answered once, and it stops being true silently. The row
+     * therefore distinguishes three states — current, available, and could-not-ask — because the
+     * third one is the one that matters while the repository is private.
+     */
+    private fun updateBlock(): android.view.View {
+        val block = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val outcome = com.mido.phonebridge.core.Updater.lastOutcome
+        val checking = com.mido.phonebridge.core.Updater.checking
+        val channel = com.mido.phonebridge.core.UpdatePrefs.channel(requireContext())
+
+        val (line, colour) = when {
+            checking -> "checking…" to Theme.ON_SURFACE_VARIANT
+            outcome is com.mido.phonebridge.core.Updater.Outcome.Available ->
+                "version ${outcome.version} is available" +
+                    (if (outcome.isBeta) " (beta)" else "") to Theme.ACCENT
+            outcome is com.mido.phonebridge.core.Updater.Outcome.UpToDate ->
+                "up to date — ${BuildConfig.VERSION_NAME}" to Theme.SUCCESS
+            outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable ->
+                "cannot check: ${outcome.reason}" to Theme.WARNING
+            else -> "not checked yet" to Theme.ON_SURFACE_VARIANT
+        }
+
+        block.addView(Theme.statusRow(ctx, "Version", line, colour))
+
+        // The channel. Free to offer because `promote.yml` already marks stable releases; a beta
+        // is simply a release that was pushed but never promoted.
+        val channelRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(
+                Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12)
+            )
+            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CONTROL)
+        }
+        channelRow.addView(
+            Theme.text(
+                ctx,
+                if (channel == com.mido.phonebridge.core.UpdatePrefs.Channel.BETA) {
+                    "Channel \u2014 beta (every push)"
+                } else {
+                    "Channel \u2014 stable (promoted only)"
+                },
+                14f,
+                Theme.ON_SURFACE,
+            ),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        channelRow.addView(
+            Theme.toggle(ctx, channel == com.mido.phonebridge.core.UpdatePrefs.Channel.BETA) { want ->
+                com.mido.phonebridge.core.UpdatePrefs.setChannel(
+                    requireContext(),
+                    if (want) com.mido.phonebridge.core.UpdatePrefs.Channel.BETA
+                    else com.mido.phonebridge.core.UpdatePrefs.Channel.STABLE,
+                )
+                // The channel changes what counts as an update, so the old answer is void.
+                com.mido.phonebridge.core.Updater.lastOutcome = null
+                render()
+                checkForUpdates()
+            }
+        )
+        block.addView(channelRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, 6) })
+
+        // An available update gets an install button, and the notes above it.
+        if (outcome is com.mido.phonebridge.core.Updater.Outcome.Available) {
+            val notes = com.mido.phonebridge.core.Updater.shortNotes(outcome.notes)
+            if (notes.isNotEmpty()) {
+                block.addView(
+                    Theme.text(ctx, notes, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                        setPadding(0, Theme.dp(ctx, 10), 0, 0)
+                    }
+                )
+            }
+            block.addView(
+                Theme.button(
+                    ctx, "INSTALL ${outcome.version}", Theme.ButtonStyle.SUCCESS,
+                ) { installUpdate(outcome) },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+            )
+        } else {
+            block.addView(
+                Theme.button(
+                    ctx, "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
+                ) { checkForUpdates() },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+            )
+        }
+
+        // When the source cannot be reached, say what will make it work. This is the whole
+        // "handle the unavailable case" requirement: a checker that silently shows nothing is
+        // indistinguishable from a broken one.
+        if (outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable) {
+            block.addView(
+                Theme.text(
+                    ctx,
+                    "The update check reads GitHub releases directly. It starts working once " +
+                        "the repository is public \u2014 nothing else needs to change.",
+                    12f, Theme.ON_SURFACE_VARIANT,
+                ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
+            )
+        }
+        return block
+    }
+
+
+    /** Check on a worker, then repaint. The main thread is never blocked on this. */
+    private fun checkForUpdates() {
+        com.mido.phonebridge.core.Updater.lastOutcome = null
+        com.mido.phonebridge.core.Updater.checking = true
+        render()
+        Thread({
+            val outcome = com.mido.phonebridge.core.Updater.check(requireContext().applicationContext)
+            Debug.log("update check: ${outcome.javaClass.simpleName}")
+            ui { render() }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
+
+
+    /**
+     * Download, verify, then hand to the installer.
+     *
+     * **Verification is not optional.** A digest mismatch deletes the file and refuses; an
+     * update that cannot be checked against what was published is exactly the thing that should
+     * not be installed.
+     */
+    private fun installUpdate(update: com.mido.phonebridge.core.Updater.Outcome.Available) {
+        // **Answered BEFORE the 42 MB download, not after it.**
+        //
+        // Android requires the human to allow installs for this app once. Discovering that after
+        // fetching and verifying a whole APK means the only thing left to show is an error about
+        // a download that was never going to be usable — and that is exactly what happened on
+        // 2026-11-04, as an unreadable toast.
+        if (!com.mido.phonebridge.core.ApkInstaller.canInstall(requireContext())) {
+            showInstallPermissionDialog { installUpdate(update) }
+            return
+        }
+
+        toast("downloading ${update.version}…")
+        Thread({
+            try {
+                val got = com.mido.phonebridge.core.Updater.download(requireContext().applicationContext, update)
+                val expected = update.sha256
+                if (expected != null) {
+                    val normalized = expected.trim().lowercase().substringAfterLast(" ")
+                    if (!got.sha256.equals(normalized, ignoreCase = true)) {
+                        got.file.delete()
+                        Debug.log("update: digest mismatch, refusing")
+                        ui { toast("download was corrupted — refusing to install") }
+                        return@Thread
+                    }
+                    Debug.log("update: digest verified")
+                } else {
+                    Debug.log("update: no published digest; installing unverified")
+                }
+                ui {
+                    com.mido.phonebridge.core.ApkInstaller.install(requireContext(), got.file) { result ->
+                        ui {
+                            when (result) {
+                                is com.mido.phonebridge.core.ApkInstaller.Result.ConfirmationShown ->
+                                    toast("confirm the install in the dialog")
+                                // The permission was revoked between the pre-check and the
+                                // commit, or a managed device forbids it. Same dialog either way:
+                                // the fix is a settings toggle, and it has a button.
+                                is com.mido.phonebridge.core.ApkInstaller.Result.NeedsPermission ->
+                                    showInstallPermissionDialog { installUpdate(update) }
+                                is com.mido.phonebridge.core.ApkInstaller.Result.Refused ->
+                                    showProblemDialog("Update could not be installed", result.reason)
+                            }
+                            render()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Debug.log("update: download failed: ${e.message}")
+                ui { toast("download failed: ${e.message ?: e.javaClass.simpleName}") }
+            }
+        }, "update-download").apply { isDaemon = true }.start()
+    }
+
+
+    /**
+     * The "allow installs for this app" dialog.
+     *
+     * **A dialog, not a toast.** Mido, 2026-11-04: *"I didn't like that the instructions were a
+     * small popup I couldn't even read. make this case a clear dialog and as easy as possible to
+     * follow. if we can have a button to go to the setting page needed that would be great"*.
+     *
+     * A toast cannot be re-read, cannot be acted on, and disappears while the human is still
+     * squinting at it. This explains WHY the permission is wanted, names the exact switch, and
+     * carries a button that opens that switch's page directly instead of describing the route.
+     *
+     * `retry` is invoked after the human returns, so granting the permission continues the
+     * install they already tapped rather than making them find it again.
+     */
+    private fun showInstallPermissionDialog(retry: () -> Unit) {
+        confirm(
+            title = "Allow STMP to install updates",
+            message = "Android needs your permission once before it will let an app install its " +
+                "own update.\n\n" +
+                "Tap Open settings, then turn on " +
+                "\"Allow from this source\". Come back here and the install carries on " +
+                "by itself.\n\n" +
+                "This does not let anything else install on your phone — the permission is " +
+                "only for STMP.",
+            positive = "Open settings",
+            negative = "Not now",
+        ) {
+            // Remembered BEFORE settings opens: the human may grant the permission and come
+            // straight back, and the resume has to know what it was in the middle of.
+            pendingAfterResume = retry
+            if (!com.mido.phonebridge.core.ApkInstaller.openInstallSettings(requireContext())) {
+                pendingAfterResume = null
+                // Neither settings page could be opened. Saying so beats launching nothing and
+                // leaving the dialog looking broken.
+                showProblemDialog(
+                    "Cannot open settings",
+                    "This build of Android would not open the install-permission page. Go to " +
+                        "Settings → Apps → STMP → Install unknown apps and allow it there.",
+                )
+            } else {
+                Debug.log("update: opened install permission settings")
+            }
+        }
+    }
+
+
+    /** A plain, readable failure dialog. Long text belongs in a dialog, never a toast. */
+    private fun showProblemDialog(title: String, message: String) {
+        confirm(
+            title = title,
+            message = message,
+            positive = "OK",
+            negative = "Close",
+        ) { }
     }
 }

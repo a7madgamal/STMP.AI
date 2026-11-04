@@ -34,18 +34,22 @@ class RuggedToggle(context: Context) : View(context) {
 
     // --- geometry, in dp, resolved once ---
 
-    private val trackHeightPx = dp(34)
-    private val trackWidthPx = dp(62)
-    private val insetPx = dp(4)
+    private val trackHeightPx = dp(31)
+    private val trackWidthPx = dp(56)
+    private val insetPx = dp(3.5f)
     /**
+     * ~10% smaller than the first shipping size (34x62 -> 31x56), by request 2026-11-04. The
+     * proportions are kept: shrinking the track without shrinking the tear would make the wobble
+     * eat a bigger share of the shape and the control would read as ragged rather than cut.
+     *
      * How deep the tear is, in dp.
      *
      * Deliberately small: the cards tear 6dp out of a ~90dp block, so the same proportion on a
      * 34dp track is roughly 2dp. Using the card's absolute 6dp here would eat a fifth of the
      * control and turn it into a ragged blob.
      */
-    private val trackTearPx = dp(2f)
-    private val knobTearPx = dp(1.2f)
+    private val trackTearPx = dp(1.8f)
+    private val knobTearPx = dp(1.1f)
 
     /**
      * The knob is SQUARE-ish on purpose. A circle would read as a Material thumb; a rectangle with

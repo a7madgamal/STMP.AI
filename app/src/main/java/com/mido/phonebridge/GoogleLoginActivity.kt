@@ -42,7 +42,7 @@ class GoogleLoginActivity : Activity() {
         root.addView(Theme.text(this, "\u2014 log \u2014", 12f, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, pad, 0, 0)
         })
-        val log = Theme.text(this, "", 11f, Theme.ON_SURFACE_VARIANT, mono = true)
+        val log = Theme.text(this, "", 12f, Theme.ON_SURFACE_VARIANT, mono = true)
         root.addView(ScrollView(this).apply { addView(log) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
 

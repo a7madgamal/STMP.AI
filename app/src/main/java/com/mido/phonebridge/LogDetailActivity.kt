@@ -70,7 +70,7 @@ class LogDetailActivity : Activity() {
 
         fun labelled(label: String, value: String, mono: Boolean = false, color: Int = Theme.ON_SURFACE) {
             if (value.isBlank()) return
-            content.addView(Theme.text(this, label, 11f, Theme.ON_SURFACE_VARIANT).apply {
+            content.addView(Theme.text(this, label, 12f, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(this@LogDetailActivity, 8), 0, 0)
             })
             content.addView(Theme.text(this, value, 14f, color, mono = mono).apply {
@@ -156,7 +156,7 @@ class LogDetailActivity : Activity() {
         }
 
         content.addView(Theme.sectionHeader(this, "raw"))
-        content.addView(Theme.text(this, raw, 11f, Theme.ON_SURFACE_VARIANT, mono = true).apply {
+        content.addView(Theme.text(this, raw, 12f, Theme.ON_SURFACE_VARIANT, mono = true).apply {
             setTextIsSelectable(true)
             setPadding(0, Theme.dp(this@LogDetailActivity, 4), 0, 0)
         })

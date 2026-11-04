@@ -166,6 +166,34 @@ object Theme {
     /** Minimum touch target. Below this a tap is a coin flip. */
     const val MIN_TARGET_DP = 48
 
+    /**
+     * The type scale, as sp values.
+     *
+     * **Why these exist rather than literals.** Sizes had drifted across nine files to 9, 10, 11,
+     * 12, 13, 14, 15, 16, 17 and 20sp with no rule, so the same kind of caption was 9sp on one
+     * screen and 13sp on another — and the smallest ones were genuinely hard to read. Mido,
+     * 2026-11-04: *"review all font sizes, in general I feel some can be hard to read so increase
+     * the smallest font size then apply common typography rules"*.
+     *
+     * The rule, in one place:
+     *
+     *  - **12sp is the floor.** Nothing renders smaller, including the modal's badge and the AI
+     *    status line, which were 9 and 10sp. A size nobody can read is not information.
+     *  - **13sp** — captions and status detail under a row.
+     *  - **14sp** — body text and row values.
+     *  - **16sp** — row labels, control labels, tab labels.
+     *  - **20sp** — screen titles only.
+     *
+     * Two steps between adjacent roles, which is the smallest gap that still reads as deliberate
+     * hierarchy rather than an accident.
+     */
+    const val TEXT_FLOOR_SP = 12f
+    const val TEXT_CAPTION_SP = 12f
+    const val TEXT_DETAIL_SP = 13f
+    const val TEXT_BODY_SP = 14f
+    const val TEXT_LABEL_SP = 16f
+    const val TEXT_TITLE_SP = 20f
+
     /** Ripple colour for controls on paper. A translucent ink tint, not the old white ripple. */
     private const val RIPPLE = 0x332B2318
 
@@ -322,18 +350,27 @@ object Theme {
         }
 
         val label = TextView(ctx).apply {
-            text = tab.label
-            textSize = 15f
+            // ALL CAPS by request (Mido, 2026-11-04). The hand font is already informal; caps
+            // give the three words the weight of labels rather than of prose, which is what a
+            // tab bar is.
+            text = tab.label.uppercase(java.util.Locale.US)
+            textSize = 16f
             gravity = Gravity.CENTER
             typeface = handFont(ctx)
             setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
+            // Bold when selected. Colour alone is unreadable for a chunk of the population and
+            // invisible in a screenshot; weight is the second signal.
+            setTypeface(
+                handFont(ctx),
+                if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+            )
             // One line, always. "Settings" wrapped to "Setting / s" as a third of a narrow bar:
             // the column is only as wide as its share, and the hand font is wide. `maxLines` alone
             // would clip, so the size shrinks to fit instead.
             isSingleLine = true
             maxLines = 1
             ellipsize = null
-            setAutoSizeTextTypeUniformWithConfiguration(11, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
         }
         column.addView(label)
 
@@ -351,13 +388,13 @@ object Theme {
             // sp -> px through TypedValue, which honours the user's font scale. The metric
             // fields are deprecated and would ignore it.
             textSize = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP, 11f, ctx.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_SP, 12f, ctx.resources.displayMetrics
             )
         }
         // The label auto-sizes down to fit, so measuring at a fixed 13sp would leave a rule wider
         // than the word it underlines. Measure at the smallest size the label may use.
         measure.textSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 9f, ctx.resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_SP, TEXT_FLOOR_SP, ctx.resources.displayMetrics
         )
         val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 12)
         column.addView(rule, LinearLayout.LayoutParams(

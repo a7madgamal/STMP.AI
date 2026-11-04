@@ -172,7 +172,7 @@ class SshActivity : Activity() {
             val fingerprint = pub?.let { SshKeygen.fingerprintOf(it) }
             if (fingerprint != null) {
                 card.addView(
-                    Theme.text(this, "key fingerprint", 11f, Theme.ON_SURFACE_VARIANT)
+                    Theme.text(this, "key fingerprint", 12f, Theme.ON_SURFACE_VARIANT)
                         .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
                 )
                 card.addView(
@@ -184,11 +184,11 @@ class SshActivity : Activity() {
             }
             if (pub != null) {
                 card.addView(
-                    Theme.text(this, "public key", 11f, Theme.ON_SURFACE_VARIANT)
+                    Theme.text(this, "public key", 12f, Theme.ON_SURFACE_VARIANT)
                         .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
                 )
                 card.addView(
-                    Theme.text(this, pub, 11f, Theme.ON_SURFACE).apply {
+                    Theme.text(this, pub, 12f, Theme.ON_SURFACE).apply {
                         typeface = android.graphics.Typeface.MONOSPACE
                         setTextIsSelectable(true)
                     }
@@ -196,7 +196,7 @@ class SshActivity : Activity() {
             }
             // The vault entry name, so a duplicate label on two hosts is tellable apart.
             card.addView(
-                Theme.text(this, "vault entry: $vaultName", 11f, Theme.ON_SURFACE_VARIANT)
+                Theme.text(this, "vault entry: $vaultName", 12f, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
             )
 

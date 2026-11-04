@@ -251,7 +251,7 @@ class ApprovalActivity : FragmentActivity() {
             // about Gmail, Calendar, or notifications — only rows. Never print a
             // label with nothing under it (an empty row is a defect, not a state).
             fun row(r: ApprovalGate.Row) {
-                content.addView(Theme.text(this, r.label, 11f, Theme.ON_SURFACE_VARIANT).apply {
+                content.addView(Theme.text(this, r.label, 12f, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
                 content.addView(Theme.text(

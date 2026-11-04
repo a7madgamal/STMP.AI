@@ -370,7 +370,9 @@ object NotifyOverlay {
         // header bar and pull weight away from the summary.
         val badge = TextView(ctx).apply {
             text = verbShort(entry.verb)
-            textSize = 9f
+            // Was 9sp: unreadable on a phone at arm's length, and this badge carries the ONE
+            // word that says what the request does. 12sp is the app's floor.
+            textSize = 12f
             setTextColor(BADGE_TEXT)
             setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
             gravity = Gravity.CENTER
@@ -389,7 +391,7 @@ object NotifyOverlay {
         // targets the local instead.
         val summaryView = TextView(ctx).apply {
             text = entry.summary
-            textSize = 11f
+            textSize = 13f
             setTextColor(TEXT)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -438,7 +440,8 @@ object NotifyOverlay {
         // box that is already there — it can never add height the card did not have.
         val aiLine = TextView(ctx).apply {
             text = if (entry.facts != null) "◌ summarising…" else ""
-            textSize = 10f
+            // Was 10sp for the same reason; 12sp is the floor.
+            textSize = 12f
             setTextColor(MUTED)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END

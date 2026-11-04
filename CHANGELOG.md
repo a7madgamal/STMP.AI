@@ -5232,10 +5232,18 @@ devDependencies. `node_modules/` is gitignored.
 - The toggle uses the app's own torn-paper edge instead of a sharper invented one.
 - The server switch sits on its own at the right of the status card, with no label above it.
 
-## 0.45.3 (build 260) — 2026-11-04 — CURRENT
+## 0.45.3 (build 260) — 2026-11-04
 - A blocked update install now explains itself in a readable dialog with a button that opens the exact Android setting, instead of a toast that disappears.
 - The install permission is checked before the download, not after it.
 - Returning from that setting continues the install without tapping again.
+
+## 0.46.0 (build 261) — 2026-11-04 — CURRENT
+- An available update is good news: green rather than alarm red, and it lives on Home now instead of buried in Settings.
+- Fingerprint for modals is a toggle, like every other switch.
+- The toggle is about a tenth smaller.
+- Text has a 12sp floor and a documented scale, so captions and the modal badge are readable.
+- Menu labels are upper case, larger, and bold when selected.
+- Settings no longer asks permission to install after downloading 42 MB: it asks first.
 
 ## Keeping this file honest
 
