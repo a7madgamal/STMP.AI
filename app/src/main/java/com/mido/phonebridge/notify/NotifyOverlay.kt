@@ -226,7 +226,7 @@ object NotifyOverlay {
         var cardBg: GradientDrawable? = null
 
         /** The drain behind the reject control. Null until the card is built. */
-        var rejectDrain: ClipDrawable? = null
+        var cardDrain: ClipDrawable? = null
 
 
     }
@@ -321,12 +321,21 @@ object NotifyOverlay {
         // parent — the full window — which is why 0.6.1 drew a full-screen-height card.
         //
         // The countdown used to be such a layer here. It now lives on the reject button instead
-        // (see `rejectDrain` below), which is still a background and so still cannot affect the
+        // (see `cardDrain` below), which is still a background and so still cannot affect the
         // card's measured height.
         val cardBg = GradientDrawable().apply {
             setColor(BG)
             cornerRadius = radius
         }
+
+        val entryDrain = ClipDrawable(
+            GradientDrawable().apply {
+                setColor(ACCENT_FILL)
+                cornerRadius = radius
+            },
+            Gravity.START,
+            ClipDrawable.HORIZONTAL,
+        ).apply { level = LEVEL_FULL }
 
         val card = FrameLayout(ctx).apply {
             // Rounded corners come from the LAYERS themselves (both carry `cornerRadius`),
@@ -336,14 +345,12 @@ object NotifyOverlay {
             // clips to NOTHING. A card that is invisible for its whole window is not
             // cosmetic: silence means APPROVE in this mode, so a prompt nobody can see
             // approves the very request it was meant to ask about.
-            // **The countdown is NOT here any more.** It used to be a full-card background
-            // wash, which meant the whole card slowly changed colour as the window closed —
-            // a large, ambiguous signal for one small fact. It now fills the REJECT button,
-            // so the drain points at the control it is about: the time you have left to say
-            // no. See the `close` view below.
+            // The card's own wash, full width: the hint's window, as it always was. Putting it
+            // on the 30dp ✕ made a chip against the right edge instead of a bar.
             background = LayerDrawable(
                 arrayOf(
                     cardBg,
+                    entryDrain,
                     // Grain on the NOTIFY card too. Without this the one surface a user actually
                     // touches in AUTOMATIC mode was the only untextured thing on screen.
                     com.mido.phonebridge.ui.GrainOverlay(radius)
@@ -352,6 +359,7 @@ object NotifyOverlay {
             isClickable = true
         }
         entry.cardBg = cardBg
+        entry.cardDrain = entryDrain
 
         val column = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -402,21 +410,14 @@ object NotifyOverlay {
         // A 30dp touch box so the target is real without looking like a button — a
         // visible button here would pull the eye off the text.
         //
-        // **The countdown fills this box.** Mido, 2026-11-04: *"replace the countdown in the
-        // modal with the rejection button having a progress-bar-like background"*. The old
-        // wash covered the whole card, which made a large surface change colour to report one
-        // number, and gave no clue what the shrinking area MEANT. Filling the reject control
-        // says it directly: this much time left to refuse.
+        // **The ✕ is plain again.**
         //
-        // The layer is a background on a view with a fixed 30dp size, so it cannot participate
-        // in the card's measurement — the `NotifyCardLayoutTest` rule is untouched.
-        val rejectFill = GradientDrawable().apply {
-            setColor(ACCENT_FILL)
-            cornerRadius = dp(4).toFloat()
-        }
-        val rejectDrain = ClipDrawable(rejectFill, Gravity.START, ClipDrawable.HORIZONTAL).apply {
-            level = LEVEL_FULL
-        }
+        // I put the countdown drain here by mistake: "the modal" in the request meant the APPROVAL
+        // modal, and this is the hint card. The result was a 44dp fill squeezed against the right
+        // edge — reported as *"hints loading is pushed to the right, not full hint width"*.
+        //
+        // The countdown now lives where it was asked for, on the modal's DENY button. This card
+        // keeps the full-card drain it already had.
         val close = TextView(ctx).apply {
             text = "✕"
             textSize = 12f
@@ -424,12 +425,9 @@ object NotifyOverlay {
             gravity = Gravity.CENTER
             isClickable = true
             contentDescription = "Reject: ${entry.label}"
-            background = rejectDrain
         }
-        entry.rejectDrain = rejectDrain
-        // 44×30 rather than 30×30: a drain needs width before it reads as a bar rather than as a
-        // tinted square, and 44dp is still comfortably under the row's text height.
-        row.addView(close, LinearLayout.LayoutParams(dp(44), dp(30)))
+        // 30dp square: a touch target, not a bar.
+        row.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
 
         column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
@@ -714,7 +712,7 @@ object NotifyOverlay {
 
                 if (entry.decisionStartAt == 0L) {
                     // Still fetching: the bar waits at full and the clock has not begun.
-                    entry.rejectDrain?.level = LEVEL_FULL
+                    entry.cardDrain?.level = LEVEL_FULL
                     // **BUT NOT FOREVER.** This branch used to have no deadline at all: it held
                     // the card at "◌ summarising…" and relied on a separate backstop Runnable
                     // to end it. When that backstop was missed — a posted callback that never
@@ -763,12 +761,12 @@ object NotifyOverlay {
                     // Computed from the REMAINING time, not accumulated from frames, so
                     // a missed tick cannot make it drift.
                     val remaining = deadline - now
-                    entry.rejectDrain?.level = (remaining * LEVEL_FULL / entry.windowMs).toInt()
+                    entry.cardDrain?.level = (remaining * LEVEL_FULL / entry.windowMs).toInt()
                     if (!loggedMidpoint && now - entry.decisionStartAt >= entry.windowMs / 2) {
                         loggedMidpoint = true
                         com.mido.phonebridge.Debug.log(
                             "notify[${entry.id}] midpoint level=" +
-                                "${entry.rejectDrain?.level} alpha=${card.alpha}"
+                                "${entry.cardDrain?.level} alpha=${card.alpha}"
                         )
                     }
                 }

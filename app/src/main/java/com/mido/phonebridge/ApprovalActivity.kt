@@ -2,6 +2,9 @@ package com.mido.phonebridge
 
 import androidx.fragment.app.FragmentActivity
 import android.os.Build
+import android.graphics.drawable.ClipDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -73,6 +76,12 @@ class ApprovalActivity : FragmentActivity() {
      * indicator (Mido, 2026-10-27).
      */
     private lateinit var armBar: com.google.android.material.progressindicator.LinearProgressIndicator
+
+    /**
+     * The DENY button's draining background: the time left to refuse, drawn on the control that
+     * refuses. Set during build, driven by the tick.
+     */
+    private var denyDrain: android.graphics.drawable.ClipDrawable? = null
 
     companion object {
         const val EXTRA_ID = "id"
@@ -341,13 +350,19 @@ class ApprovalActivity : FragmentActivity() {
             }
         }
 
-        // --- Countdown to auto-deny, from the moment the buttons go live. ---
-        // NOT from createdAtMs: the clock starts when the human can actually decide, so a
-        // slow model never spends their decision time before they can use any of it (Mido,
-        // 2026-10-19: "60 at enable"). While the AI is still working there is no countdown
-        // to show, because it has not started.
+        // --- The countdown is the DENY button's own fill. ---
+        //
+        // Mido, 2026-11-04, twice: *"replace the countdown in the modal with the rejection button
+        // having a progress-bar-like background"* and *"I FUCKING asked 2 times to remove the
+        // countdown label COMPLETELY from the modal"*.
+        //
+        // So there is no label any more. The bar that drains IS the time left to refuse, and it
+        // sits on the control that refuses — one thing to read instead of a sentence plus a bar.
+        // The `countdown` TextView stays as an invisible accessibility carrier: a screen reader
+        // still needs the remaining seconds spoken, and deleting the view would leave a blind
+        // user with a bar they cannot perceive.
         val countdown = Theme.text(this, "", 13f, Theme.WARNING).apply {
-            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+            visibility = ViewGroup.GONE
         }
 
         // --- Queue position: only when others are actually waiting. The queue is
@@ -490,9 +505,11 @@ class ApprovalActivity : FragmentActivity() {
 
                 when {
                     enabledAt == 0L -> {
-                        // No arm time yet: the summary is still being fetched.
-                        countdown.text = "⏳ waiting for the summary…"
-                        countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
+                        // No arm time yet: the summary is still being fetched. The bar stays
+                        // EMPTY rather than full, because a full bar would read as "you have
+                        // all the time in the world" when the clock has not started.
+                        denyDrain?.level = 0
+                        countdown.text = "waiting for the summary"
                     }
                     !armed -> {
                         // THE GUARD WINDOW (Mido, 2026-10-21: *"when AI is disabled, we need the
@@ -503,8 +520,10 @@ class ApprovalActivity : FragmentActivity() {
                         // Deliberately NOT the auto-deny clock: the 60s window has not started,
                         // so showing it here would claim time the human has not been given.
                         val left = ArmGuard.remainingSeconds(enabledAt, now)
-                        countdown.text = "⏳ ready in ${left}s"
-                        countdown.setTextColor(Theme.ON_SURFACE_VARIANT)
+                        // Not the auto-deny clock: the window has not started, so the bar stays
+                        // empty and only the spoken label says what is happening.
+                        denyDrain?.level = 0
+                        countdown.text = "ready in ${left}s"
                         countdown.contentDescription = "arming in ${left}s"
                     }
                     else -> {
@@ -513,8 +532,11 @@ class ApprovalActivity : FragmentActivity() {
                         val elapsedSec = (now - enabledAt) / 1000L
                         val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
                         val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
-                        countdown.text = "⏳ auto-deny in ${left}s"
-                        countdown.setTextColor(if (left <= 10) Theme.DANGER else Theme.WARNING)
+                        // The bar IS the countdown: full when the window opens, empty at zero.
+                        denyDrain?.level = pct.coerceIn(0, 100).toInt() * 100
+                        // The label stays invisible; it exists so `contentDescription` can still
+                        // speak the remaining seconds.
+                        countdown.text = "auto-deny in ${left}s"
                         countdown.contentDescription = "timeout progress ${pct}%"
                     }
                 }
@@ -579,11 +601,29 @@ class ApprovalActivity : FragmentActivity() {
             ).apply { bottomMargin = Theme.dp(this@ApprovalActivity, 10) }
         }
 
+        // Built as a LayerDrawable so the fill can DRAIN: a tint can only recolour, and a
+        // background TINT would leave nothing for `setLevel` to move.
+        val denyTrack = GradientDrawable().apply {
+            setColor(Theme.SURFACE_VARIANT)
+            cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
+        }
+        denyDrain = ClipDrawable(
+            GradientDrawable().apply {
+                setColor(Theme.DANGER)
+                cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
+            },
+            Gravity.START,
+            ClipDrawable.HORIZONTAL,
+        ).apply { level = 0 }
+
         val deny = Theme.button(this, "DENY", Theme.ButtonStyle.NEUTRAL) {
             finishWith(id, approved = false)
         }.apply {
             isEnabled = false
             alpha = 0.4f
+            // The drain REPLACES the background, so the ripple goes with it. That is correct:
+            // the bar is a readout, and a pressed state on a disabled control would be a lie.
+            background = LayerDrawable(arrayOf(denyTrack, denyDrain))
         }
         // APPROVE on a contacts request asks for the permission FIRST.
         //
@@ -843,7 +883,12 @@ class ApprovalActivity : FragmentActivity() {
         pinned.addView(detailToggle)
         pinned.addView(detailScroll)
         pinned.addView(queueLine)
-        pinned.addView(countdown)
+        // Attached so a screen reader can still reach it, but with no height: the countdown
+        // label was removed from the modal's appearance on request, and anything that still
+        // reserved a line for it would leave a gap where a label used to be.
+        pinned.addView(countdown, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0
+        ))
         // The banner must name the CAUSE, because each one needs a different action and the old
         // single line sent everyone to Settings — including the two cases where Settings would
         // not help at all.

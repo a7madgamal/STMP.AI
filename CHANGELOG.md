@@ -5300,9 +5300,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.47.2 (build 272) — 2026-11-04
 - The rules button sits on its own row under the three gate modes, so the modes get the full width.
 
-## 0.47.3 (build 273) — 2026-11-04 — CURRENT
+## 0.47.3 (build 273) — 2026-11-04
 - Adding an SSH connection keeps the dialog and everything typed in it when a field is rejected.
 - Forms and dialogs no longer draw dark widgets on the cream palette on a dark-mode phone.
+
+## 0.47.4 (build 274) — 2026-11-04 — CURRENT
+- The approval modal's countdown label is gone; the DENY button itself fills as time runs out.
+- The hint card's countdown spans the card again instead of a chip on the right edge.
 
 ## Keeping this file honest
 
