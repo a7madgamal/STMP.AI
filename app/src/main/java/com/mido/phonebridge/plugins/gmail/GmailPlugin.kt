@@ -132,13 +132,13 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         if (!AuthManager.isLoggedIn(ctx)) {
             return PluginStatus("Gmail", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
         }
-        val email = AuthManager.accountEmail ?: "(account unknown)"
+        // The ACCOUNT is not echoed here — the Google card states it once. What this row is for
+        // is whether Gmail can serve, so that is what it says.
         val left = AuthManager.tokenRemainingMs()
         val detail = if (left > 0) {
-            val mins = left / 60_000
-            "$email · token ${mins}m"
+            "ready · token ${left / 60_000}m"
         } else {
-            "$email · refresh token"
+            "ready · renews automatically"
         }
         return PluginStatus("Gmail", PluginStatus.State.OK, detail)
     }

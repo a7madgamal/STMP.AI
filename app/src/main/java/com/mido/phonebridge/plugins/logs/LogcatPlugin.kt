@@ -42,7 +42,6 @@ class LogcatPlugin(private val ctx: Context) : Plugin {
 
      */
 
-    override val canBeDisabled: Boolean get() = false
     override val displayName = "Logs"
 
     override fun routes(): List<Route> = listOf(

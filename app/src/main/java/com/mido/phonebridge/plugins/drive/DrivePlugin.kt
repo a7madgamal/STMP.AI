@@ -708,7 +708,8 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                 "re-login needed to grant Drive access"
             )
         }
-        return PluginStatus("Google Drive", PluginStatus.State.OK, AuthManager.accountEmail ?: "(account unknown)")
+        // See CalendarPlugin: the account is stated once, on the Google card.
+        return PluginStatus("Google Drive", PluginStatus.State.OK, "ready")
     }
 
     private companion object {

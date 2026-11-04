@@ -35,6 +35,19 @@ class SquiggleBorder(
     private val amplitudePx: Float,
 ) : Drawable() {
 
+    /**
+     * The alpha the colour was DECLARED with.
+     *
+     * **`setAlpha` must scale this, not replace it.** The old implementation did
+     * `paint.alpha = alpha`, which overwrites the declared transparency outright. Every border in
+     * the app is declared semi-transparent — buttons at `0x55`, cards at `0x2E` — so any caller
+     * that set alpha to 255 (LayerDrawable does this when you set alpha on a group) turned a 33%
+     * hairline into FULLY OPAQUE black. That is exactly what made the toggle's border read as a
+     * black outline: Mido, 2026-11-04: *"the toggle border is fucking black"*.
+     */
+    private val declaredAlpha = android.graphics.Color.alpha(color)
+    private var alphaMul = 255
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = strokePx
@@ -140,8 +153,14 @@ class SquiggleBorder(
         }
     }
 
+    /**
+     * Scale the DECLARED transparency by [alpha]; never replace it.
+     *
+     * A caller saying 255 means "draw at full strength", which for a 33% border is still 33%.
+     */
     override fun setAlpha(alpha: Int) {
-        paint.alpha = alpha
+        alphaMul = alpha.coerceIn(0, 255)
+        paint.alpha = declaredAlpha * alphaMul / 255
     }
 
     override fun setColorFilter(cf: ColorFilter?) {
@@ -175,6 +194,10 @@ class SquiggleRule(
      */
     private val atBottom: Boolean = false,
 ) : Drawable() {
+
+    /** See [SquiggleBorder.declaredAlpha]: setAlpha scales this, never replaces it. */
+    private val declaredAlpha = android.graphics.Color.alpha(color)
+    private var alphaMul = 255
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -226,7 +249,8 @@ class SquiggleRule(
     }
 
     override fun setAlpha(alpha: Int) {
-        paint.alpha = alpha
+        alphaMul = alpha.coerceIn(0, 255)
+        paint.alpha = declaredAlpha * alphaMul / 255
     }
 
     override fun setColorFilter(cf: ColorFilter?) {

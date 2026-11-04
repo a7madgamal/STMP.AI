@@ -102,16 +102,7 @@ class PluginDetailActivity : BridgeScreen() {
         // --- 1. THE SWITCH ---
         content.addView(Theme.sectionHeader(this, "Status"))
 
-        if (!plugin.canBeDisabled) {
-            // Required plugins say WHY rather than showing a switch that cannot move. A disabled
-            // control with no explanation is the thing this codebase keeps removing.
-            content.addView(Theme.text(
-                this,
-                "Always on. This plugin is how the rest of the bridge is discovered or " +
-                    "diagnosed, so it cannot be switched off.",
-                13f,
-            ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
-        } else {
+        run {
             // **A row with the knob at the RIGHT edge.**
             //
             // Mido asked for this twice: *"plugin page has toggle in the middle, make it right

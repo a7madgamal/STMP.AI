@@ -57,7 +57,6 @@ class HelpPlugin(private val ctx: Context) : Plugin {
 
      */
 
-    override val canBeDisabled: Boolean get() = false
     override val displayName = "Help"
 
     override fun routes(): List<Route> = listOf(

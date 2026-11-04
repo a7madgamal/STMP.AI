@@ -206,8 +206,11 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         if (!AuthManager.isLoggedIn(ctx)) {
             return PluginStatus("Calendar", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
         }
-        val email = AuthManager.accountEmail ?: "(account unknown)"
-        return PluginStatus("Calendar", PluginStatus.State.OK, email)
+        // The ACCOUNT is not echoed here. The Google card above these rows states it once —
+        // Mido, 2026-11-04: *"the google plugin should be one card, show the email once"*.
+        // Repeating it on three service rows is the same fact four times, and it pushed each
+        // row's real status (what it can actually do) off the line.
+        return PluginStatus("Calendar", PluginStatus.State.OK, "ready")
     }
 
     // --- routes ---

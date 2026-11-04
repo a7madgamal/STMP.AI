@@ -31,7 +31,6 @@ class PluginSettingsTest {
         override val id: String,
         override val displayName: String = id,
         override val enabledByDefault: Boolean = true,
-        override val canBeDisabled: Boolean = true,
     ) : Plugin {
         override fun routes() = emptyList<com.mido.phonebridge.core.Route>()
         override fun status() =
@@ -69,13 +68,41 @@ class PluginSettingsTest {
         )
     }
 
+    /**
+     * EVERY plugin is toggleable, with no exceptions.
+     *
+     * Mido, 2026-11-04: *"all plugins should be toggleable no exceptions"*. This replaces a test
+     * that asserted the opposite — that `help`, `debug` and `logs` refuse to be switched off.
+     *
+     * The safety that carve-out protected is carried by the dispatch path instead: a disabled
+     * plugin still ANSWERS, refusing with `plugin_disabled`. Turning off `help` therefore makes
+     * routes explain that they are off rather than 404, and it is recoverable from the same screen
+     * by the same switch.
+     *
+     * Guarded here because "all plugins toggleable" is the kind of rule a well-meaning exception
+     * breaks silently. If a future plugin needs to be un-disableable, that is a design argument to
+     * have out loud, not a property to add quietly.
+     */
     @Test
-    fun `a required plugin cannot be disabled`() {
-        // The three hard-core plugins (help, debug, logs) answer false here. The store refuses
-        // the WRITE, not just the UI: a future screen, an import or a migration could all reach
-        // the setter without a hidden toggle.
-        val required = FakePlugin("help", canBeDisabled = false)
-        assertFalse(required.canBeDisabled)
+    fun `no plugin declares itself un-disableable`() {
+        val root = java.io.File("src/main/java/com/mido/phonebridge")
+        assertTrue("source root not found", root.isDirectory)
+
+        val offenders = mutableListOf<String>()
+        root.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                file.readLines().forEachIndexed { i, line ->
+                    if (line.contains("canBeDisabled")) {
+                        offenders += "${file.name}:${i + 1}  ${line.trim()}"
+                    }
+                }
+            }
+        assertTrue(
+            "`canBeDisabled` must not exist: every plugin is toggleable (Mido, 2026-11-04). " +
+                "Found:\n  " + offenders.joinToString("\n  "),
+            offenders.isEmpty()
+        )
     }
 
     @Test

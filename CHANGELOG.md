@@ -5270,8 +5270,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.46.5 (build 266) — 2026-11-04
 - The Updates card is no longer empty on open: it is filled at build time, and refreshed whenever Home returns to the front.
 
-## 0.46.6 (build 267) — 2026-11-04 — CURRENT
+## 0.46.6 (build 267) — 2026-11-04
 - A background update check now appears on Home without leaving and returning to the screen.
+
+## 0.46.7 (build 268) — 2026-11-04 — CURRENT
+- Every plugin can be switched off, with no exceptions.
+- The Google services are one card, and the account email is stated once instead of on four rows.
+- The Secrets row opens the secret manager, so each URL finally shows on its own line as a tappable link.
+- SSH sits under Secrets with an add action, so secrets are no longer split across two headings.
+- Toggle outlines are no longer opaque: the edge alpha is scaled, not overwritten, which is what made it black.
 
 ## Keeping this file honest
 

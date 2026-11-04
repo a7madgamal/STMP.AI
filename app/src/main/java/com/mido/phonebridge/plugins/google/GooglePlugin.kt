@@ -31,7 +31,6 @@ class GooglePlugin(private val ctx: Context) : Plugin {
     override val id = "google"
     override val displayName = "Google account"
 
-    override val canBeDisabled: Boolean get() = false
 
     /** No routes: this plugin is a precondition, not an endpoint. */
     override fun routes() = emptyList<com.mido.phonebridge.core.Route>()

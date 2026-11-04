@@ -316,20 +316,21 @@ interface Plugin {
         get() = true
 
     /**
-     * Whether the human may turn this plugin off at all.
+     * Every plugin is toggleable; there is no "required" flag.
      *
-     * True for three plugins only (`help`, `debug`, `logs`), and the reason is structural
-     * rather than sentimental: `help` is how a caller DISCOVERS routes, so disabling it makes
-     * the rest undiscoverable; `debug` and `logs` are how a broken bridge is diagnosed, so
-     * disabling them removes the tool that explains the failure. A capability that can only be
-     * repaired by the thing it disables is not a preference.
+     * Mido, 2026-11-04: *"all plugins should be toggleable no exceptions"*.
      *
-     * Enforced by the store, not by the screen: the UI hides the toggle, and the store still
-     * refuses the write, so a future screen cannot reintroduce the hole.
+     * The old rule carved out `help`, `debug` and `logs` on the argument that they are how a
+     * broken bridge is diagnosed, so disabling them removes the tool that explains the failure.
+     * That reasoning is real but it produced the worse outcome: a screen with switches that look
+     * identical and four of them silently refuse to move. A control that cannot be used and does
+     * not say why reads as a bug, and it was reported as one.
+     *
+     * The safety it was protecting is already carried elsewhere and does not depend on this:
+     * a disabled plugin still ANSWERS, refusing with `plugin_disabled`, so turning off `help`
+     * cannot make routes 404 — it makes them explain that they are off. That is recoverable from
+     * the same screen, by the same switch.
      */
-    val canBeDisabled: Boolean
-        get() = true
-
     /** OAuth scopes this plugin needs. Empty for local-only plugins. */
     val scopes: List<String>
         get() = emptyList()

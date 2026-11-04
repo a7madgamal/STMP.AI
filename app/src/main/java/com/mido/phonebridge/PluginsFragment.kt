@@ -69,7 +69,12 @@ class PluginsFragment : BridgeFragment() {
     private val groups: List<Pair<String, Set<String>>> = listOf(
         "Google" to setOf("google", "gmail", "calendar", "drive"),
         "Phone" to setOf("notifications", "contacts", "audio", "tts"),
-        "Secrets" to setOf("secrets"),
+        // SSH is a SECRETS capability: every connection is a vault entry, its key never leaves the
+        // vault, and its allowed-hosts rule is the same boundary the other secrets use. It used to
+        // sit in no group at all, so its row fell to "Other" while its connections hung off
+        // "Secrets" — the same subject split across two headings. Mido, 2026-11-04: *"why are
+        // secrets scattered under 2 headers? all secrets should be under secrets header"*.
+        "Secrets" to setOf("secrets", "ssh"),
         "Misc" to setOf("help", "debug", "logs", "probe"),
     )
 
@@ -98,13 +103,46 @@ class PluginsFragment : BridgeFragment() {
             claimed += members.map { it.id }
 
             list.addView(Theme.sectionHeader(ctx, heading))
-            for (plugin in members) list.addView(row(plugin, store))
 
-            // The SSH connections hang off the Secrets group: each stored `ssh-<name>` secret IS
-            // a connection, and the SSH plugin's own row only reports how many exist.
-            if (heading == "Secrets") {
-                for (name in sshConnectionNames()) list.addView(sshRow(name))
+            if (heading == "Google") {
+                // **ONE card for the whole Google group.**
+                //
+                // Mido, 2026-11-04: *"the google plugin should be one card, show the email once"*.
+                // Four separate cards said "these are four unrelated things" about one account.
+                // They share an OAuth session and the same email, so they are one subject with
+                // four capabilities — which is what a card should represent.
+                //
+                // The account row comes FIRST because it is the precondition: the three services
+                // below cannot serve until it is signed in, and reading top-down tells you that
+                // before you wonder why they are greyed.
+                val googleCard = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+                }
+                googleCard.layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(ctx, 10) }
+
+                val ordered = members.sortedBy { if (it.id == "google") 0 else 1 }
+                for ((index, plugin) in ordered.withIndex()) {
+                    if (index > 0) {
+                        // A hairline between capabilities, so one card does not read as one blob.
+                        googleCard.addView(android.view.View(ctx).apply {
+                            setBackgroundColor(Theme.BORDER)
+                        }, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(ctx, 1),
+                        ).apply { topMargin = Theme.dp(ctx, 2); bottomMargin = Theme.dp(ctx, 2) })
+                    }
+                    googleCard.addView(row(plugin, store, bare = true))
+                }
+                list.addView(googleCard)
+            } else {
+                for (plugin in members) list.addView(row(plugin, store))
+                if (heading == "Secrets") addSecretsActions(members)
             }
+
+
         }
 
         // Anything not in a group is still shown. Silently dropping a plugin would make the
@@ -182,6 +220,8 @@ class PluginsFragment : BridgeFragment() {
     private fun row(
         plugin: com.mido.phonebridge.core.Plugin,
         store: PluginSettingsStore,
+        /** Draw as a bare row inside a shared card instead of standing on its own. */
+        bare: Boolean = false,
     ): LinearLayout {
         val on = store.isEnabled(plugin)
         // `status()` is the plugin's own answer about whether it can serve. Only consulted when
@@ -191,20 +231,24 @@ class PluginsFragment : BridgeFragment() {
 
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
+            // A bare row has no card of its own: the group draws ONE surface around the set, so
+            // four Google services read as one subject rather than four unrelated cards.
             setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
             )
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            if (!bare) background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
             isClickable = true
             contentDescription = "${plugin.displayName}: ${stateLabel(on, status)}"
             setOnClickListener { openDetail(plugin.id) }
         }
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = Theme.dp(ctx, 10)
-        card.layoutParams = lp
+        if (!bare) {
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = Theme.dp(ctx, 10)
+            card.layoutParams = lp
+        }
 
         val titleRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -231,10 +275,8 @@ class PluginsFragment : BridgeFragment() {
             ).apply { marginEnd = Theme.dp(ctx, 10) })
         }
 
-        // The switch. Only for plugins that can actually be turned off: a required plugin gets no
-        // knob rather than a knob that cannot move, which would be a control that lies about what
-        // it can do.
-        if (plugin.canBeDisabled) {
+        // The switch. EVERY plugin, no exceptions (Mido, 2026-11-04).
+        run {
             val toggle = Theme.toggle(ctx, on) { want ->
                 // Write, then repaint from what was written. The knob is NOT flipped optimistically:
                 // a failed write would leave it showing a state the store does not hold.
@@ -304,10 +346,24 @@ class PluginsFragment : BridgeFragment() {
     }
 
     private fun openDetail(pluginId: String) {
-        go(
-            Intent(ctx, PluginDetailActivity::class.java)
-                .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
-        )
+        // **Secrets opens its own screen.**
+        //
+        // `SecretsActivity` is the secret manager: one row per secret, each URL on its own line as
+        // a tappable link. It existed and was manifest-registered, but NOTHING launched it — every
+        // plugin row went to `PluginDetailActivity`, so the screen with the link rendering could
+        // never be reached. Mido asked twice: *"secrets need each url in a line, and they need to
+        // be clickable links"*, then *"i said secrets plugin should show each url in its own line
+        // and should be CLICKABLE links"*. The rendering was correct; the door was missing.
+        val target = if (pluginId == "secrets") {
+            SecretsActivity::class.java
+        } else {
+            PluginDetailActivity::class.java
+        }
+        val intent = Intent(ctx, target)
+        if (target == PluginDetailActivity::class.java) {
+            intent.putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
+        }
+        go(intent)
     }
 
     override fun onResume() {
@@ -316,5 +372,36 @@ class PluginsFragment : BridgeFragment() {
         // ONLY the list — the bar and the header are outside `list` and never move, so a press in
         // flight on them cannot be cancelled.
         if (::list.isInitialized) render()
+    }
+
+    /**
+     * The actions at the bottom of the Secrets group: add a secret, add an SSH connection.
+     *
+     * Mido, 2026-11-04: *"a clear way to add more should be there too"*. Adding secrets was only
+     * reachable by opening a plugin detail page and finding a button inside it — which is a
+     * two-step journey for the one thing this screen is FOR.
+     *
+     * Both are plain rows rather than buttons in a toolbar because this screen is a list of
+     * things; an action that adds to the list belongs at the end of it, where you look after
+     * scrolling past what you already have.
+     */
+    private fun addSecretsActions(members: List<com.mido.phonebridge.core.Plugin>) {
+        // One row per SSH connection, directly under the SSH plugin row: a connection IS a secret,
+        // and it was previously listed after the whole group, which read as belonging to nothing.
+        for (name in sshConnectionNames()) list.addView(sshRow(name))
+
+        if (members.none { it.id == "secrets" }) return
+
+        // The SecretsActivity manages secret values and their links; it has its own add flow.
+        list.addView(
+            Theme.button(ctx, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
+                // Same destination as the Secrets row: one screen, one way to add.
+                go(Intent(ctx, SecretsActivity::class.java))
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 10) },
+        )
     }
 }

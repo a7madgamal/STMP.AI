@@ -41,9 +41,8 @@ class PluginSettingsStore internal constructor(ctx: Context) {
     /**
      * Whether [plugin] is on, honouring a stored choice over its default.
      *
-     * [Plugin.canBeDisabled] is not consulted here: a plugin that cannot be disabled is still
-     * stored as on, so the answer is the same either way. The refusal belongs at the WRITE,
-     * where it can tell the human why.
+     * Every plugin honours a stored choice. There is no un-disableable plugin any more, so
+     * there is no second case to answer for.
      */
     fun isEnabled(plugin: Plugin): Boolean {
         val stored = readEnabled()
@@ -57,18 +56,16 @@ class PluginSettingsStore internal constructor(ctx: Context) {
     /**
      * Turn [plugin] on or off.
      *
-     * Refuses [Plugin.canBeDisabled] plugins even though the UI hides their toggle. Two reasons
-     * and they are different: the UI hiding it is a fact about this build's screens, and a
-     * future screen, an import, or a migration could all reach this method without it. The store
-     * is the boundary, so the rule lives here and the screen merely agrees with it.
+     * **No exceptions.** Mido, 2026-11-04: *"all plugins should be toggleable no exceptions"*.
+     * This used to refuse the three diagnostic plugins, which meant the store and the screen
+     * disagreed with the human about which switches were real.
+     *
+     * The safety that carve-out was protecting is carried by the DISPATCH path instead: a
+     * disabled plugin still answers, refusing with `plugin_disabled`. So turning off `help`
+     * makes routes explain that they are off rather than 404 — recoverable from the same screen
+     * by the same switch, which is the property that actually matters.
      */
     fun setEnabled(plugin: Plugin, enabled: Boolean) {
-        if (!plugin.canBeDisabled) {
-            throw PluginSettingsException(
-                "plugin '${plugin.id}' is required and cannot be disabled — " +
-                    "it is how the rest of the bridge is discovered or diagnosed"
-            )
-        }
         val next = readEnabled().toMutableMap()
         next[plugin.id] = enabled
         writeEnabled(next)
