@@ -15,6 +15,7 @@ They are kept because the "why" behind a rule is usually invisible in the code â
 | [PROTON-PLAN.md](PROTON-PLAN.md) | Whether Proton exposes anything usable at all. |
 | [TASKER-PLAN.md](TASKER-PLAN.md) | Notification-driven automation. |
 | [SECURITY-REVIEW.md](SECURITY-REVIEW.md) | The threat model and what it deliberately does not defend against. |
+| [SHELL-HIGHLIGHT-PLAN.md](SHELL-HIGHLIGHT-PLAN.md) | The zsh-compatible shell lexer, and what the SSH card does with it. |
 
 ## Reading order
 
