@@ -124,7 +124,8 @@ object ServerStatus {
             // change it.
             if (lastError.isNotBlank()) lastError
             else "${bindAddress.ifBlank { "?" }}:$port"
-        State.STOPPED -> "Tap START SERVER to begin"
+        // No button by that name exists: the control is a switch now.
+        State.STOPPED -> "Switch the server on to begin"
     }
 
     /** One-line summary for the Setup checklist row, kept in step with the hero. */

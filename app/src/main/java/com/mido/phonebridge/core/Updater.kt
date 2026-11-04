@@ -101,8 +101,12 @@ object Updater {
         val conn = try {
             (URL(RELEASES_URL).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 10_000
-                readTimeout = 15_000
+                // Short on purpose. This runs behind a button a human is watching, so a slow
+                // network should say "could not reach" in a few seconds rather than appearing to
+                // hang. 25 seconds of spinner reads as broken, and the release feed is a small
+                // JSON document when it answers at all.
+                connectTimeout = 6_000
+                readTimeout = 8_000
                 setRequestProperty("Accept", "application/vnd.github+json")
                 // GitHub requires a User-Agent; sending one is also a courtesy to their API.
                 setRequestProperty("User-Agent", "STMP/${BuildConfig.VERSION_NAME}")

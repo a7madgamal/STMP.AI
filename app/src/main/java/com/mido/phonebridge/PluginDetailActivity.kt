@@ -112,13 +112,38 @@ class PluginDetailActivity : BridgeScreen() {
                 13f,
             ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
         } else {
-            // A toggle, not a "TURN OFF" button: the knob's position is the state, so the screen
-            // cannot claim the plugin is off while it is serving.
-            content.addView(Theme.toggle(this, on) { want ->
+            // **A row with the knob at the RIGHT edge.**
+            //
+            // Mido asked for this twice: *"plugin page has toggle in the middle, make it right
+            // aligned"*, then *"plugin details screen still have the toggle in the middle not
+            // right aligned like I asked before"*. The first pass fixed the LIST row and left
+            // this screen adding the knob as a bare full-width child, so it rendered wherever
+            // the layout put it.
+            //
+            // The label takes weight 1 and absorbs all the slack; the knob follows at its own
+            // width, which pins it to the right edge of the card regardless of label length.
+            val switchRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            switchRow.addView(
+                Theme.text(
+                    this,
+                    if (on) "Enabled" else "Disabled",
+                    15f,
+                    if (on) Theme.ON_SURFACE else Theme.ON_SURFACE_VARIANT,
+                ).apply { typeface = Theme.handFont(this@PluginDetailActivity) },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            switchRow.addView(Theme.toggle(this, on) { want ->
                 store.setEnabled(plugin, want)
                 Debug.log("plugin ${plugin.id}: enabled=$want")
                 render()
             })
+            content.addView(switchRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
 
             if (on) {
                 content.addView(Theme.text(
@@ -370,7 +395,11 @@ class PluginDetailActivity : BridgeScreen() {
         when (setting) {
             is PluginSetting.Toggle -> {
                 val on = store.booleanValue(plugin.id, setting.id, setting.default)
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    // CENTER_VERTICAL so the knob lines up with its label, not the row's top.
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                }
                 row.addView(Theme.text(this, setting.label, 14f).apply {
                     setTextColor(Theme.ON_SURFACE)
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))

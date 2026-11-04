@@ -969,9 +969,18 @@ object Theme {
         setCheckedImmediately(on)
         this.pending = pending
         setOnClickListener {
-            // Do NOT flip the knob here. The knob is driven by the stored value once the change
-            // lands, so a refused or failed write leaves it showing the truth rather than the tap.
-            onChange(!on)
+            // **Read the knob's CURRENT state, never the `on` captured at build time.**
+            //
+            // This closure used to send `!on`, where `on` was fixed when the switch was built. A
+            // screen that repaints its switch in place — which is most of them, on purpose, to
+            // avoid tearing down a view mid-press — therefore kept sending the ORIGINAL value
+            // forever: after turning the setting on, every later tap sent `true` again, so it
+            // could turn on and never off. Reported 2026-11-04: *"fingerprint for modals doesn't
+            // turn off even after fingerprint reading, only turned on"*.
+            //
+            // `checked` is the live field the render drives, so this always inverts the real
+            // current state no matter how many times the screen has repainted since.
+            onChange(!checked)
         }
     }
 

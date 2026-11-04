@@ -73,6 +73,20 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      */
     private var pendingSince: Long = 0L
     private lateinit var auditBanner: TextView
+
+    /**
+     * The update section's container.
+     *
+     * **This exists because the section was built once and never again.** `updateBlock()` was
+     * called from `buildContent()` only, while `render()` updates Home's other views IN PLACE —
+     * so tapping CHECK NOW set `checking = true`, called `render()`, and nothing on screen
+     * changed. The button looked dead because nothing ever redrew it (reported 2026-11-04:
+     * *"clicking check now still does nothing"*).
+     *
+     * A container that `render()` empties and refills is the smallest fix that makes the section
+     * behave like the rest of the screen.
+     */
+    private lateinit var updatesHost: LinearLayout
     private lateinit var gateCard: LinearLayout
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
@@ -210,16 +224,26 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             on = BridgeService.serverUp,
             pending = pendingSince > 0L,
         ) { want ->
-            // Record the tap and repaint for the pending look, then act. The knob is NOT flipped
-            // here: `render()` moves it once `BridgeService.serverUp` actually changes.
+            // Record the tap and POST everything else.
+            //
+            // **Not `render()` inline.** This handler is inside the hero card, and the panel it
+            // repaints sits in the same card — doing that work during touch dispatch is the same
+            // class of fault that made CHECK NOW dead and the channel switch refuse to flip.
+            // Posting defers it to the next loop, after the press has been released.
+            //
+            // The knob is still NOT flipped here: `render()` moves it once `BridgeService.serverUp`
+            // actually changes, so a failed stop cannot leave it showing a state that is not true.
             pendingSince = android.os.SystemClock.elapsedRealtime()
-            render()
-            if (want) {
-                Debug.log("server start requested")
-                startBridge()
-            } else {
-                Debug.log("stop requested")
-                stopBridge()
+            serverToggle.pending = true
+            uiTickHandler.post {
+                if (want) {
+                    Debug.log("server start requested")
+                    startBridge()
+                } else {
+                    Debug.log("stop requested")
+                    stopBridge()
+                }
+                render()
             }
             // The service binds asynchronously; a re-render after a beat picks up the result
             // without waiting for the 5s tick. The tick covers the case where it takes longer.
@@ -310,6 +334,19 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         container.addView(gateCard)
 
+        // --- GET STARTED ---
+        //
+        // Moved here from Settings → Tools (Mido, 2026-11-04: *"move get started to home screen
+        // above updates"*). It is the first thing a new install needs and the thing an agent's
+        // human reaches for when a call is refused with no obvious fix — both are read-at-a-glance
+        // jobs, not settings.
+        container.addView(Theme.sectionHeader(ctx, "Get started"))
+        container.addView(
+            Theme.button(ctx, "HOW TO USE THIS", Theme.ButtonStyle.NEUTRAL) {
+                go(Intent(ctx, OnboardingActivity::class.java))
+            },
+        )
+
         // --- UPDATES ---
         //
         // On Home, not Settings. Mido, 2026-11-04: *"move the update section to the home page"*.
@@ -317,7 +354,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // preference buried one tab away is one nobody finds. The row stays silent when there is
         // nothing to say.
         container.addView(Theme.sectionHeader(ctx, "Updates"))
-        container.addView(updateBlock())
+        updatesHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(updatesHost)
 
         // The plugin list used to live here and made Home a wall: twelve status cards between
         // the server control and the tools, pushing "is the bridge running" off the first
@@ -486,6 +524,17 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // that was explicitly requested.
         lastRenderSignature = renderSignature()
 
+        // **The update section is NOT rebuilt here, on purpose.**
+        //
+        // Every change to it — a check, a channel flip, an install — goes through
+        // `refreshUpdateSection`, which rebuilds it POSTED so the control that was tapped is not
+        // destroyed while its own click is still being dispatched.
+        //
+        // Rebuilding it from `render()` would undo that: `render()` runs on the 5-second tick and
+        // on every server-state change, so a rebuild here could tear the channel switch down
+        // mid-press. That is the tap-eating defect this file documents at length, and it is
+        // exactly what made the switch stop flipping.
+
         // --- 1. HERO: one line that answers "is it working?" ---
         val listenerOk = BridgeService.listenerRef != null
         val notifOk = hasNotifPermission()
@@ -551,10 +600,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // The knob renders the STORED state, never the tap. `pendingSince` only suppresses the
         // "settled" look for a moment so a slow bind does not flick the knob back and forth.
         val up = BridgeService.serverUp
-        val stillPending = pendingSince > 0L &&
+        // **Settled as soon as the real state matches what was asked for.**
+        //
+        // The old rule was "pending for 3 seconds, then sync". That left the knob showing its
+        // PREVIOUS position — and, because the callback inverts `checked`, still reporting the
+        // previous state — for the whole window. After a stop it kept saying "on" for three
+        // seconds and every tap sent "off" again, which read as the switch being dead (reported
+        // 2026-11-04: *"stopping the server left toggle unresponsive"*).
+        //
+        // So: clear the pending look the moment `serverUp` agrees with the knob, and fall back to
+        // the timeout only for a start that has not landed yet.
+        val settled = serverToggle.checked == up
+        val windowOpen = pendingSince > 0L &&
             android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        if (stillPending) {
-            // The knob is left where the last real state put it; only the colour says "working".
+        if (windowOpen && !settled) {
+            // Still waiting for the service to answer. The knob stays where the last real state
+            // put it; only the colour says "working".
             serverToggle.pending = true
         } else {
             pendingSince = 0L
@@ -981,7 +1042,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     }
 
     override fun startBridge() {
-        Debug.log("START SERVER tapped")
+        Debug.log("server start requested")
         // Clear the previous failure so a retry cannot display a stale reason: the service
         // re-sets this on the way out if it fails again, and a successful bind clears it.
         // Without this, tapping START after fixing the cause would still show the old error
@@ -1023,70 +1084,77 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      * third one is the one that matters while the repository is private.
      */
     private fun updateBlock(): android.view.View {
-        val block = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        // **ONE card, not five stacked pieces.** Mido, 2026-11-04: *"make updates a single
+        // group"*. It used to be a status row, a bordered channel row, a button and two loose
+        // captions — five surfaces that happened to sit near each other. One torn card matches
+        // the rest of Home, where a subject is a card and a card is one subject.
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+            )
+            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+        }
+
         val outcome = com.mido.phonebridge.core.Updater.lastOutcome
         val checking = com.mido.phonebridge.core.Updater.checking
         val channel = com.mido.phonebridge.core.UpdatePrefs.channel(requireContext())
 
+        // **GREEN when an update exists.** This row used `Theme.ACCENT`, which is `0xFFB23A2F`
+        // — byte-identical to `Theme.DANGER`. The one piece of good news this screen can deliver
+        // was painted in the colour used for errors. Mido, 2026-11-04: *"a red dot next to an
+        // exciting update is the last thing a user needs to see"*. (This fix was lost once when
+        // the section moved screens; it is stated here so the next move does not lose it again.)
         val (line, colour) = when {
             checking -> "checking…" to Theme.ON_SURFACE_VARIANT
             outcome is com.mido.phonebridge.core.Updater.Outcome.Available ->
-                "version ${outcome.version} is available" +
-                    (if (outcome.isBeta) " (beta)" else "") to Theme.ACCENT
+                "v${outcome.version} is ready to install" +
+                    (if (outcome.isBeta) " · beta" else "") to Theme.SUCCESS
             outcome is com.mido.phonebridge.core.Updater.Outcome.UpToDate ->
-                "up to date — ${BuildConfig.VERSION_NAME}" to Theme.SUCCESS
+                "up to date — v${BuildConfig.VERSION_NAME}" to Theme.ON_SURFACE_VARIANT
             outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable ->
                 "cannot check: ${outcome.reason}" to Theme.WARNING
             else -> "not checked yet" to Theme.ON_SURFACE_VARIANT
         }
 
-        block.addView(Theme.statusRow(ctx, "Version", line, colour))
-
-        // --- the loading indicator ---
+        // Status line: what is true right now.
         //
-        // A button that merely reads "CHECKING…" looks like a label and gives no sense of
-        // whether anything is happening. A spinner beside the word says "in progress"; the
-        // button underneath is genuinely disabled so a second tap cannot race the first.
+        // **One line, not two.** "checking…" and "asking GitHub…" were saying the same thing on
+        // consecutive rows — Mido, 2026-11-04: *"asking github and checking... are redundant"*.
+        // The spinner rides beside the status word instead: it adds the one thing the word cannot
+        // say (that something is actively happening) without repeating it.
+        val statusRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
         if (checking) {
-            val busy = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, Theme.dp(ctx, 8), 0, 0)
-            }
-            busy.addView(android.widget.ProgressBar(ctx).apply {
-                // Small and indeterminate: this is a network round-trip, so there is no honest
-                // percentage to show and a determinate bar would be a fiction.
+            statusRow.addView(android.widget.ProgressBar(ctx).apply {
                 isIndeterminate = true
                 layoutParams = LinearLayout.LayoutParams(
-                    Theme.dp(ctx, 18), Theme.dp(ctx, 18)
+                    Theme.dp(ctx, 14), Theme.dp(ctx, 14)
                 ).apply { marginEnd = Theme.dp(ctx, 8) }
             })
-            busy.addView(
-                Theme.text(ctx, "asking GitHub…", 12f, Theme.ON_SURFACE_VARIANT)
-            )
-            block.addView(busy)
         }
+        statusRow.addView(Theme.text(ctx, line, 14f, colour))
+        card.addView(statusRow)
 
-        // The channel. Free to offer because `promote.yml` already marks stable releases; a beta
-        // is simply a release that was pushed but never promoted.
+        // The channel, inside the same card. A switch and its label, no nested border.
         val channelRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(
-                Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12), Theme.dp(ctx, 12)
-            )
-            background = Theme.outlined(ctx, Theme.SURFACE, Theme.RADIUS_CONTROL)
+            setPadding(0, Theme.dp(ctx, 10), 0, 0)
         }
         channelRow.addView(
             Theme.text(
                 ctx,
                 if (channel == com.mido.phonebridge.core.UpdatePrefs.Channel.BETA) {
-                    "Channel \u2014 beta (every push)"
+                    "Beta channel — every push"
                 } else {
-                    "Channel \u2014 stable (promoted only)"
+                    "Stable channel — promoted only"
                 },
-                14f,
-                Theme.ON_SURFACE,
+                13f,
+                Theme.ON_SURFACE_VARIANT,
             ),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
@@ -1099,28 +1167,27 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 )
                 // The channel changes what counts as an update, so the old answer is void.
                 com.mido.phonebridge.core.Updater.lastOutcome = null
-                render()
+                // NOT `render()`: it would tear down this switch while its click is still being
+                // dispatched, which is exactly why the knob never moved.
                 checkForUpdates()
             }
         )
-        block.addView(channelRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(ctx, 6) })
+        card.addView(channelRow)
 
-        // An available update gets an install button, and the notes above it.
+        // The action. One button, never two: an available update replaces "check" with "update",
+        // because re-checking is not what you want when you already know.
         if (outcome is com.mido.phonebridge.core.Updater.Outcome.Available) {
             val notes = com.mido.phonebridge.core.Updater.shortNotes(outcome.notes)
             if (notes.isNotEmpty()) {
-                block.addView(
+                card.addView(
                     Theme.text(ctx, notes, 12f, Theme.ON_SURFACE_VARIANT).apply {
-                        setPadding(0, Theme.dp(ctx, 10), 0, 0)
+                        setPadding(0, Theme.dp(ctx, 8), 0, 0)
                     }
                 )
             }
-            block.addView(
+            card.addView(
                 Theme.button(
-                    ctx, "INSTALL ${outcome.version}", Theme.ButtonStyle.SUCCESS,
+                    ctx, "UPDATE TO v${outcome.version}", Theme.ButtonStyle.SUCCESS,
                 ) { installUpdate(outcome) },
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1131,54 +1198,72 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             val check = Theme.button(
                 ctx, if (checking) "CHECKING…" else "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
             ) { checkForUpdates() }
-            // Genuinely disabled, not just relabelled: a second tap while a check is running
-            // would start a second request and race the first one's result into `lastOutcome`.
+            // Genuinely disabled: a second tap while a check runs would race the first result.
             check.isEnabled = !checking
-            block.addView(check, LinearLayout.LayoutParams(
+            card.addView(check, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = Theme.dp(ctx, 10) })
         }
 
-        // --- when we last actually asked ---
-        //
-        // Only shown once a check has COMPLETED, and pulled from the persisted timestamp rather
-        // than from memory: "last checked" has to survive the app being closed, or it would
-        // claim a check that this process never made.
+        // When we last actually asked. From the persisted timestamp, so it is honest across a
+        // restart; coarse on purpose, because a tick for "3 minutes" is not worth an alarm.
         val lastCheck = com.mido.phonebridge.core.UpdatePrefs.lastCheckAt(requireContext())
         if (lastCheck > 0L) {
-            block.addView(
+            card.addView(
                 Theme.text(ctx, "last checked ${agoText(lastCheck)}", 12f, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
         }
 
-        // When the source cannot be reached, say what will make it work. This is the whole
-        // "handle the unavailable case" requirement: a checker that silently shows nothing is
+        // The unreachable case says what will make it work. A checker that shows nothing is
         // indistinguishable from a broken one.
         if (outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable) {
-            block.addView(
+            card.addView(
                 Theme.text(
                     ctx,
-                    "The update check reads GitHub releases directly. It starts working once " +
-                        "the repository is public \u2014 nothing else needs to change.",
+                    "The check reads GitHub releases directly, and needs the repository to be " +
+                        "public. Nothing else has to change.",
                     12f, Theme.ON_SURFACE_VARIANT,
                 ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
         }
-        return block
+        return card
     }
 
 
     /** Check on a worker, then repaint. The main thread is never blocked on this. */
+    /**
+     * Rebuild ONLY the update section, posted off the current call stack.
+     *
+     * **Why posted, and why not `render()`.** The update controls live INSIDE `updatesHost`, so
+     * rebuilding it from their own click handler removes the view whose click is still being
+     * dispatched — `removeAllViews()` mid-dispatch. That is why the channel switch did not even
+     * flip (reported 2026-11-04) and why CHECK NOW appeared to do nothing: the tap tore down its
+     * own target before the handler finished.
+     *
+     * Posting defers the rebuild to the next loop, after touch dispatch has completed and the
+     * pressed state has been released. Rebuilding only this section also means the rest of Home
+     * is not disturbed — the hero, the gate and the audit banner keep their identity, so a press
+     * anywhere else cannot be eaten by somebody toggling a channel.
+     */
+    private fun refreshUpdateSection() {
+        val host = updatesHost
+        host.post {
+            if (!::updatesHost.isInitialized) return@post
+            host.removeAllViews()
+            host.addView(updateBlock())
+        }
+    }
+
     private fun checkForUpdates() {
         com.mido.phonebridge.core.Updater.lastOutcome = null
         com.mido.phonebridge.core.Updater.checking = true
-        render()
+        refreshUpdateSection()
         Thread({
             val outcome = com.mido.phonebridge.core.Updater.check(requireContext().applicationContext)
             Debug.log("update check: ${outcome.javaClass.simpleName}")
-            ui { render() }
+            ui { refreshUpdateSection() }
         }, "update-check").apply { isDaemon = true }.start()
     }
 

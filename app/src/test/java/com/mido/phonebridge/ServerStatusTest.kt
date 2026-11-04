@@ -64,7 +64,8 @@ class ServerStatusTest {
             serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = "",
         )
         assertEquals(ServerStatus.State.STOPPED, state)
-        assertEquals("Tap START SERVER to begin", ServerStatus.detail(state, "", "", 8787))
+        // The control is a switch now, not a button — there is no "START SERVER" to tap.
+        assertEquals("Switch the server on to begin", ServerStatus.detail(state, "", "", 8787))
     }
 
     @Test

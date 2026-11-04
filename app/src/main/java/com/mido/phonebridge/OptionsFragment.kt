@@ -109,7 +109,7 @@ class OptionsFragment : BridgeFragment() {
                         "app opens. Tailscale can take a few seconds to come up, so it retries " +
                         "for about 3 minutes and tells you if it gives up."
                 } else {
-                    "Nothing starts on its own. Open the app and tap START SERVER. After a " +
+                    "Nothing starts on its own. Open the app and switch the server on. After a " +
                         "reboot the bridge stays down until you do."
                 },
                 colour = if (policy.autoStartOnBoot) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
@@ -176,9 +176,6 @@ class OptionsFragment : BridgeFragment() {
         ))
         // --- TOOLS: the destinations that are not tabs ---
         container.addView(Theme.sectionHeader(ctx, "Tools"))
-        container.addView(toolRow("Get started") {
-            go(Intent(ctx, OnboardingActivity::class.java))
-        })
         container.addView(toolRow("Request log") {
             go(Intent(ctx, LogActivity::class.java))
         })

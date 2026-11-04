@@ -355,15 +355,32 @@ class SshPlugin(private val ctx: Context) : Plugin {
     }
 
     override fun status(): PluginStatus {
-        val count = try {
-            SecretVault.names(ctx).count { it.startsWith("ssh-") }
+        val namesSnapshot = try {
+            SecretVault.names(ctx).filter { it.startsWith("ssh-") }
         } catch (e: Exception) {
-            0
+            emptyList()
         }
+        val count = namesSnapshot.size
+        // **Name the connections, not just the count.**
+        //
+        // Mido, 2026-11-04: *"ssh still shown number of connections but no connection details"*.
+        // A bare count is the one summary that cannot be acted on: you cannot tell which host a
+        // call would reach, or whether the one you added is the one that failed to save.
+        //
+        // The names come from the vault's own index, which is plaintext while the vault is locked
+        // — so this list is readable at the moment you most need it, right after a call refused.
+        // Nothing secret is exposed: the names are `ssh-<user>@<host>` labels they typed.
         return if (count == 0) {
             PluginStatus("SSH", PluginStatus.State.OFF, "no connections configured")
         } else {
-            PluginStatus("SSH", PluginStatus.State.OK, "$count connection(s)")
+            val names = namesSnapshot.mapNotNull { it.removePrefix("ssh-").takeIf { n -> n.isNotEmpty() } }
+            val shown = names.take(4).joinToString(", ")
+            val extra = if (names.size > 4) " +${names.size - 4} more" else ""
+            PluginStatus(
+                "SSH",
+                PluginStatus.State.OK,
+                if (shown.isEmpty()) "$count connection(s)" else "$shown$extra",
+            )
         }
     }
 }
