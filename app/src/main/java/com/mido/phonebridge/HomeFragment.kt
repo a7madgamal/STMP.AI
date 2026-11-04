@@ -289,10 +289,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ctx,
             on = try { PolicyStore.from(requireContext()).get().fingerprintForModals }
                  catch (e: Exception) { false },
-        ) {
-            // Write, then repaint from what was written — the same rule every other toggle here
-            // follows, so a failed write cannot leave the knob showing the tap instead of the truth.
-            toggleFingerprintForModals()
+        ) { want ->
+            // **A fingerprint is required to flip this switch.** Mido, 2026-11-04: *"flipping the
+            // fingerprint toggle should only work after requiring the fingerprint"*.
+            //
+            // Both directions ask. Turning it OFF is the more dangerous change — it removes the
+            // proof of presence from every future approval — so it is not the one direction to
+            // leave unguarded.
+            requestFingerprintChange(want)
         }
         fpHeader.addView(gateFingerprint)
         fpRow.addView(fpHeader)
@@ -653,16 +657,40 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
         gateFingerprint.visibility = TextView.VISIBLE
         gateFingerprintWhy.visibility = TextView.VISIBLE
-        val fp = policy.fingerprintForModals
-        // `setCheckedAnimated` only moves when the value actually differs, so a repaint that
-        // changed nothing cannot make the knob twitch.
-        if (gateFingerprint.checked != fp) gateFingerprint.setCheckedAnimated(fp)
-        gateFingerprintWhy.text = if (fp) {
-            "A SECURE request needs your fingerprint to approve. A denied prompt leaves the " +
-                "request pending so you can retry in its window."
-        } else {
-            "A SECURE request approves on a plain tap, like NOTIFY does. The secret vault is " +
-                "unaffected — it keeps its own fingerprint."
+
+        // **Can this phone even ask for a fingerprint?**
+        //
+        // Mido, 2026-11-04: *"if no fingerprint feature available then it should be disabled and
+        // off stating the reason"*. The check is the same one the modal and the vault use, so the
+        // switch cannot claim a capability the approval screen would refuse.
+        when (val status = Fingerprint.status(hostActivity)) {
+            is Fingerprint.Status.Unusable -> {
+                // Forced OFF, not merely greyed out. With the policy ON and no usable biometric,
+                // `ApprovalActivity` sets `biometricBlocked` and APPROVE never enables — so every
+                // SECURE request would become unapprovable, and the cause would be buried inside
+                // the modal. Writing the policy off keeps SECURE working on a plain tap.
+                forceFingerprintOff(status.reason)
+                gateFingerprint.setCheckedImmediately(false)
+                gateFingerprint.isEnabled = false
+                gateFingerprintWhy.text = status.reason
+                gateFingerprintWhy.setTextColor(Theme.WARNING)
+            }
+
+            Fingerprint.Status.Usable -> {
+                val fp = policy.fingerprintForModals
+                gateFingerprint.isEnabled = true
+                // `setCheckedAnimated` only moves when the value actually differs, so a repaint
+                // that changed nothing cannot make the knob twitch.
+                if (gateFingerprint.checked != fp) gateFingerprint.setCheckedAnimated(fp)
+                gateFingerprintWhy.setTextColor(Theme.ON_SURFACE_VARIANT)
+                gateFingerprintWhy.text = if (fp) {
+                    "A SECURE request needs your fingerprint to approve. A denied prompt leaves " +
+                        "the request pending so you can retry in its window."
+                } else {
+                    "A SECURE request approves on a plain tap, like NOTIFY does. The secret vault " +
+                        "is unaffected — it keeps its own fingerprint."
+                }
+            }
         }
     }
 
@@ -672,7 +700,71 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      * Audited as POLICY_CHANGED, exactly as the Settings screen used to do: a fingerprint
      * requirement DISAPPEARING is the kind of change a later reader wants dated.
      */
-    private fun toggleFingerprintForModals() {
+    /**
+     * Ask for the fingerprint, and only then change the setting.
+     *
+     * The knob does NOT move on the tap. `toggleFingerprintForModals` writes, and the next
+     * `render()` drives the knob from what was written — so a cancelled prompt leaves it exactly
+     * where it was, which is the truth.
+     */
+    private fun requestFingerprintChange(want: Boolean) {
+        when (val status = Fingerprint.status(hostActivity)) {
+            is Fingerprint.Status.Unusable -> {
+                // Unreachable through the UI while the knob is disabled, but a stray call must
+                // never write a setting this phone cannot honour.
+                toast(status.reason)
+                render()
+            }
+
+            Fingerprint.Status.Usable -> Fingerprint.confirm(
+                activity = hostActivity,
+                title = if (want) {
+                    "Require fingerprint for modals"
+                } else {
+                    "Stop requiring fingerprint"
+                },
+                subtitle = "Confirm it's you",
+                onConfirmed = { toggleFingerprintForModals(want) },
+                onFailed = { why ->
+                    // Cancelled or failed: nothing changes. Repainting puts the knob back in case
+                    // the press itself moved it.
+                    Debug.log("fingerprint toggle unchanged: $why")
+                    render()
+                },
+            )
+        }
+    }
+
+    /**
+     * Turn the setting off because this phone cannot honour it.
+     *
+     * **Not cosmetic.** With the policy ON and no usable biometric, `ApprovalActivity` sets
+     * `biometricBlocked` and APPROVE never enables — so every SECURE request becomes
+     * unapprovable, with the cause buried in the modal. Forcing the policy off keeps SECURE
+     * working on a plain tap instead of silently breaking the bridge.
+     */
+    private fun forceFingerprintOff(reason: String) {
+        val store = PolicyStore.from(requireContext())
+        val current = try {
+            store.get()
+        } catch (e: PolicyException) {
+            Debug.log("cannot force fingerprint off: policy unreadable (${e.message})")
+            return
+        }
+        if (!current.fingerprintForModals) return
+        val next = current.withFingerprintForModals(false)
+        try {
+            store.set(next)
+            Debug.log("fingerprint for modals forced OFF: $reason")
+            AuditLog.from(requireContext()).append(
+                com.mido.phonebridge.audit.PolicyAudit.record(next.global, next.global, "home")
+            )
+        } catch (e: Exception) {
+            Debug.log("could not force fingerprint off: ${e.message}")
+        }
+    }
+
+    private fun toggleFingerprintForModals(want: Boolean) {
         val store = PolicyStore.from(requireContext())
         val current = try {
             store.get()
@@ -680,7 +772,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             toast("policy unreadable: ${e.message}")
             return
         }
-        val next = current.withFingerprintForModals(!current.fingerprintForModals)
+        // The value the human confirmed, not a flip. A flip would fight the render that is trying
+        // to put the knob back after a cancelled prompt.
+        val next = current.withFingerprintForModals(want)
         try {
             store.set(next)
         } catch (e: Exception) {

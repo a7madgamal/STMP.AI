@@ -148,6 +148,19 @@ class RuggedToggle(context: Context) : View(context) {
         )
     }
 
+    /**
+     * Dim when disabled.
+     *
+     * A switch that ignores taps while looking identical to a live one is the worst of both:
+     * it reads as responsive and then does nothing. The reason it is disabled is stated by the
+     * screen beside it — see the fingerprint row on Home.
+     */
+    override fun setEnabled(enabled: Boolean) {
+        if (isEnabled == enabled) return
+        super.setEnabled(enabled)
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         // Centred in the touch target, so the drawing stays small while the hit area stays
         // generous.
@@ -155,9 +168,13 @@ class RuggedToggle(context: Context) : View(context) {
         val top = (height - trackHeightPx) / 2f
         rect.set(left, top, left + trackWidthPx, top + trackHeightPx)
 
+        // Alpha, not a different colour: the shape and texture stay recognisable, so a disabled
+        // switch still reads as the same control rather than as a grey placeholder.
+        val dim = if (isEnabled) 255 else 90
         track.setBounds(
             rect.left.toInt(), rect.top.toInt(), rect.right.toInt(), rect.bottom.toInt()
         )
+        track.setAlpha(dim)
         track.draw(canvas)
 
         val knobLeft = rect.left + insetPx + travelPx * fraction
@@ -185,6 +202,7 @@ class RuggedToggle(context: Context) : View(context) {
             knobRect.left.toInt(), knobRect.top.toInt(),
             knobRect.right.toInt(), knobRect.bottom.toInt(),
         )
+        drawable.setAlpha(dim)
         drawable.draw(canvas)
     }
 

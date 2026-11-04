@@ -5245,10 +5245,14 @@ devDependencies. `node_modules/` is gitignored.
 - Menu labels are upper case, larger, and bold when selected.
 - Settings no longer asks permission to install after downloading 42 MB: it asks first.
 
-## 0.46.1 (build 262) — 2026-11-04 — CURRENT
+## 0.46.1 (build 262) — 2026-11-04
 - Tab switching fades now, because the bar is built once instead of being rebuilt on every change.
 - The toggle is drawn by the same card drawable as every other surface, so border, wrinkle and grain are identical rather than similar.
 - The update check shows a spinner and a last-checked line.
+
+## 0.46.2 (build 263) — 2026-11-04 — CURRENT
+- Fingerprint for modals can only be flipped after a successful scan, in both directions.
+- With no fingerprint available the switch is disabled and off, and says why.
 
 ## Keeping this file honest
 
