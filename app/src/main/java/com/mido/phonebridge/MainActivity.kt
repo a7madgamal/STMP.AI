@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
 
         // The body takes the remaining height and the bar sits under it at its natural size, so
         // a short screen still has its bar at the bottom rather than floating under the content.
+        // The container stops above the shadow band, so the bottom of a scrolling body is never
+        // hidden behind the blur.
         container = FrameLayout(this).apply { id = CONTAINER_ID }
         root.addView(container, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
@@ -63,7 +65,20 @@ class MainActivity : AppCompatActivity() {
 
         // A stable host for the bar, so a tab change replaces one child instead of re-finding
         // the root and guessing which child the bar is.
-        barHost = LinearLayout(this)
+        barHost = LinearLayout(this).apply {
+            // **The shadow needs room to exist.**
+            //
+            // The bar carries real elevation, and the platform draws that shadow OUTSIDE the
+            // bar's own bounds. This host had no padding and `clipChildren` defaults to true, so
+            // the shadow was clipped away the moment it was drawn -- which is why the bar looked
+            // like it had no shadow at all while the elevation code was perfectly correct.
+            //
+            // Top padding reserves the band the blur occupies; `clipChildren = false` lets it
+            // paint into that band instead of being cut at the child's edge.
+            clipChildren = false
+            clipToPadding = false
+            setPadding(0, Theme.dp(this@MainActivity, SHADOW_ROOM_DP), 0, 0)
+        }
         // MATCH_PARENT explicitly: the default layout params are WRAP_CONTENT, which made the bar
         // measure to its labels and huddle at the left edge instead of spanning the screen.
         root.addView(barHost, LinearLayout.LayoutParams(
@@ -230,6 +245,14 @@ class MainActivity : AppCompatActivity() {
          * already populated.
          */
         const val CONTAINER_ID = 0x5E1A
+
+        /**
+         * Vertical room reserved above the bar for its shadow blur, in dp.
+         *
+         * Slightly more than `Theme.BAR_ELEVATION_DP`: the blur reaches past the elevation value,
+         * and a band exactly as tall as the elevation clips the faint outer edge into a hard line.
+         */
+        const val SHADOW_ROOM_DP = 14
 
         /** Once per process. A deliberate STOP must survive a tab switch. */
         var autoStartAttempted = false

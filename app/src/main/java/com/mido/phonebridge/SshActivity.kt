@@ -160,6 +160,46 @@ class SshActivity : Activity() {
                 ).apply { setPadding(0, Theme.dp(this@SshActivity, 6), 0, 0) }
             )
 
+            // --- the key's own identity, on the card ---
+            //
+            // "SSH needs more details when opened" (Mido, 2026-11-04). The card used to name the
+            // key type and then offer a button whose only output was a dialog. That meant the two
+            // things you actually check against a server — the public key line and its
+            // fingerprint — were one tap deep, and the fingerprint was not shown anywhere at all.
+            //
+            // Both are public by construction: the private half never leaves the vault.
+            val pub = SshKeygen.publicKeyOf(conn.privateKey, comment = "phonebridge-$label")
+            val fingerprint = pub?.let { SshKeygen.fingerprintOf(it) }
+            if (fingerprint != null) {
+                card.addView(
+                    Theme.text(this, "key fingerprint", 11f, Theme.ON_SURFACE_VARIANT)
+                        .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
+                )
+                card.addView(
+                    Theme.text(this, fingerprint, 12f, Theme.ON_SURFACE).apply {
+                        typeface = android.graphics.Typeface.MONOSPACE
+                        setTextIsSelectable(true)
+                    }
+                )
+            }
+            if (pub != null) {
+                card.addView(
+                    Theme.text(this, "public key", 11f, Theme.ON_SURFACE_VARIANT)
+                        .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
+                )
+                card.addView(
+                    Theme.text(this, pub, 11f, Theme.ON_SURFACE).apply {
+                        typeface = android.graphics.Typeface.MONOSPACE
+                        setTextIsSelectable(true)
+                    }
+                )
+            }
+            // The vault entry name, so a duplicate label on two hosts is tellable apart.
+            card.addView(
+                Theme.text(this, "vault entry: $vaultName", 11f, Theme.ON_SURFACE_VARIANT)
+                    .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
+            )
+
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             buttons.addView(small("copy public key") { copyPublicKey(label, conn) })
             buttons.addView(small("delete") { confirmDelete(label, vaultName) })

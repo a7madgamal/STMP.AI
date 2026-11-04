@@ -29,11 +29,11 @@ class RuggedToggle(context: Context) : View(context) {
 
     // --- geometry, in dp, resolved once ---
 
-    private val trackHeightPx = dp(30)
-    private val trackWidthPx = dp(56)
-    private val insetPx = dp(3)
-    private val knobRadiusPx = dp(2)
-    private val trackRadiusPx = dp(3)
+    private val trackHeightPx = dp(34)
+    private val trackWidthPx = dp(62)
+    private val insetPx = dp(4)
+    private val knobRadiusPx = dp(1.5f)
+    private val trackRadiusPx = dp(2)
 
     /**
      * The knob is SQUARE-ish on purpose. A circle would read as a Material thumb; a rectangle with
@@ -79,7 +79,9 @@ class RuggedToggle(context: Context) : View(context) {
         minimumWidth = Theme.dp(context, 64)
         minimumHeight = Theme.dp(context, 48)
         contentDescription = "Off"
-        edge.strokeWidth = dp(1.2f)
+        // Thicker and darker than a hairline. A 1.2dp light stroke on a 30dp track read as a
+        // Material pill; a 2dp darker edge reads as card stock with thickness.
+        edge.strokeWidth = dp(2f)
     }
 
     /** Set the state WITHOUT animating. Used on first render, where motion would be a lie. */
@@ -151,8 +153,24 @@ class RuggedToggle(context: Context) : View(context) {
         canvas.drawPaint(PaperGrain.paint())
         canvas.restore()
 
-        edge.color = Theme.BORDER
+        edge.color = withAlpha(Theme.ON_SURFACE, 0x55)
         canvas.drawPath(path, edge)
+
+        // An inner shadow across the top of the track. Without it the knob looks pasted on; with
+        // it the knob looks like it is sitting inside a routed channel, which is the whole
+        // difference between "rugged" and "flat rectangle with a square in it".
+        canvas.save()
+        canvas.clipPath(path)
+        val inner = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(
+                0f, rect.top, 0f, rect.top + dp(7f),
+                intArrayOf(withAlpha(Theme.ON_SURFACE, 0x40), android.graphics.Color.TRANSPARENT),
+                null,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawRect(rect, inner)
+        canvas.restore()
 
         // --- knob ---
         val knobLeft = rect.left + insetPx + travelPx * fraction
@@ -177,17 +195,26 @@ class RuggedToggle(context: Context) : View(context) {
         canvas.drawPaint(PaperGrain.paint())
         canvas.restore()
 
-        // A darker hairline on the knob so it reads as a separate piece of card sitting on the
-        // track rather than a painted rectangle.
-        edge.color = withAlpha(Theme.ON_SURFACE, 0x40)
+        // The knob's own shadow, offset down-right. This is what makes it read as a physical
+        // piece resting ON the track instead of a rectangle painted inside it.
+        val knobShadow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = withAlpha(Theme.ON_SURFACE, 0x4D)
+            maskFilter = android.graphics.BlurMaskFilter(dp(2.5f), android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+        canvas.save()
+        canvas.translate(dp(1f), dp(2f))
+        canvas.drawPath(knobPath, knobShadow)
+        canvas.restore()
+
+        // A hard dark edge, so the knob has a definite outline rather than a soft one.
+        edge.color = withAlpha(Theme.ON_SURFACE, 0x70)
         canvas.drawPath(knobPath, edge)
 
-        // A faint highlight along the top of the knob: light from above is what makes a flat shape
-        // look raised, and it costs one line.
-        edge.color = withAlpha(Color.WHITE, 0x33)
+        // A bright top highlight: light from above is what makes a flat shape look raised.
+        edge.color = withAlpha(Color.WHITE, 0x66)
         canvas.drawLine(
-            knobLeft + knobRadiusPx, knobTop + dp(0.6f),
-            knobLeft + knobSizePx - knobRadiusPx, knobTop + dp(0.6f),
+            knobLeft + knobRadiusPx + dp(1f), knobTop + dp(1f),
+            knobLeft + knobSizePx - knobRadiusPx - dp(1f), knobTop + dp(1f),
             edge,
         )
     }

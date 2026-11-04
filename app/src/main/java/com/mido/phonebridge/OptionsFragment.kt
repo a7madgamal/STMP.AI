@@ -109,12 +109,15 @@ class OptionsFragment : BridgeFragment() {
         container.addView(
             aiBackendRow(store, policy)
         )
+        // The model row sits with the backend that uses it. It was under Permissions, which put
+        // "which model is loaded" a screen-section away from "which backend runs it".
+        container.addView(aiModelRow(store, policy))
 
         // Speak used to be configured here. It now lives on the plugin that owns it — Plugins →
         // Speak — so the settings sit with the routes they govern instead of in a second list
         // that had to be kept in step by hand.
 
-        container.addView(Theme.sectionHeader(ctx, "Device access"))
+        container.addView(Theme.sectionHeader(ctx, "Permissions"))
 
         // These five rows came OFF Home (Mido, 2026-11-03: *"rethink each button screen"*).
         // They are device and service state, not live answers about whether the bridge is
@@ -147,8 +150,6 @@ class OptionsFragment : BridgeFragment() {
             if (SecretVault.isUnlocked()) Theme.SUCCESS else Theme.WARNING,
             onClick = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
         ))
-        container.addView(aiModelRow(store, policy))
-
         // --- TOOLS: the destinations that are not tabs ---
         container.addView(Theme.sectionHeader(ctx, "Tools"))
         container.addView(toolRow("Get started") {
@@ -258,7 +259,7 @@ class OptionsFragment : BridgeFragment() {
                 com.mido.phonebridge.callers.CallerState.Denied -> Theme.DANGER
             }
             row.addView(
-                Theme.text(ctx, "$label\n${entry.ip}", 14f, colour).apply {
+                Theme.text(ctx, "$label · ${entry.ip}", 14f, colour).apply { isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END }.apply {
                     layoutParams = LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                     )
@@ -367,7 +368,7 @@ class OptionsFragment : BridgeFragment() {
     /**
      * The AI backend block: current state, what it costs, and one button per alternative.
      *
-     * Buttons name the DESTINATION ("use local", "use external") rather than toggling, because
+     * Buttons name the DESTINATION ("on-device", "use external") rather than toggling, because
      * three states cannot be expressed as on/off without hiding which one is active.
      *
      * The external row states the failure mode plainly: an unreachable box refuses requests
@@ -443,7 +444,7 @@ class OptionsFragment : BridgeFragment() {
             if (target == current) continue
             val label = when (target) {
                 com.mido.phonebridge.policy.AiBackend.OFF -> "turn off"
-                com.mido.phonebridge.policy.AiBackend.LOCAL -> "use local"
+                com.mido.phonebridge.policy.AiBackend.LOCAL -> "on-device"
                 com.mido.phonebridge.policy.AiBackend.EXTERNAL -> "use external"
             }
             choices.addView(
@@ -790,6 +791,7 @@ class OptionsFragment : BridgeFragment() {
         }
         val header = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
         }
         header.addView(
             Theme.text(ctx, title, 15f, Theme.ON_SURFACE).apply {
@@ -799,25 +801,16 @@ class OptionsFragment : BridgeFragment() {
                 )
             }
         )
-        header.addView(Theme.text(ctx, state, 13f, colour))
+        // The switch, in the header rather than a "turn on" button underneath.
+        //
+        // `state == "ON"` was the only signal the row had, and it duplicated what the knob now
+        // shows. `colour` is kept as a parameter so an unreadable store can still say so.
+        header.addView(Theme.toggle(ctx, state == "ON") { onToggle() })
         block.addView(header)
         block.addView(
             Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
-        )
-        block.addView(
-            Theme.button(
-                ctx,
-                if (state == "ON") "turn off" else "turn on",
-                Theme.ButtonStyle.NEUTRAL,
-                small = true,
-                onClick = onToggle
-            ),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(ctx, 10) }
         )
         return block
     }

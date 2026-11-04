@@ -175,13 +175,22 @@ class SecretsActivity : Activity() {
             } catch (e: Exception) {
                 SecretVault.SecretMeta()
             }
+            // --- links, one URL per line ---
+            //
+            // These used to be two chips reading "docs ↗" and "key ↗": the URL itself was never
+            // on screen, so you could not tell WHICH page a chip would open, and could not copy
+            // one. Mido, 2026-11-04: *"secrets need each url in a line, and they need to be
+            // clickable links"*.
+            //
+            // A full URL is long and has no spaces, so it needs `breakStrategy` set explicitly:
+            // without it the default hyphenation splits `https://api.example.com/v1/keys` at an
+            // arbitrary character and the link becomes uncopyable.
+            if (links.docs.isNotEmpty()) rowView.addView(linkLine(links.docs) { openLink(n, "API docs", links.docs) })
+            if (links.key.isNotEmpty()) rowView.addView(linkLine(links.key) { openLink(n, "key page", links.key) })
+
             val linkRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            linkRow.addView(small(if (links.docs.isEmpty()) "+ docs" else "docs ↗") {
-                openLink(n, "API docs", links.docs)
-            })
-            linkRow.addView(small(if (links.key.isEmpty()) "+ key link" else "key ↗") {
-                openLink(n, "key page", links.key)
-            })
+            if (links.docs.isEmpty()) linkRow.addView(small("+ docs") { openLink(n, "API docs", links.docs) })
+            if (links.key.isEmpty()) linkRow.addView(small("+ key link") { openLink(n, "key page", links.key) })
             linkRow.addView(small("edit links") { editLinksDialog(n, links) })
             rowView.addView(linkRow)
 
@@ -225,6 +234,29 @@ class SecretsActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 6) }
     }
+
+    /**
+     * One URL, on its own line, and tappable.
+     *
+     * Underlined and in the accent colour so it reads as a link rather than as a value, because
+     * this app prints plenty of plain monospace values (fingerprints, keys) that are NOT links.
+     * A row that looks identical to those but opens a browser on tap is a trap.
+     */
+    private fun linkLine(url: String, onClick: () -> Unit): android.widget.TextView =
+        TextView(this).apply {
+            text = url
+            textSize = 13f
+            setTextColor(Theme.ACCENT)
+            paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+            // A long URL must WRAP, not be split mid-token by hyphenation: a broken URL cannot be
+            // copied, which defeats the point of showing it.
+            breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
+            setPadding(0, Theme.dp(this@SecretsActivity, 6), 0, 0)
+            isClickable = true
+            isFocusable = true
+            isSingleLine = false
+            setOnClickListener { onClick() }
+        }
 
     private fun small(label: String, onClick: () -> Unit): MaterialButton =
         Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true, onClick = onClick).apply {

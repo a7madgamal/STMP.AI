@@ -166,6 +166,7 @@ class PluginsFragment : BridgeFragment() {
             setTextColor(Theme.ON_SURFACE)
             typeface = Theme.handFont(ctx)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        titleRow.gravity = android.view.Gravity.CENTER_VERTICAL
         titleRow.addView(Theme.text(ctx, "SSH", 12f).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
         })
@@ -205,7 +206,14 @@ class PluginsFragment : BridgeFragment() {
         lp.topMargin = Theme.dp(ctx, 10)
         card.layoutParams = lp
 
-        val titleRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val titleRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            // CENTER_VERTICAL so the knob lines up with the name rather than the top of the word.
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        // Weight 1 on the name: it absorbs all the slack, which is what pushes the state word and
+        // then the knob to the right edge. Without it the knob sat wherever the text happened to
+        // end, so rows disagreed about where the switch lived.
         titleRow.addView(Theme.text(ctx, plugin.displayName, 16f).apply {
             setTextColor(Theme.ON_SURFACE)
             typeface = Theme.handFont(ctx)
@@ -213,12 +221,15 @@ class PluginsFragment : BridgeFragment() {
 
         // The state chip. Colour carries the meaning and the WORD carries it too, because a
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
-        titleRow.addView(Theme.text(ctx, stateLabel(on, status), 12f).apply {
-            setTextColor(stateColour(on, status))
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { marginEnd = Theme.dp(ctx, 10) })
+        val stateText = stateLabel(on, status)
+        if (stateText.isNotEmpty()) {
+            titleRow.addView(Theme.text(ctx, stateText, 12f).apply {
+                setTextColor(stateColour(on, status))
+            }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = Theme.dp(ctx, 10) })
+        }
 
         // The switch. Only for plugins that can actually be turned off: a required plugin gets no
         // knob rather than a knob that cannot move, which would be a control that lies about what
@@ -257,10 +268,18 @@ class PluginsFragment : BridgeFragment() {
         return card
     }
 
+    /**
+     * The row's status word — or empty when the knob already says it.
+     *
+     * **"ON" and "OFF" are gone on purpose.** The switch sits right there and its position IS the
+     * answer; printing "ON" beside a knob pointing right is the same fact twice, and the label was
+     * the thing that used to go stale. What stays is everything the knob CANNOT say: a plugin that
+     * is switched on but cannot serve.
+     */
     private fun stateLabel(on: Boolean, status: PluginStatus?): String = when {
-        !on -> "OFF"
-        status == null -> "ON"
-        status.state == PluginStatus.State.OK -> "ON"
+        !on -> ""
+        status == null -> ""
+        status.state == PluginStatus.State.OK -> ""
         status.state == PluginStatus.State.NEEDS_ATTENTION -> "ACTION NEEDED"
         status.state == PluginStatus.State.ERROR -> "ERROR"
         // A plugin that is on but reports OFF internally is measurably misconfigured, not off by

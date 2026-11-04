@@ -5197,10 +5197,24 @@ devDependencies. `node_modules/` is gitignored.
 - Removed the thin grey outline around the bar and the empty margin below it, so the paper meets the screen edge.
 - Tab labels stay on one line instead of wrapping.
 
-## 0.44.0 (build 254) — 2026-11-03 — CURRENT
+## 0.44.0 (build 254) — 2026-11-03
 - New paper toggle: a grained rectangular track with a sliding knob, matching the cards.
 - The server, every plugin row, the plugin detail switch and plugin settings all use it.
 - The server knob shows a pending look while the service binds instead of sliding on the tap.
+
+## 0.44.1 (build 255) — 2026-11-04 — CURRENT
+- The toggle is heavier: a routed track with an inner shadow and a cast knob.
+- The bottom bar has a real shadow again: its host was clipping the blur away.
+- Toggles no longer repeat what the knob already says; only ACTION NEEDED, ERROR and NOT SET UP remain.
+- Auto-start on boot uses the toggle instead of an ON/OFF word and a button.
+- The server toggle sits inside the status card, where the answer it changes is.
+- "use local" is now "on-device", and "Device access" is now "Permissions".
+- The AI model row sits with the AI backend instead of under Permissions.
+- Callers show on one line, and the menu text is larger with a wider underline that fades between tabs.
+- A Google account no longer claims its token is valid for 0 minutes.
+- Plugin toggles are right-aligned on every row.
+- SSH connections show their key fingerprint, public key and vault entry.
+- Secret URLs are each on their own line and tappable.
 
 ## Keeping this file honest
 

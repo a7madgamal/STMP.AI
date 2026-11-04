@@ -175,22 +175,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ))
         }
         heroCard.addView(heroRow)
-        container.addView(heroCard)
 
-        // --- 2. CONTROLS: the primary action ---
+        // --- 2. THE CONTROL: inside the hero, because it is the answer's other half ---
         //
-        // A row, not a full-width button: a switch sized to the whole screen would be a bar with a
-        // knob at one end, and the label is what tells you what is being switched.
+        // "Is the server up?" and "turn it up" are one subject. As a separate row below, the
+        // switch read as another item in a list; inside the card it belongs to the status it
+        // changes. A hairline above it separates without adding a box.
         val serveRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, Theme.dp(ctx, 16), 0, 0)
+            setPadding(0, Theme.dp(ctx, 12), 0, 0)
         }
         val serveLabel = TextView(ctx).apply {
             text = "Server"
-            textSize = 18f
+            textSize = 16f
             typeface = Theme.handFont(ctx)
-            setTextColor(Theme.ON_SURFACE)
+            setTextColor(Theme.ON_SURFACE_VARIANT)
         }
         serveRow.addView(serveLabel, LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
@@ -217,7 +217,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             uiTickHandler.postDelayed({ render() }, 600)
         }
         serveRow.addView(serverToggle)
-        container.addView(serveRow)
+        heroCard.addView(serveRow)
+        container.addView(heroCard)
 
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
         // account part to the google plugin"*). Signing in is a precondition the Google plugins

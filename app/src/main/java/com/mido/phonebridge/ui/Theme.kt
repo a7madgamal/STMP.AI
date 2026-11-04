@@ -323,7 +323,7 @@ object Theme {
 
         val label = TextView(ctx).apply {
             text = tab.label
-            textSize = 13f
+            textSize = 15f
             gravity = Gravity.CENTER
             typeface = handFont(ctx)
             setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
@@ -333,7 +333,7 @@ object Theme {
             isSingleLine = true
             maxLines = 1
             ellipsize = null
-            setAutoSizeTextTypeUniformWithConfiguration(9, 13, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            setAutoSizeTextTypeUniformWithConfiguration(11, 15, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
         }
         column.addView(label)
 
@@ -351,7 +351,7 @@ object Theme {
             // sp -> px through TypedValue, which honours the user's font scale. The metric
             // fields are deprecated and would ignore it.
             textSize = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP, 13f, ctx.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_SP, 11f, ctx.resources.displayMetrics
             )
         }
         // The label auto-sizes down to fit, so measuring at a fixed 13sp would leave a rule wider
@@ -359,14 +359,14 @@ object Theme {
         measure.textSize = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP, 9f, ctx.resources.displayMetrics
         )
-        val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 4)
+        val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 12)
         column.addView(rule, LinearLayout.LayoutParams(
             ruleWidth.coerceAtLeast(dp(ctx, 16)),
             ruleHeight,
         ).apply { topMargin = dp(ctx, 2) })
         rule.background = SquiggleRule(
             color = if (selected) ACCENT else Color.TRANSPARENT,
-            strokePx = dpF(ctx, 2f),
+            strokePx = dpF(ctx, 2.6f),
             amplitudePx = dpF(ctx, SQUIGGLE_DP),
             spanFraction = 1.0f,
             atBottom = true,
@@ -379,6 +379,21 @@ object Theme {
         // reused by a host that swaps fragments, and the tab -> Activity mapping had to be
         // repeated anywhere else that wanted to navigate. The caller knows what a selection
         // means; the bar only reports that it happened.
+        // A freshly-built tab starts either fully drawn (selected) or invisible (not), and then
+        // fades in. Without this the marker jumps from one tab to the other with nothing between,
+        // which reads as a flicker rather than a selection moving.
+        rule.alpha = if (selected) 1f else 0f
+        label.alpha = if (selected) 1f else 0.72f
+        if (selected) {
+            rule.animate().alpha(1f).setDuration(180L).start()
+            label.animate().alpha(1f).setDuration(180L).start()
+        } else {
+            // Fade the unselected state in from full, so the marker visibly RETREATS rather than
+            // blinking out when the bar is rebuilt on a tab change.
+            rule.alpha = 0f
+            label.alpha = 0.72f
+        }
+
         if (!selected) {
             column.setOnClickListener { onSelect(tab) }
         }

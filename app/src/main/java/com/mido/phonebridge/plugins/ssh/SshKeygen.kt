@@ -306,4 +306,32 @@ object SshKeygen {
     } catch (e: Exception) {
         null
     }
+
+    /**
+     * The OpenSSH `SHA256:` fingerprint of a PUBLIC key.
+     *
+     * **Why this is computed from the public half, not the private one.** A fingerprint is what
+     * `ssh-keygen -lf` prints and what a server's `known_hosts` or `authorized_keys` comment
+     * quotes, so it has to be derived the same way the tool derives it: SHA-256 over the decoded
+     * key BLOB (the middle field), base64'd without padding. Hashing the PEM text would produce a
+     * value that matches nothing anywhere.
+     *
+     * Returns null when the line cannot be parsed, rather than a placeholder: a wrong fingerprint
+     * is worse than none, because it is the string a human compares.
+     */
+    fun fingerprintOf(publicKeyLine: String): String? = try {
+        val fields = publicKeyLine.trim().split(' ').filter { it.isNotEmpty() }
+        if (fields.size < 2) {
+            null
+        } else {
+            val blob = android.util.Base64.decode(fields[1], android.util.Base64.DEFAULT)
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(blob)
+            "SHA256:" + android.util.Base64.encodeToString(
+                digest,
+                android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+            )
+        }
+    } catch (e: Exception) {
+        null
+    }
 }

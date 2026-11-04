@@ -89,11 +89,19 @@ class GooglePlugin(private val ctx: Context) : Plugin {
             )
         }
         val email = AuthManager.accountEmail ?: "(email unknown)"
-        val left = AuthManager.tokenRemainingMs()
-        return PluginStatus(
-            "Google account",
-            PluginStatus.State.OK,
-            "$email — token valid for ${left / 60_000} min",
-        )
+        // **Not "token valid for N min".** The access token is deliberately NOT cached across a
+        // process start -- it lives in memory, and the refresh token on disk is what survives. So
+        // `tokenRemainingMs()` is 0 on every cold read and the row claimed "valid for 0 min" while
+        // the account was working perfectly. A number that is wrong on first glance is worse than
+        // no number: it invites a re-login that changes nothing.
+        //
+        // State what is actually true: signed in, with a refresh token that renews on demand.
+        val minutesLeft = AuthManager.tokenRemainingMs() / 60_000
+        val detail = if (minutesLeft > 0) {
+            "$email — renews automatically (current token ${minutesLeft} min)"
+        } else {
+            "$email — signed in, renews automatically"
+        }
+        return PluginStatus("Google account", PluginStatus.State.OK, detail)
     }
 }
