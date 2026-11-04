@@ -259,41 +259,22 @@ class SshActivity : Activity() {
             toast("vault locked — unlock the app first")
             return
         }
-        val nameField = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-            hint = "name (lowercase, e.g. prod)"
-            inputType = InputType.TYPE_CLASS_TEXT
-        }
-        val hostField = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-            hint = "host (e.g. box.example.com)"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
-        }
-        val portField = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-            hint = "port (default 22)"
+        val nameField = field("name (lowercase, e.g. prod)")
+        val hostField = field("host (e.g. box.example.com)")
+        val portField = field("port (default 22)").apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText("22")
         }
-        val userField = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-            hint = "user (e.g. deploy)"
-            inputType = InputType.TYPE_CLASS_TEXT
-            importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+        val userField = field("user (e.g. deploy)")
+
+        // The reason a failure left the dialog empty, shown INSIDE it.
+        val errorLine = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Theme.DANGER)
+            visibility = android.view.View.GONE
+            setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0)
         }
+
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
@@ -304,34 +285,69 @@ class SshActivity : Activity() {
             addView(hostField)
             addView(portField)
             addView(userField)
+            addView(errorLine)
         }
 
-        AlertDialog.Builder(this)
+        // **A REAL dialog, not `setPositiveButton`.**
+        //
+        // Mido, 2026-11-04: *"the problem is the dialog is lost, a failed attempt should keep the
+        // dialog and its data for easy fix"*.
+        //
+        // `setPositiveButton` ALWAYS dismisses when tapped — that is the contract. So the old
+        // `return@setPositiveButton` on a validation failure returned from a dialog Android had
+        // already decided to close. The name rule is the one people hit (it demands lowercase
+        // `[a-z0-9_-]`), and the result was: hint unreadable as a toast, all four fields gone,
+        // retype from scratch. A validation failure must cost a keystroke, not the form.
+        //
+        // So the button is wired manually and the dialog closes ONLY on success. The error is
+        // reported IN the dialog, where the fields it refers to still are.
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Add SSH connection")
             .setView(box)
-            .setPositiveButton("generate key") { _, _ ->
+            .setNegativeButton("cancel", null)
+            .setPositiveButton("generate key", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val name = nameField.text.toString().trim().lowercase()
                 val host = hostField.text.toString().trim()
                 val user = userField.text.toString().trim()
                 val port = portField.text.toString().trim().toIntOrNull() ?: 22
 
-                if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
-                    toast("name must be lowercase [a-z0-9_-]")
-                    return@setPositiveButton
-                }
-                if (host.isBlank() || user.isBlank()) {
-                    toast("host and user are required")
-                    return@setPositiveButton
-                }
-                if (port !in 1..65535) {
-                    toast("port must be 1..65535")
-                    return@setPositiveButton
-                }
-                if (SecretVault.has(this, "ssh-$name")) {
-                    toast("'$name' already exists")
-                    return@setPositiveButton
+                fun refuse(message: String, focus: android.widget.EditText) {
+                    errorLine.text = message
+                    errorLine.visibility = android.view.View.VISIBLE
+                    focus.requestFocus()
+                    Debug.log("ssh: add refused: $message")
                 }
 
+                if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
+                    refuse(
+                        "Name must be lowercase letters, digits, - or _ (1-49 chars). " +
+                            "\"$name\" has something else.",
+                        nameField,
+                    )
+                    return@setOnClickListener
+                }
+                if (host.isBlank()) {
+                    refuse("Host is required.", hostField)
+                    return@setOnClickListener
+                }
+                if (user.isBlank()) {
+                    refuse("User is required.", userField)
+                    return@setOnClickListener
+                }
+                if (port !in 1..65535) {
+                    refuse("Port must be between 1 and 65535.", portField)
+                    return@setOnClickListener
+                }
+                if (SecretVault.has(this, "ssh-$name")) {
+                    refuse("A connection named \"$name\" already exists. Pick another name.", nameField)
+                    return@setOnClickListener
+                }
+
+                errorLine.visibility = android.view.View.GONE
                 try {
                     val key = SshKeygen.generate(comment = "phonebridge-$name")
                     val conn = SshConnection(
@@ -347,28 +363,51 @@ class SshActivity : Activity() {
                         this, "ssh-$name", conn.toJson().toString(),
                         kind = SecretVault.SecretMeta.Kind.SSH
                     )
+                    // ONLY here does the dialog close: the connection exists.
+                    dialog.dismiss()
                     render()
                     // Show the public key straight away — the connection is useless until the
                     // human installs it, so handing it over now is the only useful next step.
                     copyPublicKey(name, conn)
                 } catch (e: PluginError) {
-                    // Logged as well as toasted: a toast disappears, and this is the one path whose
-                    // failure the human reports as "it just doesn't work".
+                    // Logged as well as shown: this is the one path whose failure the human
+                    // reports as "it just doesn't work".
                     Debug.log("ssh: create '$name' failed: ${e.code}: ${e.message}")
-                    toast("${e.code}: ${e.message}")
+                    refuse("${e.code}: ${e.message}", nameField)
                 } catch (e: Throwable) {
                     // **Throwable, not Exception.** The 0.40.3 failure was a
                     // `NoClassDefFoundError` from inside JSch — an `Error`, which an `Exception`
-                    // catch does not see at all. So the dialog threw, nothing was caught, nothing
-                    // was logged, and the only symptom was a key that never appeared. Catching
-                    // `Throwable` here is correct precisely because this is a UI boundary: the
-                    // process must not die and the reason must reach the log.
+                    // catch does not see at all. Catching `Throwable` here is correct precisely
+                    // because this is a UI boundary: the process must not die and the reason must
+                    // reach the log.
                     Debug.log("ssh: create '$name' CRASHED: ${e.javaClass.name}: ${e.message}")
-                    toast("could not create '$name': ${e.javaClass.simpleName}: ${e.message}")
+                    refuse("Could not create key: ${e.javaClass.simpleName}: ${e.message}", nameField)
                 }
             }
-            .setNegativeButton("cancel", null)
-            .show()
+        }
+        dialog.show()
+    }
+
+    /** A text field styled to match the paper palette. */
+    private fun field(hintText: String) = EditText(this).apply {
+        // Explicit colours: the platform default is white-on-cream here, and with a DayNight
+        // parent it went the other way on a dark-mode phone — the mismatch Mido reported.
+        setTextColor(Theme.ON_SURFACE)
+        setHintTextColor(Theme.ON_SURFACE_VARIANT)
+        highlightColor = Theme.ACCENT
+        // A drawn background, so the field is a paper block rather than a Material underline
+        // that carries its own theme colours.
+        background = Theme.outlined(this@SshActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+        setPadding(
+            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10),
+            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
+        )
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = Theme.dp(this@SshActivity, 8) }
+        hint = hintText
+        inputType = InputType.TYPE_CLASS_TEXT
+        importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
     }
 
     private fun confirmDelete(label: String, vaultName: String) {
