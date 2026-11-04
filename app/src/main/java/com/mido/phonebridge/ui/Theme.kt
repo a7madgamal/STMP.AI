@@ -971,6 +971,33 @@ object Theme {
         button(ctx, label, if (selected) ButtonStyle.PRIMARY else ButtonStyle.NEUTRAL, small = true, onClick = onClick)
 
     /**
+     * A radio marker: a small ring, filled with the accent when selected.
+     *
+     * Lives here rather than in the screen because `GrainCoverageTest` forbids a bare
+     * `GradientDrawable` outside the ui package — and rightly so, that rule is what keeps
+     * surfaces from shipping flat. A 12dp marker cannot carry grain, so it belongs where the
+     * sanctioned constructors live.
+     */
+    fun radioDot(ctx: Context, selected: Boolean): View {
+        val size = dp(ctx, 14)
+        return View(ctx).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                if (selected) {
+                    setColor(ACCENT)
+                    setStroke(dp(ctx, 3), SURFACE)
+                } else {
+                    setColor(android.graphics.Color.TRANSPARENT)
+                    setStroke(dp(ctx, 2), BORDER)
+                }
+            }
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginEnd = dp(ctx, 10)
+            }
+        }
+    }
+
+    /**
      * An on/off switch, drawn as paper with a sliding knob.
      *
      * **Why this returns a custom View and not a styled `SwitchCompat`.** Material's switch is a

@@ -121,35 +121,45 @@ object Updater {
                 setRequestProperty("User-Agent", "STMP/${BuildConfig.VERSION_NAME}")
             }
         } catch (e: Exception) {
-            return Outcome.Unavailable("could not reach github.com: ${e.message ?: e.javaClass.simpleName}")
+            // **A sentence, not a stack trace.**
+            //
+            // This used to interpolate `e.message`, which on a real device read:
+            // "failed to connect to api.github.com/20.205.243.168 (port 443) from /192.168.0.9
+            // (port 53136) after 6000ms" — accurate, unreadable, and it filled four lines of the
+            // card. The human needs to know whether to check their connection or try again, not
+            // which socket number the resolver picked.
+            println("update: connect failed: ${e.javaClass.simpleName}: ${e.message}")
+            return Outcome.Unavailable("no connection to GitHub — check the network and try again")
         }
 
         try {
             val code = conn.responseCode
             if (code == 404) {
-                // THE EXPECTED CASE while the repository is private.
+                // No releases yet, a renamed repo, or a private one. Say all three rather than
+                // asserting "private", which was only ever true while the project was closed.
                 return Outcome.Unavailable(
-                    "the release feed is not public — this build checks a public repository " +
-                        "and $OWNER/$REPO is private"
+                    "GitHub has no releases at $OWNER/$REPO — the repository may be private, or " +
+                        "renamed, or have published nothing yet"
                 )
             }
             if (code == 403 || code == 429) {
-                return Outcome.Unavailable("rate-limited by github (HTTP $code) — try again later")
+                return Outcome.Unavailable("GitHub is rate-limiting this phone — try again later")
             }
             if (code != 200) {
-                return Outcome.Unavailable("github answered HTTP $code")
+                return Outcome.Unavailable("GitHub answered HTTP $code — try again later")
             }
 
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val releases = try {
                 JSONArray(body)
             } catch (e: Exception) {
-                return Outcome.Unavailable("release feed was not a list of releases")
+                return Outcome.Unavailable("GitHub sent something that was not a release list")
             }
 
             return selectNewest(ctx, releases, beta)
         } catch (e: Exception) {
-            return Outcome.Unavailable("could not read the release feed: ${e.message ?: e.javaClass.simpleName}")
+            println("update: read failed: ${e.javaClass.simpleName}: ${e.message}")
+            return Outcome.Unavailable("the reply from GitHub was cut off — try again")
         } finally {
             conn.disconnect()
         }

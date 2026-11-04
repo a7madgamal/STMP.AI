@@ -1243,14 +1243,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             )
         }
 
-        // The unreachable case says what will make it work. A checker that shows nothing is
-        // indistinguishable from a broken one.
+        // The unreachable case says what will actually make it work.
+        //
+        // **It used to blame a private repository, and that stopped being true the day the
+        // project was made public.** A note that names the wrong cause is worse than no note: it
+        // sends someone to check a setting that is already correct. What a human can act on is
+        // "your network", "wait", or "get it from the releases page" — so that is what it says.
         if (outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable) {
             card.addView(
                 Theme.text(
                     ctx,
-                    "The check reads GitHub releases directly, and needs the repository to be " +
-                        "public. Nothing else has to change.",
+                    "This is a network or GitHub-side problem, not a setting. The button below " +
+                        "opens the releases page in your browser, which is the same APK.",
                     12f, Theme.ON_SURFACE_VARIANT,
                 ).apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
@@ -1268,9 +1272,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // so a fallback that only appeared on failure would be missing exactly when it is needed.
         //
         // Small and GHOST so it never competes with CHECK NOW: it is a door, not an action.
+        // A GHOST door when things work, a real action when they do not.
+        //
+        // The button exists in both states (the failures it rescues include ones this app cannot
+        // detect), but when the check just FAILED it is the only thing on the card that can
+        // actually move — so it stops being a quiet link and becomes the primary control.
+        val checkFailed = outcome is com.mido.phonebridge.core.Updater.Outcome.Unavailable
         card.addView(
             Theme.button(
-                ctx, "OPEN RELEASES PAGE", Theme.ButtonStyle.GHOST, small = true,
+                ctx,
+                if (checkFailed) "GET IT FROM GITHUB" else "OPEN RELEASES PAGE",
+                if (checkFailed) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.GHOST,
+                small = !checkFailed,
             ) {
                 // Handed to the browser rather than fetched: this is the escape hatch, so it must
                 // not depend on any code in this app that could be the thing that is broken.
@@ -1286,7 +1299,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 }
             },
             LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
+                if (checkFailed) LinearLayout.LayoutParams.MATCH_PARENT
+                else LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = Theme.dp(ctx, 10) },
         )
