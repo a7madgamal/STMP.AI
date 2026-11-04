@@ -5219,11 +5219,14 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.44.2 (build 256) — 2026-11-04
 - The approval card's countdown now fills the reject button instead of washing the whole card.
 
-## 0.45.0 (build 257) — 2026-11-04 — CURRENT
+## 0.45.0 (build 257) — 2026-11-04
 - Settings has an Updates section: it checks GitHub releases, shows what changed, and installs in one tap.
 - Stable and beta channels, taken from the promote flag the release pipeline already sets.
 - Downloads are verified against the published SHA-256 and refused on a mismatch.
 - While the repository is private the check says so plainly instead of showing nothing.
+
+## 0.45.1 (build 258) — 2026-11-04 — CURRENT
+- The toggle is flat again: the fake depth is gone and both shapes are drawn as jagged, hand-cut rectangles.
 
 ## Keeping this file honest
 
