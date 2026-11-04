@@ -5293,9 +5293,12 @@ devDependencies. `node_modules/` is gitignored.
 - A paper crease plays on screen switch, and sound effects can now be turned off in Settings.
 - The Google plugin can log out.
 
-## 0.47.1 (build 271) — 2026-11-04 — CURRENT
+## 0.47.1 (build 271) — 2026-11-04
 - Fixes the server refusing to start after the mode rename: an old policy file is upgraded instead of rejected.
 - Anything unreadable now falls back to a safe value, says so in the debug log, and the repaired file is written back.
+
+## 0.47.2 (build 272) — 2026-11-04 — CURRENT
+- The rules button sits on its own row under the three gate modes, so the modes get the full width.
 
 ## Keeping this file honest
 

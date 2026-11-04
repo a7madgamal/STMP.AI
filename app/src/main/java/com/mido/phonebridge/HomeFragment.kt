@@ -741,12 +741,19 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // Settings → Tools → Exceptions, three taps away from the thing being described. A summary
         // you cannot act on is a label, not a control.
         //
-        // It sits in the same row as the three modes and takes a fixed share rather than a weight:
-        // the modes are a choice of three, this is a different verb.
+        // **On its own row, not beside the modes.** Mido, 2026-11-04: *"approval gate is too
+        // crowded, move the rules button under"*. In the modes row it took a quarter of the width
+        // from three choices that need to read as one set, which made all four labels cramped.
+        // Underneath, the modes get the full width and the rules button reads as the separate verb
+        // it is.
         gateButtons.addView(
-            Theme.button(ctx, "RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
+            Theme.button(ctx, "EDIT RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
                 go(Intent(ctx, ExceptionsActivity::class.java))
             },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 8) },
         )
 
         // The fingerprint control, rendered from the STORED value rather than from what we
