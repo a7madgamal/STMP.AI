@@ -357,6 +357,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         updatesHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(updatesHost)
 
+        // **Filled here, at build time.**
+        //
+        // This host used to be created empty and only ever filled by `refreshUpdateSection()`,
+        // which is only called from the CHECK NOW handler. So a fresh screen showed the "Updates"
+        // header with NOTHING under it until you tapped a button — and since the button was
+        // inside the missing block, there was nothing to tap. Reported 2026-11-04: *"the update
+        // section completely empty just a header"*.
+        //
+        // The section is now correct on first paint and is refreshed afterwards by posted
+        // rebuilds, which is the only model that keeps its controls alive under a tap.
+        updatesHost.addView(updateBlock())
+
         // The plugin list used to live here and made Home a wall: twelve status cards between
         // the server control and the tools, pushing "is the bridge running" off the first
         // screen. It moved to the Plugins tab, where capability inventory belongs.
@@ -427,6 +439,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     override fun onResume() {
         super.onResume()
         render()
+        // The update section is not part of `render()` (rebuilding it there could tear a control
+        // down under a press), so returning to this screen has to ask for it explicitly — that is
+        // what makes an install-return or a background check show up.
+        if (::updatesHost.isInitialized) refreshUpdateSection()
 
         // The install-permission dialog promises the install resumes on return. Keep it.
         // Posted, not called inline: the pending action may open another dialog or start a

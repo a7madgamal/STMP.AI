@@ -5261,11 +5261,14 @@ devDependencies. `node_modules/` is gitignored.
 - Updates are one card, and "Get started" sits on Home above them.
 - The plugin detail toggle is right-aligned, and SSH names its connections instead of counting them.
 
-## 0.46.4 (build 265) — 2026-11-04 — CURRENT
+## 0.46.4 (build 265) — 2026-11-04
 - The toggle now wears the same material as the buttons, so every input matches.
 - Toggles are 20% smaller, with the same touch target.
 - The update card offers a button straight to the releases page, in case checking or installing ever fails.
 - A failed install asks for permission before the download, not after it.
+
+## 0.46.5 (build 266) — 2026-11-04 — CURRENT
+- The Updates card is no longer empty on open: it is filled at build time, and refreshed whenever Home returns to the front.
 
 ## Keeping this file honest
 
