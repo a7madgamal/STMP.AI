@@ -40,6 +40,11 @@ class GrainCoverageTest {
         // recolours it at runtime (`entry.cardBg`), and the grain is already a SEPARATE layer
         // stacked on top of it — see the LayerDrawable in `buildCard`.
         "NotifyOverlay.kt" to "val cardBg = GradientDrawable()",
+        // The reject button's countdown fill. It is a PROGRESS FILL, not a surface: it is meant
+        // to read as a clean tinted wash shrinking inside the 44x30 touch box, and grain inside
+        // a shape that narrow would render as a speck rather than texture. The card behind it
+        // still carries grain, and the button sits on top of that.
+        "NotifyOverlay.kt" to "val rejectFill = GradientDrawable()",
         // A 10dp status dot: an OVAL, so grain inside it would be clipped to a circle smaller
         // than one grain tile and would render as a flat speck.
         "Theme.kt" to "shape = GradientDrawable.OVAL",

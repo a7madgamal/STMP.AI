@@ -5202,7 +5202,7 @@ devDependencies. `node_modules/` is gitignored.
 - The server, every plugin row, the plugin detail switch and plugin settings all use it.
 - The server knob shows a pending look while the service binds instead of sliding on the tap.
 
-## 0.44.1 (build 255) — 2026-11-04 — CURRENT
+## 0.44.1 (build 255) — 2026-11-04
 - The toggle is heavier: a routed track with an inner shadow and a cast knob.
 - The bottom bar has a real shadow again: its host was clipping the blur away.
 - Toggles no longer repeat what the knob already says; only ACTION NEEDED, ERROR and NOT SET UP remain.
@@ -5215,6 +5215,9 @@ devDependencies. `node_modules/` is gitignored.
 - Plugin toggles are right-aligned on every row.
 - SSH connections show their key fingerprint, public key and vault entry.
 - Secret URLs are each on their own line and tappable.
+
+## 0.44.2 (build 256) — 2026-11-04 — CURRENT
+- The approval card's countdown now fills the reject button instead of washing the whole card.
 
 ## Keeping this file honest
 
