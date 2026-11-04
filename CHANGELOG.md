@@ -5304,9 +5304,13 @@ devDependencies. `node_modules/` is gitignored.
 - Adding an SSH connection keeps the dialog and everything typed in it when a field is rejected.
 - Forms and dialogs no longer draw dark widgets on the cream palette on a dark-mode phone.
 
-## 0.47.4 (build 274) — 2026-11-04 — CURRENT
+## 0.47.4 (build 274) — 2026-11-04
 - The approval modal's countdown label is gone; the DENY button itself fills as time runs out.
 - The hint card's countdown spans the card again instead of a chip on the right edge.
+
+## 0.47.5 (build 275) — 2026-11-04 — CURRENT
+- SSH connections list only on the SSH screen, and secrets only on the Secrets screen.
+- The duplicates in "Other" are gone: each secret no longer appears as its own plugin row.
 
 ## Keeping this file honest
 

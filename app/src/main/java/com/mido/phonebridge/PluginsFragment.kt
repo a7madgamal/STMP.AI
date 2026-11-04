@@ -84,7 +84,22 @@ class PluginsFragment : BridgeFragment() {
         list.removeAllViews()
 
         val store = PluginSettingsStore.from(requireContext())
+        // **Per-secret plugins are not rows on this screen.**
+        //
+        // Mido, 2026-11-04: *"delete the duplicate others list, currently showing 2 secrets
+        // already shown under secrets"*. `BridgeService.registerSecretPlugin` gives every secret
+        // its own plugin (id = the secret's name) so its route is reachable — that is a ROUTING
+        // fact, not a capability a human switches on. Listing them made each secret appear twice:
+        // once under Secrets, once in "Other".
+        //
+        // Filtered by "is one of the declared plugin ids", not by "is not in a group": an id in no
+        // group is still a DEFECT worth showing (see `unlisted` below), and that guard stays.
+        //
+        // Filtered by TYPE, not by a list of ids: a list would drift from `groups` above and
+        // silently hide the next plugin someone adds. `SecretPlugin` is the one class that
+        // exists per-secret, so excluding it is precise and cannot go stale.
         val plugins = PluginRegistry.all()
+            .filterNot { it is com.mido.phonebridge.plugins.secrets.SecretPlugin }
 
         if (plugins.isEmpty()) {
             // Real state: the service has not registered yet. Say so rather than showing a blank

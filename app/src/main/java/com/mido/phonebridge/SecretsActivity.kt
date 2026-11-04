@@ -102,14 +102,30 @@ class SecretsActivity : Activity() {
         }
 
         listContainer.removeAllViews()
+        // **SSH connections are NOT listed here.**
+        //
+        // Mido, 2026-11-04: *"move ssh entries from the secrets screen to the ssh screen where
+        // they belong"*. They are vault entries, which is why they appeared — but a connection is
+        // managed by generating and installing a key, not by pasting a value, and the SSH screen
+        // already owns that flow. Listing them here offered a "delete" button and a sentence
+        // pointing elsewhere: a screen showing something it cannot edit.
+        //
+        // `ssh-` is the prefix `SshConnection.vaultName()` writes, so this filter matches the
+        // same set the SSH screen loads.
         val names = try {
-            SecretVault.names(this)
+            SecretVault.names(this).filterNot { it.startsWith("ssh-") }
         } catch (e: Exception) {
             listContainer.addView(row("vault unreadable", e.message ?: "", Theme.DANGER_SURFACE))
             emptyList()
         }
         if (names.isEmpty()) {
-            listContainer.addView(row("no secrets yet", "tap ADD SECRET", Theme.SURFACE))
+            listContainer.addView(
+                row(
+                    "no secrets yet",
+                    "tap ADD SECRET. SSH keys live on the SSH screen.",
+                    Theme.SURFACE
+                )
+            )
         }
         for (n in names) {
             val rowView = LinearLayout(this).apply {
@@ -130,6 +146,9 @@ class SecretsActivity : Activity() {
             } catch (e: Exception) {
                 SecretVault.SecretMeta()
             }
+            // Filtered above, so this is always false. Kept as a guard rather than deleted:
+            // a future entry could carry Kind.SSH under a different name prefix, and the
+            // reveal button must never appear for a private key.
             val isSsh = meta.kind == SecretVault.SecretMeta.Kind.SSH
 
             rowView.addView(Theme.text(this, n, 16f))
