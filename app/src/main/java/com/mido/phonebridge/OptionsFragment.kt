@@ -117,6 +117,26 @@ class OptionsFragment : BridgeFragment() {
             )
         )
 
+        // --- sound effects ---
+        //
+        // Mido, 2026-11-04: *"add option to toggle sound effects, should be enabled by default"*.
+        // It sits with the bridge because it is a property of the APP, not of any plugin: it gates
+        // the approval crease and the tab switch, both of which are the app's own voice.
+        container.addView(
+            toggleRow(
+                title = "Sound effects",
+                state = if (policy.soundEffects) "ON" else "OFF",
+                detail = if (policy.soundEffects) {
+                    "The paper crease when an approval modal appears and when you switch screens. " +
+                        "Plugin sounds are not affected."
+                } else {
+                    "Silent. Approvals still vibrate, and nothing a plugin plays is affected."
+                },
+                colour = if (policy.soundEffects) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
+                onToggle = { save(store, policy.withSoundEffects(!policy.soundEffects)) },
+            )
+        )
+
         // The fingerprint toggle moved to Home, into the gate card (Mido, 2026-11-03: *"gate on
         // home"*). The mode picker and the fingerprint requirement are one subject — when you are
         // asked, and how you prove it — so splitting them across two screens meant neither could

@@ -135,6 +135,18 @@ class Policy(
      */
     val autoStartOnBoot: Boolean = true,
     /**
+     * Whether the app plays its own sound effects.
+     *
+     * **Default ON.** Mido, 2026-11-04: *"add option to toggle sound effects, should be enabled by
+     * default"*. The sounds are part of how this app feels like paper being stamped rather than a
+     * notification arriving, so a silent install by default would be the wrong first impression.
+     *
+     * A preference like the others: parsed leniently, never a reason to refuse to start. It gates
+     * only sounds the APP makes — the approval crease and the tab switch — never anything a plugin
+     * does on its own account.
+     */
+    val soundEffects: Boolean = true,
+    /**
      * How the phone speaks, when a caller asks it to — cap, rate, pitch, queue depth.
      *
      * **One object rather than four fields**, and that is a deliberate answer to a defect this
@@ -178,6 +190,7 @@ class Policy(
         // claim a fact nobody established.
         .apply { aiExternalDialect?.let { put("aiExternalDialect", it.name) } }
         .put("autoStartOnBoot", autoStartOnBoot)
+        .put("soundEffects", soundEffects)
         // Always written, never omitted: the block has defaults for every key, so a file that
         // round-trips through write-then-read must read back what was stored.
         .put("tts", tts.toJson())
@@ -220,6 +233,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -235,6 +249,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -250,6 +265,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -265,6 +281,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -280,6 +297,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -295,6 +313,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -310,6 +329,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -332,6 +352,7 @@ class Policy(
             aiExternalModel = model,
             aiExternalDialect = dialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -352,7 +373,24 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = autoStartOnBoot,
+            soundEffects = soundEffects,
             tts = next
+        )
+
+    /** A new policy with the sound-effects preference changed. */
+    fun withSoundEffects(enabled: Boolean): Policy =
+        Policy(
+            global = global,
+            rules = rules,
+            fingerprintForModals = fingerprintForModals,
+            aiBackend = aiBackend,
+            aiExternalUrl = aiExternalUrl,
+            aiExternalToken = aiExternalToken,
+            aiExternalModel = aiExternalModel,
+            aiExternalDialect = aiExternalDialect,
+            autoStartOnBoot = autoStartOnBoot,
+            soundEffects = enabled,
+            tts = tts,
         )
 
     /** A new policy with the boot auto-start preference changed. */
@@ -367,6 +405,7 @@ class Policy(
             aiExternalModel = aiExternalModel,
             aiExternalDialect = aiExternalDialect,
             autoStartOnBoot = enabled,
+            soundEffects = soundEffects,
             tts = tts,
         )
 
@@ -428,6 +467,9 @@ class Policy(
             // Absent means ON. A file written before this preference existed therefore gets the
             // new behaviour without a migration step — which is why VERSION does not move.
             val autoStart = lenientFlag(o, "autoStartOnBoot", true, warnings)
+            // Absent means ON: a file written before this existed gets sound, which is the
+            // documented default and needs no migration.
+            val sound = lenientFlag(o, "soundEffects", true, warnings)
             // Absent means defaults, which is the normal state for a file written before TTS
             // existed — so absence is NOT a warning. A present-but-unreadable value is.
             val ttsSettings = TtsSettings.parse(o.optJSONObject("tts"), warnings)
@@ -441,6 +483,7 @@ class Policy(
                 aiExternalModel = externalModel,
                 aiExternalDialect = externalDialect,
                 autoStartOnBoot = autoStart,
+                soundEffects = sound,
                 tts = ttsSettings,
                 preferenceWarnings = warnings
             )

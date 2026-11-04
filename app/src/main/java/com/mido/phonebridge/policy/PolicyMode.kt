@@ -14,13 +14,13 @@ import com.mido.phonebridge.core.Verb
  * a human first. `SECURE` is stricter than `NOTIFY`, so the switch can only move
  * *toward* asking more — never away from it.
  */
-enum class GlobalMode { AUTOMATIC, SECURE, NOTIFY }
+enum class GlobalMode { WHITELIST, PARANOID, DONT_DISTURB }
 
 /**
  * The mode a request is actually gated with. Distinct from [GlobalMode] because
  * `AUTOMATIC` is a switch value that is not a mode: it resolves to one.
  */
-enum class Mode { SECURE, NOTIFY }
+enum class Mode { PARANOID, DONT_DISTURB }
 
 /**
  * Why a mode was chosen. Deliberately a policy-local enum rather than the audit's
@@ -69,16 +69,16 @@ fun resolve(
     plugin: String,
     verb: Verb
 ): ModeResolution = when (global) {
-    GlobalMode.AUTOMATIC -> {
+    GlobalMode.WHITELIST -> {
         // Exact first, then the plugin's ANY fallback. Not `firstOrNull { covers() }`,
         // which would let list ORDER decide between an exact rule and an ANY rule.
         val rule = rules.find { it.plugin == plugin && it.verb == verb }
             ?: rules.find { it.plugin == plugin && it.verb == null }
-        if (rule == null) ModeResolution(Mode.SECURE, ModeSource.DEFAULT, null)
+        if (rule == null) ModeResolution(Mode.PARANOID, ModeSource.DEFAULT, null)
         else ModeResolution(rule.mode, ModeSource.RULE, rule)
     }
-    GlobalMode.SECURE -> ModeResolution(Mode.SECURE, ModeSource.GLOBAL, null)
-    GlobalMode.NOTIFY -> ModeResolution(Mode.NOTIFY, ModeSource.GLOBAL, null)
+    GlobalMode.PARANOID -> ModeResolution(Mode.PARANOID, ModeSource.GLOBAL, null)
+    GlobalMode.DONT_DISTURB -> ModeResolution(Mode.DONT_DISTURB, ModeSource.GLOBAL, null)
 }
 
 /** Thin wrapper for callers that only need the mode. One decision path, not two. */
@@ -106,6 +106,6 @@ fun resolveMode(
  * whether it is asked at all. That invariant is the whole reason the button is safe.
  */
 fun exceptionModeFor(resolved: Mode): Mode = when (resolved) {
-    Mode.SECURE -> Mode.NOTIFY
-    Mode.NOTIFY -> Mode.SECURE
+    Mode.PARANOID -> Mode.DONT_DISTURB
+    Mode.DONT_DISTURB -> Mode.PARANOID
 }

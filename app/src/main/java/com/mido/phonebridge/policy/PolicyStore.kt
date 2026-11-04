@@ -41,7 +41,7 @@ class PolicyStore(private val dir: File) {
             // SECURE (see `resolve`), so "silence means ask me" is preserved. The default
             // changes WHICH mode is in force, not how much a rule can grant — and a rule can
             // never auto-approve, because no such mode exists.
-            val fresh = Policy(GlobalMode.AUTOMATIC, DEFAULT_RULES)
+            val fresh = Policy(GlobalMode.WHITELIST, DEFAULT_RULES)
             write(fresh)
             return fresh
         }
@@ -111,7 +111,7 @@ class PolicyStore(private val dir: File) {
          * screen like any other rule, so the human can see it and change it. A hidden default
          * that a user cannot find is the kind of thing this app refuses to do.
          */
-        private val DEFAULT_RULES: List<Rule> = listOf(Rule("help", null, Mode.NOTIFY))
+        private val DEFAULT_RULES: List<Rule> = listOf(Rule("help", null, Mode.DONT_DISTURB))
 
         @Volatile
         private var singleton: PolicyStore? = null

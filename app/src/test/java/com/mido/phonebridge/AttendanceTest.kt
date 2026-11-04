@@ -34,14 +34,14 @@ class AttendanceTest {
     @Test
     fun `a NOTIFY request may proceed unattended once the vault is unlocked`() {
         // The rule itself.
-        assertTrue(unattendedAllowed(Mode.NOTIFY, vaultUnlocked = true))
+        assertTrue(unattendedAllowed(Mode.DONT_DISTURB, vaultUnlocked = true))
     }
 
     @Test
     fun `a NOTIFY request is still denied unattended when the vault is locked`() {
         // The bound: no session, no trust. This is what stops a cold-booted phone from
         // approving things it has never been unlocked for.
-        assertFalse(unattendedAllowed(Mode.NOTIFY, vaultUnlocked = false))
+        assertFalse(unattendedAllowed(Mode.DONT_DISTURB, vaultUnlocked = false))
     }
 
     @Test
@@ -49,8 +49,8 @@ class AttendanceTest {
         // The line that must never blur. A SECURE modal exists to require a present human, and
         // its fingerprint is bound to the vault — but a vault session is NOT a substitute for a
         // human. If this ever returns true, the fingerprint gate is silently off.
-        assertFalse(unattendedAllowed(Mode.SECURE, vaultUnlocked = true))
-        assertFalse(unattendedAllowed(Mode.SECURE, vaultUnlocked = false))
+        assertFalse(unattendedAllowed(Mode.PARANOID, vaultUnlocked = true))
+        assertFalse(unattendedAllowed(Mode.PARANOID, vaultUnlocked = false))
     }
 
     @Test
@@ -61,7 +61,7 @@ class AttendanceTest {
             val allowed = unattendedAllowed(mode, vaultUnlocked = true)
             assertEquals(
                 "mode=$mode",
-                mode == Mode.NOTIFY,
+                mode == Mode.DONT_DISTURB,
                 allowed,
             )
         }
@@ -75,6 +75,6 @@ class AttendanceTest {
         //
         // This test exists so that adding a Verb parameter would fail loudly and force the
         // conversation rather than quietly narrowing the rule.
-        assertTrue(unattendedAllowed(Mode.NOTIFY, vaultUnlocked = true))
+        assertTrue(unattendedAllowed(Mode.DONT_DISTURB, vaultUnlocked = true))
     }
 }

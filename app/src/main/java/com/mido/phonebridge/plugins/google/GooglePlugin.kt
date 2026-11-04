@@ -66,8 +66,32 @@ class GooglePlugin(private val ctx: Context) : Plugin {
                     Debug.log("cannot open Google sign-in: ${e.message}")
                 }
             },
-        )
-    )
+        ),
+        // **A way out of the account.**
+        //
+        // Mido, 2026-11-04: *"add button in google plugin to logout"*. The plugin could sign in
+        // and re-sign in, but never LEAVE — so changing accounts meant clearing app data or
+        // reinstalling. That is not a preference, it is a trapdoor.
+        //
+        // Only offered when there is something to log out of: a "Log out" button on a signed-out
+        // account is a control that cannot do anything, which is the pattern this codebase keeps
+        // removing.
+        PluginSetting.Action(
+            id = "signOut",
+            label = if (AuthManager.isLoggedIn(ctx)) "Log out" else "Not signed in",
+            description = "Forgets the account and its tokens on this phone. Gmail, Calendar and " +
+                "Drive stop serving until you sign in again. Nothing in your Google account is " +
+                "changed — stored secrets and SSH keys are untouched.",
+            run = { c ->
+                try {
+                    AuthManager.clear(c)
+                    Debug.log("google: signed out")
+                } catch (e: Exception) {
+                    Debug.log("google: sign-out failed: ${e.message}")
+                }
+            },
+        ).takeIf { AuthManager.isLoggedIn(ctx) }
+    ).filterNotNull()
 
     override fun status(): PluginStatus {
         if (AuthManager.clientId.isBlank()) {
@@ -95,12 +119,9 @@ class GooglePlugin(private val ctx: Context) : Plugin {
         // no number: it invites a re-login that changes nothing.
         //
         // State what is actually true: signed in, with a refresh token that renews on demand.
-        val minutesLeft = AuthManager.tokenRemainingMs() / 60_000
-        val detail = if (minutesLeft > 0) {
-            "$email — renews automatically (current token ${minutesLeft} min)"
-        } else {
-            "$email — signed in, renews automatically"
-        }
-        return PluginStatus("Google account", PluginStatus.State.OK, detail)
+        // Just the account. Mido, 2026-11-04: *"remove all 'renews automatically' from google
+        // plugin"*. It was a reassurance about machinery the human cannot see or act on, printed
+        // on every glance at the card.
+        return PluginStatus("Google account", PluginStatus.State.OK, email)
     }
 }

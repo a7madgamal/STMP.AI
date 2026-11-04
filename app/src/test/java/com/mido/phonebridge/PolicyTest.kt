@@ -40,7 +40,7 @@ class PolicyTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    private val gmailDelete = PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)
+    private val gmailDelete = PolicyRule("gmail", Verb.DELETE, Mode.DONT_DISTURB)
 
     // --- resolveMode: the whole engine ---
 
@@ -49,10 +49,10 @@ class PolicyTest {
         // A rule that would say NOTIFY, and a switch that overrides it. SECURE is the
         // strictest value, so it wins over any stored decision.
         val rules = listOf(gmailDelete)
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.SECURE, rules, "gmail", Verb.DELETE))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.PARANOID, rules, "gmail", Verb.DELETE))
         assertEquals(
             ModeSource.GLOBAL,
-            resolve(GlobalMode.SECURE, rules, "gmail", Verb.DELETE).source
+            resolve(GlobalMode.PARANOID, rules, "gmail", Verb.DELETE).source
         )
     }
 
@@ -67,22 +67,22 @@ class PolicyTest {
             val mode = resolveMode(g, rules, "gmail", Verb.DELETE)
             assertTrue(
                 "switch $g resolved to $mode, which is below the NOTIFY floor",
-                mode == Mode.NOTIFY || mode == Mode.SECURE
+                mode == Mode.DONT_DISTURB || mode == Mode.PARANOID
             )
         }
     }
 
     @Test
     fun `notify applies to every request regardless of rules`() {
-        val rules = listOf(PolicyRule("gmail", Verb.READ, Mode.SECURE))
-        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.NOTIFY, rules, "gmail", Verb.READ))
-        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.NOTIFY, rules, "calendar", Verb.READ))
+        val rules = listOf(PolicyRule("gmail", Verb.READ, Mode.PARANOID))
+        assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.DONT_DISTURB, rules, "gmail", Verb.READ))
+        assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.DONT_DISTURB, rules, "calendar", Verb.READ))
     }
 
     @Test
     fun `automatic uses a matching rule and reports it as RULE`() {
-        val r = resolve(GlobalMode.AUTOMATIC, listOf(gmailDelete), "gmail", Verb.DELETE)
-        assertEquals(Mode.NOTIFY, r.mode)
+        val r = resolve(GlobalMode.WHITELIST, listOf(gmailDelete), "gmail", Verb.DELETE)
+        assertEquals(Mode.DONT_DISTURB, r.mode)
         assertEquals(ModeSource.RULE, r.source)
         assertEquals("gmail/DELETE", r.ruleKey)
     }
@@ -90,8 +90,8 @@ class PolicyTest {
     @Test
     fun `automatic with no matching rule is SECURE, and says DEFAULT`() {
         // The invariant: silence means "ask me". Nothing auto-approves by accident.
-        val r = resolve(GlobalMode.AUTOMATIC, listOf(gmailDelete), "calendar", Verb.DELETE)
-        assertEquals(Mode.SECURE, r.mode)
+        val r = resolve(GlobalMode.WHITELIST, listOf(gmailDelete), "calendar", Verb.DELETE)
+        assertEquals(Mode.PARANOID, r.mode)
         assertEquals(ModeSource.DEFAULT, r.source)
         assertNull(r.ruleKey)
     }
@@ -99,21 +99,21 @@ class PolicyTest {
     @Test
     fun `automatic matches on both plugin and verb, never one of them`() {
         // gmail/READ must not be satisfied by a rule for calendar/READ or gmail/DELETE.
-        val rules = listOf(PolicyRule("calendar", Verb.READ, Mode.NOTIFY), gmailDelete)
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "calendar", Verb.WRITE))
-        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "calendar", Verb.READ))
+        val rules = listOf(PolicyRule("calendar", Verb.READ, Mode.DONT_DISTURB), gmailDelete)
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.READ))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "calendar", Verb.WRITE))
+        assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.WHITELIST, rules, "calendar", Verb.READ))
     }
 
     // --- ANY: one axis, two levels (Mido, 2026-10-19) ---
 
     @Test
     fun `an ANY rule covers every verb of its plugin`() {
-        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
+        val rules = listOf(PolicyRule("gmail", null, Mode.DONT_DISTURB))
         for (v in Verb.values()) {
             assertEquals(
                 "ANY did not cover gmail/${v.name}",
-                Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", v)
+                Mode.DONT_DISTURB, resolveMode(GlobalMode.WHITELIST, rules, "gmail", v)
             )
         }
     }
@@ -122,9 +122,9 @@ class PolicyTest {
     fun `an ANY rule does not leak to another plugin`() {
         // The plugin axis stays exact. This is the whole difference between a bounded
         // two-level rule and the unbounded cascade the plan deleted.
-        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "calendar", Verb.READ))
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "notifications", Verb.EXECUTE))
+        val rules = listOf(PolicyRule("gmail", null, Mode.DONT_DISTURB))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "calendar", Verb.READ))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "notifications", Verb.EXECUTE))
     }
 
     @Test
@@ -132,11 +132,11 @@ class PolicyTest {
         // The precedence rule, asserted rather than left to list order. ANY is a
         // fallback, so a broad rule cannot silently swallow a deliberate exception.
         val rules = listOf(
-            PolicyRule("gmail", null, Mode.NOTIFY),
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+            PolicyRule("gmail", null, Mode.DONT_DISTURB),
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID)
         )
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
-        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.DELETE))
+        assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.READ))
     }
 
     @Test
@@ -145,16 +145,16 @@ class PolicyTest {
         // same policy resolves differently depending on write order — the defect the
         // duplicate-pair guard exists to prevent, in a new shape.
         val exactFirst = listOf(
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE),
-            PolicyRule("gmail", null, Mode.NOTIFY)
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID),
+            PolicyRule("gmail", null, Mode.DONT_DISTURB)
         )
         val anyFirst = listOf(
-            PolicyRule("gmail", null, Mode.NOTIFY),
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+            PolicyRule("gmail", null, Mode.DONT_DISTURB),
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID)
         )
         for (rules in listOf(exactFirst, anyFirst)) {
-            assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
-            assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
+            assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.DELETE))
+            assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.READ))
         }
     }
 
@@ -162,10 +162,10 @@ class PolicyTest {
     fun `an ANY rule still cannot weaken a request below NOTIFY`() {
         // ANY widens WHICH requests a rule covers, never what it may do to them. The
         // 0.12.0 floor is untouched by it.
-        val rules = listOf(PolicyRule("gmail", null, Mode.NOTIFY))
+        val rules = listOf(PolicyRule("gmail", null, Mode.DONT_DISTURB))
         for (g in GlobalMode.values()) {
             val mode = resolveMode(g, rules, "gmail", Verb.DELETE)
-            assertTrue("switch $g resolved to $mode", mode == Mode.NOTIFY || mode == Mode.SECURE)
+            assertTrue("switch $g resolved to $mode", mode == Mode.DONT_DISTURB || mode == Mode.PARANOID)
         }
     }
 
@@ -173,10 +173,10 @@ class PolicyTest {
     fun `an ANY rule round-trips through the file`() {
         val dir = tmp.newFolder()
         val rules = listOf(
-            PolicyRule("gmail", null, Mode.NOTIFY),
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+            PolicyRule("gmail", null, Mode.DONT_DISTURB),
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID)
         )
-        PolicyStore(dir).set(Policy(GlobalMode.AUTOMATIC, rules))
+        PolicyStore(dir).set(Policy(GlobalMode.WHITELIST, rules))
         val back = PolicyStore(dir).get()
         assertEquals(rules, back.rules)
         assertNull(back.rules.first { it.plugin == "gmail" && it.verb == null }.verb)
@@ -186,7 +186,7 @@ class PolicyTest {
     fun `the stored token for an ANY rule is the literal ANY`() {
         // The file says what it means. A missing verb key must never be read as a
         // wildcard, which is why the token is explicit and required.
-        val json = Policy(GlobalMode.AUTOMATIC, listOf(PolicyRule("gmail", null, Mode.NOTIFY))).toJson()
+        val json = Policy(GlobalMode.WHITELIST, listOf(PolicyRule("gmail", null, Mode.DONT_DISTURB))).toJson()
         assertEquals(PolicyRule.ANY, json.getJSONArray("rules").getJSONObject(0).getString("verb"))
     }
 
@@ -194,7 +194,7 @@ class PolicyTest {
     fun `a rule with a missing verb is refused, never read as ANY`() {
         val e = assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","mode":"NOTIFY"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","mode":"DONT_DISTURB"}]}"""
             )
         }
         assertEquals(true, e.message!!.contains("unknown verb"))
@@ -205,9 +205,9 @@ class PolicyTest {
         // They are different keys, so this is NOT a duplicate. If the guard ever treats
         // them as one, the exact-over-ANY pattern becomes unauthorable.
         val p = Policy.parse(
-            """{"version":1,"global":"AUTOMATIC","rules":[""" +
-                """{"plugin":"gmail","verb":"ANY","mode":"NOTIFY"},""" +
-                """{"plugin":"gmail","verb":"DELETE","mode":"SECURE"}]}"""
+            """{"version":1,"global":"WHITELIST","rules":[""" +
+                """{"plugin":"gmail","verb":"ANY","mode":"DONT_DISTURB"},""" +
+                """{"plugin":"gmail","verb":"DELETE","mode":"PARANOID"}]}"""
         )
         assertEquals(2, p.rules.size)
     }
@@ -216,9 +216,9 @@ class PolicyTest {
     fun `two ANY rules for one plugin are still a duplicate`() {
         assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[""" +
-                    """{"plugin":"gmail","verb":"ANY","mode":"NOTIFY"},""" +
-                    """{"plugin":"gmail","verb":"ANY","mode":"SECURE"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[""" +
+                    """{"plugin":"gmail","verb":"ANY","mode":"DONT_DISTURB"},""" +
+                    """{"plugin":"gmail","verb":"ANY","mode":"PARANOID"}]}"""
             )
         }
     }
@@ -247,22 +247,22 @@ class PolicyTest {
     @Test
     fun `a valid policy round-trips through write and read`() {
         val dir = tmp.newFolder()
-        PolicyStore(dir).set(Policy(GlobalMode.NOTIFY))
+        PolicyStore(dir).set(Policy(GlobalMode.DONT_DISTURB))
         // A fresh store on the same dir proves it came off disk, not the cache.
-        assertEquals(GlobalMode.NOTIFY, PolicyStore(dir).get().global)
+        assertEquals(GlobalMode.DONT_DISTURB, PolicyStore(dir).get().global)
     }
 
     @Test
     fun `rules round-trip and keep their order`() {
         val dir = tmp.newFolder()
         val rules = listOf(
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE),
-            PolicyRule("notifications", Verb.READ, Mode.NOTIFY),
-            PolicyRule("calendar", Verb.WRITE, Mode.NOTIFY)
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID),
+            PolicyRule("notifications", Verb.READ, Mode.DONT_DISTURB),
+            PolicyRule("calendar", Verb.WRITE, Mode.DONT_DISTURB)
         )
-        PolicyStore(dir).set(Policy(GlobalMode.AUTOMATIC, rules))
+        PolicyStore(dir).set(Policy(GlobalMode.WHITELIST, rules))
         val back = PolicyStore(dir).get()
-        assertEquals(GlobalMode.AUTOMATIC, back.global)
+        assertEquals(GlobalMode.WHITELIST, back.global)
         assertEquals(rules, back.rules)
     }
 
@@ -281,7 +281,7 @@ class PolicyTest {
     fun `an unknown verb in a rule is refused`() {
         assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","verb":"NUKE","mode":"NOTIFY"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"NUKE","mode":"DONT_DISTURB"}]}"""
             )
         }
     }
@@ -290,7 +290,7 @@ class PolicyTest {
     fun `an unknown mode in a rule is refused`() {
         assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","verb":"DELETE","mode":"WHATEVER"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"WHATEVER"}]}"""
             )
         }
     }
@@ -303,7 +303,7 @@ class PolicyTest {
         // row would bypass the gate.
         assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"gmail","verb":"DELETE","mode":"OFF"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"gmail","verb":"DELETE","mode":"OFF"}]}"""
             )
         }
     }
@@ -333,9 +333,9 @@ class PolicyTest {
         // The same file must not resolve differently depending on write order.
         val e = assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[""" +
-                    """{"plugin":"gmail","verb":"DELETE","mode":"NOTIFY"},""" +
-                    """{"plugin":"gmail","verb":"DELETE","mode":"SECURE"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[""" +
+                    """{"plugin":"gmail","verb":"DELETE","mode":"DONT_DISTURB"},""" +
+                    """{"plugin":"gmail","verb":"DELETE","mode":"PARANOID"}]}"""
             )
         }
         assertEquals(true, e.message!!.contains("duplicate"))
@@ -345,7 +345,7 @@ class PolicyTest {
     fun `a wildcard plugin is refused`() {
         assertThrows(PolicyException::class.java) {
             Policy.parse(
-                """{"version":1,"global":"AUTOMATIC","rules":[{"plugin":"*","verb":"DELETE","mode":"NOTIFY"}]}"""
+                """{"version":1,"global":"WHITELIST","rules":[{"plugin":"*","verb":"DELETE","mode":"DONT_DISTURB"}]}"""
             )
         }
     }
@@ -353,7 +353,7 @@ class PolicyTest {
     @Test
     fun `a missing rules array is refused rather than assumed empty`() {
         assertThrows(PolicyException::class.java) {
-            Policy.parse("""{"version":1,"global":"SECURE"}""")
+            Policy.parse("""{"version":1,"global":"PARANOID"}""")
         }
     }
 
@@ -365,7 +365,7 @@ class PolicyTest {
     @Test
     fun `a wrong version is refused`() {
         assertThrows(PolicyException::class.java) {
-            Policy.parse("""{"version":99,"global":"SECURE","rules":[]}""")
+            Policy.parse("""{"version":99,"global":"PARANOID","rules":[]}""")
         }
     }
 
@@ -381,17 +381,17 @@ class PolicyTest {
     @Test
     fun `withRule replaces an existing pair instead of adding a second`() {
         // Duplicates are a parse error, so the editor must never be able to create one.
-        val p = Policy(GlobalMode.AUTOMATIC, listOf(gmailDelete))
-        val next = p.withRule(PolicyRule("gmail", Verb.DELETE, Mode.SECURE))
+        val p = Policy(GlobalMode.WHITELIST, listOf(gmailDelete))
+        val next = p.withRule(PolicyRule("gmail", Verb.DELETE, Mode.PARANOID))
         assertEquals(1, next.rules.size)
-        assertEquals(Mode.SECURE, next.rules.single().mode)
+        assertEquals(Mode.PARANOID, next.rules.single().mode)
     }
 
     @Test
     fun `withoutRule removes the pair and leaves the rest alone`() {
         val p = Policy(
-            GlobalMode.AUTOMATIC,
-            listOf(gmailDelete, PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
+            GlobalMode.WHITELIST,
+            listOf(gmailDelete, PolicyRule("calendar", Verb.READ, Mode.DONT_DISTURB))
         )
         val next = p.withoutRule("gmail", Verb.DELETE)
         assertEquals(1, next.rules.size)
@@ -403,8 +403,8 @@ class PolicyTest {
     @Test
     fun `an exception is the OTHER mode, and can never auto-approve`() {
         // The whole point of the button: one tap changes HOW a pair is asked about.
-        assertEquals(Mode.NOTIFY, exceptionModeFor(Mode.SECURE))
-        assertEquals(Mode.SECURE, exceptionModeFor(Mode.NOTIFY))
+        assertEquals(Mode.DONT_DISTURB, exceptionModeFor(Mode.PARANOID))
+        assertEquals(Mode.PARANOID, exceptionModeFor(Mode.DONT_DISTURB))
         // The floor holds by construction — there is no auto-approve Mode to return.
         for (m in Mode.values()) {
             assertTrue(
@@ -418,13 +418,13 @@ class PolicyTest {
     fun `a modal-written exception round-trips through the file`() {
         // What the button writes must reload as the same decision, or the tap is a lie
         // the next boot undoes.
-        val written = Policy(GlobalMode.AUTOMATIC).withRule(
-            PolicyRule("gmail", Verb.DELETE, exceptionModeFor(Mode.SECURE))
+        val written = Policy(GlobalMode.WHITELIST).withRule(
+            PolicyRule("gmail", Verb.DELETE, exceptionModeFor(Mode.PARANOID))
         )
         val reloaded = Policy.parse(written.toJson().toString())
         assertEquals(written.rules, reloaded.rules)
         assertEquals(
-            Mode.NOTIFY,
+            Mode.DONT_DISTURB,
             resolveMode(reloaded.global, reloaded.rules, "gmail", Verb.DELETE)
         )
     }
@@ -434,14 +434,14 @@ class PolicyTest {
         // Read-modify-write, never a fresh Policy: constructing a new one would drop every
         // sibling rule, which this project already paid for once in applyGate.
         val p = Policy(
-            GlobalMode.AUTOMATIC,
-            listOf(PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
+            GlobalMode.WHITELIST,
+            listOf(PolicyRule("calendar", Verb.READ, Mode.DONT_DISTURB))
         )
-        val next = p.withRule(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY))
+        val next = p.withRule(PolicyRule("gmail", Verb.DELETE, Mode.DONT_DISTURB))
         assertEquals(2, next.rules.size)
-        assertEquals(GlobalMode.AUTOMATIC, next.global)
+        assertEquals(GlobalMode.WHITELIST, next.global)
         assertEquals(
-            Mode.NOTIFY,
+            Mode.DONT_DISTURB,
             resolveMode(next.global, next.rules, "calendar", Verb.READ)
         )
     }
@@ -450,11 +450,11 @@ class PolicyTest {
     fun `an exact modal exception beats the plugin's ANY rule`() {
         // The precedence the engine already promises must survive a write from the modal.
         val rules = listOf(
-            PolicyRule("gmail", null, Mode.NOTIFY),
-            PolicyRule("gmail", Verb.DELETE, Mode.SECURE)
+            PolicyRule("gmail", null, Mode.DONT_DISTURB),
+            PolicyRule("gmail", Verb.DELETE, Mode.PARANOID)
         )
-        assertEquals(Mode.SECURE, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.DELETE))
-        assertEquals(Mode.NOTIFY, resolveMode(GlobalMode.AUTOMATIC, rules, "gmail", Verb.READ))
+        assertEquals(Mode.PARANOID, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.DELETE))
+        assertEquals(Mode.DONT_DISTURB, resolveMode(GlobalMode.WHITELIST, rules, "gmail", Verb.READ))
     }
 
     // --- first run ---
@@ -468,7 +468,7 @@ class PolicyTest {
         // AUTOMATIC, not SECURE: it is the only mode that READS the rule table, so it is the
         // only one where a seeded default rule means anything. Under a forced SECURE/NOTIFY
         // every rule is inert and the `help` rule below would be a line that never fires.
-        assertEquals(GlobalMode.AUTOMATIC, fresh.global)
+        assertEquals(GlobalMode.WHITELIST, fresh.global)
 
         // The seeded exception: /help is a normal gated route, downgraded to the 5s card so a
         // newcomer's first call does not cost a full-screen modal. NOTIFY is still the floor —
@@ -477,13 +477,13 @@ class PolicyTest {
         val help = fresh.rules.single()
         assertEquals("help", help.plugin)
         assertNull("ANY, so a future help route is downgraded too", help.verb)
-        assertEquals(Mode.NOTIFY, help.mode)
+        assertEquals(Mode.DONT_DISTURB, help.mode)
 
         // And AUTOMATIC with no rule still means SECURE: the default changed which mode is in
         // force, not how much a rule can grant.
         assertEquals(
-            Mode.SECURE,
-            resolveMode(GlobalMode.AUTOMATIC, fresh.rules, "gmail", Verb.DELETE),
+            Mode.PARANOID,
+            resolveMode(GlobalMode.WHITELIST, fresh.rules, "gmail", Verb.DELETE),
         )
 
         // Written immediately, so "never chosen" is not re-derived on every boot.
@@ -494,9 +494,9 @@ class PolicyTest {
     fun `the file is replaced atomically, leaving no temp behind`() {
         val dir = tmp.newFolder()
         val store = PolicyStore(dir)
-        store.set(Policy(GlobalMode.SECURE))
-        store.set(Policy(GlobalMode.NOTIFY))
-        assertEquals(GlobalMode.NOTIFY, PolicyStore(dir).get().global)
+        store.set(Policy(GlobalMode.PARANOID))
+        store.set(Policy(GlobalMode.DONT_DISTURB))
+        assertEquals(GlobalMode.DONT_DISTURB, PolicyStore(dir).get().global)
         assertEquals(false, File(dir, "policy.json.tmp").exists())
     }
 
@@ -508,7 +508,7 @@ class PolicyTest {
         // unchanged, because VERSION did not move. A bump here would invalidate the file on every
         // device that already has one — and that file now survives a reinstall, so the damage
         // would be sticky.
-        val raw = """{"version":1,"global":"SECURE","rules":[]}"""
+        val raw = """{"version":1,"global":"PARANOID","rules":[]}"""
         val p = Policy.parse(raw)
         assertEquals(false, p.fingerprintForModals)
         assertEquals(AiBackend.OFF, p.aiBackend)
@@ -522,7 +522,7 @@ class PolicyTest {
     fun `auto-start can be turned OFF and survives a round trip`() {
         val dir = tmp.newFolder()
         val store = PolicyStore(dir)
-        store.set(Policy(GlobalMode.AUTOMATIC, emptyList(), autoStartOnBoot = false))
+        store.set(Policy(GlobalMode.WHITELIST, emptyList(), autoStartOnBoot = false))
         // Re-read through a NEW store, so this proves the file, not the cache.
         assertEquals(false, PolicyStore(dir).get().autoStartOnBoot)
     }
@@ -532,7 +532,7 @@ class PolicyTest {
         // Same leniency contract as the other preferences, with a different default: the safe
         // direction here is ON, because the failure mode is a visible running server rather than
         // a silently dead bridge.
-        val raw = """{"version":1,"global":"SECURE","rules":[],"autoStartOnBoot":"yes"}"""
+        val raw = """{"version":1,"global":"PARANOID","rules":[],"autoStartOnBoot":"yes"}"""
         val p = Policy.parse(raw)
         assertEquals(true, p.autoStartOnBoot)
         assertTrue(p.preferenceWarnings.isNotEmpty())
@@ -543,17 +543,17 @@ class PolicyTest {
         // The carry-over trap, now covering all three: each `withX` rebuilds the object
         // positionally, so a new field that is not carried in EVERY builder silently resets.
         val base = Policy(
-            GlobalMode.AUTOMATIC,
+            GlobalMode.WHITELIST,
             emptyList(),
             fingerprintForModals = true,
             aiBackend = AiBackend.LOCAL,
             autoStartOnBoot = false,
         )
-        val afterRule = base.withRule(PolicyRule("gmail", Verb.READ, Mode.NOTIFY))
+        val afterRule = base.withRule(PolicyRule("gmail", Verb.READ, Mode.DONT_DISTURB))
         assertEquals(false, afterRule.autoStartOnBoot)
         assertEquals(AiBackend.LOCAL, afterRule.aiBackend)
 
-        val afterGlobal = base.withGlobal(GlobalMode.SECURE)
+        val afterGlobal = base.withGlobal(GlobalMode.PARANOID)
         assertEquals(false, afterGlobal.autoStartOnBoot)
         assertEquals(true, afterGlobal.fingerprintForModals)
 
@@ -564,7 +564,7 @@ class PolicyTest {
 
     @Test
     fun `a preference is read when present`() {
-        val raw = """{"version":1,"global":"SECURE","rules":[],""" +
+        val raw = """{"version":1,"global":"PARANOID","rules":[],""" +
             """"fingerprintForModals":true,"aiBackend":"LOCAL"}"""
         val p = Policy.parse(raw)
         assertEquals(true, p.fingerprintForModals)
@@ -576,7 +576,7 @@ class PolicyTest {
         // The whole reason these are lenient: a preference must never be able to refuse to start
         // the server. `optBoolean` would coerce "yes" to false silently; this asserts the value
         // is ignored AND that the file still parses, which is the contract.
-        val raw = """{"version":1,"global":"SECURE","rules":[],""" +
+        val raw = """{"version":1,"global":"PARANOID","rules":[],""" +
             """"fingerprintForModals":"yes","aiBackend":0}"""
         val p = Policy.parse(raw)
         assertEquals(false, p.fingerprintForModals)
@@ -597,12 +597,12 @@ class PolicyTest {
         // sibling field. Here that would turn the AI off (or a fingerprint requirement on) every
         // time someone added a rule — with nothing in the UI saying why.
         val base = Policy(
-            GlobalMode.AUTOMATIC,
-            listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
+            GlobalMode.WHITELIST,
+            listOf(PolicyRule("gmail", Verb.DELETE, Mode.DONT_DISTURB)),
             fingerprintForModals = true,
             aiBackend = AiBackend.LOCAL
         )
-        val next = base.withRule(PolicyRule("calendar", Verb.READ, Mode.NOTIFY))
+        val next = base.withRule(PolicyRule("calendar", Verb.READ, Mode.DONT_DISTURB))
         assertEquals(true, next.fingerprintForModals)
         assertEquals(AiBackend.LOCAL, next.aiBackend)
         assertEquals(2, next.rules.size)
@@ -617,13 +617,13 @@ class PolicyTest {
         // `applyGate` used to build `Policy(after, existing.rules)` and wipe the rule table; the
         // fix was `withGlobal`. Same trap, same test.
         val base = Policy(
-            GlobalMode.SECURE,
-            listOf(PolicyRule("gmail", Verb.DELETE, Mode.NOTIFY)),
+            GlobalMode.PARANOID,
+            listOf(PolicyRule("gmail", Verb.DELETE, Mode.DONT_DISTURB)),
             fingerprintForModals = true,
             aiBackend = AiBackend.LOCAL
         )
-        val next = base.withGlobal(GlobalMode.AUTOMATIC)
-        assertEquals(GlobalMode.AUTOMATIC, next.global)
+        val next = base.withGlobal(GlobalMode.WHITELIST)
+        assertEquals(GlobalMode.WHITELIST, next.global)
         assertEquals(true, next.fingerprintForModals)
         assertEquals(AiBackend.LOCAL, next.aiBackend)
         // And the rules, which `Policy(after)` alone used to wipe.
@@ -636,7 +636,7 @@ class PolicyTest {
         val store = PolicyStore(dir)
         store.set(
             Policy(
-                GlobalMode.AUTOMATIC,
+                GlobalMode.WHITELIST,
                 listOf(gmailDelete),
                 fingerprintForModals = true,
                 aiBackend = AiBackend.LOCAL
@@ -646,6 +646,6 @@ class PolicyTest {
         assertEquals(true, reread.fingerprintForModals)
         assertEquals(AiBackend.LOCAL, reread.aiBackend)
         assertEquals(1, reread.rules.size)
-        assertEquals(GlobalMode.AUTOMATIC, reread.global)
+        assertEquals(GlobalMode.WHITELIST, reread.global)
     }
 }

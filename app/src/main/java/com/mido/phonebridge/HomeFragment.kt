@@ -188,15 +188,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             addView(heroTitle)
             addView(heroSub)
         }
+        // **The knob sits IN the header row, top right.**
+        //
+        // Mido, 2026-11-04: *"server toggle still in its own row, it should be top right aligned
+        // so the header gets compacted"*. It was below the title in a row of its own, which cost
+        // an entire line of vertical space on the one card that is meant to be read at a glance.
+        //
+        // TOP-aligned rather than centred: the text block is two lines tall, and a centred knob
+        // drifts to the vertical middle of the card, away from the title it belongs to.
         val heroRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            gravity = android.view.Gravity.TOP
             addView(mark)
             addView(heroText, LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
             ))
         }
-        heroCard.addView(heroRow)
 
         // --- 2. THE CONTROL: inside the hero, because it is the answer's other half ---
         //
@@ -211,14 +218,6 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // the switch sitting under that sentence has exactly one possible meaning. A lone knob
         // hard right also makes the row shorter, which is the point — the hero is meant to be read
         // at a glance, not parsed.
-        val serveRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            // END, not CENTER_VERTICAL with a spacer: with nothing to its left the knob should sit
-            // against the card's right edge rather than float in the middle.
-            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, Theme.dp(ctx, 10), 0, 0)
-        }
-
         serverToggle = Theme.toggle(
             ctx,
             on = BridgeService.serverUp,
@@ -249,8 +248,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // without waiting for the 5s tick. The tick covers the case where it takes longer.
             uiTickHandler.postDelayed({ render() }, 600)
         }
-        serveRow.addView(serverToggle)
-        heroCard.addView(serveRow)
+        heroRow.addView(serverToggle, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { marginStart = Theme.dp(ctx, 8) })
+        heroCard.addView(heroRow)
         container.addView(heroCard)
 
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
@@ -699,23 +701,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // Only AUTOMATIC reads the rules. The other two force one mode on every
             // request, and the card says which so the home screen never shows a switch
             // position without showing what it implies.
-            GlobalMode.AUTOMATIC -> {
+            GlobalMode.WHITELIST -> {
                 gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "AUTOMATIC"
+                gateTitle.text = "WHITELIST"
                 gateSub.text = rulesSummary()
             }
-            GlobalMode.SECURE -> {
+            GlobalMode.PARANOID -> {
                 gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "SECURE"
-                gateSub.text = "Every request needs your stamp. Biometric required."
+                gateTitle.text = "PARANOID"
+                gateSub.text = "Every request needs your stamp. Nothing is quiet."
             }
-            GlobalMode.NOTIFY -> {
+            GlobalMode.DONT_DISTURB -> {
                 // Amber, not red: the gate still exists, it is just quiet and fast.
                 // Calling it red would make the real panic switch less loud by
                 // comparison, which is the failure that matters.
                 gateCard.background = Theme.surface(ctx, Theme.WARNING_SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "⚠ NOTIFY"
-                gateSub.text = "Small overlay toast. Silent 5s = approved. Tap ✕ to reject."
+                gateTitle.text = "⚠ DON'T DISTURB"
+                gateSub.text = "Small overlay. Doing nothing approves it. Tap ✕ to reject."
             }
         }
         gateTitle.setTextColor(Theme.ON_SURFACE)
@@ -729,8 +731,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             }
             gateButtons.addView(b, LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ).apply { marginEnd = Theme.dp(ctx, 6) })
+            ).apply { marginEnd = Theme.dp(ctx, 4) })
         }
+
+        // **A way into the rule table from the card that shows it.**
+        //
+        // Mido, 2026-11-04: *"approval gate should have a button to edit the rules"*. The card
+        // already SUMMARISES the rules ("3 rules · 2 quiet") but the only route to change one was
+        // Settings → Tools → Exceptions, three taps away from the thing being described. A summary
+        // you cannot act on is a label, not a control.
+        //
+        // It sits in the same row as the three modes and takes a fixed share rather than a weight:
+        // the modes are a choice of three, this is a different verb.
+        gateButtons.addView(
+            Theme.button(ctx, "RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
+                go(Intent(ctx, ExceptionsActivity::class.java))
+            },
+        )
 
         // The fingerprint control, rendered from the STORED value rather than from what we
         // assume: a write that silently failed must not leave the screen claiming otherwise.
@@ -770,14 +787,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 // `setCheckedAnimated` only moves when the value actually differs, so a repaint
                 // that changed nothing cannot make the knob twitch.
                 if (gateFingerprint.checked != fp) gateFingerprint.setCheckedAnimated(fp)
+                // **No explanatory sentence.**
+                //
+                // Mido, 2026-11-04: *"remove the desc saying A SECURE request...."*. It restated
+                // what the knob beside it already says, in two variants that both began with the
+                // same four words — the kind of text that gets read once and then becomes noise.
+                // A hidden `when` branch keeps the view's visibility logic intact.
                 gateFingerprintWhy.setTextColor(Theme.ON_SURFACE_VARIANT)
-                gateFingerprintWhy.text = if (fp) {
-                    "A SECURE request needs your fingerprint to approve. A denied prompt leaves " +
-                        "the request pending so you can retry in its window."
-                } else {
-                    "A SECURE request approves on a plain tap, like NOTIFY does. The secret vault " +
-                        "is unaffected — it keeps its own fingerprint."
-                }
+                gateFingerprintWhy.text = ""
             }
         }
     }
@@ -894,7 +911,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
         if (next == current) return
 
-        if (next == GlobalMode.NOTIFY) {
+        if (next == GlobalMode.DONT_DISTURB) {
             // Not a red-alert confirmation: NOTIFY still asks, just quietly. But it is
             // the value where silence means YES, so it gets one sentence saying so.
             confirm(

@@ -53,6 +53,6 @@ data class Rule(
          * and the tests agree on one source, and so a future mode has to be added here
          * deliberately rather than becoming rule-settable by default.
          */
-        val ALLOWED_MODES: List<Mode> = listOf(Mode.NOTIFY, Mode.SECURE)
+        val ALLOWED_MODES: List<Mode> = listOf(Mode.DONT_DISTURB, Mode.PARANOID)
     }
 }

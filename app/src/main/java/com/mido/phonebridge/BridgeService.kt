@@ -1275,7 +1275,7 @@ class HttpServer(
             // Computed before the attendance check, because attendance is judged against
             // the mode that will actually gate the request, not the one policy suggested.
             val needsPassword = resolved.route.needsPassword?.invoke(req) == true
-            val mode = if (needsPassword) Mode.SECURE else resolvedPolicyMode
+            val mode = if (needsPassword) Mode.PARANOID else resolvedPolicyMode
             val globalMode = policy.global
 
             // ATTENDANCE. A request that cannot be shown to an attending human is DENIED —
@@ -1322,7 +1322,7 @@ class HttpServer(
                 draft.outcome(AuditOutcome.APPROVED)
             } else {
                 when (mode) {
-                    Mode.NOTIFY -> {
+                    Mode.DONT_DISTURB -> {
                         if (unattendedProceed) {
                             // Nobody is at the screen, so a card cannot be read and must not be
                             // drawn. Drawing one would be the dishonest version: it would report
@@ -1439,7 +1439,7 @@ class HttpServer(
                             }
                         }
                     }
-                    Mode.SECURE -> {
+                    Mode.PARANOID -> {
                         // Central gate: describe the concrete call, then wait for the human.
                         //
                         // The AI summary is NO LONGER computed here (Mido, 2026-10-19). It used
@@ -1464,7 +1464,7 @@ class HttpServer(
                                 // Keystore and `lockOnLoad` still unlocks it at app start, so a locked
                                 // vault answers `secret_locked` exactly as it already does under
                                 // NOTIFY, which never touched biometrics either.
-                                requiresBiometric = mode == Mode.SECURE && policy.fingerprintForModals,
+                                requiresBiometric = mode == Mode.PARANOID && policy.fingerprintForModals,
                                 rows = rows,
                                 exceptionOffer = exceptionOfferFor(
                                     globalMode, resolved.plugin.id, verb, mode
@@ -1595,7 +1595,7 @@ class HttpServer(
         globalMode: GlobalMode,
         resolved: ModeResolution
     ): Decision {
-        val mode = Mode.SECURE.name
+        val mode = Mode.PARANOID.name
         val source = decisionSource(resolved.source)
         val ruleKey = resolved.ruleKey
         return when (g) {
@@ -1645,11 +1645,11 @@ class HttpServer(
         verb: Verb,
         resolvedMode: Mode
     ): ApprovalGate.ExceptionOffer? {
-        if (globalMode != GlobalMode.AUTOMATIC) return null
+        if (globalMode != GlobalMode.WHITELIST) return null
         val exceptionMode = exceptionModeFor(resolvedMode)
         return ApprovalGate.ExceptionOffer(
             rule = Rule(plugin, verb, exceptionMode),
-            label = if (exceptionMode == Mode.NOTIFY) "ALWAYS NOTIFY" else "ALWAYS ASK"
+            label = if (exceptionMode == Mode.DONT_DISTURB) "ALWAYS NOTIFY" else "ALWAYS ASK"
         )
     }
 

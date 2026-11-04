@@ -83,7 +83,7 @@ class ExceptionsActivity : Activity() {
             Theme.text(
                 this,
                 when (policy.global) {
-                    GlobalMode.AUTOMATIC ->
+                    GlobalMode.WHITELIST ->
                         "The switch is AUTOMATIC, so these rules are in force. " +
                             "A pair with no rule asks you first."
                     else ->
@@ -146,13 +146,13 @@ class ExceptionsActivity : Activity() {
             // that does not exist.
             "${rule.plugin} · ${rule.verb?.name?.lowercase() ?: "any"} — " +
                 rule.mode.name.lowercase() +
-                if (rule.mode == Mode.SECURE) " (default)" else "",
+                if (rule.mode == Mode.PARANOID) " (default)" else "",
             13f
         )
         row.addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         row.addView(
-            Theme.button(this, if (rule.mode == Mode.NOTIFY) "→ secure" else "→ notify",
+            Theme.button(this, if (rule.mode == Mode.DONT_DISTURB) "→ secure" else "→ notify",
                 Theme.ButtonStyle.NEUTRAL, small = true) {
                 setRule(policy, Rule(rule.plugin, rule.verb, toggle(rule.mode)), "settings")
             }
@@ -172,7 +172,7 @@ class ExceptionsActivity : Activity() {
     }
 
     private fun toggle(mode: Mode): Mode =
-        if (mode == Mode.NOTIFY) Mode.SECURE else Mode.NOTIFY
+        if (mode == Mode.DONT_DISTURB) Mode.PARANOID else Mode.DONT_DISTURB
 
     // --- authoring flow: plugin, then verb, then mode ---
 
@@ -213,8 +213,8 @@ class ExceptionsActivity : Activity() {
             .setItems(labels) { _, which ->
                 when (which) {
                     0 -> clearRule(policy, plugin, verb, "settings")
-                    1 -> setRule(policy, Rule(plugin, verb, Mode.NOTIFY), "settings")
-                    else -> setRule(policy, Rule(plugin, verb, Mode.SECURE), "settings")
+                    1 -> setRule(policy, Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
+                    else -> setRule(policy, Rule(plugin, verb, Mode.PARANOID), "settings")
                 }
             }
             .show()

@@ -184,6 +184,14 @@ class MainActivity : AppCompatActivity() {
      * nobody is looking at, which is the same family of bug that ate taps for three releases.
      * Losing scroll position is the cheaper cost, and it is visible rather than silent.
      */
+    /** Whether the app should make its own sounds. Unreadable policy means quiet, not noisy. */
+    private fun soundEffectsOn(): Boolean = try {
+        com.mido.phonebridge.policy.PolicyStore.from(applicationContext).get().soundEffects
+    } catch (e: Exception) {
+        Debug.log("sound preference unreadable (${e.message}); staying quiet")
+        false
+    }
+
     private fun show(tab: Theme.Tab) {
         if (supportFragmentManager.isStateSaved) {
             // Committing after state is saved throws. This only happens while backgrounded, so
@@ -197,6 +205,8 @@ class MainActivity : AppCompatActivity() {
             Theme.Tab.PLUGINS -> PluginsFragment()
             Theme.Tab.SETTINGS -> OptionsFragment()
         }
+        // Read BEFORE `currentTab` is reassigned below; otherwise this is always false.
+        val changing = currentTab != tab
         supportFragmentManager.beginTransaction()
             .replace(CONTAINER_ID, fragment)
             // No transition: the point of this whole change is that switching tabs does not
@@ -205,6 +215,25 @@ class MainActivity : AppCompatActivity() {
             .setTransition(androidx.fragment.app.FragmentTransaction.TRANSIT_NONE)
             .commitNow()
         rebuildBar(tab)
+
+        // **The same paper-crease as the approval modal.**
+        //
+        // Mido, 2026-11-04: *"play the same modal sound on screen switch"*. A tab IS a sheet
+        // being turned here, so the same sound says the same thing — and reusing `modalAppear`
+        // rather than adding a second sample is what keeps it one material.
+        //
+        // Gated by the preference, and only on a REAL change: `show()` also runs on first paint,
+        // where a sound would announce something nobody did.
+        //
+        // Wrapped because this must never break navigation: `SoundAlerts` fails hard by design,
+        // so a missing sample would otherwise take the tab switch down with it.
+        if (changing && soundEffectsOn()) {
+            try {
+                com.mido.phonebridge.alert.SoundAlerts.modalAppear(this)
+            } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
+                Debug.log("tab switch sound unavailable: ${e.message}")
+            }
+        }
     }
 
     /**

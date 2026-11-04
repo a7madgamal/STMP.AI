@@ -109,7 +109,7 @@ class HelpPlugin(private val ctx: Context) : Plugin {
             .put(
                 "gate",
                 JSONObject()
-                    .put("modes", JSONArray(listOf("AUTOMATIC", "SECURE", "NOTIFY")))
+                    .put("modes", JSONArray(listOf("WHITELIST", "PARANOID", "DONT_DISTURB")))
                     .put("secureWindowSeconds", ApprovalGate.TIMEOUT_SECONDS)
                     .put("notifyWindowSeconds", NotifyGate.WINDOW_MS / 1000)
             )

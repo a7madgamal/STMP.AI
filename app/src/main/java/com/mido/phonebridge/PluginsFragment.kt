@@ -69,12 +69,14 @@ class PluginsFragment : BridgeFragment() {
     private val groups: List<Pair<String, Set<String>>> = listOf(
         "Google" to setOf("google", "gmail", "calendar", "drive"),
         "Phone" to setOf("notifications", "contacts", "audio", "tts"),
-        // SSH is a SECRETS capability: every connection is a vault entry, its key never leaves the
-        // vault, and its allowed-hosts rule is the same boundary the other secrets use. It used to
-        // sit in no group at all, so its row fell to "Other" while its connections hung off
-        // "Secrets" — the same subject split across two headings. Mido, 2026-11-04: *"why are
-        // secrets scattered under 2 headers? all secrets should be under secrets header"*.
-        "Secrets" to setOf("secrets", "ssh"),
+        // **Secrets and SSH are separate headers, each with its own items.**
+        //
+        // Mido, 2026-11-04: *"split secrets into secrets and ssh with its own header and related
+        // items"*. An earlier pass merged them because SSH IS a vault entry — but they are not the
+        // same work: Secrets holds API keys you paste, SSH holds generated keys you install on a
+        // server. Merging them put two different add flows under one word.
+        "Secrets" to setOf("secrets"),
+        "SSH" to setOf("ssh"),
         "Misc" to setOf("help", "debug", "logs", "probe"),
     )
 
@@ -140,6 +142,7 @@ class PluginsFragment : BridgeFragment() {
             } else {
                 for (plugin in members) list.addView(row(plugin, store))
                 if (heading == "Secrets") addSecretsActions(members)
+                if (heading == "SSH") addSshActions(members)
             }
 
 
@@ -385,18 +388,36 @@ class PluginsFragment : BridgeFragment() {
      * things; an action that adds to the list belongs at the end of it, where you look after
      * scrolling past what you already have.
      */
+    /** The Secrets group's own actions: its entries live on the Secrets screen. */
     private fun addSecretsActions(members: List<com.mido.phonebridge.core.Plugin>) {
-        // One row per SSH connection, directly under the SSH plugin row: a connection IS a secret,
-        // and it was previously listed after the whole group, which read as belonging to nothing.
-        for (name in sshConnectionNames()) list.addView(sshRow(name))
-
         if (members.none { it.id == "secrets" }) return
-
         // The SecretsActivity manages secret values and their links; it has its own add flow.
         list.addView(
             Theme.button(ctx, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
                 // Same destination as the Secrets row: one screen, one way to add.
                 go(Intent(ctx, SecretsActivity::class.java))
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 10) },
+        )
+    }
+
+    /**
+     * The SSH group's own actions.
+     *
+     * One row per connection FIRST, then the way to add another — the list is what you scan, and
+     * the add control belongs under it where you look after reading what you already have.
+     */
+    private fun addSshActions(members: List<com.mido.phonebridge.core.Plugin>) {
+        if (members.none { it.id == "ssh" }) return
+        for (name in sshConnectionNames()) list.addView(sshRow(name))
+        list.addView(
+            Theme.button(ctx, "+ ADD CONNECTION", Theme.ButtonStyle.SUCCESS) {
+                // The SSH screen owns the generate-and-install flow: a connection needs a key
+                // before it can do anything, so adding one is a screen, not a form here.
+                go(Intent(ctx, SshActivity::class.java))
             },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,

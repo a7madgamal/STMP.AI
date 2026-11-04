@@ -87,7 +87,7 @@ object ExternalModel : SummaryModel {
         com.mido.phonebridge.policy.PolicyStore.from(ctx).get()
     } catch (e: Exception) {
         com.mido.phonebridge.policy.Policy(
-            com.mido.phonebridge.policy.GlobalMode.AUTOMATIC
+            com.mido.phonebridge.policy.GlobalMode.WHITELIST
         )
     }
 

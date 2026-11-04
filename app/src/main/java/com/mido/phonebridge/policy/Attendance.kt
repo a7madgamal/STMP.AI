@@ -67,6 +67,6 @@ fun isAttended(screenInteractive: Boolean, keyguardLocked: Boolean): Boolean =
 fun unattendedAllowed(mode: Mode, vaultUnlocked: Boolean): Boolean = when (mode) {
     // The whole point: a locked vault means the app has not been unlocked in this process, so
     // there is no session to extend trust from.
-    Mode.NOTIFY -> vaultUnlocked
-    Mode.SECURE -> false
+    Mode.DONT_DISTURB -> vaultUnlocked
+    Mode.PARANOID -> false
 }
