@@ -91,6 +91,15 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     private lateinit var gateTitle: TextView
     private lateinit var gateSub: TextView
     private lateinit var gateButtons: LinearLayout
+
+    /**
+     * The column holding the mode row and the rules button.
+     *
+     * A separate field from [gateButtons] because the two are different KINDS of row: the modes
+     * share width equally, the rules button takes a full row of its own. Putting them in one
+     * horizontal parent is what made the modes collapse to nothing.
+     */
+    private lateinit var gateRows: LinearLayout
     private lateinit var gateFingerprint: com.mido.phonebridge.ui.RuggedToggle
     private lateinit var gateFingerprintWhy: TextView
     private lateinit var heroCard: LinearLayout
@@ -282,11 +291,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
         gateButtons = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
+        }
+        // A COLUMN holding two rows: the modes, then EDIT RULES.
+        //
+        // It used to be the horizontal row itself, and the rules button was added to the SAME
+        // row with MATCH_PARENT. In a horizontal LinearLayout that gives the rules button all the
+        // width and shrinks the three weighted modes to zero — so the card showed only WHITELIST
+        // and the other two vanished. Reported 2026-11-04: *"approval gate is fucking empty only
+        // whitelist"*.
+        gateRows = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(0, Theme.dp(ctx, 10), 0, 0)
+            addView(gateButtons)
         }
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
-        gateCard.addView(gateButtons)
+        gateCard.addView(gateRows)
 
         // The fingerprint toggle lives HERE, beside the mode picker, not in Settings.
         //
@@ -746,7 +766,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // from three choices that need to read as one set, which made all four labels cramped.
         // Underneath, the modes get the full width and the rules button reads as the separate verb
         // it is.
-        gateButtons.addView(
+        gateRows.addView(
             Theme.button(ctx, "EDIT RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
                 go(Intent(ctx, ExceptionsActivity::class.java))
             },
@@ -1236,15 +1256,64 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                     }
                 )
             }
-            card.addView(
-                Theme.button(
-                    ctx, "UPDATE TO v${outcome.version}", Theme.ButtonStyle.SUCCESS,
-                ) { installUpdate(outcome) },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = Theme.dp(ctx, 10) }
-            )
+            // **A loader from the tap until the app restarts, or until CANCEL.**
+            //
+            // Mido, 2026-11-04: *"clicking update should immediately show a loader until the app is
+            // actually restarted or user canceling"*. Before this, the whole download-verify-install
+            // ran behind a toast that vanished after two seconds, so for most of a minute the
+            // screen looked like the tap had been ignored.
+            //
+            // The state lives on `Updater`, not on this fragment: the section is rebuilt on every
+            // repaint, so a local flag would be wiped the first time anything else refreshed.
+            if (com.mido.phonebridge.core.Updater.installing) {
+                val busy = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(0, Theme.dp(ctx, 10), 0, 0)
+                }
+                busy.addView(android.widget.ProgressBar(ctx).apply {
+                    isIndeterminate = true
+                    layoutParams = LinearLayout.LayoutParams(
+                        Theme.dp(ctx, 18), Theme.dp(ctx, 18)
+                    ).apply { marginEnd = Theme.dp(ctx, 10) }
+                })
+                busy.addView(
+                    Theme.text(
+                        ctx,
+                        "Installing v${outcome.version}… the app restarts when it finishes",
+                        12f, Theme.ON_SURFACE_VARIANT,
+                    ),
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+                )
+                card.addView(busy)
+
+                // CANCEL, offered while the download is still running. Once Android's own
+                // confirmation dialog is up, the system owns the decision and this button
+                // disappears from the next repaint.
+                card.addView(
+                    Theme.button(ctx, "CANCEL", Theme.ButtonStyle.NEUTRAL, small = true) {
+                        com.mido.phonebridge.core.Updater.installCancelled = true
+                        com.mido.phonebridge.core.Updater.installing = false
+                        com.mido.phonebridge.core.Updater.installingVersion = null
+                        Debug.log("update: cancelled by the human")
+                        refreshUpdateSection()
+                    },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(ctx, 8) },
+                )
+            } else {
+                card.addView(
+                    Theme.button(
+                        ctx, "UPDATE TO v${outcome.version}", Theme.ButtonStyle.SUCCESS,
+                    ) { installUpdate(outcome) },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(ctx, 10) },
+                )
+            }
         } else {
             val check = Theme.button(
                 ctx, if (checking) "CHECKING…" else "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
@@ -1387,17 +1456,36 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             return
         }
 
-        toast("downloading ${update.version}…")
+        // **Set BEFORE the worker starts**, so the loader is on screen at the next frame rather
+        // than after the first network call returns.
+        com.mido.phonebridge.core.Updater.installCancelled = false
+        com.mido.phonebridge.core.Updater.installingVersion = update.version
+        com.mido.phonebridge.core.Updater.installing = true
+        refreshUpdateSection()
+
         Thread({
             try {
-                val got = com.mido.phonebridge.core.Updater.download(requireContext().applicationContext, update)
+                val got = com.mido.phonebridge.core.Updater.download(requireContext().applicationContext, update) { _ -> }
+                // A cancel during the download means the bytes are not wanted. Delete them and
+                // stop: installing a version the human withdrew while it downloaded is the one
+                // thing a cancel button must actually prevent.
+                if (com.mido.phonebridge.core.Updater.installCancelled) {
+                    got.file.delete()
+                    Debug.log("update: cancelled mid-download; file removed")
+                    return@Thread
+                }
                 val expected = update.sha256
                 if (expected != null) {
                     val normalized = expected.trim().lowercase().substringAfterLast(" ")
                     if (!got.sha256.equals(normalized, ignoreCase = true)) {
                         got.file.delete()
                         Debug.log("update: digest mismatch, refusing")
-                        ui { toast("download was corrupted — refusing to install") }
+                        ui {
+                            com.mido.phonebridge.core.Updater.installing = false
+                            com.mido.phonebridge.core.Updater.installingVersion = null
+                            toast("download was corrupted — refusing to install")
+                            refreshUpdateSection()
+                        }
                         return@Thread
                     }
                     Debug.log("update: digest verified")
@@ -1415,8 +1503,14 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                                 // the fix is a settings toggle, and it has a button.
                                 is com.mido.phonebridge.core.ApkInstaller.Result.NeedsPermission ->
                                     showInstallPermissionDialog { installUpdate(update) }
-                                is com.mido.phonebridge.core.ApkInstaller.Result.Refused ->
+                                is com.mido.phonebridge.core.ApkInstaller.Result.Refused -> {
+                                    // No install is happening, so the loader must stop: a
+                                    // spinner that outlives its work is the exact failure this
+                                    // change exists to remove.
+                                    com.mido.phonebridge.core.Updater.installing = false
+                                    com.mido.phonebridge.core.Updater.installingVersion = null
                                     showProblemDialog("Update could not be installed", result.reason)
+                                }
                             }
                             render()
                         }
@@ -1424,7 +1518,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 }
             } catch (e: Exception) {
                 Debug.log("update: download failed: ${e.message}")
-                ui { toast("download failed: ${e.message ?: e.javaClass.simpleName}") }
+                ui {
+                    com.mido.phonebridge.core.Updater.installing = false
+                    com.mido.phonebridge.core.Updater.installingVersion = null
+                    toast("download failed: ${e.message ?: e.javaClass.simpleName}")
+                    refreshUpdateSection()
+                }
             }
         }, "update-download").apply { isDaemon = true }.start()
     }

@@ -85,6 +85,28 @@ object Updater {
     var checking: Boolean = false
 
     /**
+     * True from the moment UPDATE is tapped until the app restarts or the human cancels.
+     *
+     * **Added because the button gave no feedback at all.** Mido, 2026-11-04: *"clicking update
+     * should immediately show a loader until the app is actually restarted or user canceling"*.
+     * The whole download-verify-install sequence ran behind a toast, so for several seconds the
+     * screen looked like the tap had been ignored.
+     *
+     * Held here rather than in the fragment because the fragment's update section is rebuilt on
+     * every repaint — local state would be lost the first time anything else refreshed.
+     */
+    @Volatile
+    var installing: Boolean = false
+
+    /** Set by the CANCEL button; checked after the download so a cancelled update is not applied. */
+    @Volatile
+    var installCancelled: Boolean = false
+
+    /** The version being installed, for the loader's label. Null when not installing. */
+    @Volatile
+    var installingVersion: String? = null
+
+    /**
      * Ask GitHub for the newest release this install's channel would accept.
      *
      * Blocking: call from a worker thread. Returns data; never throws for an expected failure.

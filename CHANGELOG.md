@@ -5312,9 +5312,13 @@ devDependencies. `node_modules/` is gitignored.
 - SSH connections list only on the SSH screen, and secrets only on the Secrets screen.
 - The duplicates in "Other" are gone: each secret no longer appears as its own plugin row.
 
-## 0.48.0 (build 276) — 2026-11-04 — CURRENT
+## 0.48.0 (build 276) — 2026-11-04
 - AI summaries is one switch. Off shows nothing else; on shows two large radio cards for on-device or remote.
 - Each card states its own condition, and the download button lives only on the card that is selected.
+
+## 0.48.1 (build 277) — 2026-11-04 — CURRENT
+- The gate card shows all three modes again; only WHITELIST was visible after the rules button moved.
+- Tapping UPDATE shows a loader immediately, until the app restarts or you cancel.
 
 ## Keeping this file honest
 
