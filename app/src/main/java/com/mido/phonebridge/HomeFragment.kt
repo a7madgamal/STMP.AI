@@ -558,7 +558,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             if (serverToggle.checked != up) serverToggle.setCheckedAnimated(up)
         }
 
-        // The status checklist moved to Settings > Device access. Home now answers one question
+        // The status checklist moved to Settings > Permissions. Home now answers one question
         // — is the bridge running — and offers one control. Everything else is a setting.
 
         renderGate()
@@ -948,6 +948,31 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         block.addView(Theme.statusRow(ctx, "Version", line, colour))
 
+        // --- the loading indicator ---
+        //
+        // A button that merely reads "CHECKING…" looks like a label and gives no sense of
+        // whether anything is happening. A spinner beside the word says "in progress"; the
+        // button underneath is genuinely disabled so a second tap cannot race the first.
+        if (checking) {
+            val busy = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, Theme.dp(ctx, 8), 0, 0)
+            }
+            busy.addView(android.widget.ProgressBar(ctx).apply {
+                // Small and indeterminate: this is a network round-trip, so there is no honest
+                // percentage to show and a determinate bar would be a fiction.
+                isIndeterminate = true
+                layoutParams = LinearLayout.LayoutParams(
+                    Theme.dp(ctx, 18), Theme.dp(ctx, 18)
+                ).apply { marginEnd = Theme.dp(ctx, 8) }
+            })
+            busy.addView(
+                Theme.text(ctx, "asking GitHub…", 12f, Theme.ON_SURFACE_VARIANT)
+            )
+            block.addView(busy)
+        }
+
         // The channel. Free to offer because `promote.yml` already marks stable releases; a beta
         // is simply a release that was pushed but never promoted.
         val channelRow = LinearLayout(ctx).apply {
@@ -1009,14 +1034,28 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 ).apply { topMargin = Theme.dp(ctx, 10) }
             )
         } else {
+            val check = Theme.button(
+                ctx, if (checking) "CHECKING…" else "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
+            ) { checkForUpdates() }
+            // Genuinely disabled, not just relabelled: a second tap while a check is running
+            // would start a second request and race the first one's result into `lastOutcome`.
+            check.isEnabled = !checking
+            block.addView(check, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 10) })
+        }
+
+        // --- when we last actually asked ---
+        //
+        // Only shown once a check has COMPLETED, and pulled from the persisted timestamp rather
+        // than from memory: "last checked" has to survive the app being closed, or it would
+        // claim a check that this process never made.
+        val lastCheck = com.mido.phonebridge.core.UpdatePrefs.lastCheckAt(requireContext())
+        if (lastCheck > 0L) {
             block.addView(
-                Theme.button(
-                    ctx, "CHECK NOW", Theme.ButtonStyle.NEUTRAL,
-                ) { checkForUpdates() },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = Theme.dp(ctx, 10) }
+                Theme.text(ctx, "last checked ${agoText(lastCheck)}", 12f, Theme.ON_SURFACE_VARIANT)
+                    .apply { setPadding(0, Theme.dp(ctx, 8), 0, 0) }
             )
         }
 
@@ -1166,5 +1205,22 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             positive = "OK",
             negative = "Close",
         ) { }
+    }
+
+    /**
+     * A short, human "how long ago", for the last-checked line.
+     *
+     * Deliberately coarse: "just now", "5 min ago", "yesterday". A precise timestamp on an
+     * update check implies a precision nobody needs, and a live-updating string would need a tick
+     * this row has no business owning.
+     */
+    private fun agoText(at: Long): String {
+        val minutes = ((System.currentTimeMillis() - at) / 60_000L).coerceAtLeast(0L)
+        return when {
+            minutes < 1L -> "just now"
+            minutes < 60L -> "$minutes min ago"
+            minutes < 60L * 24L -> "${minutes / 60L} h ago"
+            else -> "${minutes / (60L * 24L)} d ago"
+        }
     }
 }

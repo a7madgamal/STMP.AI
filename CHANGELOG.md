@@ -5237,13 +5237,18 @@ devDependencies. `node_modules/` is gitignored.
 - The install permission is checked before the download, not after it.
 - Returning from that setting continues the install without tapping again.
 
-## 0.46.0 (build 261) — 2026-11-04 — CURRENT
+## 0.46.0 (build 261) — 2026-11-04
 - An available update is good news: green rather than alarm red, and it lives on Home now instead of buried in Settings.
 - Fingerprint for modals is a toggle, like every other switch.
 - The toggle is about a tenth smaller.
 - Text has a 12sp floor and a documented scale, so captions and the modal badge are readable.
 - Menu labels are upper case, larger, and bold when selected.
 - Settings no longer asks permission to install after downloading 42 MB: it asks first.
+
+## 0.46.1 (build 262) — 2026-11-04 — CURRENT
+- Tab switching fades now, because the bar is built once instead of being rebuilt on every change.
+- The toggle is drawn by the same card drawable as every other surface, so border, wrinkle and grain are identical rather than similar.
+- The update check shows a spinner and a last-checked line.
 
 ## Keeping this file honest
 

@@ -829,7 +829,12 @@ class OptionsFragment : BridgeFragment() {
         //
         // `state == "ON"` was the only signal the row had, and it duplicated what the knob now
         // shows. `colour` is kept as a parameter so an unreadable store can still say so.
-        header.addView(Theme.toggle(ctx, state == "ON") { onToggle() })
+        // `want` is USED, not ignored. The previous form was `{ onToggle() }`, which threw the
+        // knob's value away and flipped the policy instead: correct only by coincidence, and
+        // wrong the moment anyone made the callback asymmetrical.
+        header.addView(Theme.toggle(ctx, state == "ON") { want ->
+            if (want != (state == "ON")) onToggle()
+        })
         block.addView(header)
         block.addView(
             Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {

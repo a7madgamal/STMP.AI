@@ -37,6 +37,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var barHost: LinearLayout
 
     /**
+     * The bar, built ONCE.
+     *
+     * It used to be rebuilt on every tab change, which is why the selection could not fade: a
+     * brand-new bar has no previous state to animate from, and the fade animated `1f` to `1f`.
+     * Keeping the instance means the outgoing tab still exists when the incoming one is selected,
+     * so the marker visibly travels.
+     */
+    private var bottomBar: Theme.BottomBar? = null
+
+    /**
      * The visible tab, as a field rather than re-derived at save time.
      *
      * `findFragmentById` can return null while state is being saved, and "null means Home" would
@@ -204,18 +214,29 @@ class MainActivity : AppCompatActivity() {
      * runs on a timer: a bar rebuilt under a press is the tap-eating defect this codebase has
      * already paid for twice.
      */
+    /**
+     * Move the bar's selection.
+     *
+     * Not a rebuild. The bar is created on the first call and reused after that, which is what
+     * makes the fade work and what keeps its elevation shadow from being recreated (and briefly
+     * missing) on every tab change.
+     */
     private fun rebuildBar(tab: Theme.Tab) {
-        barHost.removeAllViews()
-        // MATCH_PARENT again: `addView` with no params defaults to WRAP_CONTENT, so the rebuilt
-        // bar would snap back to hugging the left edge after the first tab switch -- the same
-        // bug, only visible after interacting.
-        barHost.addView(
-            Theme.bottomNav(this, tab) { selected -> show(selected) },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ),
-        )
+        val existing = bottomBar
+        if (existing == null) {
+            val bar = Theme.bottomNav(this, tab) { selected -> show(selected) }
+            bottomBar = bar
+            barHost.addView(
+                bar,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        } else {
+            // Animated: this is a real selection change, and the fade is the point.
+            existing.select(tab, animate = true)
+        }
     }
 
     /** Whatever screen is on screen, for a repaint request that comes from the shell. */

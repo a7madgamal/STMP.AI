@@ -2,33 +2,28 @@ package com.mido.phonebridge.ui
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 
 /**
  * A rugged, grained, rectangular on/off switch.
  *
- * **Why a custom View rather than `SwitchCompat`.** That widget is Material: a thin capsule, a
- * circular thumb, a ripple, and a track that tints. Every one of those is wrong here. This app is
- * paper and ink — a switch has to look cut from the same sheet as the cards, which means grain, a
- * hairline edge and a chunky rectangular thumb. Restyling `SwitchCompat` far enough to stop
- * looking borrowed costs more than drawing thirty lines.
+ * **It draws the app's card, not an imitation of it.** Mido, 2026-11-04: *"the toggles are still not
+ * matching the look and feel of the cards. I want same border color and width, same params for
+ * wrinkle effect, same grain effect"*.
+ *
+ * That is not a request for closer numbers — it is a request to stop having two implementations.
+ * Both shapes here are `Theme.tornCard(...)` drawables. So the border colour, the stroke width, the
+ * nine-sample wrinkle pattern and the grain are not "matched": they are the same values, because it
+ * is the same drawable that every card on every screen uses. If the card edge changes, this changes
+ * with it, and there is no second copy to forget.
  *
  * **State, not action.** The knob's POSITION is the answer: left is off, right is on. There is no
- * "TURN OFF" label that has to be recomputed, so the control cannot contradict itself — a stale
- * label on a running server was a lie that only surfaced when someone tapped it.
+ * "TURN OFF" label to recompute, so the control cannot go stale and claim the wrong thing.
  *
- * **Grain follows the shape.** Both the track and the knob clip `PaperGrain` to their own paths, so
- * the texture stops at the edge instead of being painted into the corners of a bounding box.
- *
- * **Flat on purpose.** Mido, 2026-11-04: *"you made the toggle more 3d. I want it more 2d but more
- * rugged looking with jagged lines"*. An earlier version faked depth — an inner gradient along the
- * track, a blurred drop shadow under the knob, a white highlight on its top edge. All three are
- * gone, and the ruggedness now comes from [TornEdge]: the SAME torn silhouette the cards and the
- * bottom bar use, so the whole app reads as cut from one sheet rather than three.
+ * **Flat.** No gradient, no drop shadow, no highlight. The texture and the torn edge carry it.
  */
 class RuggedToggle(context: Context) : View(context) {
 
@@ -37,37 +32,40 @@ class RuggedToggle(context: Context) : View(context) {
     private val trackHeightPx = dp(31)
     private val trackWidthPx = dp(56)
     private val insetPx = dp(3.5f)
-    /**
-     * ~10% smaller than the first shipping size (34x62 -> 31x56), by request 2026-11-04. The
-     * proportions are kept: shrinking the track without shrinking the tear would make the wobble
-     * eat a bigger share of the shape and the control would read as ragged rather than cut.
-     *
-     * How deep the tear is, in dp.
-     *
-     * Deliberately small: the cards tear 6dp out of a ~90dp block, so the same proportion on a
-     * 34dp track is roughly 2dp. Using the card's absolute 6dp here would eat a fifth of the
-     * control and turn it into a ragged blob.
-     */
-    private val trackTearPx = dp(1.8f)
-    private val knobTearPx = dp(1.1f)
 
-    /**
-     * The knob is SQUARE-ish on purpose. A circle would read as a Material thumb; a rectangle with
-     * a slight radius reads as a physical slider cut from card stock.
-     */
+    /** The knob is square-ish on purpose: a circle would read as a Material thumb. */
     private val knobSizePx = trackHeightPx - insetPx * 2
 
-    /** How far the knob travels: everything between its two resting places. */
+    /** How far the knob travels between its two resting places. */
     private val travelPx = trackWidthPx - knobSizePx - insetPx * 2
 
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val path = Path()
-    private val knobPath = Path()
     private val rect = RectF()
     private val knobRect = RectF()
 
-    /** 0f = left (off), 1f = right (on). Animated; the checked VALUE flips immediately. */
+    /**
+     * The track: the card drawable at the control's own size.
+     *
+     * Rebuilt only if the radius changes, which it cannot at runtime — so this is built once.
+     * `tearDp` is 2 rather than the card's 6 because the track is 31dp tall: a 6dp tear would eat a
+     * fifth of the shape. The PATTERN is shared; only the depth is proportioned.
+     */
+    private val track: Drawable = Theme.tornCard(
+        context,
+        color = Theme.SURFACE,
+        radiusDp = 3,
+        tearDp = 2,
+    )
+
+    /**
+     * The knob, rebuilt only when its colour changes.
+     *
+     * Cards rebuild their drawable on a colour change too, so this is the same cost profile — and
+     * caching by colour means a repaint that changed nothing reuses the existing instance.
+     */
+    private var knob: Drawable? = null
+    private var knobColorKey: Int = 0
+
+    /** 0f = left (off), 1f = right (on). */
     private var fraction = 0f
     private var animator: android.animation.ValueAnimator? = null
 
@@ -78,27 +76,24 @@ class RuggedToggle(context: Context) : View(context) {
      * Draw the knob as "working on it" without moving it.
      *
      * The server takes a moment to bind, and a knob that slides then slides back would be showing
-     * intent rather than truth — the same fault the old button labels had. The knob stays where the
-     * last KNOWN state put it and takes on a pending look until the host reports the real value.
+     * intent rather than truth.
      */
     var pending: Boolean = false
         set(value) {
             if (field == value) return
             field = value
+            knob = null
             invalidate()
         }
 
     init {
         isClickable = true
         isFocusable = true
-        // A MINIMUM touch target larger than the drawing: 30dp of paint is easy to see and hard to
+        // A minimum touch target larger than the drawing: 31dp of paint is easy to see and hard to
         // hit, and a switch that misses is worse than one that looks slightly small.
         minimumWidth = Theme.dp(context, 64)
         minimumHeight = Theme.dp(context, 48)
         contentDescription = "Off"
-        // Thicker and darker than a hairline. A 1.2dp light stroke on a 30dp track read as a
-        // Material pill; a 2dp darker edge reads as card stock with thickness.
-        edge.strokeWidth = dp(2f)
     }
 
     /** Set the state WITHOUT animating. Used on first render, where motion would be a lie. */
@@ -107,6 +102,7 @@ class RuggedToggle(context: Context) : View(context) {
         checked = value
         fraction = if (value) 1f else 0f
         contentDescription = if (value) "On" else "Off"
+        knob = null
         invalidate()
     }
 
@@ -118,6 +114,7 @@ class RuggedToggle(context: Context) : View(context) {
         }
         checked = value
         contentDescription = if (value) "On" else "Off"
+        knob = null
         val from = fraction
         val to = if (value) 1f else 0f
         if (from == to) {
@@ -146,73 +143,49 @@ class RuggedToggle(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(
-            resolveSize(dp(64).toInt(), widthMeasureSpec),
-            resolveSize(dp(48).toInt(), heightMeasureSpec),
+            resolveSize(Theme.dp(context, 64), widthMeasureSpec),
+            resolveSize(Theme.dp(context, 48), heightMeasureSpec),
         )
     }
 
     override fun onDraw(canvas: Canvas) {
-        // The track is centred in the touch target, so the drawing stays small while the hit area
-        // stays generous.
+        // Centred in the touch target, so the drawing stays small while the hit area stays
+        // generous.
         val left = (width - trackWidthPx) / 2f
         val top = (height - trackHeightPx) / 2f
         rect.set(left, top, left + trackWidthPx, top + trackHeightPx)
 
-        // --- track ---
-        //
-        // The app's own torn-paper shape, filled flat. An earlier pass invented a per-vertex
-        // scatter here and at 34dp it came out visibly noisier than every card on the screen —
-        // Mido, 2026-11-04: *"too jagged, can we just use the same exact effect we are using
-        // everywhere else?"*. So this calls [TornEdge] now: the SAME nine-sample pattern and the
-        // SAME rounded-top/square-side construction as `tornCard`, only with a smaller tear.
-        TornEdge.path(
-            out = path,
-            left = rect.left, top = rect.top, right = rect.right, bottom = rect.bottom,
-            tearPx = trackTearPx,
-            cornerPx = dp(2f),
+        track.setBounds(
+            rect.left.toInt(), rect.top.toInt(), rect.right.toInt(), rect.bottom.toInt()
         )
-        fill.style = Paint.Style.FILL
-        fill.color = Theme.SURFACE
-        canvas.drawPath(path, fill)
+        track.draw(canvas)
 
-        canvas.save()
-        canvas.clipPath(path)
-        canvas.drawPaint(PaperGrain.paint())
-        canvas.restore()
-
-        edge.color = withAlpha(Theme.ON_SURFACE, 0x66)
-        canvas.drawPath(path, edge)
-
-        // --- knob ---
         val knobLeft = rect.left + insetPx + travelPx * fraction
         val knobTop = rect.top + insetPx
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
-        TornEdge.path(
-            out = knobPath,
-            left = knobRect.left, top = knobRect.top,
-            right = knobRect.right, bottom = knobRect.bottom,
-            tearPx = knobTearPx,
-            cornerPx = dp(1.5f),
-        )
 
-        fill.style = Paint.Style.FILL
-        fill.color = when {
+        val color = when {
             pending -> withAlpha(Theme.WARNING, 0xB0)
             checked -> Theme.SUCCESS
             else -> Theme.ON_SURFACE_VARIANT
         }
-        canvas.drawPath(knobPath, fill)
+        // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
+        val current = knob.let { if (it != null && knobColorKey == color) it else null }
+        val drawable = current ?: Theme.tornCard(
+            context,
+            color = color,
+            radiusDp = 2,
+            tearDp = 1,
+        ).also {
+            knob = it
+            knobColorKey = color
+        }
 
-        canvas.save()
-        canvas.clipPath(knobPath)
-        canvas.drawPaint(PaperGrain.paint())
-        canvas.restore()
-
-        // Its own outline, heavier and darker than the track's. That weight difference is the only
-        // thing separating the knob from the track now that the drop shadow is gone — a lighter
-        // line would make the knob disappear into the paper at a glance.
-        edge.color = withAlpha(Theme.ON_SURFACE, 0xAA)
-        canvas.drawPath(knobPath, edge)
+        drawable.setBounds(
+            knobRect.left.toInt(), knobRect.top.toInt(),
+            knobRect.right.toInt(), knobRect.bottom.toInt(),
+        )
+        drawable.draw(canvas)
     }
 
     override fun performClick(): Boolean {
@@ -220,8 +193,8 @@ class RuggedToggle(context: Context) : View(context) {
         return true
     }
 
-    private fun dp(v: Float): Float = Theme.dpF(context, v)
-    private fun dp(v: Int): Float = dp(v.toFloat())
-
     private fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
+
+    private fun dp(v: Float): Float = Theme.dpF(context, v)
+    private fun dp(v: Int): Float = Theme.dpF(context, v.toFloat())
 }

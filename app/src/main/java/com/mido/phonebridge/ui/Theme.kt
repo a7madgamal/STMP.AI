@@ -280,45 +280,38 @@ object Theme {
      * The selected tab is passed in, not stored. Each screen knows which tab it IS, which is a
      * fact that cannot go stale the way a shared "current tab" could.
      */
-    fun bottomNav(ctx: Context, current: Tab, onSelect: (Tab) -> Unit): View {
-        val bar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            background = tornBar(ctx, BG)
-            // No band above the paper: the shadow is real elevation now, drawn by the platform
-            // OUTSIDE these bounds. The padding here only keeps the labels off the torn edge.
-            setPadding(0, dp(ctx, 8), 0, dp(ctx, 6))
-        }
+    /**
+     * The bottom bar.
+     *
+     * **Built ONCE and repainted in place.** Mido, 2026-11-04: *"add animation or fade, switching
+     * is too sharp"* — and the first attempt at that could not work, because the host called
+     * `removeAllViews()` and built a brand-new bar on every tab change. An animation needs a
+     * previous state to move FROM; a rebuilt bar has none, and the fade ran `1f -> 1f`.
+     *
+     * So this returns a [BottomBar] that owns its three tabs and exposes [BottomBar.select]. The
+     * shell builds it once per Activity and calls `select` on a tab change.
+     */
+    fun bottomNav(ctx: Context, current: Tab, onSelect: (Tab) -> Unit): BottomBar {
+        val bar = BottomBar(ctx, onSelect)
         for (tab in Tab.entries) {
-            val selected = tab == current
-            bar.addView(
-                tabView(ctx, tab, selected, onSelect),
-                // EQUAL WEIGHTS across the full width. Without this the bar measured as
-                // wrap-content, so the three tabs huddled at the left edge and the bar's paper
-                // stopped wherever the last label ended.
+            // `addTabView`, not `addView`: the bar has to know the parts to repaint them, and a
+            // plain addView would leave its registry empty so select() would silently do nothing.
+            bar.addTabView(
+                tabView(ctx, tab, tab == current, onSelect),
+                // EQUAL WEIGHTS across the full width. Without this the bar measures as
+                // wrap-content, so the three tabs huddle at the left edge.
                 LinearLayout.LayoutParams(0, dp(ctx, 52), 1f),
             )
         }
 
-        // Real shadow, from elevation -- but with a RECTANGULAR outline.
-        //
-        // `elevation` is the only way to get a genuinely transparent, blurred shadow; a painted
-        // gradient in a reserved band is what produced the grey rectangle. Two things:
-        //
-        //  * The outline must be a Path-based one. A torn edge is CONCAVE, and `Outline.setConvexPath`
-        //    throws on a concave path -- so the torn edge itself cannot be the outline. The shadow
-        //    therefore sits under a rectangle, which is correct: a real shadow is a blur of the
-        //    whole silhouette, and a 5dp tear displaced by a blur reads as torn anyway.
-        //
-        //  * `clipToOutline` stays FALSE so the torn path still paints its own ragged edge. Turning
-        //    it on would clip the paper to the rectangle and flatten the tear.
-        // The bottom inset is applied to the BAR, not to its host.
-        //
-        // Padding the host instead leaves the paper stopping above the gesture bar, with the
-        // window's flat background showing underneath -- which reads as the bar floating with a
-        // margin. On the bar itself the inset pads its content while its background still paints
-        // behind the gesture area, so the paper reaches the physical bottom edge.
+        // The bottom inset is applied to the BAR, not to its host: padding the host leaves the
+        // paper stopping above the gesture bar, which reads as the bar floating with a margin.
         BottomInset.apply(bar)
 
+        // Real elevation, with a RECTANGULAR outline. `elevation` is the only way to get a
+        // genuinely transparent blurred shadow, and it needs an outline; a torn edge is CONCAVE
+        // and `Outline.setConvexPath` throws on those, so the shadow follows a rectangle. A 2dp
+        // tear under an 8dp blur still reads as torn.
         bar.elevation = dpF(ctx, BAR_ELEVATION_DP)
         bar.outlineProvider = object : android.view.ViewOutlineProvider() {
             override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
@@ -328,113 +321,177 @@ object Theme {
         return bar
     }
 
+    /**
+     * The bar itself: three tabs whose selection can change without being rebuilt.
+     *
+     * Keeping the tab views alive is what makes the fade possible — the outgoing tab still exists
+     * when the incoming one is selected, so the marker can visibly retreat rather than blink out.
+     */
+    class BottomBar(
+        ctx: Context,
+        private val onSelect: (Tab) -> Unit,
+    ) : LinearLayout(ctx) {
+
+        /** One entry per [Tab], in the order they were added. */
+        private val tabs = mutableListOf<TabView>()
+
+        init {
+            orientation = LinearLayout.HORIZONTAL
+            background = tornBar(ctx, BG)
+            // No band above the paper: the shadow is real elevation, drawn OUTSIDE these bounds.
+            setPadding(0, dp(ctx, 8), 0, dp(ctx, 6))
+        }
+
+        /** Register a tab's parts so [select] can repaint them later. */
+        internal fun addTabView(parts: TabView, params: LayoutParams) {
+            tabs += parts
+            addView(parts.column, params)
+        }
+
+        /**
+         * Move the selection to [tab].
+         *
+         * `animate` is false on the first paint — a bar that fades in as the app opens is
+         * animating something nobody did.
+         */
+        fun select(tab: Tab, animate: Boolean = true) {
+            for (parts in tabs) {
+                parts.setSelected(parts.tab == tab, animate)
+            }
+        }
+    }
+
+    /**
+     * One tab's parts, kept alive so its selection can change without rebuilding it.
+     *
+     * A plain data holder rather than a custom ViewGroup: the column is the view Android lays out,
+     * and wrapping it in another layer would add a level of nesting for no benefit.
+     */
+    internal class TabView(
+        val tab: Tab,
+        val column: LinearLayout,
+        private val label: TextView,
+        private val rule: View,
+        private val accent: Int,
+        private val variant: Int,
+        private val bold: android.graphics.Typeface,
+        private val normal: android.graphics.Typeface,
+    ) {
+        /**
+         * Repaint for the selected state.
+         *
+         * **The rule's alpha is the animation.** Its colour is always [accent]; only opacity
+         * moves, so nothing has to be re-created mid-transition. The OUTGOING tab fades its rule
+         * away while the INCOMING one fades in, which is what makes the marker look like it
+         * travelled instead of teleporting.
+         */
+        fun setSelected(selected: Boolean, animate: Boolean) {
+            column.contentDescription =
+                if (selected) "${tab.label}, selected" else tab.label
+            label.setTextColor(if (selected) accent else variant)
+            // Synthesised bold: Handlee ships one weight, so Android thickens the glyphs itself.
+            // It reads as weight rather than as a different face, which is what is wanted here.
+            label.setTypeface(if (selected) bold else normal)
+
+            val target = if (selected) 1f else 0f
+            val labelTarget = if (selected) 1f else 0.72f
+            if (animate) {
+                rule.animate().alpha(target).setDuration(180L).start()
+                label.animate().alpha(labelTarget).setDuration(180L).start()
+            } else {
+                rule.animate().cancel()
+                label.animate().cancel()
+                rule.alpha = target
+                label.alpha = labelTarget
+            }
+            // Only the unselected tab is tappable, so tapping the current one does nothing.
+            column.setOnClickListener(
+                if (selected) null else android.view.View.OnClickListener { onSelectClicked() }
+            )
+        }
+
+        /** Set by [tabView]; kept here so [setSelected] can rewire the listener each time. */
+        internal var onSelectClicked: () -> Unit = {}
+    }
+
+    /**
+     * One tab: a column holding the label and its underline, plus the parts [BottomBar] needs to
+     * repaint it in place.
+     *
+     * The rule is a SIBLING of the label, never its background — a background cannot be narrower
+     * than its view, and the label's view is a third of the screen wide, which is what made the
+     * underline span a third of the bar with the word sitting under it.
+     */
     private fun tabView(
         ctx: Context,
         tab: Tab,
-        selected: Boolean,
+        initiallySelected: Boolean,
         onSelect: (Tab) -> Unit,
-    ): View {
-        // The label is wrapped in a column so the rule can hug the TEXT rather than span the
-        // whole tab.
-        //
-        // It used to be the TextView's own background, and that view is a third of the screen
-        // wide — so the "underline" came out as a line spanning a third of the bar with the word
-        // sitting under it, which is what made the menu look broken. A background cannot be
-        // narrower than its view; a sibling can.
+    ): TabView {
         val column = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             isClickable = true
             isFocusable = true
-            contentDescription = if (selected) "${tab.label}, selected" else tab.label
         }
 
         val label = TextView(ctx).apply {
-            // ALL CAPS by request (Mido, 2026-11-04). The hand font is already informal; caps
-            // give the three words the weight of labels rather than of prose, which is what a
-            // tab bar is.
+            // ALL CAPS by request (Mido, 2026-11-04). The hand font is informal; caps give the
+            // three words the weight of labels rather than of prose, which is what a tab bar is.
             text = tab.label.uppercase(java.util.Locale.US)
             textSize = 16f
             gravity = Gravity.CENTER
-            typeface = handFont(ctx)
-            setTextColor(if (selected) ACCENT else ON_SURFACE_VARIANT)
-            // Bold when selected. Colour alone is unreadable for a chunk of the population and
-            // invisible in a screenshot; weight is the second signal.
-            setTypeface(
-                handFont(ctx),
-                if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
-            )
-            // One line, always. "Settings" wrapped to "Setting / s" as a third of a narrow bar:
-            // the column is only as wide as its share, and the hand font is wide. `maxLines` alone
-            // would clip, so the size shrinks to fit instead.
+            // One line, always. "Settings" wrapped to "Setting / s" as a third of a narrow bar.
             isSingleLine = true
             maxLines = 1
             ellipsize = null
-            setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            setAutoSizeTextTypeUniformWithConfiguration(
+                12, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP
+            )
         }
         column.addView(label)
 
-        // The rule, under the word and only as wide as the word.
-        //
-        // Always added, in both states, with the unselected one transparent: the bar then changes
-        // PAINT on selection rather than layout, so it cannot twitch as selection moves.
         val rule = View(ctx)
         val ruleHeight = dp(ctx, 6)
-        // Measured with the same face and size the label uses, so the rule ends where the word
-        // ends. `TextView.measureText` is not usable here: it lives on the instance, and the
-        // instance has not been laid out yet.
+        // Measured with the same face and at the SMALLEST size the label may take, so the rule
+        // cannot come out wider than the word it underlines.
         val measure = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             typeface = handFont(ctx)
-            // sp -> px through TypedValue, which honours the user's font scale. The metric
-            // fields are deprecated and would ignore it.
             textSize = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP, 12f, ctx.resources.displayMetrics
+                TypedValue.COMPLEX_UNIT_SP, TEXT_FLOOR_SP, ctx.resources.displayMetrics
             )
         }
-        // The label auto-sizes down to fit, so measuring at a fixed 13sp would leave a rule wider
-        // than the word it underlines. Measure at the smallest size the label may use.
-        measure.textSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, TEXT_FLOOR_SP, ctx.resources.displayMetrics
+        val ruleWidth = measure.measureText(tab.label.uppercase(java.util.Locale.US)).toInt() +
+            dp(ctx, 12)
+        column.addView(
+            rule,
+            LinearLayout.LayoutParams(ruleWidth.coerceAtLeast(dp(ctx, 16)), ruleHeight)
+                .apply { topMargin = dp(ctx, 2) },
         )
-        val ruleWidth = measure.measureText(tab.label).toInt() + dp(ctx, 12)
-        column.addView(rule, LinearLayout.LayoutParams(
-            ruleWidth.coerceAtLeast(dp(ctx, 16)),
-            ruleHeight,
-        ).apply { topMargin = dp(ctx, 2) })
         rule.background = SquiggleRule(
-            color = if (selected) ACCENT else Color.TRANSPARENT,
+            color = ACCENT,
             strokePx = dpF(ctx, 2.6f),
             amplitudePx = dpF(ctx, SQUIGGLE_DP),
             spanFraction = 1.0f,
             atBottom = true,
         )
 
-        // A callback, not an Intent.
-        //
-        // The bar used to name the three screen Activities itself, which made the bar the thing
-        // that knew the navigation model. That is the wrong owner twice over: the bar cannot be
-        // reused by a host that swaps fragments, and the tab -> Activity mapping had to be
-        // repeated anywhere else that wanted to navigate. The caller knows what a selection
-        // means; the bar only reports that it happened.
-        // A freshly-built tab starts either fully drawn (selected) or invisible (not), and then
-        // fades in. Without this the marker jumps from one tab to the other with nothing between,
-        // which reads as a flicker rather than a selection moving.
-        rule.alpha = if (selected) 1f else 0f
-        label.alpha = if (selected) 1f else 0.72f
-        if (selected) {
-            rule.animate().alpha(1f).setDuration(180L).start()
-            label.animate().alpha(1f).setDuration(180L).start()
-        } else {
-            // Fade the unselected state in from full, so the marker visibly RETREATS rather than
-            // blinking out when the bar is rebuilt on a tab change.
-            rule.alpha = 0f
-            label.alpha = 0.72f
-        }
-
-        if (!selected) {
-            column.setOnClickListener { onSelect(tab) }
-        }
-        return column
+        val parts = TabView(
+            tab = tab,
+            column = column,
+            label = label,
+            rule = rule,
+            accent = ACCENT,
+            variant = ON_SURFACE_VARIANT,
+            // Synthesised bold, since Handlee ships one weight. It thickens the glyphs rather
+            // than swapping a face, which is exactly the effect wanted here.
+            bold = android.graphics.Typeface.create(handFont(ctx), android.graphics.Typeface.BOLD),
+            normal = handFont(ctx),
+        )
+        parts.onSelectClicked = { onSelect(tab) }
+        // First paint: no animation, because nothing moved.
+        parts.setSelected(initiallySelected, animate = false)
+        return parts
     }
 
     // --- surfaces ---
