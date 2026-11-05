@@ -104,6 +104,25 @@ used as permitted by the terms under which they were obtained.
 The stamp images (`stamp_approved.png`, `stamp_rejected.png`) and the launcher icon are
 original artwork by the project author, covered by the project's own Apache-2.0 grant.
 
+## Test data — zsh-syntax-highlighting golden corpus
+
+`shellhl/src/test/resources/zsh-corpus/` contains 271 golden test files copied verbatim from
+[zsh-users/zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
+(`highlighters/main/test-data`), plus that project's `COPYING.md`.
+
+**BSD 3-Clause.** Copyright (c) 2010-2020 zsh-syntax-highlighting contributors. All rights
+reserved. Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the above copyright notice, this list of conditions and the following
+disclaimer are retained. Neither the name of the zsh-syntax-highlighting contributors nor the
+names of its contributors may be used to endorse or promote products derived from this software
+without specific prior written permission. The software is provided "as is", without warranty of
+any kind.
+
+Every file already carries that copyright header individually, so the notice travels with the
+data; `COPYING.md` in the same directory holds the full text. They are test resources only —
+never compiled into the APK — but they are committed and redistributed with the repository,
+which is why they are listed here rather than under "tooling".
+
 ## Build and test tooling — deliberately not listed
 
 `junit` and `robolectric` are `testImplementation` only. They are not compiled into the
