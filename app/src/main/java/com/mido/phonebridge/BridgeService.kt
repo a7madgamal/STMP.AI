@@ -27,6 +27,7 @@ import com.mido.phonebridge.audit.DecisionSource
 import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.audit.recordResponse
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
@@ -1731,7 +1732,7 @@ class HttpServer(
          * (see [factsFor]) and building them twice is a second live Google round-trip per
          * approval on a route that pre-fetches its target — gmail trash, calendar delete.
          */
-        rows: List<Pair<String, String>>,
+        rows: List<ApprovalRow>,
         /** The exception the modal may offer, or null. See [exceptionOfferFor]. */
         exceptionOffer: ApprovalGate.ExceptionOffer? = null,
         /**
@@ -1790,7 +1791,7 @@ class HttpServer(
                 messageCount = sbn?.notification?.number ?: 0,
                 replyText = if (body.has("replyText")) body.getString("replyText") else null,
                 options = otherActions,
-                destructive = rows,
+                destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
                 needsPassword = needsPassword
@@ -1817,7 +1818,7 @@ class HttpServer(
                 notifText = text,
                 messageCount = sbn.notification.number,
                 replyText = null,
-                destructive = rows,
+                destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
                 needsPassword = needsPassword
@@ -1847,7 +1848,7 @@ class HttpServer(
             // knows its request shapes and can fetch live data to name the target.
             // Rows are keyed on method+path inside the plugin, so two routes sharing
             // a path template (GET vs POST, POST vs DELETE) can never be confused.
-            destructive = rows,
+            destructive = rows.toGateRows(),
             // Biometric is a SECURE-only rule, computed by the policy and passed in.
             // The gate states it; the Activity renders it and never recomputes it.
             // In R3 this always evaluates true, because a view only exists on the
@@ -1862,6 +1863,29 @@ class HttpServer(
             // gmail). Every `return ApprovalView(...)` in this function must pass it.
             exceptionOffer = exceptionOffer,
             needsPassword = needsPassword
+        )
+    }
+
+    /**
+     * Translate plugin rows into the gate's row type, **keeping the style**.
+     *
+     * Two near-identical row types exist because `core` must not depend on the gate: the
+     * plugin contract (`ApprovalRow`) and what the modal renders (`ApprovalGate.Row`). The
+     * translation is explicit so a new style cannot be silently dropped — the exact bug this
+     * fixes: `pluginRows` used to flatten to `label to value`, so every modal row rendered
+     * WARN and a plugin could never ask for a different presentation.
+     */
+    private fun List<ApprovalRow>.toGateRows(): List<ApprovalGate.Row> = map { r ->
+        ApprovalGate.Row(
+            r.label,
+            r.value,
+            when (r.style) {
+                ApprovalRow.Style.NORMAL -> ApprovalGate.Row.Style.NORMAL
+                ApprovalRow.Style.MONO -> ApprovalGate.Row.Style.MONO
+                ApprovalRow.Style.LONG -> ApprovalGate.Row.Style.LONG
+                ApprovalRow.Style.WARN -> ApprovalGate.Row.Style.WARN
+                ApprovalRow.Style.CODE -> ApprovalGate.Row.Style.CODE
+            }
         )
     }
 
@@ -1889,7 +1913,7 @@ class HttpServer(
         route: Route,
         verb: Verb,
         summary: String,
-        rows: List<Pair<String, String>>,
+        rows: List<ApprovalRow>,
         rawBody: String = "",
         url: String = ""
     ): com.mido.phonebridge.ai.RequestFacts =
@@ -1898,7 +1922,10 @@ class HttpServer(
             verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
-            rows = rows.filter { it.second.isNotBlank() },
+            // The summariser reads FACTS, it does not render them — pairs are its shape. The
+            // render hint stops here deliberately: a model that could see "this row is CODE"
+            // would be handed a presentation detail it has no use for.
+            rows = rows.map { it.label to it.value }.filter { it.second.isNotBlank() },
             rawBody = rawBody,
             url = url
         )
@@ -1931,7 +1958,8 @@ class HttpServer(
             verb = verb.name,
             routeLabel = route.describe,
             summary = summary,
-            rows = rows.filter { it.second.isNotBlank() },
+            // Pairs are the summariser's shape: it reads facts, it does not render them.
+            rows = rows.map { it.label to it.value }.filter { it.second.isNotBlank() },
             rawBody = rawBody,
             url = url
         )
@@ -1949,7 +1977,7 @@ class HttpServer(
         body: JSONObject,
         query: Map<String, String>,
         remote: String
-    ): List<Pair<String, String>> {
+    ): List<ApprovalRow> {
         val plugin = PluginRegistry.resolve(route.method, route.path)?.plugin
             ?: throw PluginError("internal_error", "no plugin for ${route.method} ${route.path}")
         val pathParams = pathParamsFor(route, actualPath)
@@ -1967,7 +1995,11 @@ class HttpServer(
             body = body,
             remote = remote
         )
-        return plugin.describeRows(req).map { it.label to it.value }
+        // **The style survives.** This used to be `.map { it.label to it.value }`, which threw
+        // away the render hint — so every row in every modal became WARN (mono, amber) and the
+        // SSH command could never be CODE. The plugin is the only place that knows its row is
+        // a command; discarding the hint here made that knowledge unreachable.
+        return plugin.describeRows(req)
     }
 
     /**

@@ -445,7 +445,25 @@ data class ApprovalRow(
     val value: String,
     val style: Style = Style.WARN
 ) {
-    enum class Style { NORMAL, MONO, LONG, WARN }
+    enum class Style {
+        NORMAL,
+        /** Monospace + selectable — ids, addresses, raw targets. */
+        MONO,
+        /** Long free text: a message body, an event description. Full, wrapped. */
+        LONG,
+        /** A consequence the human must not miss (mutating target). */
+        WARN,
+
+        /**
+         * A shell command: monospace, syntax-coloured, split at token boundaries.
+         *
+         * **Distinct from [LONG] on purpose.** `LONG` is prose and renders in the handwritten
+         * face, which is right for a message body and unreadable for a command. This style is
+         * the one the SSH card needs, and it is also what makes the render "the exact string
+         * that will run" readable rather than merely present.
+         */
+        CODE,
+    }
 }
 
 /** What the home screen shows for a plugin. */

@@ -481,6 +481,25 @@ object Highlight {
 }
 
 /**
+ * Character offsets where a display line should break, for a command rendered in a card.
+ *
+ * **A parsing question, not a formatting one.** `;` inside quotes is not a boundary, and
+ * `awk -F';'` must stay on one line. Exposed separately from [highlightLines] so a renderer
+ * that applies colour spans can insert the breaks itself and keep one coordinate system.
+ *
+ * Each offset is a position in [command] where a newline belongs, before the character at
+ * that index. Ascending, distinct, and never 0 or `command.length` (a break there would
+ * produce an empty first or last line).
+ */
+fun lineBreakOffsets(command: String): List<Int> =
+    Lexer.tokenize(command)
+        .filter { isBreakToken(it.kind) }
+        .map { it.end }
+        .filter { it in 1 until command.length }
+        .distinct()
+        .sorted()
+
+/**
  * The command split into display lines at token boundaries.
  *
  * This is what the SSH approval card needs, and it lives here rather than in the app
@@ -497,15 +516,7 @@ fun highlightLines(
 ): List<String> {
     if (command.isEmpty()) return listOf(command)
 
-    val cuts = Lexer.tokenize(command)
-        .filter { isBreakToken(it.kind) }
-        // A separator ends its line (default), or starts the next one.
-        .map { if (breakBeforeOperators) it.start else it.end }
-        // A cut at 0 would make an empty first line and a cut at length an empty last
-        // one; neither is a real boundary.
-        .filter { it in 1 until command.length }
-        .distinct()
-        .sorted()
+    val cuts = lineBreakOffsets(command)
 
     if (cuts.isEmpty()) return listOf(command)
 

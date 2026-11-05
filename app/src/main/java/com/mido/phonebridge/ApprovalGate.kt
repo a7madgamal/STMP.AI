@@ -152,7 +152,16 @@ object ApprovalGate {
             /** Long free text (a message body, an event description): full, wrapped. */
             LONG,
             /** A consequence the human must not miss (mutating target). */
-            WARN
+            WARN,
+            /**
+             * A shell command: monospace, syntax-coloured, broken at token boundaries.
+             *
+             * Distinct from [LONG] on purpose. `LONG` is prose and renders in the handwritten
+             * face — right for a message body, unreadable for a command. This is the style the
+             * SSH card asks for, and the Activity is the only place that knows how to draw it
+             * (it owns the palette; the library emits zsh style keys, not colours).
+             */
+            CODE
         }
     }
 
@@ -208,7 +217,7 @@ object ApprovalGate {
          * Kept as a plain list of rows; [sections] is the general form and this
          * remains for callers that only need the target block.
          */
-        val destructive: List<Pair<String, String>> = emptyList(),
+        val destructive: List<Row> = emptyList(),
         /**
          * The plugin-facing content: ordered sections of rows rendered by the same
          * component for every route. When empty, the Activity falls back to the

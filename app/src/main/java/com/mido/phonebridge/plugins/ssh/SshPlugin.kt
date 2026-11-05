@@ -131,10 +131,15 @@ class SshPlugin(private val ctx: Context) : Plugin {
 
                 buildList {
                     add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.WARN))
-                    // The command, verbatim, in the monospace long field. Not truncated in the
-                    // modal: a long command that is silently clipped is exactly the "you approved
-                    // something you could not read" failure this design must avoid.
-                    add(ApprovalRow("COMMAND", command, ApprovalRow.Style.LONG))
+                    // The command, verbatim, in the CODE field: monospace, syntax-coloured, and
+                    // broken at token boundaries. Not truncated in the modal: a long command that
+                    // is silently clipped is exactly the "you approved something you could not
+                    // read" failure this design must avoid.
+                    //
+                    // **CODE, not LONG.** `LONG` is prose and renders in the handwritten face —
+                    // right for a message body, unreadable for a shell command. Colour and line
+                    // breaks are display only: `SshExec.run` still receives `command` untouched.
+                    add(ApprovalRow("COMMAND", command, ApprovalRow.Style.CODE))
                     // Elevation is stated as its own row, never folded into the command text.
                     // A `sudo` buried mid-string is easy to miss on a glance, and "this runs as
                     // root" is the single fact most worth seeing before a tap.
@@ -175,7 +180,7 @@ class SshPlugin(private val ctx: Context) : Plugin {
                     add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.WARN))
                     // The command verbatim, exactly as the synchronous route shows it: detaching
                     // changes WHEN it runs, never WHAT runs.
-                    add(ApprovalRow("COMMAND", command, ApprovalRow.Style.LONG))
+                    add(ApprovalRow("COMMAND", command, ApprovalRow.Style.CODE))
                     // Said plainly, because "detached" is the one fact that changes what the
                     // human is agreeing to: this outlives the request and keeps running.
                     add(

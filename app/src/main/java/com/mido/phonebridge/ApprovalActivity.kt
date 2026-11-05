@@ -25,6 +25,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.ShellCode
 import com.mido.phonebridge.ui.StampOverlay
 import com.mido.phonebridge.alert.SoundAlerts
 
@@ -263,17 +264,35 @@ class ApprovalActivity : FragmentActivity() {
                 content.addView(Theme.text(this, r.label, 12f, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
-                content.addView(Theme.text(
-                    this,
-                    r.value,
-                    13f,
-                    if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
-                    mono = r.style == ApprovalGate.Row.Style.MONO ||
-                        r.style == ApprovalGate.Row.Style.WARN
-                ).apply {
-                    setTextIsSelectable(true)
-                    setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-                })
+
+                // **CODE is its own path, not a mono variant.** A command gets coloured spans
+                // and token-boundary line breaks; everything else keeps the plain renderer.
+                // Falling through to `Theme.text(mono = true)` would draw the command in one
+                // colour, which is what it looked like before this feature existed.
+                val view = if (r.style == ApprovalGate.Row.Style.CODE) {
+                    TextView(this).apply {
+                        text = ShellCode.render(r.value)
+                        textSize = 13f
+                        setTextColor(Theme.ON_SURFACE)
+                        typeface = ShellCode.typeface
+                        setTextIsSelectable(true)
+                        setLineSpacing(0f, 1.25f) // room for the inserted breaks
+                        setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                    }
+                } else {
+                    Theme.text(
+                        this,
+                        r.value,
+                        13f,
+                        if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
+                        mono = r.style == ApprovalGate.Row.Style.MONO ||
+                            r.style == ApprovalGate.Row.Style.WARN
+                    ).apply {
+                        setTextIsSelectable(true)
+                        setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                    }
+                }
+                content.addView(view)
             }
 
             // Plugin-provided sections (Calendar, Gmail, …). Each section renders
@@ -286,10 +305,12 @@ class ApprovalActivity : FragmentActivity() {
             }
 
             // Legacy target block (mutating routes) — same renderer, one section.
+            // Styles come from the PLUGIN now, so a command row can ask for CODE instead of
+            // being flattened to WARN and drawn as amber monospace like everything else.
             if (view.destructive.isNotEmpty()) {
                 view.destructive
-                    .filter { it.second.isNotBlank() }
-                    .forEach { row(ApprovalGate.Row(it.first, it.second, ApprovalGate.Row.Style.WARN)) }
+                    .filter { it.value.isNotBlank() }
+                    .forEach { row(it) }
             }
             // Scope the read carried (filters). A scoped read must show its scope:
             // "count=3, package=com.whatsapp", never a bare verb.

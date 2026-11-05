@@ -252,6 +252,10 @@ dependencies {
     // fewer heavyweight dependencies the better. The surface used here is tiny (connect,
     // auth with a key, exec, capture output), so the abstraction cost is low either way.
     implementation("com.github.mwiede:jsch:2.28.8")
+    // The shell lexer (module :shellhl). No Android imports inside it, no dependencies of
+    // its own — it exists so the SSH card can colour a command from the same tokens it uses
+    // to decide where lines break. See docs/plans/SHELL-HIGHLIGHT-PLAN.md.
+    implementation(project(":shellhl"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     // BiometricPrompt for the approval gate: STRONG biometrics or device credential.
