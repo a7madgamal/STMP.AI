@@ -463,6 +463,16 @@ data class ApprovalRow(
          * that will run" readable rather than merely present.
          */
         CODE,
+
+        /**
+         * A JSON body: monospace, pretty-printed, syntax-coloured, with `\/` removed.
+         *
+         * **Display only, like [CODE].** The string sent, stored and re-parsed is the one the
+         * caller supplied; this style only decides how a copy of it is drawn. Distinct from
+         * [LONG] because a JSON document in the handwritten face is unreadable, and distinct
+         * from [MONO] because flat monospace makes a 40-line response a wall.
+         */
+        JSON,
     }
 }
 

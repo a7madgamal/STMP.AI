@@ -5327,7 +5327,9 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.48.3 (build 279) — 2026-11-04
 - The gate's three modes are large radio cards, the same shape as the AI backend picker, and each says what it does.
 
-## 0.48.4 (build 280) — 2026-11-05 — CURRENT
+## 0.48.5 (build 281) — 2026-11-05 — CURRENT
+- SSH and Secrets cards lead with the friendly connection/secret name, with the address underneath as detail.
+- JSON bodies render pretty-printed and coloured wherever they appear, and `\/` is shown as `/` in the rendered copy.
 - The SSH approval card colours its command: commands, options, quotes, redirections and `sudo` each read differently, so a long command can be scanned instead of deciphered.
 - The command breaks onto a new line at `;`, `&&`, `||` and `|`, at token boundaries only, so a `;` inside quotes stays put.
 - Plugin rows reach the modal as rows. They were flattened to label/value pairs, which forced every row in every modal to render the same; the SSH command could not ask to be drawn as code.

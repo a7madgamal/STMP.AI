@@ -1,5 +1,6 @@
 package com.mido.phonebridge
 
+import android.graphics.Typeface
 import androidx.fragment.app.FragmentActivity
 import android.os.Build
 import android.graphics.drawable.ClipDrawable
@@ -26,6 +27,7 @@ import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.ShellCode
+import com.mido.phonebridge.ui.JsonCode
 import com.mido.phonebridge.ui.StampOverlay
 import com.mido.phonebridge.alert.SoundAlerts
 
@@ -265,12 +267,13 @@ class ApprovalActivity : FragmentActivity() {
                     setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
 
-                // **CODE is its own path, not a mono variant.** A command gets coloured spans
-                // and token-boundary line breaks; everything else keeps the plain renderer.
-                // Falling through to `Theme.text(mono = true)` would draw the command in one
-                // colour, which is what it looked like before this feature existed.
-                val view = if (r.style == ApprovalGate.Row.Style.CODE) {
-                    TextView(this).apply {
+                // **CODE and JSON are their own paths, not mono variants.** A command gets
+                // coloured spans and token-boundary line breaks; a JSON body gets pretty-printed
+                // and coloured. Everything else keeps the plain renderer. Falling through to
+                // `Theme.text(mono = true)` would draw either one in a single colour, which is
+                // what they looked like before this existed.
+                val view = when (r.style) {
+                    ApprovalGate.Row.Style.CODE -> TextView(this).apply {
                         text = ShellCode.render(r.value)
                         textSize = 13f
                         setTextColor(Theme.ON_SURFACE)
@@ -279,17 +282,52 @@ class ApprovalActivity : FragmentActivity() {
                         setLineSpacing(0f, 1.25f) // room for the inserted breaks
                         setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
                     }
-                } else {
-                    Theme.text(
-                        this,
-                        r.value,
-                        13f,
-                        if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
-                        mono = r.style == ApprovalGate.Row.Style.MONO ||
-                            r.style == ApprovalGate.Row.Style.WARN
-                    ).apply {
+
+                    ApprovalGate.Row.Style.JSON -> TextView(this).apply {
+                        text = JsonCode.render(r.value)
+                        textSize = 13f
+                        setTextColor(Theme.ON_SURFACE)
+                        typeface = Typeface.MONOSPACE
                         setTextIsSelectable(true)
+                        setLineSpacing(0f, 1.15f)
                         setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                    }
+
+                    else -> {
+                        // **Any row whose value is JSON renders as JSON**, without every plugin
+                        // having to tag it. A body does not arrive with a type marker — it is
+                        // just a string — so detection decides. `LONG` prose (a message body, an
+                        // event description) is untouched: it does not start with `{` or `[`,
+                        // and the check is cheap and exact.
+                        //
+                        // **`WARN` is exempt.** Amber on a card means "a consequence you must
+                        // not miss" — a mutated target, an elevation. Recolouring a WARN row
+                        // because its text happens to be JSON would trade that meaning for
+                        // tidiness, and the meaning is why the row is amber.
+                        val asJson = r.style != ApprovalGate.Row.Style.WARN && JsonCode.looksJson(r.value)
+                        if (asJson) {
+                            TextView(this).apply {
+                                text = JsonCode.render(r.value)
+                                textSize = 13f
+                                setTextColor(Theme.ON_SURFACE)
+                                typeface = Typeface.MONOSPACE
+                                setTextIsSelectable(true)
+                                setLineSpacing(0f, 1.15f)
+                                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                            }
+                        } else {
+                            Theme.text(
+                                this,
+                                r.value,
+                                13f,
+                                if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
+                                mono = r.style == ApprovalGate.Row.Style.MONO ||
+                                    r.style == ApprovalGate.Row.Style.WARN
+                            ).apply {
+                                setTextIsSelectable(true)
+                                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                            }
+                        }
                     }
                 }
                 content.addView(view)

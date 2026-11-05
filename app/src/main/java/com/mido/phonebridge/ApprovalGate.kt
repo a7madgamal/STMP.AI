@@ -161,7 +161,15 @@ object ApprovalGate {
              * SSH card asks for, and the Activity is the only place that knows how to draw it
              * (it owns the palette; the library emits zsh style keys, not colours).
              */
-            CODE
+            CODE,
+            /**
+             * A JSON body: monospace, pretty-printed, syntax-coloured, `\/` removed.
+             *
+             * Display only. The string that is sent or stored is never touched — this only
+             * decides how a copy of it is drawn. The Activity owns the palette; the detector
+             * lives in [com.mido.phonebridge.ui.JsonCode].
+             */
+            JSON
         }
     }
 

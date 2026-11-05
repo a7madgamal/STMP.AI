@@ -13,6 +13,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.JsonCode
 import org.json.JSONObject
 
 /**
@@ -73,9 +74,22 @@ class LogDetailActivity : Activity() {
             content.addView(Theme.text(this, label, 12f, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(this@LogDetailActivity, 8), 0, 0)
             })
-            content.addView(Theme.text(this, value, 14f, color, mono = mono).apply {
-                setTextIsSelectable(true)
-            })
+            // **JSON renders rich wherever it appears**, without every call site having to
+            // know it is JSON. A body does not arrive with a type tag — `requestBody` is just
+            // a string — so the detector decides. Rendering only touches the copy on screen;
+            // the stored audit line is untouched.
+            val view = if (mono && JsonCode.looksJson(value)) {
+                Theme.text(this, "", 12f, color).apply {
+                    text = JsonCode.render(value)
+                    typeface = Typeface.MONOSPACE
+                    setTextIsSelectable(true)
+                }
+            } else {
+                Theme.text(this, value, 14f, color, mono = mono).apply {
+                    setTextIsSelectable(true)
+                }
+            }
+            content.addView(view)
         }
 
         val outcome = o.optString("outcome")

@@ -1885,6 +1885,7 @@ class HttpServer(
                 ApprovalRow.Style.LONG -> ApprovalGate.Row.Style.LONG
                 ApprovalRow.Style.WARN -> ApprovalGate.Row.Style.WARN
                 ApprovalRow.Style.CODE -> ApprovalGate.Row.Style.CODE
+                ApprovalRow.Style.JSON -> ApprovalGate.Row.Style.JSON
             }
         )
     }

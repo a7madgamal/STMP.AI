@@ -71,8 +71,12 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
         val url = req.body.optString("url", "(no url)")
         val method = req.body.optString("method", "GET").uppercase()
         val rows = mutableListOf(
-            ApprovalRow("TARGET", "$method $url", ApprovalRow.Style.MONO),
-            ApprovalRow("SECRET", secretName, ApprovalRow.Style.NORMAL)
+            // **The friendly name leads.** `todoist` is what the human named this credential and
+            // what they recognise; `POST https://api.todoist.com/…` is the detail. Reporting the
+            // URL first made the reader work out which secret was about to be spent, and on a
+            // scrolled list of approvals that is exactly the confusion the card exists to prevent.
+            ApprovalRow("SECRET", secretName, ApprovalRow.Style.NORMAL),
+            ApprovalRow("TARGET", "$method $url", ApprovalRow.Style.MONO)
         )
         // The QUERY is part of what is being approved, and for a read it is often the ONLY
         // substantive content: a filtered list, a project scope, a search term. Without it the

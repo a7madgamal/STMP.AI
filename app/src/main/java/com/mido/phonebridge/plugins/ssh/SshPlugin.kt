@@ -130,7 +130,14 @@ class SshPlugin(private val ctx: Context) : Plugin {
                     ?: throw PluginError("not_found", "no SSH connection named '$name'")
 
                 buildList {
-                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.WARN))
+                    // **The name the human gave this host comes FIRST.** The address below is the
+                    // detail; `prod` is what the human recognises and what the caller asked for.
+                    // A card that leads with `deploy@10.0.0.4:22` makes the reader reconstruct
+                    // which connection that is, and on a wall of approvals that reconstruction is
+                    // where a wrong tap comes from.
+                    add(ApprovalRow("CONNECTION", name, ApprovalRow.Style.NORMAL))
+                    // The address is the exact target, so it stays monospace and selectable.
+                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.MONO))
                     // The command, verbatim, in the CODE field: monospace, syntax-coloured, and
                     // broken at token boundaries. Not truncated in the modal: a long command that
                     // is silently clipped is exactly the "you approved something you could not
@@ -177,7 +184,10 @@ class SshPlugin(private val ctx: Context) : Plugin {
                 val conn = loadConnection(name)
                     ?: throw PluginError("not_found", "no SSH connection named '$name'")
                 buildList {
-                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.WARN))
+                    // Same rule as the synchronous route: the friendly name leads, the address
+                    // is the detail beneath it.
+                    add(ApprovalRow("CONNECTION", name, ApprovalRow.Style.NORMAL))
+                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.MONO))
                     // The command verbatim, exactly as the synchronous route shows it: detaching
                     // changes WHEN it runs, never WHAT runs.
                     add(ApprovalRow("COMMAND", command, ApprovalRow.Style.CODE))
