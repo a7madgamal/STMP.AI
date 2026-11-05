@@ -298,7 +298,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateButtons = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
         }
-        // A COLUMN holding two rows: the modes, then EDIT RULES.
+        // A COLUMN holding the mode cards.
+        //
+        // It used to also hold EDIT RULES on its own row. That button has moved INTO the
+        // whitelist card, where it belongs: only WHITELIST reads the rule table, and being a
+        // child of a card that `renderGate` clears wholesale makes the old "5 EDIT RULES
+        // buttons" stacking bug structurally impossible rather than avoided by care.
         //
         // It used to be the horizontal row itself, and the rules button was added to the SAME
         // row with MATCH_PARENT. In a horizontal LinearLayout that gives the rules button all the
@@ -309,17 +314,6 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             orientation = LinearLayout.VERTICAL
             setPadding(0, Theme.dp(ctx, 10), 0, 0)
             addView(gateButtons)
-            // The rules door. Built here, once: `renderGate` refreshes the MODES but must never
-            // add this again, or every repaint stacks another copy.
-            addView(
-                Theme.button(ctx, "EDIT RULES", Theme.ButtonStyle.NEUTRAL, small = true) {
-                    go(Intent(ctx, ExceptionsActivity::class.java))
-                },
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = Theme.dp(ctx, 8) },
-            )
         }
         gateCard.addView(gateTitle)
         gateCard.addView(gateSub)
@@ -1674,7 +1668,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            // **TOP, not CENTER_VERTICAL.** Each card is a title plus a two-line blurb;
+            // centring the marker put it level with the blurb's last line, so it read as
+            // belonging to nothing in particular. At the top it sits beside the title, which
+            // is the thing being chosen.
+            gravity = android.view.Gravity.TOP
         }
         row.addView(Theme.radioDot(ctx, selected))
 
@@ -1699,11 +1697,52 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         )
         card.addView(row)
 
-        // The current rule count only makes sense under WHITELIST — the other two ignore the table.
+        // The rule count only makes sense under WHITELIST — the other two ignore the table.
         if (selected && mode == GlobalMode.WHITELIST) {
             card.addView(
                 Theme.text(ctx, rulesSummary(), 12f, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
+            )
+        }
+
+        // **The rules door lives INSIDE the whitelist card**, because that is the only mode
+        // that reads the table: PARANOID asks about everything and DON'T DISTURB resolves by
+        // silence, so a rule written under either is inert.
+        //
+        // Greyed rather than hidden when this card is not selected. A control that vanishes
+        // teaches nothing; a greyed one says "select this card and I open". An Android view
+        // with `isEnabled = false` does not consume touch either, so a tap here falls through
+        // to the card's own listener and selects WHITELIST — the useful response, not a dead
+        // zone.
+        //
+        // This also retired a long-standing bug: the button used to be built ONCE in
+        // `buildContent` and re-added on every repaint, which stacked up to five copies. Here
+        // it is a child of a card that `renderGate` clears wholesale, so duplication is
+        // structurally impossible rather than prevented by a comment.
+        if (mode == GlobalMode.WHITELIST) {
+            card.addView(
+                Theme.button(
+                    ctx,
+                    "EDIT RULES",
+                    Theme.ButtonStyle.NEUTRAL,
+                    small = true,
+                ) {
+                    go(Intent(ctx, ExceptionsActivity::class.java))
+                }.apply {
+                    isEnabled = selected
+                    // The button's own colours come from the Material theme; dimming at the
+                    // view level keeps the disabled state honest without a second style.
+                    alpha = if (selected) 1f else 0.45f
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = Theme.dp(ctx, 8)
+                    // Aligned with the text column, not the marker: it is a child of the
+                    // card, not of the row.
+                    marginStart = Theme.dp(ctx, 26)
+                },
             )
         }
         return card

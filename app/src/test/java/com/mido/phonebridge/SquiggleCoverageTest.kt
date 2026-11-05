@@ -36,12 +36,16 @@ class SquiggleCoverageTest {
         // GHOST buttons keep their hairline stroke under the drawn edge; the wobble sits on top
         // of it so the edge still reads as ink at 1dp.
         "Theme.kt" to "strokeWidth = dp(ctx, 1)",
-        // The radio marker. A 14dp circle is smaller than one grain tile and far smaller than a
-        // squiggle amplitude, so it cannot be drawn by hand: `setStroke` here is the ring, and the
-        // hand-drawn edge would render as a blob rather than as a wobble. It lives in Theme, which
-        // is where the sanctioned constructors belong.
-        "Theme.kt" to "setStroke(dp(ctx, 3), SURFACE)",
-        "Theme.kt" to "setStroke(dp(ctx, 2), BORDER)",
+        // The radio marker. A 16dp circle is smaller than one grain tile and far smaller than
+        // a squiggle amplitude, so it cannot be drawn by hand: `setStroke` here is the ring,
+        // and the hand-drawn edge would render as a blob rather than as a wobble. It lives in
+        // Theme, which is where the sanctioned constructors belong.
+        //
+        // Both strokes come from one `ring` width so the marker keeps the same size and shape
+        // selected or not — only the fill changes. Matched on the call, not the literal width,
+        // so a marker resized again does not fail the guard for the wrong reason.
+        "Theme.kt" to "setStroke(ring, ACCENT)",
+        "Theme.kt" to "setStroke(ring, BORDER)",
     )
 
     @Test

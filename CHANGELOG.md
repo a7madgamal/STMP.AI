@@ -5327,7 +5327,10 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.48.3 (build 279) — 2026-11-04
 - The gate's three modes are large radio cards, the same shape as the AI backend picker, and each says what it does.
 
-## 0.48.5 (build 281) — 2026-11-05 — CURRENT
+## 0.48.6 (build 282) — 2026-11-05 — CURRENT
+- Radio markers keep the same size and ring weight selected or not; only the fill changes. Selecting one used to make it visibly smaller than the ones it beat.
+- Radio markers sit beside the title instead of floating mid-card, and no text can sit behind one.
+- The rules button lives inside the whitelist card, where the rule table is actually read, and is greyed out while whitelist is not selected.
 - SSH and Secrets cards lead with the friendly connection/secret name, with the address underneath as detail.
 - JSON bodies render pretty-printed and coloured wherever they appear, and `\/` is shown as `/` in the rendered copy.
 - The SSH approval card colours its command: commands, options, quotes, redirections and `sudo` each read differently, so a long command can be scanned instead of deciphered.

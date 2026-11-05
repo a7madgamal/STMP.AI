@@ -979,20 +979,41 @@ object Theme {
      * sanctioned constructors live.
      */
     fun radioDot(ctx: Context, selected: Boolean): View {
-        val size = dp(ctx, 14)
+        val size = dp(ctx, 16)
+        val ring = dp(ctx, 2)
         return View(ctx).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 if (selected) {
+                    // A solid accent disc: the stroke matches the fill so the two read as
+                    // ONE shape. The old version stroked SURFACE at 3dp inside a 14dp
+                    // circle, which left an 8dp dot — so selecting a radio made its marker
+                    // SMALLER than the unselected one, changing shape as well as colour.
                     setColor(ACCENT)
-                    setStroke(dp(ctx, 3), SURFACE)
+                    setStroke(ring, ACCENT)
                 } else {
-                    setColor(android.graphics.Color.TRANSPARENT)
-                    setStroke(dp(ctx, 2), BORDER)
+                    // Identical outer diameter and ring weight; only the fill differs. That
+                    // is the whole constraint: the marker must not change size or shape when
+                    // selection moves, or the eye reads two different controls.
+                    //
+                    // The fill is SURFACE_VARIANT — the exact colour of an UNSELECTED card,
+                    // which is the only card an unfilled marker ever sits on — rather than
+                    // TRANSPARENT. Stating the colour means the hole can never read as
+                    // whatever happens to be behind it.
+                    //
+                    // Checked the two call sites: both put the dot inside a card that is
+                    // SURFACE_VARIANT when unselected and SURFACE when selected, and this
+                    // branch only runs when unselected. So one constant is correct at both.
+                    setColor(SURFACE_VARIANT)
+                    setStroke(ring, BORDER)
                 }
             }
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
                 marginEnd = dp(ctx, 10)
+                // The row is TOP-aligned so the marker sits beside the TITLE rather than
+                // floating in the middle of a two-line card. This small nudge puts its
+                // centre on that first line instead of level with the cap height.
+                topMargin = dp(ctx, 2)
             }
         }
     }

@@ -562,7 +562,9 @@ class OptionsFragment : BridgeFragment() {
 
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            // TOP, matching the gate card: the marker sits beside the title, not centred
+            // against a multi-line description. The two choice screens must read identically.
+            gravity = android.view.Gravity.TOP
         }
         row.addView(Theme.radioDot(ctx, selected))
         val text = LinearLayout(ctx).apply {

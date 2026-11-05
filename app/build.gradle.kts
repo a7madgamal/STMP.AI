@@ -73,8 +73,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 281
-        versionName = "0.48.5"
+        versionCode = 282
+        versionName = "0.48.6"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
