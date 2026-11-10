@@ -5346,9 +5346,13 @@ devDependencies. `node_modules/` is gitignored.
 - Get started sits directly under the status card, above the approval gate, where a new install meets it before the mode picker.
 - "Per-pair rules" is gone from the gate card. The word named the implementation; the screen has been Exceptions since October, and the button now says so too.
 
-## 0.48.9 (build 285) — 2026-11-10 — CURRENT
+## 0.48.9 (build 285) — 2026-11-10
 - Every plugin row has a `?` that opens what the plugin does: its routes, the permissions it needs and why, and the system access it wants.
 - That dialog is built from the plugin's own declarations, so it cannot drift from what the plugin actually serves.
+
+## 0.48.10 (build 286) — 2026-11-10 — CURRENT
+- Get started asks which agent you use. Hermes gets its install and config commands with this phone's address already filled in; everything else keeps the generic prompt.
+- The Hermes steps name `caller_unverified` as expected rather than a fault, which is where people otherwise conclude the plugin is broken.
 
 ## Keeping this file honest
 
