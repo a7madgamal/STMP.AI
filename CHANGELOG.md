@@ -5375,9 +5375,13 @@ devDependencies. `node_modules/` is gitignored.
 - A check in progress no longer stays "checking…" forever, which previously also disabled CHECK NOW.
 - Speaking during a call is refused with `tts_in_call` instead of reporting success for a sentence nobody heard.
 
-## 0.48.15 (build 291) — 2026-11-10 — CURRENT
+## 0.48.15 (build 291) — 2026-11-10
 - A plugin's help is a 💡 badge on the left of the row instead of a `?` beside the switch. A question mark beside a control reads as a fault on that control; on the left it marks the thing being explained.
 - The badge sits in a 44dp touch frame with a drawn disc inside it, so it is easy to hit without being a large target on screen.
+
+## 0.48.16 (build 292) — 2026-11-10 — CURRENT
+- The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
+- No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
 
 ## Keeping this file honest
 

@@ -891,18 +891,16 @@ class BridgeService : Service() {
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // specialUse (API 34+), not dataSync: dataSync is capped at 6h/24h on
-            // Android 15+ and the system kills the process when the cap is hit.
-            // Below 34 the type constant does not exist; the overload without a
-            // type is the only option and carries no such cap.
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            }
-            startForeground(NOTIF_ID, notif, type)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // specialUse, not dataSync: dataSync is capped at 6h/24h on Android 15+ and the
+            // system kills the process when the cap is hit.
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
+            // Below 34 specialUse does not exist, and naming dataSync instead fails the subset
+            // check Android 12+ runs against the manifest's declared type ("foregroundServiceType
+            // 0x1 is not a subset of 0x40000000"), which throws out of startForeground and kills
+            // the service before the HTTP server is bound. Untyped is legal below 34, carries no
+            // dataSync cap, and is the one request the manifest can always satisfy.
             startForeground(NOTIF_ID, notif)
         }
         Debug.log("foreground notification posted")
