@@ -10,93 +10,290 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
+import com.mido.phonebridge.core.OnboardingPrefs
+import com.mido.phonebridge.policy.GlobalMode
+import com.mido.phonebridge.policy.blurb
+import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.ui.Theme
 
 /**
- * "How do I use this?" — the one screen that explains STMP to someone who just installed it.
+ * The introduction: what STMP is, what it can do, how the gate decides, then how to connect.
  *
- * **The deliverable is a copyable prompt, not documentation.** STMP has no UI to speak of: the
- * phone is a server and the agent is the client. So the useful artifact is a paragraph a human
- * pastes into whatever agent they already use — Claude, Cursor, OpenClaw, a shell — and which
- * makes that agent productive without installing anything.
+ * **Why this is a flow and not a scroll.** The previous screen explained only HOW to connect, and
+ * a new install landed on Home facing a server switch and three unexplained mode radios. Purpose
+ * is not a paragraph you append — it needs room, so it gets its own steps.
  *
- * **It contains no API documentation.** Everything mechanical (routes, verbs, error meanings) is
- * served live by `GET /help`, so restating it here would be a second copy that rots. The prompt
- * only tells the agent where to look and how to behave once it has looked — which is judgment,
- * and judgment is the one thing `/help` deliberately does not carry.
+ * **Why steps and not swipeable pages.** Step 2 and step 4 contain selectable monospace fields.
+ * Horizontal swiping fights text selection: a drag to select would flip the page instead. Back and
+ * Next are unambiguous, and they leave the gesture surface to the field that needs it.
  *
- * **The address is read from the running service**, not typed. A hardcoded IP here would be wrong
- * on any other phone, and on this one it changes between Wi-Fi and Tailscale.
+ * **Opened once.** `OnboardingPrefs` records that it has been seen, and it is written on ENTRY.
+ * A human who opens this, reads one step and swipes the app away has been introduced; re-opening
+ * on every launch because they never reached the last page would make the flag mean "completed a
+ * tour" rather than "has been introduced", and the nagging version is the one people resent.
  *
- * **The agent picker changes WORDS ONLY.** Picking Hermes does not configure anything, does not
- * register anything, and does not change what the bridge serves. It swaps the text this screen
- * hands you. That separation is deliberate: an onboarding screen that quietly wrote settings
- * would be a screen you could not read and trust at the same time.
+ * **It writes nothing but that flag.** No setting is changed by walking through this. An
+ * onboarding that silently altered the gate would be one you could not read and trust in the same
+ * breath.
  */
 class OnboardingActivity : FragmentActivity() {
 
-    /**
-     * Who is being set up.
-     *
-     * `HERMES` exists because that path is not a paragraph of judgment — it is a plugin install
-     * and a config write, then a naming step that looks like an error and is not. A generic
-     * prompt would leave the human at `caller_unverified` with no idea it was expected.
-     */
+    /** Who is being set up. Only affects the LAST step's content. */
     private enum class Agent { HERMES, GENERIC }
 
     private var agent = Agent.GENERIC
 
-    /** Rebuilt on every pick. Holds the picker AND the content below it. */
+    /** 0-based. The last step is [STEP_COUNT] - 1. */
+    private var step = 0
+
+    /** Rebuilt wholesale on every step change. */
     private lateinit var body: LinearLayout
+
+    private lateinit var scroll: ScrollView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Marked HERE, not on finish. See the class comment: "has been introduced" is the fact
+        // worth storing, and it is the one that cannot nag.
+        OnboardingPrefs.markSeen(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
                 Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 20),
-                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 32)
+                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 16)
             )
             background = Theme.sheet(Theme.BG)
         }
 
-        root.addView(Theme.text(this, "GET STARTED", 22f).apply {
+        root.addView(Theme.text(this, "STMP", 22f).apply {
             typeface = Theme.handFont(this@OnboardingActivity)
         })
 
-        root.addView(
-            Theme.text(
-                this,
-                "This phone is a server. Your agent calls it; you approve each call on the " +
-                    "phone. There is nothing to configure inside the app beyond starting the " +
-                    "server — everything else happens in your agent.",
-                14f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 10), 0, 0) }
-        )
-
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(body)
+
+        scroll = ScrollView(this).apply { addView(body) }
+        root.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+
+        // The nav rail is OUTSIDE the scroll: Next must never be the thing you have to scroll to
+        // find, which is exactly how a long introduction becomes one nobody finishes.
+        nav = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, 0)
+        }
+        root.addView(nav)
 
         render()
-
-        setContentView(Theme.inset(ScrollView(this).apply { addView(root) }))
+        setContentView(root)
     }
 
+    private lateinit var nav: LinearLayout
+
     /**
-     * Paint the picker and everything under it.
+     * Paint the current step and the rail.
      *
-     * Called from a `post { }` when a card is tapped, never inline. The card that was tapped is
-     * destroyed by this method, and tearing a view down while its own click is still being
-     * dispatched is the tap-eating defect `HomeFragment` documents at length — the tap lands and
-     * nothing happens.
+     * Everything is rebuilt, never patched: a step's content is not a superset of another's, so
+     * mutating in place would mean reasoning about which views to remove. The whole set is small
+     * and text-only, so rebuilding is cheaper than the bookkeeping.
      */
     private fun render() {
         body.removeAllViews()
+        nav.removeAllViews()
+
+        body.addView(
+            Theme.text(
+                this,
+                "Step ${step + 1} of $STEP_COUNT",
+                12f, Theme.ON_SURFACE_VARIANT
+            )
+        )
+
+        when (step) {
+            0 -> stepWhatThisIs()
+            1 -> stepWhatItCanDo()
+            2 -> stepHowTheGateDecides()
+            else -> stepConnectYourAgent()
+        }
+
+        renderNav()
+
+        // Always show the TOP of the new step. Carrying the scroll offset across would land the
+        // reader mid-paragraph in a section they have not seen the heading of.
+        scroll.post { scroll.scrollTo(0, 0) }
+    }
+
+    private fun renderNav() {
+        val last = step == STEP_COUNT - 1
+
+        // Skip is always present. A flow with no exit is a wall, and the app is fully usable
+        // without reading any of this — the Plugins tab says what each thing does.
+        nav.addView(
+            Theme.button(this, if (last) "CLOSE" else "SKIP", Theme.ButtonStyle.GHOST, small = true) {
+                finish()
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        // Spacer: pushes the primary action to the right edge so Next sits where a thumb expects
+        // it and does not move between steps of different text length.
+        nav.addView(android.view.View(this), LinearLayout.LayoutParams(0, 1, 1f))
+
+        if (step > 0) {
+            nav.addView(
+                Theme.button(this, "BACK", Theme.ButtonStyle.NEUTRAL, small = true) {
+                    step--
+                    render()
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginEnd = Theme.dp(this@OnboardingActivity, 8) }
+            )
+        }
+
+        nav.addView(
+            Theme.button(
+                this,
+                if (last) "DONE" else "NEXT",
+                Theme.ButtonStyle.PRIMARY,
+                small = true,
+            ) {
+                if (last) finish() else { step++; render() }
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+    }
+
+    // --- 1. what this is ---------------------------------------------------
+
+    private fun stepWhatThisIs() {
+        body.addView(Theme.sectionHeader(this, "What this is"))
+
+        body.addView(
+            paragraph(
+                "This phone is a server, and your agent is the client. It calls the phone; you " +
+                    "approve each call here. Nothing about your accounts lives on the machine " +
+                    "running the agent."
+            )
+        )
+
+        body.addView(Theme.sectionHeader(this, "The trust boundary is the phone"))
+
+        body.addView(
+            paragraph(
+                "Google tokens, API keys and SSH private keys live in a Keystore-wrapped vault on " +
+                    "this device. They are never sent anywhere — not to your agent, not to a " +
+                    "server. When a call needs a credential, the PHONE makes the request and " +
+                    "returns the answer, so the secret never crosses the wire."
+            )
+        )
+
+        body.addView(
+            paragraph(
+                "That is the whole design. An agent that has been prompt-injected, or a laptop " +
+                    "that has been compromised, can still only ASK — it cannot approve itself, " +
+                    "and it has nothing worth stealing."
+            )
+        )
+    }
+
+    // --- 2. what it can do -------------------------------------------------
+
+    /**
+     * The capability summary, grouped by MEANING rather than listed exhaustively.
+     *
+     * Deliberately curated, not generated from `PluginRegistry`. A page that listed thirteen
+     * plugins with their real ids would be a wall of names on a screen meant to answer "should I
+     * keep this app". The Plugins tab is the live truth and names every one; this is the shape of
+     * the thing. When a plugin is added, the tab updates and this stays a summary — which is the
+     * intended division rather than a drift.
+     */
+    private fun stepWhatItCanDo() {
+        body.addView(Theme.sectionHeader(this, "What it can do"))
+
+        for ((group, items) in GROUPS) {
+            body.addView(
+                Theme.text(this, group, 14f, Theme.ACCENT).apply {
+                    typeface = Theme.handFont(this@OnboardingActivity)
+                    setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, Theme.dp(this@OnboardingActivity, 2))
+                }
+            )
+            body.addView(paragraph(items))
+        }
+
+        body.addView(
+            Theme.text(
+                this,
+                "Every plugin can be switched off individually, and each row has a ? explaining " +
+                    "exactly what it serves.",
+                12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, 0) }
+        )
+    }
+
+    // --- 3. how the gate decides -------------------------------------------
+
+    /**
+     * The three modes and what each one COSTS.
+     *
+     * The descriptions come from `GlobalMode.title`/`blurb` — the same properties the Home gate
+     * card renders. Copying them here would drift: nobody re-reads an onboarding paragraph when
+     * they tweak a card label, so this page would quietly start describing a tradeoff the app no
+     * longer offered.
+     */
+    private fun stepHowTheGateDecides() {
+        body.addView(Theme.sectionHeader(this, "How the gate decides"))
+
+        body.addView(
+            paragraph(
+                "One switch governs every call. It can only ever make the app ask MORE — there is " +
+                    "no setting that lets a request through without a human, so the quietest it " +
+                    "gets is a five-second card."
+            )
+        )
+
+        for (mode in GlobalMode.entries) {
+            body.addView(
+                Theme.text(this, mode.title, 15f, Theme.ON_SURFACE).apply {
+                    typeface = Theme.handFont(this@OnboardingActivity)
+                    setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0)
+                }
+            )
+            body.addView(
+                Theme.text(this, mode.blurb, 13f, Theme.ON_SURFACE_VARIANT).apply {
+                    setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0)
+                }
+            )
+        }
+
+        body.addView(
+            Theme.text(
+                this,
+                "Under Whitelist you can also write per-plugin exceptions, so a route you trust " +
+                    "stops asking. Everything else keeps asking.",
+                12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0) }
+        )
+    }
+
+    // --- 4. connect your agent ---------------------------------------------
+
+    private fun stepConnectYourAgent() {
+        body.addView(Theme.sectionHeader(this, "Connect your agent"))
+
+        body.addView(paragraph("Pick what you use, then copy the block below into it."))
 
         // --- pick your agent ---
-        body.addView(Theme.sectionHeader(this, "Which agent?"))
-
         body.addView(
             agentCard(
                 Agent.HERMES,
@@ -109,8 +306,7 @@ class OnboardingActivity : FragmentActivity() {
             agentCard(
                 Agent.GENERIC,
                 "Another agent",
-                "Anything that can make an HTTP request and read a reply. " +
-                    "Nothing to install.",
+                "Anything that can make an HTTP request and read a reply. Nothing to install.",
             )
         )
 
@@ -123,21 +319,17 @@ class OnboardingActivity : FragmentActivity() {
         body.addView(Theme.sectionHeader(this, "Before it will work"))
 
         body.addView(
-            Theme.text(
-                this,
+            paragraph(
                 "Your agent needs to reach this phone. If both are on the same network that is " +
                     "enough; otherwise install Tailscale on both — it gives the phone an address " +
-                    "that works from anywhere.",
-                13f, Theme.ON_SURFACE_VARIANT
+                    "that works from anywhere."
             )
         )
         body.addView(
-            Theme.text(
-                this,
-                "The first request from a new machine makes the phone ask you to name it. " +
-                    "That happens once per machine.",
-                13f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 8), 0, 0) }
+            paragraph(
+                "The first request from a new machine makes the phone ask you to name it. That " +
+                    "happens once per machine."
+            )
         )
     }
 
@@ -155,8 +347,7 @@ class OnboardingActivity : FragmentActivity() {
             ).apply { setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8)) }
         )
 
-        // The address is interpolated, so the second line cannot be pasted with a stale IP. The
-        // README shows `http://192.168.1.20:8787`; here it is this phone's real bind address.
+        // The address is interpolated, so the second line cannot be pasted with a stale IP.
         val commands = """
             hermes plugins install a7madgamal/hermes-stmp --enable
             hermes config set plugins.entries.stmp.settings.base_url $base
@@ -190,7 +381,7 @@ class OnboardingActivity : FragmentActivity() {
         )
     }
 
-    /** The generic path: unchanged from before the picker existed. */
+    /** The generic path. */
     private fun renderGeneric() {
         body.addView(Theme.sectionHeader(this, "Paste this into your agent"))
 
@@ -198,8 +389,7 @@ class OnboardingActivity : FragmentActivity() {
         body.addView(
             Theme.text(
                 this,
-                "Works with any agent that can make an HTTP request and read a reply. " +
-                    "Nothing to install.",
+                "Works with any agent that can make an HTTP request and read a reply.",
                 12f, Theme.ON_SURFACE_VARIANT
             ).apply { setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8)) }
         )
@@ -223,6 +413,12 @@ class OnboardingActivity : FragmentActivity() {
             )
         }
     }
+
+    /** A paragraph with the standard gap beneath it. */
+    private fun paragraph(text: String): TextView =
+        Theme.text(this, text, 13f, Theme.ON_SURFACE).apply {
+            setPadding(0, Theme.dp(this@OnboardingActivity, 6), 0, Theme.dp(this@OnboardingActivity, 6))
+        }
 
     /**
      * One selectable agent, drawn as the same radio card the gate picker uses.
@@ -251,7 +447,7 @@ class OnboardingActivity : FragmentActivity() {
                 agent = choice
                 // Rebuild AFTER this click finishes. The card is destroyed by `render()`, and
                 // tearing down a view mid-dispatch is how a tap lands and nothing happens.
-                body.post { render() }
+                nav.post { render() }
             }
         }
         card.layoutParams = LinearLayout.LayoutParams(
@@ -325,7 +521,7 @@ class OnboardingActivity : FragmentActivity() {
      * Only judgment and a pointer: where to look (`/help`), what a refusal means (never retry a
      * decline), and how to check the gate works (`/probe`, where a denial is a pass). Every route
      * and error is described by the endpoint, so naming them here would be the second copy that
-     * drifts — the same mistake `respond()` made by enumerating its keys.
+     * drifts.
      */
     private fun buildPrompt(): String {
         val base = baseUrl()
@@ -378,8 +574,8 @@ class OnboardingActivity : FragmentActivity() {
         "1. Start the server on the home screen — the address above is only real once it is running.",
         "2. Paste the prompt into your agent and send it.",
         "3. Approve the first request on the phone. If it is a naming prompt, name this machine.",
-        "4. From then on, every call your agent makes asks you first — a tap for SECURE, a " +
-            "five-second card for NOTIFY.",
+        "4. From then on, every call your agent makes asks you first — a tap for Whitelist or " +
+            "Paranoid, a five-second card for Don't disturb.",
     )
 
     /**
@@ -395,7 +591,24 @@ class OnboardingActivity : FragmentActivity() {
         "3. Call stmp_help. The first call is refused with caller_unverified — that is the " +
             "phone asking who this machine is, not a fault.",
         "4. Approve that prompt on the phone and name the machine, then retry. It is named once.",
-        "5. From then on every gated call waits for you: a tap for SECURE, a five-second card " +
-            "for NOTIFY.",
+        "5. From then on every gated call waits for you — a tap for Whitelist or Paranoid, a " +
+            "five-second card for Don't disturb.",
     )
+
+    private companion object {
+        const val STEP_COUNT = 4
+
+        /** Curated, not exhaustive — see [stepWhatItCanDo]. */
+        val GROUPS: List<Pair<String, String>> = listOf(
+            "Google" to "Gmail, Calendar and Drive — read, send, create, trash, upload. " +
+                "The tokens stay in the phone's vault.",
+            "Phone" to "Read and act on notifications, dismiss them, and search your contacts.",
+            "Machine" to "Run shell commands over SSH from a key generated on the phone. It " +
+                "never leaves this device.",
+            "Voice" to "Speak text aloud, and play cues so a request can reach you when you " +
+                "are not looking at the screen.",
+            "Plumbing" to "API contract, logs, an audit trail and a self-report — so an agent " +
+                "can diagnose itself without asking you to read a screen.",
+        )
+    }
 }

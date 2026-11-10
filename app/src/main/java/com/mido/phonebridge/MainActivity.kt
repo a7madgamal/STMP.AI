@@ -9,6 +9,7 @@ import androidx.fragment.app.Fragment
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.core.AuthManager
+import com.mido.phonebridge.core.OnboardingPrefs
 import com.mido.phonebridge.ui.Theme
 
 /**
@@ -107,6 +108,19 @@ class MainActivity : AppCompatActivity() {
         val wanted = savedInstanceState?.getString(STATE_TAB)
             ?: intent?.getStringExtra(Tabs.EXTRA_TAB)
         show(wanted?.let(::tabNamed) ?: Theme.Tab.HOME)
+
+        // **First launch explains itself.** A fresh install otherwise lands on a server switch
+        // and three unexplained mode radios, with nothing saying why any of it exists.
+        //
+        // Guarded on `savedInstanceState == null` so a ROTATION does not re-open it mid-read —
+        // the flag would not stop that, because it is written on entry, not on finish.
+        //
+        // `OnboardingPrefs.markSeen` happens inside the Activity, on entry: a human who opens
+        // this and swipes away has been introduced, and re-opening on every launch because they
+        // never reached the last page would make the flag mean "finished a tour".
+        if (savedInstanceState == null && !OnboardingPrefs.seen(this)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+        }
     }
 
     /**

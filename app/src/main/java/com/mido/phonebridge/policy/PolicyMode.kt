@@ -17,6 +17,35 @@ import com.mido.phonebridge.core.Verb
 enum class GlobalMode { WHITELIST, PARANOID, DONT_DISTURB }
 
 /**
+ * What a mode is CALLED and what it DOES.
+ *
+ * **One source, because this text now appears twice.** The Home gate card states each mode's
+ * consequence, and the onboarding flow explains the same three choices. Copied strings would
+ * drift, and the drift would be invisible: nobody re-reads an onboarding paragraph when they
+ * tweak a card label, so the flow would quietly start describing a tradeoff the app no longer
+ * offered. Both screens read from here instead.
+ *
+ * The wording states the COST of the mode, not its name. "Paranoid" is a label; "every request
+ * needs your stamp" is the thing the human is choosing between.
+ */
+val GlobalMode.title: String
+    get() = when (this) {
+        GlobalMode.WHITELIST -> "Whitelist"
+        GlobalMode.PARANOID -> "Paranoid"
+        GlobalMode.DONT_DISTURB -> "Don't disturb"
+    }
+
+val GlobalMode.blurb: String
+    get() = when (this) {
+        GlobalMode.WHITELIST ->
+            "Rules decide. Anything without a rule asks for your stamp."
+        GlobalMode.PARANOID ->
+            "Every request needs your stamp. Nothing is quiet."
+        GlobalMode.DONT_DISTURB ->
+            "Small overlay. Doing nothing approves it. Tap \u2715 to reject."
+    }
+
+/**
  * The mode a request is actually gated with. Distinct from [GlobalMode] because
  * `AUTOMATIC` is a switch value that is not a mode: it resolves to one.
  */

@@ -23,6 +23,8 @@ import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.policy.GlobalMode
+import com.mido.phonebridge.policy.blurb
+import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
@@ -278,7 +280,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // read-at-a-glance jobs, not settings.
         container.addView(Theme.sectionHeader(ctx, "Get started"))
         container.addView(
-            Theme.button(ctx, "HOW TO USE THIS", Theme.ButtonStyle.NEUTRAL) {
+            // **"HOW TO USE THIS" named the door, not the room.** Mido, 2026-11-10: *"getting
+            // started section is not obvious"* — the button promised instructions and delivered
+            // one prompt. It now opens a flow that explains what the app IS first, and the label
+            // says so.
+            Theme.button(ctx, "WHAT IS STMP?", Theme.ButtonStyle.NEUTRAL) {
                 go(Intent(ctx, OnboardingActivity::class.java))
             },
         )
@@ -756,7 +762,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             GlobalMode.PARANOID -> {
                 gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "PARANOID"
-                gateSub.text = "Every request needs your stamp. Nothing is quiet."
+                gateSub.text = GlobalMode.PARANOID.blurb
             }
             GlobalMode.DONT_DISTURB -> {
                 // Amber, not red: the gate still exists, it is just quiet and fast.
@@ -764,7 +770,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 // comparison, which is the failure that matters.
                 gateCard.background = Theme.surface(ctx, Theme.WARNING_SURFACE, Theme.RADIUS_CARD)
                 gateTitle.text = "⚠ DON'T DISTURB"
-                gateSub.text = "Small overlay. Doing nothing approves it. Tap ✕ to reject."
+                gateSub.text = GlobalMode.DONT_DISTURB.blurb
             }
         }
         gateTitle.setTextColor(Theme.ON_SURFACE)
@@ -1650,14 +1656,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      * card title AFTER selection.
      */
     private fun gateRadioCard(mode: GlobalMode, selected: Boolean): LinearLayout {
-        val (title, blurb) = when (mode) {
-            GlobalMode.WHITELIST ->
-                "Whitelist" to "Rules decide. Anything without a rule asks for your stamp."
-            GlobalMode.PARANOID ->
-                "Paranoid" to "Every request needs your stamp. Nothing is quiet."
-            GlobalMode.DONT_DISTURB ->
-                "Don't disturb" to "Small overlay. Doing nothing approves it. Tap ✕ to reject."
-        }
+        // Shared with the onboarding flow, so the two can never describe different tradeoffs.
+        val title = mode.title
+        val blurb = mode.blurb
 
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
