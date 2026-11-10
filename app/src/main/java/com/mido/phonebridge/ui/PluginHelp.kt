@@ -1,88 +1,89 @@
 package com.mido.phonebridge.ui
 
-import android.app.AlertDialog
 import android.content.Context
+import android.widget.LinearLayout
 import com.mido.phonebridge.core.Plugin
 
 /**
- * What a plugin does, where it matters, shown as a dialog rather than a screen.
+ * The `?` beside a plugin: what it does, in words a person would use.
  *
- * **Built from the plugin's OWN declarations, never from a table of prose.** Every line here
- * comes from `routes()`, `permissions()`, `specialAccess()` or `scopes()` — the same data the
- * gate and the request prompts already use. A hand-written description beside a plugin is a
- * second truth: it drifts the first time a route is added, and it lies in the direction the
- * human cannot check, because it describes what they were *told* rather than what the app does.
+ * **This replaced a generated technical sheet.** The first version listed routes, HTTP methods and
+ * permission ids, built from the plugin's own declarations. It was accurate and it was useless —
+ * nobody deciding whether to switch on "Google Drive" wants to read `GET /drive/files/{id}`. Mido,
+ * 2026-11-10: *"friendly not a fucking api documentation. a non developer simple description of
+ * the features and example prompts"*.
  *
- * **Why a dialog and not another screen.** The question "what does this do" is asked while
- * looking at the toggle, and the answer must not cost a navigation — the row already navigates
- * on tap for the full detail screen. A dialog is dismissible in one gesture and leaves the
- * switch underneath exactly where it was.
+ * **The trade, stated rather than hidden.** Generated copy cannot drift; this copy can. It is kept
+ * to PURPOSE rather than mechanism, because purpose changes rarely and routes change constantly.
+ * `/help` remains the accurate contract for anything that needs one — this dialog exists to answer
+ * "should I turn this on", which is a different question.
+ *
+ * **Example prompts are the load-bearing part.** "Read my last email" explains Gmail faster than
+ * any description of it, and it is the shape of thing a human will actually type.
  */
 object PluginHelp {
 
-    /** Show the help for [plugin]. */
+    /** Show the `?` dialog for [plugin]. */
     fun show(ctx: Context, plugin: Plugin, enabled: Boolean) {
-        val body = StringBuilder()
+        val info = PluginCopy.forId(plugin.id, plugin.displayName)
 
-        body.append("${plugin.displayName}\n\n")
+        val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
 
-        // STATE FIRST: the most common question is not "what is this" but "why is it not
-        // working", and the answer is usually here.
-        body.append(
-            if (enabled) "On. Its routes are served and gated."
-            else "Off. Its routes still answer, refusing with an explanation."
-        ).append("\n")
+        // State first, because the question is usually "why is this not working" rather than
+        // "what is this". Both sentences are short: the answer is the whole point of the row.
+        body.addView(
+            Theme.text(
+                ctx,
+                if (enabled) "On, and ready." else PluginCopy.OFF_NOTE,
+                13f,
+                if (enabled) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
+            )
+        )
 
-        val routes = plugin.routes()
-        if (routes.isNotEmpty()) {
-            body.append("\nROUTES\n")
-            routes.take(MAX_ROUTES).forEach { r ->
-                body.append("  ${r.method} ${r.path}\n      ${r.describe}\n")
-            }
-            if (routes.size > MAX_ROUTES) {
-                body.append("  …and ${routes.size - MAX_ROUTES} more\n")
+        body.addView(PaperDialog.caption(ctx, info.blurb))
+
+        if (info.examples.isNotEmpty()) {
+            body.addView(PaperDialog.heading(ctx, "Ask it things like"))
+            for (example in info.examples) {
+                body.addView(
+                    Theme.text(ctx, "“$example”", 13f, Theme.ON_SURFACE).apply {
+                        setPadding(
+                            Theme.dp(ctx, 10), Theme.dp(ctx, 6),
+                            Theme.dp(ctx, 10), Theme.dp(ctx, 6),
+                        )
+                        background = Theme.outlined(
+                            ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL,
+                        )
+                    },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(ctx, 6) }
+                )
             }
         }
 
-        // Permissions are stated with their REASON, because the reason is what makes a prompt
-        // answerable. `PluginPermission.why` is required for exactly that.
+        // The permissions this plugin will ask for, in the plugin's own words. Kept because a
+        // prompt that appears later with no warning is the thing people refuse.
         val perms = plugin.permissions()
         if (perms.isNotEmpty()) {
-            body.append("\nNEEDS\n")
-            perms.forEach { p ->
-                val optional = if (p.optional) " (optional — works without it)" else ""
-                body.append("  ${p.label}$optional\n      ${p.why}\n")
+            body.addView(PaperDialog.heading(ctx, "It will ask for"))
+            for (p in perms) {
+                body.addView(
+                    PaperDialog.caption(
+                        ctx,
+                        "• ${p.label} — ${p.why}${if (p.optional) " (optional)" else ""}",
+                    )
+                )
             }
         }
 
-        val special = plugin.specialAccess()
-        if (special.isNotEmpty()) {
-            body.append("\nSYSTEM ACCESS\n")
-            special.forEach { s ->
-                body.append("  ${s.label}\n      Granted in Android Settings, not in this app.\n")
-            }
-        }
-
-        if (plugin.scopes.isNotEmpty()) {
-            body.append("\nGOOGLE SCOPES\n")
-            plugin.scopes.forEach { body.append("  $it\n") }
-        }
-
-        body.append("\nRefusals are recoverable: a plugin that is off answers `plugin_disabled` ")
-        body.append("rather than disappearing, so nothing starts 404-ing because of a switch.")
-
-        AlertDialog.Builder(ctx)
-            .setTitle(plugin.displayName)
-            .setMessage(body.toString().trimEnd())
-            .setPositiveButton("close", null)
-            .show()
+        PaperDialog.show(
+            ctx = ctx,
+            title = plugin.displayName,
+            body = body,
+            actions = listOf("got it" to {}),
+            style = { Theme.ButtonStyle.PRIMARY },
+        )
     }
-
-    /**
-     * Route lines shown before summarising.
-     *
-     * A dialog that runs longer than the screen is a dialog nobody reads to the end, and the
-     * count is the honest way to say "there is more" without pretending the list was complete.
-     */
-    private const val MAX_ROUTES = 6
 }

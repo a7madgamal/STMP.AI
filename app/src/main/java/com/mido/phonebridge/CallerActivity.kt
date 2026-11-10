@@ -70,7 +70,7 @@ class CallerActivity : FragmentActivity() {
         }
 
         root.addView(
-            Theme.text(this, "UNKNOWN CALLER", 20f).apply {
+            Theme.text(this, "NEW DEVICE", 20f).apply {
                 typeface = Theme.handFont(this@CallerActivity)
             }
         )
@@ -79,13 +79,26 @@ class CallerActivity : FragmentActivity() {
                 setPadding(0, Theme.dp(this@CallerActivity, 8), 0, 0)
             }
         )
+
+        // **What this screen is FOR, in plain words.** The previous copy said "this address has
+        // never reached this phone before" and jumped straight to a submit button — it stated a
+        // fact and left the human to work out why they were being asked.
         root.addView(
             Theme.text(
                 this,
-                "This address has never reached this phone before. Name it to allow it, or " +
-                    "block it. Either way it is remembered, so you are only asked once.",
+                "A computer just tried to talk to this phone, and it has not done that before. " +
+                    "Give it a name you will recognise and it can connect from now on — or block " +
+                    "it.",
                 13f, Theme.ON_SURFACE_VARIANT
             ).apply { setPadding(0, Theme.dp(this@CallerActivity, 10), 0, 0) }
+        )
+        root.addView(
+            Theme.text(
+                this,
+                "Nothing is allowed until you choose, and this is asked once per computer, " +
+                    "not once per request.",
+                12f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@CallerActivity, 6), 0, 0) }
         )
 
         nameField = EditText(this).apply {
@@ -116,9 +129,26 @@ class CallerActivity : FragmentActivity() {
 
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(0, Theme.dp(this@CallerActivity, 20), 0, 0)
         }
+
+        // **A way out that decides nothing.** Without it the only two choices were allow and
+        // block, so a human who was not ready had to press Back — and Back reads as "I broke
+        // this" rather than "not now". Cancel resolves the waiting request as unavailable, which
+        // is retryable, and writes nothing: the next knock asks again.
+        val cancel = Theme.button(this, "not now", Theme.ButtonStyle.GHOST, small = true) {
+            if (decided) return@button
+            decided = true
+            CallerPrompt.resolve(CallerPrompt.Result.Unavailable)
+            finish()
+        }
+        buttons.addView(cancel)
+
+        // Spacer: the two consequential buttons sit at the right edge, away from the dismissive
+        // one. Approving by reflex should take aim, not luck.
+        buttons.addView(android.view.View(this), LinearLayout.LayoutParams(0, 1, 1f))
+
         deny = Theme.button(this, "block", Theme.ButtonStyle.DANGER) { decide(allow = false) }
         approve = Theme.button(this, "allow", Theme.ButtonStyle.SUCCESS) { decide(allow = true) }
         buttons.addView(deny)

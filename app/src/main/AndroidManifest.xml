@@ -154,7 +154,11 @@
              request; writes callers.json and releases the waiting request. -->
         <activity
             android:name=".CallerActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:showOnLockScreen="true" />
 
         <activity
             android:name=".SshActivity"

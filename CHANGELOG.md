@@ -5354,10 +5354,16 @@ devDependencies. `node_modules/` is gitignored.
 - Get started asks which agent you use. Hermes gets its install and config commands with this phone's address already filled in; everything else keeps the generic prompt.
 - The Hermes steps name `caller_unverified` as expected rather than a fault, which is where people otherwise conclude the plugin is broken.
 
-## 0.48.11 (build 287) — 2026-11-10 — CURRENT
+## 0.48.11 (build 287) — 2026-11-10
 - Get started is a four-step introduction: what the app is, what it can do, how the gate decides, then connecting an agent. It opens by itself on first launch and is reachable from Home afterwards.
 - The three gate modes are described in one place shared by the Home card and the introduction, so the two cannot describe different tradeoffs.
 - Home's door is labelled WHAT IS STMP? — the old wording promised instructions and delivered one prompt.
+
+## 0.48.12 (build 288) — 2026-11-10 — CURRENT
+- The new-device prompt no longer stacks: opening it twice showed two screens, and it now has a `not now` action that decides nothing instead of forcing a block.
+- The new-device screen explains itself — what just happened, and that this is asked once per computer rather than once per request.
+- A plugin's `?` speaks plain English now: what the feature is for, and example things to ask it. The technical sheet it used to show read like API documentation.
+- Dialogs are drawn on the app's own paper instead of a system dialog.
 
 ## Keeping this file honest
 
