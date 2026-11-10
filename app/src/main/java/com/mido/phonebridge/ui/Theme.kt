@@ -13,6 +13,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.EditText
 import android.widget.TextView
@@ -969,6 +970,46 @@ object Theme {
     /** A compact filter chip. Same machinery as [button], tighter. */
     fun chip(ctx: Context, label: String, selected: Boolean = false, onClick: () -> Unit): MaterialButton =
         button(ctx, label, if (selected) ButtonStyle.PRIMARY else ButtonStyle.NEUTRAL, small = true, onClick = onClick)
+
+    /**
+     * A round bulb badge that opens an explanation, sized to be tapped rather than aimed at.
+     *
+     * **Why a bulb and not a `?`.** A question mark on a row reads as "something is wrong" or
+     * "unknown value" — it is the shape of a diagnostic, not of an offer to explain. A bulb in a
+     * disc says "there is more to read here" before it is tapped (Mido, 2026-11-10).
+     *
+     * **The target is the BOX, not the paint.** A 30dp disc is easy to see and small to hit, so it
+     * is centred inside a 44dp touch frame: minimumWidth/minimumHeight do nothing on a fixed-size
+     * child, so the frame is what makes the affordance hittable. The disc carries the app's paper
+     * grain and drawn edge through [surface], like every other bounded surface in the app.
+     *
+     * Its own click listener is deliberate — a clickable child wins the touch, so tapping the badge
+     * never navigates the row underneath it.
+     */
+    fun bulbBadge(ctx: Context, describe: String, onClick: () -> Unit): FrameLayout {
+        val touch = dp(ctx, 44)
+        val disc = dp(ctx, 30)
+        val holder = FrameLayout(ctx)
+        holder.contentDescription = describe
+        holder.isClickable = true
+        holder.isFocusable = true
+        holder.setOnClickListener { onClick() }
+        holder.layoutParams = LinearLayout.LayoutParams(touch, touch).apply {
+            marginEnd = dp(ctx, 8)
+        }
+        holder.addView(View(ctx).apply {
+            background = surface(ctx, WARNING_SURFACE, 15)
+        }, FrameLayout.LayoutParams(disc, disc, Gravity.CENTER))
+        holder.addView(TextView(ctx).apply {
+            text = "\uD83D\uDCA1"
+            textSize = 14f
+            gravity = Gravity.CENTER
+            // No hand font and no ink colour: the glyph is drawn by the system emoji font, so the
+            // typeface and colour are ignored. Kept explicit so a later pass does not wonder.
+            setTextColor(ON_SURFACE)
+        }, FrameLayout.LayoutParams(disc, disc, Gravity.CENTER))
+        return holder
+    }
 
     /**
      * A radio marker: a small ring, filled with the accent when selected.

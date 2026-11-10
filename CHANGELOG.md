@@ -5368,12 +5368,16 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.48.13 (build 289) — 2026-11-10
 - Settings repaints when you come back to it, so a permission granted in Android Settings shows as granted instead of still offering to grant it.
 
-## 0.48.14 (build 290) — 2026-11-10 — CURRENT
+## 0.48.14 (build 290) — 2026-11-10
 - The introduction is shorter and larger: each step is a headline plus a few lines, and body text is bigger.
 - The introduction now helps you grant the four system accesses it depends on — notification access, draw over apps, lock-screen popup and battery exemption — each row showing live state and opening the right screen.
 - The updates card always states the installed version, instead of only when a check came back up to date.
 - A check in progress no longer stays "checking…" forever, which previously also disabled CHECK NOW.
 - Speaking during a call is refused with `tts_in_call` instead of reporting success for a sentence nobody heard.
+
+## 0.48.15 (build 291) — 2026-11-10 — CURRENT
+- A plugin's help is a 💡 badge on the left of the row instead of a `?` beside the switch. A question mark beside a control reads as a fault on that control; on the left it marks the thing being explained.
+- The badge sits in a 44dp touch frame with a drawn disc inside it, so it is easy to hit without being a large target on screen.
 
 ## Keeping this file honest
 

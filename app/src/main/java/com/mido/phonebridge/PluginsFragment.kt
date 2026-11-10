@@ -274,6 +274,22 @@ class PluginsFragment : BridgeFragment() {
             // CENTER_VERTICAL so the knob lines up with the name rather than the top of the word.
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
+        // **A 💡 badge at the START of the row**, before the name.
+        //
+        // Mido, 2026-11-10: *"change the ? in the plugins list into a leftside into a 💡 circle
+        // icon"*. It used to sit in the control cluster beside the knob, where a `?` reads as a
+        // diagnostic on the switch. On the left it reads as what it is: a marker on the thing to
+        // be explained, and the name sits beside the bulb it belongs to.
+        //
+        // Its own click listener means the row does NOT navigate when it is tapped — a clickable
+        // child wins the touch. That is the point: the row already opens the detail screen, and a
+        // help affordance that navigated somewhere would be the same door twice.
+        titleRow.addView(
+            Theme.bulbBadge(ctx, "What ${plugin.displayName} does") {
+                PluginHelp.show(ctx, plugin, on)
+            },
+        )
+
         // Weight 1 on the name: it absorbs all the slack, which is what pushes the state word and
         // then the knob to the right edge. Without it the knob sat wherever the text happened to
         // end, so rows disagreed about where the switch lived.
@@ -281,26 +297,6 @@ class PluginsFragment : BridgeFragment() {
             setTextColor(Theme.ON_SURFACE)
             typeface = Theme.handFont(ctx)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-
-        // **A "?" beside the switch**, not inside the title text: the name takes weight 1 and
-        // absorbs all slack, so a button placed before it would sit mid-row. Here it lands in
-        // the same cluster as the knob, which is where "what does this control do" is asked.
-        //
-        // Its own click listener means the row does NOT navigate when it is tapped — a clickable
-        // child wins the touch. That is the point: the row already opens the detail screen, and a
-        // help affordance that navigated somewhere would be the same door twice.
-        titleRow.addView(Theme.text(ctx, "?", 15f).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(Theme.dp(ctx, 10), 0, Theme.dp(ctx, 10), 0)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "What ${plugin.displayName} does"
-            setOnClickListener { PluginHelp.show(ctx, plugin, on) }
-            // A 15sp glyph is a small target on its own; padding above widens it without
-            // drawing anything, so the row still reads as one line of text and one switch.
-            minimumHeight = Theme.dp(ctx, 40)
-            gravity = android.view.Gravity.CENTER
-        })
 
         // The state chip. Colour carries the meaning and the WORD carries it too, because a
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
