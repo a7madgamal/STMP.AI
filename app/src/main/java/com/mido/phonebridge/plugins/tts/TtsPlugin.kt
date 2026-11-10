@@ -162,6 +162,20 @@ class TtsPlugin(private val ctx: Context) : Plugin {
             // No usable engine is a broken install / disabled voice — the caller can do nothing
             // about it, and pretending to speak would be the worst answer.
             throw PluginError("tts_unavailable", e.message ?: "no usable text-to-speech engine")
+        } catch (e: TtsSpeaker.TtsInCall) {
+            // **Not a fault, and NOT a success.**
+            //
+            // Before this existed the engine accepted the text during a call, played it into a
+            // muted stream, reported `onDone`, and the route answered `ok` — so a caller was told
+            // the human had been spoken to when nobody heard a word. Mido, 2026-11-10: *"tts failed
+            // silently when the phone was in a call"*.
+            //
+            // The message says what happened and what to do, because "tts_failed" for a busy phone
+            // teaches the caller to retry the wrong way.
+            throw PluginError(
+                "tts_in_call",
+                e.message ?: "the phone is on a call, so speech would be inaudible"
+            )
         } catch (e: TtsSpeaker.TtsFailed) {
             throw PluginError("tts_failed", e.message ?: "the phone could not speak this")
         }

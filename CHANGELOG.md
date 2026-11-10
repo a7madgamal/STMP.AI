@@ -5365,8 +5365,15 @@ devDependencies. `node_modules/` is gitignored.
 - A plugin's `?` speaks plain English now: what the feature is for, and example things to ask it. The technical sheet it used to show read like API documentation.
 - Dialogs are drawn on the app's own paper instead of a system dialog.
 
-## 0.48.13 (build 289) — 2026-11-10 — CURRENT
+## 0.48.13 (build 289) — 2026-11-10
 - Settings repaints when you come back to it, so a permission granted in Android Settings shows as granted instead of still offering to grant it.
+
+## 0.48.14 (build 290) — 2026-11-10 — CURRENT
+- The introduction is shorter and larger: each step is a headline plus a few lines, and body text is bigger.
+- The introduction now helps you grant the four system accesses it depends on — notification access, draw over apps, lock-screen popup and battery exemption — each row showing live state and opening the right screen.
+- The updates card always states the installed version, instead of only when a check came back up to date.
+- A check in progress no longer stays "checking…" forever, which previously also disabled CHECK NOW.
+- Speaking during a call is refused with `tts_in_call` instead of reporting success for a sentence nobody heard.
 
 ## Keeping this file honest
 

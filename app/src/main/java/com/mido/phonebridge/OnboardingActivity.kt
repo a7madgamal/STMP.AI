@@ -3,6 +3,7 @@ package com.mido.phonebridge
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -17,24 +18,29 @@ import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.ui.Theme
 
 /**
- * The introduction: what STMP is, what it can do, how the gate decides, then how to connect.
+ * The introduction: what STMP is, what it can do, what it needs, how the gate decides, then how
+ * to connect an agent.
  *
- * **Why this is a flow and not a scroll.** The previous screen explained only HOW to connect, and
- * a new install landed on Home facing a server switch and three unexplained mode radios. Purpose
- * is not a paragraph you append — it needs room, so it gets its own steps.
+ * **Short by rule, not by taste.** The first version explained everything carefully and read as a
+ * wall: three of four steps were 3–4 sentence paragraphs at 13sp, and step 1 said the same thing
+ * three times. Mido, 2026-11-10: *"the onboarding is very text heavy. more concise and larger
+ * text"*. So: every step is a headline plus at most three short lines, body is 16sp, and the
+ * prose is roughly a third of what it was. The detail lives where it is actionable — the `?` on
+ * each plugin, `/help` for an agent, Settings → Permissions for state.
  *
- * **Why steps and not swipeable pages.** Step 2 and step 4 contain selectable monospace fields.
- * Horizontal swiping fights text selection: a drag to select would flip the page instead. Back and
- * Next are unambiguous, and they leave the gesture surface to the field that needs it.
+ * **Permissions are a step, not a footnote.** The app cannot work without four system accesses,
+ * and previously the only place to find them was Settings → Permissions, three taps from an
+ * explanation of why they matter. Mido, 2026-11-10: *"the onboarding must also help user give all
+ * needed permissions like the draw and full screen one"*. Each row shows live state and opens the
+ * exact Settings screen.
  *
- * **Opened once.** `OnboardingPrefs` records that it has been seen, and it is written on ENTRY.
- * A human who opens this, reads one step and swipes the app away has been introduced; re-opening
- * on every launch because they never reached the last page would make the flag mean "completed a
- * tour" rather than "has been introduced", and the nagging version is the one people resent.
+ * **Skip is always available, and Next never blocks.** A permission the human declines is a
+ * degraded app, not a broken one, and an introduction that refuses to advance until four system
+ * toggles are flipped is a hostage negotiation. The rows are here so the choice is informed, not
+ * compulsory — and Settings → Permissions keeps the same rows for later.
  *
- * **It writes nothing but that flag.** No setting is changed by walking through this. An
- * onboarding that silently altered the gate would be one you could not read and trust in the same
- * breath.
+ * **Only the `seen` flag is written.** No gate mode, no toggle, no permission request is issued
+ * by walking through this: the rows open Settings and the human decides there.
  */
 class OnboardingActivity : FragmentActivity() {
 
@@ -51,11 +57,13 @@ class OnboardingActivity : FragmentActivity() {
 
     private lateinit var scroll: ScrollView
 
+    private lateinit var nav: LinearLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Marked HERE, not on finish. See the class comment: "has been introduced" is the fact
-        // worth storing, and it is the one that cannot nag.
+        // Marked HERE, not on finish: a human who opens this and swipes away has been
+        // introduced, and the flag that means "completed a tour" is the one that nags.
         OnboardingPrefs.markSeen(this)
 
         val root = LinearLayout(this).apply {
@@ -67,7 +75,7 @@ class OnboardingActivity : FragmentActivity() {
             background = Theme.sheet(Theme.BG)
         }
 
-        root.addView(Theme.text(this, "STMP", 22f).apply {
+        root.addView(Theme.text(this, "STMP", 26f).apply {
             typeface = Theme.handFont(this@OnboardingActivity)
         })
 
@@ -91,14 +99,25 @@ class OnboardingActivity : FragmentActivity() {
         setContentView(root)
     }
 
-    private lateinit var nav: LinearLayout
+    /**
+     * Coming back from a Settings screen must show the grant.
+     *
+     * The permission rows read live state, and the human leaves this Activity to grant them — so
+     * without this the row they just satisfied would still say "turn on". Same failure, and the
+     * same fix, as `OptionsFragment.onResume`.
+     */
+    override fun onResume() {
+        super.onResume()
+        // Guarded: onResume runs before the first render() has built the rail.
+        if (::nav.isInitialized) render()
+    }
 
     /**
      * Paint the current step and the rail.
      *
      * Everything is rebuilt, never patched: a step's content is not a superset of another's, so
-     * mutating in place would mean reasoning about which views to remove. The whole set is small
-     * and text-only, so rebuilding is cheaper than the bookkeeping.
+     * mutating in place would mean reasoning about which views to remove. The set is small and
+     * text-only, so rebuilding is cheaper than the bookkeeping.
      */
     private fun render() {
         body.removeAllViews()
@@ -107,15 +126,16 @@ class OnboardingActivity : FragmentActivity() {
         body.addView(
             Theme.text(
                 this,
-                "Step ${step + 1} of $STEP_COUNT",
-                12f, Theme.ON_SURFACE_VARIANT
+                "${step + 1} / $STEP_COUNT",
+                13f, Theme.ON_SURFACE_VARIANT
             )
         )
 
         when (step) {
             0 -> stepWhatThisIs()
             1 -> stepWhatItCanDo()
-            2 -> stepHowTheGateDecides()
+            2 -> stepWhatItNeeds()
+            3 -> stepHowTheGateDecides()
             else -> stepConnectYourAgent()
         }
 
@@ -130,7 +150,7 @@ class OnboardingActivity : FragmentActivity() {
         val last = step == STEP_COUNT - 1
 
         // Skip is always present. A flow with no exit is a wall, and the app is fully usable
-        // without reading any of this — the Plugins tab says what each thing does.
+        // without reading any of this.
         nav.addView(
             Theme.button(this, if (last) "CLOSE" else "SKIP", Theme.ButtonStyle.GHOST, small = true) {
                 finish()
@@ -177,136 +197,230 @@ class OnboardingActivity : FragmentActivity() {
     // --- 1. what this is ---------------------------------------------------
 
     private fun stepWhatThisIs() {
-        body.addView(Theme.sectionHeader(this, "What this is"))
+        body.addView(heading("Your phone is the server"))
+        body.addView(line("Your agent asks. You approve on the phone."))
 
         body.addView(
-            paragraph(
-                "This phone is a server, and your agent is the client. It calls the phone; you " +
-                    "approve each call here. Nothing about your accounts lives on the machine " +
-                    "running the agent."
-            )
-        )
-
-        body.addView(Theme.sectionHeader(this, "The trust boundary is the phone"))
-
-        body.addView(
-            paragraph(
-                "Google tokens, API keys and SSH private keys live in a Keystore-wrapped vault on " +
-                    "this device. They are never sent anywhere — not to your agent, not to a " +
-                    "server. When a call needs a credential, the PHONE makes the request and " +
-                    "returns the answer, so the secret never crosses the wire."
-            )
-        )
-
-        body.addView(
-            paragraph(
-                "That is the whole design. An agent that has been prompt-injected, or a laptop " +
-                    "that has been compromised, can still only ASK — it cannot approve itself, " +
-                    "and it has nothing worth stealing."
-            )
+            card {
+                addView(
+                    Theme.text(this@OnboardingActivity, "Your keys never leave here", 18f, Theme.ON_SURFACE).apply {
+                        typeface = Theme.handFont(this@OnboardingActivity)
+                    }
+                )
+                addView(
+                    Theme.text(
+                        this@OnboardingActivity,
+                        "Google tokens, API keys, SSH keys — they live in a vault on this device. Nothing is sent to the machine running your agent.",
+                        16f, Theme.ON_SURFACE_VARIANT,
+                    ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 6), 0, 0) }
+                )
+                addView(
+                    Theme.text(
+                        this@OnboardingActivity,
+                        "So a stolen laptop, or an agent tricked into obeying something else, has nothing to take and still has to ask you.",
+                        16f, Theme.ON_SURFACE_VARIANT,
+                    ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 8), 0, 0) }
+                )
+            }
         )
     }
 
     // --- 2. what it can do -------------------------------------------------
 
     /**
-     * The capability summary, grouped by MEANING rather than listed exhaustively.
+     * Capabilities by MEANING, not by plugin id.
      *
-     * Deliberately curated, not generated from `PluginRegistry`. A page that listed thirteen
-     * plugins with their real ids would be a wall of names on a screen meant to answer "should I
-     * keep this app". The Plugins tab is the live truth and names every one; this is the shape of
-     * the thing. When a plugin is added, the tab updates and this stays a summary — which is the
-     * intended division rather than a drift.
+     * Curated rather than generated: thirteen rows would be a wall on a screen meant to answer
+     * "should I keep this app". The Plugins tab is the live truth and names every one.
      */
     private fun stepWhatItCanDo() {
-        body.addView(Theme.sectionHeader(this, "What it can do"))
+        body.addView(heading("What it can do"))
 
         for ((group, items) in GROUPS) {
             body.addView(
-                Theme.text(this, group, 14f, Theme.ACCENT).apply {
+                Theme.text(this, group, 17f, Theme.ACCENT).apply {
                     typeface = Theme.handFont(this@OnboardingActivity)
-                    setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, Theme.dp(this@OnboardingActivity, 2))
+                    setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, Theme.dp(this@OnboardingActivity, 2))
                 }
             )
-            body.addView(paragraph(items))
+            body.addView(line(items))
         }
 
         body.addView(
             Theme.text(
                 this,
-                "Every plugin can be switched off individually, and each row has a ? explaining " +
-                    "exactly what it serves.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, 0) }
+                "Each one can be switched off, and its ? explains what it does.",
+                14f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, 0) }
         )
     }
 
-    // --- 3. how the gate decides -------------------------------------------
+    // --- 3. what it needs --------------------------------------------------
+
+    /**
+     * The four system accesses, each a row that opens the screen which grants it.
+     *
+     * Order is by consequence, not by Android's own listing: without notification access the
+     * agent is blind, so it goes first. Each row states what breaks if it stays off — a toggle
+     * with no consequence attached is a toggle people skip.
+     */
+    private fun stepWhatItNeeds() {
+        body.addView(heading("What it needs to work"))
+
+        body.addView(line("Four things Android decides, not this app. Tap any one to grant it."))
+
+        permissionRow(
+            "Notification access",
+            "Without it your agent cannot see anything on your phone.",
+            granted = BridgeService.listenerRef != null,
+            optional = false,
+        ) { openNotifAccessSettings() }
+
+        permissionRow(
+            "Draw over other apps",
+            "Without it the approval card cannot appear over another app.",
+            granted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(this),
+            optional = false,
+        ) { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(this) }
+
+        permissionRow(
+            "Lock-screen popup",
+            "Without it approvals miss you while the screen is locked.",
+            granted = ApprovalGate.canUseFullScreenIntent(this),
+            optional = true,
+        ) { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(this) }
+
+        permissionRow(
+            "Battery optimization",
+            "Without it Android may freeze the server while the screen sleeps.",
+            granted = com.mido.phonebridge.ui.SystemAccess.batteryExempt(this),
+            optional = false,
+        ) { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(this) }
+
+        body.addView(
+            Theme.text(
+                this,
+                "You can change these later in Settings → Permissions.",
+                14f, Theme.ON_SURFACE_VARIANT
+            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, 0) }
+        )
+    }
+
+    /**
+     * One system access, with its live state.
+     *
+     * Tappable in BOTH states, deliberately. Sending the human to the same Settings screen even
+     * when it already reads granted costs nothing, and a row that stops responding once satisfied
+     * is a row that looks broken.
+     */
+    private fun permissionRow(
+        title: String,
+        why: String,
+        granted: Boolean,
+        optional: Boolean,
+        onClick: () -> Unit,
+    ) {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
+                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
+            )
+            background = Theme.outlined(
+                this@OnboardingActivity,
+                Theme.SURFACE,
+                Theme.RADIUS_CONTROL,
+                strokeColor = if (granted) Theme.SUCCESS else Theme.BORDER,
+                strokeDp = if (granted) 2 else 1,
+            )
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+        card.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(this@OnboardingActivity, 10) }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+
+        row.addView(
+            Theme.text(this, title, 17f, Theme.ON_SURFACE).apply {
+                typeface = Theme.handFont(this@OnboardingActivity)
+            },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        row.addView(
+            Theme.text(
+                this,
+                when {
+                    granted -> "on"
+                    optional -> "optional"
+                    else -> "turn on"
+                },
+                14f,
+                if (granted) Theme.SUCCESS else Theme.WARNING,
+            )
+        )
+        card.addView(row)
+
+        card.addView(
+            Theme.text(this, why, 14f, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, 0)
+            }
+        )
+        body.addView(card)
+    }
+
+    // --- 4. how the gate decides -------------------------------------------
 
     /**
      * The three modes and what each one COSTS.
      *
      * The descriptions come from `GlobalMode.title`/`blurb` — the same properties the Home gate
-     * card renders. Copying them here would drift: nobody re-reads an onboarding paragraph when
-     * they tweak a card label, so this page would quietly start describing a tradeoff the app no
-     * longer offered.
+     * card renders. Copying them here would drift silently: nobody re-reads an onboarding
+     * paragraph when they tweak a card label.
      */
     private fun stepHowTheGateDecides() {
-        body.addView(Theme.sectionHeader(this, "How the gate decides"))
-
-        body.addView(
-            paragraph(
-                "One switch governs every call. It can only ever make the app ask MORE — there is " +
-                    "no setting that lets a request through without a human, so the quietest it " +
-                    "gets is a five-second card."
-            )
-        )
+        body.addView(heading("How it asks you"))
+        body.addView(line("One switch for everything. It can only make the app ask more, never less."))
 
         for (mode in GlobalMode.entries) {
             body.addView(
-                Theme.text(this, mode.title, 15f, Theme.ON_SURFACE).apply {
+                Theme.text(this, mode.title, 17f, Theme.ON_SURFACE).apply {
                     typeface = Theme.handFont(this@OnboardingActivity)
                     setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0)
                 }
             )
             body.addView(
-                Theme.text(this, mode.blurb, 13f, Theme.ON_SURFACE_VARIANT).apply {
+                Theme.text(this, mode.blurb, 15f, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0)
                 }
             )
         }
-
-        body.addView(
-            Theme.text(
-                this,
-                "Under Whitelist you can also write per-plugin exceptions, so a route you trust " +
-                    "stops asking. Everything else keeps asking.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0) }
-        )
     }
 
-    // --- 4. connect your agent ---------------------------------------------
+    // --- 5. connect your agent ---------------------------------------------
 
     private fun stepConnectYourAgent() {
-        body.addView(Theme.sectionHeader(this, "Connect your agent"))
+        body.addView(heading("Connect your agent"))
+        body.addView(line("Pick what you use, then copy the block into it."))
 
-        body.addView(paragraph("Pick what you use, then copy the block below into it."))
-
-        // --- pick your agent ---
         body.addView(
             agentCard(
                 Agent.HERMES,
                 "Hermes",
-                "Installs the hermes-stmp plugin and points it at this phone. " +
-                    "Thirteen tools, one per plugin class.",
+                "Installs the plugin and points it at this phone. Thirteen tools.",
             )
         )
         body.addView(
             agentCard(
                 Agent.GENERIC,
                 "Another agent",
-                "Anything that can make an HTTP request and read a reply. Nothing to install.",
+                "Anything that can make an HTTP request. Nothing to install.",
             )
         )
 
@@ -315,22 +429,9 @@ class OnboardingActivity : FragmentActivity() {
             Agent.GENERIC -> renderGeneric()
         }
 
-        // --- shared caveats, true for both paths ---
         body.addView(Theme.sectionHeader(this, "Before it will work"))
-
-        body.addView(
-            paragraph(
-                "Your agent needs to reach this phone. If both are on the same network that is " +
-                    "enough; otherwise install Tailscale on both — it gives the phone an address " +
-                    "that works from anywhere."
-            )
-        )
-        body.addView(
-            paragraph(
-                "The first request from a new machine makes the phone ask you to name it. That " +
-                    "happens once per machine."
-            )
-        )
+        body.addView(line("Both machines must reach each other. Same network is enough; otherwise install Tailscale on both."))
+        body.addView(line("The first request from a new machine asks you to name it. Once per machine."))
     }
 
     /** The Hermes path: install, point at this phone, expect the naming refusal. */
@@ -338,12 +439,11 @@ class OnboardingActivity : FragmentActivity() {
         val base = baseUrl()
 
         body.addView(Theme.sectionHeader(this, "Run these where Hermes runs"))
-
         body.addView(
             Theme.text(
                 this,
-                "Not in Hermes — on the machine that hosts it. These are shell commands.",
-                12f, Theme.ON_SURFACE_VARIANT
+                "On the machine hosting Hermes — not in Hermes.",
+                14f, Theme.ON_SURFACE_VARIANT
             ).apply { setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8)) }
         )
 
@@ -362,11 +462,11 @@ class OnboardingActivity : FragmentActivity() {
             ).apply { topMargin = Theme.dp(this@OnboardingActivity, 12) }
         )
 
-        body.addView(Theme.sectionHeader(this, "What happens next"))
+        body.addView(Theme.sectionHeader(this, "Then"))
 
         for (line in hermesSteps()) {
             body.addView(
-                Theme.text(this, line, 13f, Theme.ON_SURFACE).apply {
+                Theme.text(this, line, 16f, Theme.ON_SURFACE).apply {
                     setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8))
                 }
             )
@@ -376,7 +476,7 @@ class OnboardingActivity : FragmentActivity() {
             Theme.text(
                 this,
                 "Read the plugin first: https://github.com/a7madgamal/hermes-stmp",
-                12f, Theme.ON_SURFACE_VARIANT
+                14f, Theme.ON_SURFACE_VARIANT
             ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, 0) }
         )
     }
@@ -386,14 +486,6 @@ class OnboardingActivity : FragmentActivity() {
         body.addView(Theme.sectionHeader(this, "Paste this into your agent"))
 
         val prompt = buildPrompt()
-        body.addView(
-            Theme.text(
-                this,
-                "Works with any agent that can make an HTTP request and read a reply.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8)) }
-        )
-
         body.addView(monoField(prompt))
         body.addView(
             copyButton("COPY PROMPT", prompt),
@@ -403,22 +495,59 @@ class OnboardingActivity : FragmentActivity() {
             ).apply { topMargin = Theme.dp(this@OnboardingActivity, 12) }
         )
 
-        body.addView(Theme.sectionHeader(this, "What happens next"))
+        body.addView(Theme.sectionHeader(this, "Then"))
 
         for (line in steps()) {
             body.addView(
-                Theme.text(this, line, 13f, Theme.ON_SURFACE).apply {
+                Theme.text(this, line, 16f, Theme.ON_SURFACE).apply {
                     setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8))
                 }
             )
         }
     }
 
-    /** A paragraph with the standard gap beneath it. */
-    private fun paragraph(text: String): TextView =
-        Theme.text(this, text, 13f, Theme.ON_SURFACE).apply {
-            setPadding(0, Theme.dp(this@OnboardingActivity, 6), 0, Theme.dp(this@OnboardingActivity, 6))
+    // --- shared building blocks --------------------------------------------
+
+    /** A step heading, large enough to be the thing you read first. */
+    private fun heading(text: String): TextView =
+        Theme.text(this, text, 24f, Theme.ON_SURFACE).apply {
+            typeface = Theme.handFont(this@OnboardingActivity)
+            setPadding(0, Theme.dp(this@OnboardingActivity, 10), 0, Theme.dp(this@OnboardingActivity, 6))
         }
+
+    /** One line of body copy at reading size. */
+    private fun line(text: String): TextView =
+        Theme.text(this, text, 16f, Theme.ON_SURFACE_VARIANT).apply {
+            setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, Theme.dp(this@OnboardingActivity, 4))
+        }
+
+    /** A paper card holding a few related lines. */
+    private fun card(content: LinearLayout.() -> Unit): LinearLayout {
+        val c = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
+                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
+            )
+            background = Theme.outlined(
+                this@OnboardingActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CARD,
+            )
+            content()
+        }
+        c.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(this@OnboardingActivity, 10) }
+        return c
+    }
+
+    private fun openNotifAccessSettings() {
+        try {
+            startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "could not open notification settings", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     /**
      * One selectable agent, drawn as the same radio card the gate picker uses.
@@ -428,7 +557,7 @@ class OnboardingActivity : FragmentActivity() {
      */
     private fun agentCard(choice: Agent, title: String, blurb: String): LinearLayout {
         val selected = agent == choice
-        val card = LinearLayout(this).apply {
+        val cardLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
                 Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 10),
@@ -450,7 +579,7 @@ class OnboardingActivity : FragmentActivity() {
                 nav.post { render() }
             }
         }
-        card.layoutParams = LinearLayout.LayoutParams(
+        cardLayout.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = Theme.dp(this@OnboardingActivity, 8) }
@@ -463,17 +592,17 @@ class OnboardingActivity : FragmentActivity() {
 
         val text = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(Theme.text(this@OnboardingActivity, title, 15f, Theme.ON_SURFACE).apply {
+            addView(Theme.text(this@OnboardingActivity, title, 17f, Theme.ON_SURFACE).apply {
                 typeface = Theme.handFont(this@OnboardingActivity)
             })
             addView(
-                Theme.text(this@OnboardingActivity, blurb, 12f, Theme.ON_SURFACE_VARIANT)
+                Theme.text(this@OnboardingActivity, blurb, 14f, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0) }
             )
         }
         row.addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        card.addView(row)
-        return card
+        cardLayout.addView(row)
+        return cardLayout
     }
 
     /**
@@ -492,7 +621,7 @@ class OnboardingActivity : FragmentActivity() {
         setHintTextColor(Theme.ON_SURFACE_VARIANT)
         highlightColor = Theme.ACCENT
         typeface = android.graphics.Typeface.MONOSPACE
-        textSize = 13f
+        textSize = 14f
         background = Theme.outlined(this@OnboardingActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         setPadding(
             Theme.dp(this@OnboardingActivity, 12), Theme.dp(this@OnboardingActivity, 12),
@@ -571,44 +700,36 @@ class OnboardingActivity : FragmentActivity() {
     }
 
     private fun steps(): List<String> = listOf(
-        "1. Start the server on the home screen — the address above is only real once it is running.",
+        "1. Start the server on the home screen.",
         "2. Paste the prompt into your agent and send it.",
-        "3. Approve the first request on the phone. If it is a naming prompt, name this machine.",
-        "4. From then on, every call your agent makes asks you first — a tap for Whitelist or " +
-            "Paranoid, a five-second card for Don't disturb.",
+        "3. Approve the first request. Name this machine if asked.",
+        "4. From then on, every call asks you first.",
     )
 
     /**
      * The Hermes steps, which are a different shape from the generic ones.
      *
-     * Step 3 is the important line: `caller_unverified` looks like a failure and is not. Left
+     * Step 2 is the important line: `caller_unverified` looks like a failure and is not. Left
      * unexplained, it is the point where people conclude the plugin is broken.
      */
     private fun hermesSteps(): List<String> = listOf(
-        "1. Start the server on the home screen — the address in those commands is only real " +
-            "once it is running.",
-        "2. Run the two commands above on the machine that hosts Hermes.",
-        "3. Call stmp_help. The first call is refused with caller_unverified — that is the " +
-            "phone asking who this machine is, not a fault.",
-        "4. Approve that prompt on the phone and name the machine, then retry. It is named once.",
-        "5. From then on every gated call waits for you — a tap for Whitelist or Paranoid, a " +
-            "five-second card for Don't disturb.",
+        "1. Start the server on the home screen.",
+        "2. Run the two commands above.",
+        "3. Call stmp_help. It is refused with caller_unverified — that is the phone asking who this machine is, not a fault.",
+        "4. Approve it on the phone and retry. Named once.",
+        "5. From then on, every call asks you first.",
     )
 
     private companion object {
-        const val STEP_COUNT = 4
+        const val STEP_COUNT = 5
 
         /** Curated, not exhaustive — see [stepWhatItCanDo]. */
         val GROUPS: List<Pair<String, String>> = listOf(
-            "Google" to "Gmail, Calendar and Drive — read, send, create, trash, upload. " +
-                "The tokens stay in the phone's vault.",
-            "Phone" to "Read and act on notifications, dismiss them, and search your contacts.",
-            "Machine" to "Run shell commands over SSH from a key generated on the phone. It " +
-                "never leaves this device.",
-            "Voice" to "Speak text aloud, and play cues so a request can reach you when you " +
-                "are not looking at the screen.",
-            "Plumbing" to "API contract, logs, an audit trail and a self-report — so an agent " +
-                "can diagnose itself without asking you to read a screen.",
+            "Google" to "Gmail, Calendar and Drive. Read, send, schedule, upload.",
+            "Phone" to "Notifications and contacts.",
+            "Machine" to "Shell commands over SSH, key made on the phone.",
+            "Voice" to "Speak text aloud, play a cue to reach you.",
+            "Plumbing" to "Logs, audit trail, self-report — so it can diagnose itself.",
         )
     }
 }

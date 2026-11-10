@@ -2,6 +2,7 @@ package com.mido.phonebridge.plugins.tts
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.mido.phonebridge.policy.TtsSettings
@@ -41,6 +42,18 @@ object TtsSpeaker {
 
     /** The engine accepted the text and then failed to say it. */
     class TtsFailed(message: String) : RuntimeException(message)
+
+    /**
+     * The phone's audio path would have swallowed the utterance.
+     *
+     * **A separate type from [TtsFailed], because it is not a fault.** During a call the engine
+     * behaves perfectly — it accepts the text, plays it, and reports `onDone`. The sentence simply
+     * goes somewhere nobody can hear it. Reporting that as a generic failure would say "something
+     * broke"; reporting it as SUCCESS would be the lie this file exists to prevent. It gets its own
+     * type so the caller is told what actually happened and can decide (retry after the call,
+     * or route it another way).
+     */
+    class TtsInCall(message: String) : RuntimeException(message)
 
     private class Job(
         /**
@@ -96,6 +109,18 @@ object TtsSpeaker {
      * @throws TtsFailed when the engine reports an error, or the deadline passes.
      */
     fun speak(ctx: Context, text: String, settings: TtsSettings) {
+        // **Refuse BEFORE queueing.**
+        //
+        // This is the whole fix for the silent failure. During a call the engine does not fail:
+        // `speak()` returns SUCCESS, the utterance plays into a muted stream, `onDone` fires, and
+        // the route answers `ok` for a sentence nobody heard. Mido, 2026-11-10: *"tts failed
+        // silently when the phone was in a call, handle this better"*.
+        //
+        // Checked at the ENTRY, not mid-utterance: a request that arrives during a call must not
+        // occupy a queue slot, and the caller needs the answer immediately so it can choose to
+        // retry later rather than believe the human was told.
+        TtsLimits.speechBlockedReason(phoneAudio(ctx))?.let { throw TtsInCall(it) }
+
         val job = Job(ctx.applicationContext, text, settings)
         synchronized(lock) {
             // `queueDepth` counts what is AHEAD of this one, so the one speaking plus the line
@@ -246,6 +271,29 @@ object TtsSpeaker {
         }
         engine = created
         return created
+    }
+
+    /**
+     * What the phone's audio path is doing right now, in the terms [TtsLimits] decides on.
+     *
+     * **The platform read, kept away from the decision.** `AudioManager.mode` is an int the
+     * framework can add to; [TtsLimits.speechBlockedReason] is what turns it into "may we
+     * speak". Splitting them means the rule is testable on the JVM and this function stays a
+     * four-line translation.
+     *
+     * `mode` is the honest source rather than `isSpeakerphoneOn` or the ringtone volume: during
+     * a call Android forces audio into the earpiece path, so TTS plays to nobody while every API
+     * still reports success.
+     */
+    private fun phoneAudio(ctx: Context): TtsLimits.PhoneAudio {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            ?: return TtsLimits.PhoneAudio.NORMAL
+
+        return when (am.mode) {
+            AudioManager.MODE_IN_CALL -> TtsLimits.PhoneAudio.IN_CALL
+            AudioManager.MODE_IN_COMMUNICATION -> TtsLimits.PhoneAudio.IN_COMMUNICATION
+            else -> TtsLimits.PhoneAudio.NORMAL
+        }
     }
 
     private fun configure(tts: TextToSpeech, settings: TtsSettings) {

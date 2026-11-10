@@ -561,6 +561,16 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         append(AuthManager.isLoggedIn(ctx)).append('|')
         append(AuthManager.accountEmail ?: "").append('|')
         append(AuditHealth.reason ?: "").append('|')
+        // **The update check is part of what this screen displays.** Without these two, a check
+        // that finished while Home was visible changed nothing the signature could see, so the
+        // tick skipped the repaint and the card stayed on "checking…" until the screen was left
+        // and re-entered. Mido, 2026-11-10: *"the checking status right after updating is stuck
+        // forever"*.
+        //
+        // `lastOutcome?.javaClass` rather than the outcome itself: this only needs to notice that
+        // the value CHANGED, and the class name is a cheap stand-in that does not allocate.
+        append(com.mido.phonebridge.core.Updater.checking).append('|')
+        append(com.mido.phonebridge.core.Updater.lastOutcome?.javaClass?.simpleName ?: "").append('|')
     }
 
     /**
@@ -1253,6 +1263,19 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         statusRow.addView(Theme.text(ctx, line, 14f, colour))
         card.addView(statusRow)
 
+        // **What you are running, always.** The version previously appeared only in the
+        // "up to date" line — so the moment an update existed, or the check had not run, the
+        // number vanished. That is the one fact a person needs to answer "am I on the build I
+        // just installed?", and it should not depend on the outcome of a network call.
+        card.addView(
+            Theme.text(
+                ctx,
+                "installed: v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                13f,
+                Theme.ON_SURFACE_VARIANT,
+            ).apply { setPadding(0, Theme.dp(ctx, 4), 0, 0) }
+        )
+
         // The channel, inside the same card. A switch and its label, no nested border.
         val channelRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1472,10 +1495,32 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         com.mido.phonebridge.core.Updater.lastOutcome = null
         com.mido.phonebridge.core.Updater.checking = true
         refreshUpdateSection()
+
+        // **The context is taken HERE, on the main thread, before the worker starts.**
+        //
+        // `requireContext()` inside the thread throws `IllegalStateException` when the fragment
+        // is detached — which is exactly what happens around an update: the install completes,
+        // the activity is torn down, and a check started in that window dies before `check()` is
+        // ever entered. `check()` clears `checking` in its own `finally`, so a throw BEFORE it
+        // leaves the flag stuck at `true` forever and the card reads "checking…" until the app is
+        // killed. Mido, 2026-11-10: *"the checking status right after updating is stuck forever"*.
+        //
+        // The application context does not belong to the fragment, so capturing it early removes
+        // the whole failure rather than catching it.
+        val appContext = requireContext().applicationContext
+
         Thread({
-            val outcome = com.mido.phonebridge.core.Updater.check(requireContext().applicationContext)
-            Debug.log("update check: ${outcome.javaClass.simpleName}")
-            ui { refreshUpdateSection() }
+            try {
+                val outcome = com.mido.phonebridge.core.Updater.check(appContext)
+                Debug.log("update check: ${outcome.javaClass.simpleName}")
+                ui { refreshUpdateSection() }
+            } finally {
+                // **Belt and braces.** If anything above throws before `check()` sets its own
+                // `finally`, the flag must still come down: a spinner that never stops is worse
+                // than a check that failed, because it hides the CHECK NOW button too.
+                com.mido.phonebridge.core.Updater.checking = false
+                ui { refreshUpdateSection() }
+            }
         }, "update-check").apply { isDaemon = true }.start()
     }
 

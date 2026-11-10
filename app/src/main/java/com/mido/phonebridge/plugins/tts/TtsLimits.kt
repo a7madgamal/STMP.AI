@@ -75,4 +75,43 @@ object TtsLimits {
 
     /** A configured queue depth, clamped; 0 would mean "refuse unless idle", which is a dead route. */
     fun clampQueueDepth(configured: Int): Int = configured.coerceIn(1, MAX_QUEUE_DEPTH)
+
+    /**
+     * What the phone's audio path is currently doing, as far as speech is concerned.
+     *
+     * **A plain enum rather than `AudioManager`'s mode int.** The decision "may we speak right
+     * now" belongs where a test can reach it; the platform read belongs in the I/O layer. This
+     * project has paid twice for a rule living inside the engine plumbing, where only a phone
+     * could check it.
+     */
+    enum class PhoneAudio {
+        /** Not in a call. Speech is audible (subject to the ringer, which is the user's brake). */
+        NORMAL,
+
+        /** A call is in progress. Speech would play into the earpiece, unheard. */
+        IN_CALL,
+
+        /** A VoIP call or voice session. Same problem, different transport. */
+        IN_COMMUNICATION,
+    }
+
+    /**
+     * Why speech cannot be heard right now, or null when it can.
+     *
+     * **This exists because the engine does NOT fail during a call — it succeeds silently.**
+     * `speak()` returns SUCCESS, the utterance runs, `onDone` fires, and the route answered `ok`
+     * for a sentence nobody heard. Mido, 2026-11-10: *"tts failed silently when the phone was in
+     * a call, handle this better"*. A caller that gets `ok` believes the human was told; that is
+     * the one lie this whole file exists to prevent.
+     *
+     * Returning a REASON rather than a boolean matches the rest of this object: deciding where it
+     * surfaces is the caller's job, and a function that only answers can be asserted on.
+     */
+    fun speechBlockedReason(audio: PhoneAudio): String? = when (audio) {
+        PhoneAudio.NORMAL -> null
+        PhoneAudio.IN_CALL ->
+            "the phone is on a call, so speech would be inaudible to anyone"
+        PhoneAudio.IN_COMMUNICATION ->
+            "the phone is in a voice call, so speech would be inaudible to anyone"
+    }
 }

@@ -132,6 +132,13 @@ object ErrorCodes {
         // The engine accepted the text and then failed to say it — a real fault, never a silent
         // success, because the caller would otherwise believe the human heard it.
         "tts_failed" to INTERNAL,
+        // **The phone was on a call, so the sentence would have gone nowhere.**
+        //
+        // 409 CONFLICT rather than 500: nothing is broken and nothing needs fixing. The device is
+        // simply in a state that makes speech impossible, and the same request will succeed later.
+        // 503 would say "this service is unavailable", which invites the caller to treat a
+        // transient device state as a service outage.
+        "tts_in_call" to CONFLICT,
         // --- Contacts ---
         // The permission was never granted (or was revoked). 503 because the route EXISTS and the
         // device CAN do it — the missing thing is a human tap. 403 would say "you may not", which
@@ -275,6 +282,7 @@ object ErrorCodes {
         "tts_busy" to "Too many utterances are already queued or speaking. Retry shortly.",
         "tts_unavailable" to "No usable text-to-speech engine or voice is installed on the device.",
         "tts_failed" to "The engine accepted the text and then failed to speak it.",
+        "tts_in_call" to "The phone is on a call, so speech would be inaudible. Nothing is broken; retry when the call ends.",
         "contacts_unavailable" to "READ_CONTACTS is not granted. A human must allow it on the phone.",
         "contacts_query_failed" to "The contacts provider refused or failed the query.",
         "vault_missing" to "No vault exists on this device yet.",
