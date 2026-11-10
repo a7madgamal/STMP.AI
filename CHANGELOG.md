@@ -5341,10 +5341,14 @@ devDependencies. `node_modules/` is gitignored.
 - README documents running privileged commands through a connection pointed at the bridge's own host. The route already fed a modal password to `sudo -S`, so this needed no sudoers change; it was undocumented, and the working shape is not obvious.
 - The same section records that chaining through a second host hangs rather than failing, because the intermediate `ssh` consumes the password first.
 
-## 0.48.8 (build 284) — 2026-11-10 — CURRENT
+## 0.48.8 (build 284) — 2026-11-10
 - A plugin's switch reads off whenever it cannot serve, so the knob and the ACTION NEEDED label no longer disagree.
 - Get started sits directly under the status card, above the approval gate, where a new install meets it before the mode picker.
 - "Per-pair rules" is gone from the gate card. The word named the implementation; the screen has been Exceptions since October, and the button now says so too.
+
+## 0.48.9 (build 285) — 2026-11-10 — CURRENT
+- Every plugin row has a `?` that opens what the plugin does: its routes, the permissions it needs and why, and the system access it wants.
+- That dialog is built from the plugin's own declarations, so it cannot drift from what the plugin actually serves.
 
 ## Keeping this file honest
 

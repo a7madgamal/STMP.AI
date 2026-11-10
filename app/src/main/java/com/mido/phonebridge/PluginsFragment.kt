@@ -8,6 +8,7 @@ import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSettingsStore
 import com.mido.phonebridge.core.PluginStatus
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.PluginHelp
 
 /**
  * The Plugins screen: every capability the bridge exposes, whether it is on, and why not.
@@ -280,6 +281,26 @@ class PluginsFragment : BridgeFragment() {
             setTextColor(Theme.ON_SURFACE)
             typeface = Theme.handFont(ctx)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        // **A "?" beside the switch**, not inside the title text: the name takes weight 1 and
+        // absorbs all slack, so a button placed before it would sit mid-row. Here it lands in
+        // the same cluster as the knob, which is where "what does this control do" is asked.
+        //
+        // Its own click listener means the row does NOT navigate when it is tapped — a clickable
+        // child wins the touch. That is the point: the row already opens the detail screen, and a
+        // help affordance that navigated somewhere would be the same door twice.
+        titleRow.addView(Theme.text(ctx, "?", 15f).apply {
+            setTextColor(Theme.ON_SURFACE_VARIANT)
+            setPadding(Theme.dp(ctx, 10), 0, Theme.dp(ctx, 10), 0)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "What ${plugin.displayName} does"
+            setOnClickListener { PluginHelp.show(ctx, plugin, on) }
+            // A 15sp glyph is a small target on its own; padding above widens it without
+            // drawing anything, so the row still reads as one line of text and one switch.
+            minimumHeight = Theme.dp(ctx, 40)
+            gravity = android.view.Gravity.CENTER
+        })
 
         // The state chip. Colour carries the meaning and the WORD carries it too, because a
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
