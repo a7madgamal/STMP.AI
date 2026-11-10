@@ -145,6 +145,50 @@ curl -X POST http://<tailnet-ip>:8787/ssh/myhost \
   -d '{"command":"hostname"}'
 ```
 
+## Getting root on the host the bridge runs on
+
+The SSH plugin executes on whatever host the connection points at. Point a connection at the
+bridge's **own** host and `/ssh/<that-connection>` with `sudo -S` is root there — with the
+password typed into the approval modal, never stored, and no sudoers change at all.
+
+This is the answer to "give the bridge sudo" that needs no `NOPASSWD` grant and no carved-out
+identity. It works because `sudo -S` reads one line from stdin and the route now supplies exactly
+that: the modal password, wiped after the request.
+
+One-time setup, on the phone:
+
+1. SSH → ADD CONNECTION → host = the bridge host's tailnet address, user = the account that owns
+the bridge process.
+2. Paste the generated public key into that account's `~/.ssh/authorized_keys`.
+3. Confirm the host key. The first call answers `409 ssh_host_key_unknown` with a fingerprint and
+   runs nothing; compare it against `ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub` on the target and
+   repeat the call with `"trustHostKey"`. Never trust it blind — the handshake exists to make that
+   a decision, not a formality.
+
+```bash
+curl -X POST http://<tailnet-ip>:8787/ssh/self \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"sudo -S -p \"\" id"}'
+```
+
+The card asks for the password because `SudoCommand` recognises `sudo` in the command and forces
+the mode to `PARANOID` before the modal opens. The password goes to the command's stdin and
+nowhere else — not argv, not the environment, not the body, not the audit log. A `sudo` command
+without `-S` is refused pre-gate with `400 sudo_needs_stdin`, so a guaranteed failure never costs
+a tap.
+
+**Do not chain it through a second host.** `ssh otherhost 'sudo -S id'` hangs to its deadline: the
+intermediate `ssh` consumes the password from stdin, so the inner `sudo` waits for a line that
+never arrives. The password is fed to the outermost process only. If the target is not reachable
+directly, add a connection to it rather than nesting.
+
+Limits worth knowing before relying on it:
+
+- `POST /ssh/{name}/detach` refuses `sudo` outright — the password is wiped when the request ends
+  and the job outlives it. Run privileged work in the foreground.
+- Exactly one line reaches stdin, so a second prompt gets EOF. Pass `-y` yourself when you need it;
+  the route will not rewrite the command the human approved.
+
 ## Layout
 
 ```
