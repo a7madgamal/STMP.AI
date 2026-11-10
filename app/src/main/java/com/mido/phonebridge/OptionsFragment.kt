@@ -66,6 +66,22 @@ class OptionsFragment : BridgeFragment() {
 
     override fun onResume() {
         super.onResume()
+
+        // **Repaint on the way back, ALWAYS.** Without this every permission row kept the value
+        // it had when the screen was first built, so a human who tapped "Draw over apps",
+        // granted it in Settings and came back still saw "tap to grant". The permission was
+        // real; the row was stale. Mido, 2026-11-10: *"permission was given but indicator was
+        // still off"*.
+        //
+        // The other two screens already did this (`HomeFragment` and `PluginDetailActivity` both
+        // call render() here); this one only ran its queued action and returned, which is why
+        // the bug showed up here and nowhere else.
+        //
+        // Cheap and safe: `render()` rebuilds the container wholesale, and it does not own a
+        // control whose press could be interrupted — that hazard is why Home rebuilds its update
+        // section separately rather than inside render().
+        render()
+
         val pending = pendingAfterResume ?: return
         pendingAfterResume = null
         // Posted, not called inline: this runs during the fragment's resume, and the pending

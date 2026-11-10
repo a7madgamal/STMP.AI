@@ -5359,11 +5359,14 @@ devDependencies. `node_modules/` is gitignored.
 - The three gate modes are described in one place shared by the Home card and the introduction, so the two cannot describe different tradeoffs.
 - Home's door is labelled WHAT IS STMP? — the old wording promised instructions and delivered one prompt.
 
-## 0.48.12 (build 288) — 2026-11-10 — CURRENT
+## 0.48.12 (build 288) — 2026-11-10
 - The new-device prompt no longer stacks: opening it twice showed two screens, and it now has a `not now` action that decides nothing instead of forcing a block.
 - The new-device screen explains itself — what just happened, and that this is asked once per computer rather than once per request.
 - A plugin's `?` speaks plain English now: what the feature is for, and example things to ask it. The technical sheet it used to show read like API documentation.
 - Dialogs are drawn on the app's own paper instead of a system dialog.
+
+## 0.48.13 (build 289) — 2026-11-10 — CURRENT
+- Settings repaints when you come back to it, so a permission granted in Android Settings shows as granted instead of still offering to grant it.
 
 ## Keeping this file honest
 
