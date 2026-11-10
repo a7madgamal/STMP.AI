@@ -5327,7 +5327,7 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.48.3 (build 279) — 2026-11-04
 - The gate's three modes are large radio cards, the same shape as the AI backend picker, and each says what it does.
 
-## 0.48.6 (build 282) — 2026-11-05 — CURRENT
+## 0.48.6 (build 282) — 2026-11-05
 - Radio markers keep the same size and ring weight selected or not; only the fill changes. Selecting one used to make it visibly smaller than the ones it beat.
 - Radio markers sit beside the title instead of floating mid-card, and no text can sit behind one.
 - The rules button lives inside the whitelist card, where the rule table is actually read, and is greyed out while whitelist is not selected.
@@ -5336,6 +5336,10 @@ devDependencies. `node_modules/` is gitignored.
 - The SSH approval card colours its command: commands, options, quotes, redirections and `sudo` each read differently, so a long command can be scanned instead of deciphered.
 - The command breaks onto a new line at `;`, `&&`, `||` and `|`, at token boundaries only, so a `;` inside quotes stays put.
 - Plugin rows reach the modal as rows. They were flattened to label/value pairs, which forced every row in every modal to render the same; the SSH command could not ask to be drawn as code.
+
+## 0.48.7 (build 283) — 2026-11-10 — CURRENT
+- README documents running privileged commands through a connection pointed at the bridge's own host. The route already fed a modal password to `sudo -S`, so this needed no sudoers change; it was undocumented, and the working shape is not obvious.
+- The same section records that chaining through a second host hangs rather than failing, because the intermediate `ssh` consumes the password first.
 
 ## Keeping this file honest
 
