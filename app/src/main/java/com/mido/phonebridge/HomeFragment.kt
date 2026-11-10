@@ -264,6 +264,25 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         heroCard.addView(heroRow)
         container.addView(heroCard)
 
+        // --- GET STARTED ---
+        //
+        // **Directly under the hero, above the gate.** Mido, 2026-11-10: *"move get started
+        // up"*. It was below the approval-gate card, which meant a fresh install met three mode
+        // radios and an exception table before it met the explanation of what the app is for.
+        // The hero answers "is it running", this answers "what do I do next" — those are the two
+        // first questions, and they belong next to each other.
+        //
+        // Originally moved here from Settings → Tools (Mido, 2026-11-04: *"move get started to
+        // home screen above updates"*). It is the first thing a new install needs and the thing
+        // an agent's human reaches for when a call is refused with no obvious fix — both are
+        // read-at-a-glance jobs, not settings.
+        container.addView(Theme.sectionHeader(ctx, "Get started"))
+        container.addView(
+            Theme.button(ctx, "HOW TO USE THIS", Theme.ButtonStyle.NEUTRAL) {
+                go(Intent(ctx, OnboardingActivity::class.java))
+            },
+        )
+
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
         // account part to the google plugin"*). Signing in is a precondition the Google plugins
         // share, so it belongs with them: Plugins → Google account holds the email, the token
@@ -376,19 +395,6 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateCard.addView(fpRow)
 
         container.addView(gateCard)
-
-        // --- GET STARTED ---
-        //
-        // Moved here from Settings → Tools (Mido, 2026-11-04: *"move get started to home screen
-        // above updates"*). It is the first thing a new install needs and the thing an agent's
-        // human reaches for when a call is refused with no obvious fix — both are read-at-a-glance
-        // jobs, not settings.
-        container.addView(Theme.sectionHeader(ctx, "Get started"))
-        container.addView(
-            Theme.button(ctx, "HOW TO USE THIS", Theme.ButtonStyle.NEUTRAL) {
-                go(Intent(ctx, OnboardingActivity::class.java))
-            },
-        )
 
         // --- UPDATES ---
         //
@@ -974,17 +980,28 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    /** One line of truth about the rule table, for the AUTOMATIC card. */
+    /**
+     * One line of truth about the exception table, for the WHITELIST card.
+     *
+     * **"Per-pair" is gone.** It named the IMPLEMENTATION (a rule is one plugin × verb
+     * pair) instead of the thing the human manages, which is an exception to the
+     * ask-everything default. The screen itself was renamed to EXCEPTIONS on 2026-10-19 for
+     * exactly this reason; these three strings were missed and kept the old vocabulary, so
+     * the card and the button it opens described the same idea with different words.
+     *
+     * The wording now says what the mode DOES: exceptions decide, and with none set every
+     * request asks.
+     */
     private fun rulesSummary(): String = try {
         val p = PolicyStore.from(requireContext()).get()
         val n = p.rules.size
         when (n) {
-            0 -> "Per-pair rules decide. No rules yet, so everything waits for your stamp."
-            1 -> "Per-pair rules decide. 1 rule set."
-            else -> "Per-pair rules decide. $n rules set."
+            0 -> "Exceptions decide. None set yet, so everything asks for your stamp."
+            1 -> "Exceptions decide. 1 exception set."
+            else -> "Exceptions decide. $n exceptions set."
         }
     } catch (e: PolicyException) {
-        "rules unreadable: ${e.message}"
+        "exceptions unreadable: ${e.message}"
     }
 
     /**
@@ -1723,7 +1740,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             card.addView(
                 Theme.button(
                     ctx,
-                    "EDIT RULES",
+                    // **"EDIT RULES" was the last "rules" in this card.** The summary above it
+                    // now says "Exceptions decide", and a button that names a different noun
+                    // than the line it sits under is the same confusion the rename set out to
+                    // remove. It opens ExceptionsActivity and it edits exceptions.
+                    "EDIT EXCEPTIONS",
                     Theme.ButtonStyle.NEUTRAL,
                     small = true,
                 ) {

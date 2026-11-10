@@ -5337,9 +5337,14 @@ devDependencies. `node_modules/` is gitignored.
 - The command breaks onto a new line at `;`, `&&`, `||` and `|`, at token boundaries only, so a `;` inside quotes stays put.
 - Plugin rows reach the modal as rows. They were flattened to label/value pairs, which forced every row in every modal to render the same; the SSH command could not ask to be drawn as code.
 
-## 0.48.7 (build 283) — 2026-11-10 — CURRENT
+## 0.48.7 (build 283) — 2026-11-10
 - README documents running privileged commands through a connection pointed at the bridge's own host. The route already fed a modal password to `sudo -S`, so this needed no sudoers change; it was undocumented, and the working shape is not obvious.
 - The same section records that chaining through a second host hangs rather than failing, because the intermediate `ssh` consumes the password first.
+
+## 0.48.8 (build 284) — 2026-11-10 — CURRENT
+- A plugin's switch reads off whenever it cannot serve, so the knob and the ACTION NEEDED label no longer disagree.
+- Get started sits directly under the status card, above the approval gate, where a new install meets it before the mode picker.
+- "Per-pair rules" is gone from the gate card. The word named the implementation; the screen has been Exceptions since October, and the button now says so too.
 
 ## Keeping this file honest
 

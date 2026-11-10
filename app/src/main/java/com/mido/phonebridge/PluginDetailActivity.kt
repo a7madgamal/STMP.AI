@@ -103,7 +103,20 @@ class PluginDetailActivity : BridgeScreen() {
         content.addView(Theme.sectionHeader(this, "Status"))
 
         run {
-            // **A row with the knob at the RIGHT edge.**
+            // **OFF while the plugin cannot serve**, same rule as the list row.
+            //
+            // Mido, 2026-11-10: *"for plugins when action needed or disabled the toggles should
+            // be off"*. Showing a knob pointing right above a line that says the plugin cannot
+            // work is the control contradicting its own label.
+            //
+            // Display only: `store.isEnabled` is untouched, so the stored preference survives and
+            // the knob springs back once the permission or the sign-in is sorted. `status()` is
+            // only consulted when the plugin is stored as on — an off plugin reports nothing and
+            // this must not turn "off" into "attention".
+            val healthy = !on || plugin.status().state ==
+                com.mido.phonebridge.core.PluginStatus.State.OK
+            val showsOn = on && healthy
+            // A row with the knob at the RIGHT edge.
             //
             // Mido asked for this twice: *"plugin page has toggle in the middle, make it right
             // aligned"*, then *"plugin details screen still have the toggle in the middle not
@@ -120,13 +133,13 @@ class PluginDetailActivity : BridgeScreen() {
             switchRow.addView(
                 Theme.text(
                     this,
-                    if (on) "Enabled" else "Disabled",
+                    if (showsOn) "Enabled" else "Disabled",
                     15f,
-                    if (on) Theme.ON_SURFACE else Theme.ON_SURFACE_VARIANT,
+                    if (showsOn) Theme.ON_SURFACE else Theme.ON_SURFACE_VARIANT,
                 ).apply { typeface = Theme.handFont(this@PluginDetailActivity) },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
             )
-            switchRow.addView(Theme.toggle(this, on) { want ->
+            switchRow.addView(Theme.toggle(this, showsOn) { want ->
                 store.setEnabled(plugin, want)
                 Debug.log("plugin ${plugin.id}: enabled=$want")
                 render()
@@ -136,12 +149,22 @@ class PluginDetailActivity : BridgeScreen() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
 
-            if (on) {
+            if (showsOn) {
                 content.addView(Theme.text(
                     this,
                     "On. Its routes are served and gated like any other.",
                     12f,
                 ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
+            } else if (on) {
+                // Stored ON but cannot serve. The knob above reads off, so this line has to say
+                // WHY the two agree — otherwise "off" beside an unchanged preference looks like
+                // the app turned it off behind the human's back.
+                content.addView(Theme.text(
+                    this,
+                    "Switched on, but it cannot serve until the problem above is fixed. " +
+                        "Its routes stay registered.",
+                    12f,
+                ).apply { setTextColor(Theme.WARNING) })
             } else {
                 content.addView(Theme.text(
                     this,

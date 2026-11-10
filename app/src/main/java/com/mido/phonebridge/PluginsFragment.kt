@@ -295,7 +295,29 @@ class PluginsFragment : BridgeFragment() {
 
         // The switch. EVERY plugin, no exceptions (Mido, 2026-11-04).
         run {
-            val toggle = Theme.toggle(ctx, on) { want ->
+            // **The knob shows OFF when the plugin cannot serve.**
+            //
+            // Mido, 2026-11-10: *"for plugins when action needed or disabled the toggles should
+            // be off"*. The knob used to render the STORED flag, so a plugin switched on but
+            // unable to work (no permission, not signed in, no secrets) showed a knob pointing
+            // right beside the word ACTION NEEDED — the control claiming one thing and the label
+            // saying another.
+            //
+            // Only `OK` counts as on. `OFF`, `NEEDS_ATTENTION` and `ERROR` all mean the plugin
+            // cannot currently serve, which is exactly when a knob pointing right is a lie.
+            // A null status (not registered yet) keeps the stored value: that is a settling
+            // state, not a defect, and flipping the knob while it settles would flicker.
+            //
+            // **Display only.** `store.setEnabled` is untouched, so the plugin's own preference
+            // survives: granting the permission makes the knob spring back without anybody
+            // re-enabling it. Writing `false` here would silently disable a plugin because of a
+            // temporary condition, and the human would have to find it and turn it on again.
+            //
+            // Tapping therefore means "turn it off" while it reads off — harmless: the write
+            // lands on the stored value the human actually wants, and a plugin that cannot serve
+            // does nothing either way.
+            val showsOn = on && (status == null || status.state == PluginStatus.State.OK)
+            val toggle = Theme.toggle(ctx, showsOn) { want ->
                 // Write, then repaint from what was written. The knob is NOT flipped optimistically:
                 // a failed write would leave it showing a state the store does not hold.
                 store.setEnabled(plugin, want)
