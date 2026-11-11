@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.49.1 (build 294)**.
+Current build: **v0.49.2 (build 295)**.
 
 ---
 
@@ -5391,9 +5391,13 @@ devDependencies. `node_modules/` is gitignored.
 - Home, Activity and Preferences replace the artificial Plugins/Settings split. Plugin-owned settings and the verified update/install flow keep one implementation in the consolidated Preferences screen.
 - Approval facts come before optional model context, long payloads have visible overflow guidance, and the paper entrance, stamp impact and denial tear have reduced-motion and forced-exit paths.
 
-## 0.49.1 (build 294) — 2026-11-11 — CURRENT
+## 0.49.1 (build 294) — 2026-11-11
 - Preference taps no longer freeze: rebuilding the screen now waits until the tap finishes instead of tearing down the view mid-click, and bursts of updates coalesce into one rebuild.
 - The Activity filter chips now carry real gaps and margins instead of rendering as one touching bar; the same spacing reaches the older log screen.
+
+## 0.49.2 (build 295) — 2026-11-11 — CURRENT
+- A crash now records its own stack trace to a file, and `GET /debug` reports it as `lastCrash`. Previously the trace rotated out of logcat before it could be read, so a crash report had no evidence to act on.
+- The plugin inventory no longer re-orders its own children while Android is still attaching them, which could tear the hierarchy apart mid-dispatch.
 
 ## Keeping this file honest
 

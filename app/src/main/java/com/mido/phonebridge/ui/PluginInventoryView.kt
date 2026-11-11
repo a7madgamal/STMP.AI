@@ -94,9 +94,18 @@ class PluginInventoryView(
         ordered.forEach(::addView)
     }
 
+    /**
+     * Deliberately does NOT re-arrange on attach.
+     *
+     * This used to call `arrange()`, which does `removeAllViews()` then re-adds every group —
+     * while Android is still dispatching the attach down this view's children. Detaching a child
+     * mid-dispatch is the crash: the group being iterated is removed from its parent as it is
+     * visited, and the hierarchy is left half-attached. `arrange()` is already called from
+     * [init] and from the end of `OptionsFragment.render()`, both at a safe moment, so this
+     * override only added a way to crash.
+     */
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        arrange()
     }
 
     private fun render() {

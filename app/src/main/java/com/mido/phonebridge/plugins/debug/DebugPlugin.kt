@@ -144,6 +144,14 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         o.put("audit", auditInfo())
         o.put("accessLog", accessLog())
         o.put("logTail", logTail())
+        // The last uncaught exception, if there has been one.
+        //
+        // **This is why the field exists.** A crash report with no stack cannot be acted on, and
+        // logcat's retained buffer rotates out within minutes on this app. Reported 2026-11-11
+        // as "still failing and asking me to reset app data after crash" — by the time the log
+        // was fetched, the trace was already gone and the only evidence left was the symptom.
+        // Null means "has not crashed", which is distinct from "crashed with no detail".
+        o.put("lastCrash", com.mido.phonebridge.Crash.last(ctx) ?: JSONObject.NULL)
         o.put("routes", routesInfo())
         return Resp.ok(o)
     }
