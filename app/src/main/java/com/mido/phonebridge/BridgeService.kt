@@ -49,7 +49,6 @@ import com.mido.phonebridge.policy.ModeSource
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.policy.Rule
-import com.mido.phonebridge.policy.exceptionModeFor
 import com.mido.phonebridge.policy.isAttended
 import com.mido.phonebridge.policy.resolve
 import com.mido.phonebridge.policy.unattendedAllowed
@@ -1465,8 +1464,8 @@ class HttpServer(
                                 // NOTIFY, which never touched biometrics either.
                                 requiresBiometric = mode == Mode.PARANOID && policy.fingerprintForModals,
                                 rows = rows,
-                                exceptionOffer = exceptionOfferFor(
-                                    globalMode, resolved.plugin.id, verb, mode
+                                exceptionOffer = ApprovalGate.exceptionOfferFor(
+                                    globalMode, resolved.plugin.id, verb, mode, needsPassword
                                 ),
                                 // The gate needs this to render the field and to refuse a
                                 // resolve that arrives without one.
@@ -1627,32 +1626,6 @@ class HttpServer(
     }
 
     /**
-     * The exception the modal may offer for this request, or null when it must not.
-     *
-     * **Only under `AUTOMATIC`.** `resolve()` reads the rule table in that mode alone, so
-     * under a forced `SECURE`/`NOTIFY` a written rule is inert — offering the button there
-     * would be offering a tap that changes nothing. Rather than flip the switch behind the
-     * human's back (Mido's call, 2026-10-19: *"it should work with automatic and that's
-     * it"*), the offer is simply absent and the button does not render.
-     *
-     * The mode is the OTHER one — see [exceptionModeFor] — so the label always names the
-     * behaviour the tap will produce.
-     */
-    private fun exceptionOfferFor(
-        globalMode: GlobalMode,
-        plugin: String,
-        verb: Verb,
-        resolvedMode: Mode
-    ): ApprovalGate.ExceptionOffer? {
-        if (globalMode != GlobalMode.WHITELIST) return null
-        val exceptionMode = exceptionModeFor(resolvedMode)
-        return ApprovalGate.ExceptionOffer(
-            rule = Rule(plugin, verb, exceptionMode),
-            label = if (exceptionMode == Mode.DONT_DISTURB) "ALWAYS NOTIFY" else "ALWAYS ASK"
-        )
-    }
-
-    /**
      * Persist a rule the human authored from the modal, and record it.
      *
      * Read-modify-write, never a fresh [Policy]: constructing a new one would reset every
@@ -1731,7 +1704,7 @@ class HttpServer(
          * approval on a route that pre-fetches its target — gmail trash, calendar delete.
          */
         rows: List<ApprovalRow>,
-        /** The exception the modal may offer, or null. See [exceptionOfferFor]. */
+        /** The exception the modal may offer, or null. See [ApprovalGate.exceptionOfferFor]. */
         exceptionOffer: ApprovalGate.ExceptionOffer? = null,
         /**
          * True when the modal must collect a sudo password.
