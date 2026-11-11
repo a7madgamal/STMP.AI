@@ -152,6 +152,12 @@ class DebugPlugin(private val ctx: Context) : Plugin {
         // was fetched, the trace was already gone and the only evidence left was the symptom.
         // Null means "has not crashed", which is distinct from "crashed with no detail".
         o.put("lastCrash", com.mido.phonebridge.Crash.last(ctx) ?: JSONObject.NULL)
+        // The last FROZEN main thread, if there has been one.
+        //
+        // A hang leaves no exception and no FATAL line, so `lastCrash` is null for exactly the
+        // failure this app actually has. The heartbeat watchdog records the frozen thread's own
+        // stack instead, which is the only way to see what a stuck thread was doing.
+        o.put("lastStall", com.mido.phonebridge.Stall.last(ctx) ?: JSONObject.NULL)
         o.put("routes", routesInfo())
         return Resp.ok(o)
     }

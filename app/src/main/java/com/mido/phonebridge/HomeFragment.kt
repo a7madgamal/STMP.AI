@@ -805,6 +805,38 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 "Secret-backed requests will be refused until you unlock this session.",
                 Theme.WARNING) { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
         }
+        // **The app's own crash or freeze, on the screen that is always reachable.**
+        //
+        // `GET /debug` reports both, but that route needs the bridge running — and the failures
+        // these record are exactly the ones that stop it serving (reported 2026-11-11: a hang
+        // with port 8787 refusing). Putting it here means the evidence is readable without a
+        // caller, a laptop or a working server. Tapping copies the whole trace, so it travels
+        // by paste instead of by another round trip.
+        val crash = com.mido.phonebridge.Crash.last(ctx)
+        val stall = com.mido.phonebridge.Stall.last(ctx)
+        if (crash != null || stall != null) {
+            // Smart-cast through a local, never `!!`: the compiler already knows each branch is
+            // non-null, and an unnecessary assertion is a build error under -Werror.
+            val isStall = crash == null
+            val detail: String = stall ?: crash ?: return
+            val what = if (isStall) "The screen froze" else "The app crashed"
+            val headline = detail.lineSequence()
+                .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
+                ?.trim() ?: "no detail recorded"
+            rows.add(Theme.statusRow(
+                ctx, what,
+                "$headline\nTap to copy the full trace",
+                Theme.DANGER,
+                onClick = {
+                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("STMP ${if (isStall) "stall" else "crash"}", detail)
+                    )
+                    toast("copied — paste it to whoever is fixing this")
+                },
+            ))
+        }
         if (rows.isEmpty()) return
         problemsHost.addView(Theme.sectionHeader(ctx, "Fix next"))
         rows.forEach(problemsHost::addView)

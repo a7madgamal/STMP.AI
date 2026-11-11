@@ -271,11 +271,24 @@ class PluginInventoryView(
         /** Draw as a bare row inside a shared card instead of standing on its own. */
         bare: Boolean = false,
     ): LinearLayout {
-        val on = store.isEnabled(plugin)
-        // `status()` is the plugin's own answer about whether it can serve. Only consulted when
-        // the plugin is ON: an off plugin may well report OK, and a page saying "OK" next to a
-        // switch that is off is the confusion this screen exists to remove.
-        val status = if (on) plugin.status() else null
+        val on: Boolean
+        val status: PluginStatus?
+        try {
+            on = store.isEnabled(plugin)
+            status = if (on) plugin.status() else null
+        } catch (t: Throwable) {
+            // **One plugin must not take the whole screen down.**
+            //
+            // `store.isEnabled` deliberately THROWS on a corrupt stored value, and a plugin's
+            // `status()` reads the Keystore and the vault. Either can fail, and because this
+            // runs for every row on every render, one failure crashed Preferences on open —
+            // repeatedly, which is what makes Android offer to clear the app's data.
+            //
+            // Surfaced, never hidden: the row names the failure, so the next fix has a message
+            // instead of a symptom.
+            Debug.log("plugin ${plugin.id}: row failed: ${t.javaClass.simpleName}: ${t.message}")
+            return errorRow(plugin, t)
+        }
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -389,6 +402,28 @@ class PluginInventoryView(
             })
         }
         return card
+    }
+
+    /** A row that failed to build, rendered as the failure instead of crashing the screen. */
+    private fun errorRow(
+        plugin: com.mido.phonebridge.core.Plugin,
+        t: Throwable,
+    ): LinearLayout = LinearLayout(context).apply {
+        orientation = VERTICAL
+        setPadding(
+            Theme.dp(context, 14), Theme.dp(context, 12),
+            Theme.dp(context, 14), Theme.dp(context, 12),
+        )
+        background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(context, 10) }
+        addView(Theme.text(context, "${plugin.displayName} — settings unreadable",
+            Theme.TEXT_BODY_SP, Theme.DANGER))
+        addView(Theme.text(context, "${t.javaClass.simpleName}: ${t.message ?: "no detail"}",
+            Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
+                setPadding(0, Theme.dp(context, 4), 0, 0)
+            })
     }
 
     /** Plain job language, independent of route names and implementation details. */

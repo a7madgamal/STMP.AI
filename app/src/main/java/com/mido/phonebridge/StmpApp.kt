@@ -13,5 +13,6 @@ class StmpApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Crash.install(this)
+        Stall.install(this)
     }
 }
