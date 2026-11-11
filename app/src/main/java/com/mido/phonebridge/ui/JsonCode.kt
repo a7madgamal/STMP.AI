@@ -125,6 +125,15 @@ object JsonCode {
         JsonKind.PUNCT to Theme.ON_SURFACE_VARIANT,
     )
 
+    /** Kind colours for the gate's dark readout (TOKENS 3.4): values bright, structure muted. */
+    fun readoutInk(p: com.mido.phonebridge.ui.tokens.Palette): Map<JsonKind, Int> = mapOf(
+        JsonKind.KEY to p.readoutMuted,
+        JsonKind.STRING to p.readoutString,
+        JsonKind.NUMBER to p.readoutCommand,
+        JsonKind.LITERAL to p.readoutCommand,
+        JsonKind.PUNCT to p.readoutMuted,
+    )
+
     /**
      * Split already-presented text into coloured runs.
      *

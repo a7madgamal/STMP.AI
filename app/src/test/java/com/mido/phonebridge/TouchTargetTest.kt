@@ -11,6 +11,7 @@ import androidx.core.widget.NestedScrollView
 import com.google.android.material.chip.ChipGroup
 import com.mido.phonebridge.debug.KitHostActivity
 import com.mido.phonebridge.kit.allViews
+import com.mido.phonebridge.screenshots.GateFixtures
 import com.mido.phonebridge.screenshots.KitFixtures
 import com.mido.phonebridge.ui.kit.HoldKey
 import com.mido.phonebridge.ui.kit.KnobSelector
@@ -59,7 +60,44 @@ class TouchTargetTest(private val fontScale: Float) {
                 view.layoutParams ?: LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
             )
             shadowOf(Looper.getMainLooper()).idle()
-            check(a, "${f.screen}/${f.state}", failures)
+            check(a.column, "${f.screen}/${f.state}", failures)
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    // WP03a: the approval gate in its main gestures and states.
+    private val approvalFixtures: List<Pair<String, () -> android.app.Activity>> get() = listOf(
+        "approval/hold_ssh" to { GateFixtures.launch(GateFixtures.ssh("ls -la"), "POST /ssh/kvm-box") },
+        "approval/tap_probe" to {
+            GateFixtures.launch(GateFixtures.view(com.mido.phonebridge.core.Verb.READ, "GET /probe"), "GET /probe")
+        },
+        "approval/exception_offer" to {
+            GateFixtures.launch(
+                GateFixtures.contacts(
+                    offer = com.mido.phonebridge.ApprovalGate.ExceptionOffer(
+                        com.mido.phonebridge.policy.Rule("contacts", com.mido.phonebridge.core.Verb.READ, com.mido.phonebridge.policy.Mode.DONT_DISTURB),
+                        "ALWAYS NOTIFY",
+                    ),
+                ),
+                "GET /contacts",
+            )
+        },
+        "approval/password" to { GateFixtures.launch(GateFixtures.ssh("sudo -S true", sudo = true), "POST /ssh/kvm-box") },
+    )
+
+    @Test
+    fun `every enrolled approval fixture meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, launch) in approvalFixtures) {
+                val a = launch()
+                shadowOf(Looper.getMainLooper()).idle()
+                check(a.window.decorView as ViewGroup, name, failures)
+                GateFixtures.reset()
+            }
+        } finally {
+            GateFixtures.reset()
         }
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
@@ -73,9 +111,9 @@ class TouchTargetTest(private val fontScale: Float) {
         return v is HoldKey || v.isClickable || v.isLongClickable || v.hasOnClickListeners()
     }
 
-    private fun check(a: KitHostActivity, name: String, failures: MutableList<String>) {
-        val d = a.resources.displayMetrics.density
-        val targets = a.column.allViews().filter(::isTarget)
+    private fun check(root: ViewGroup, name: String, failures: MutableList<String>) {
+        val d = root.resources.displayMetrics.density
+        val targets = root.allViews().filter(::isTarget)
         for (t in targets) {
             val w = t.width / d
             val h = t.height / d

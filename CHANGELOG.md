@@ -5401,10 +5401,17 @@ devDependencies. `node_modules/` is gitignored.
 - Text is set in Geist and Geist Mono, bundled with the app; the handwritten face, paper grain and torn edges are gone.
 - The primary colour is ink; the old stamp red is removed, and error states use amber instead of red.
 
-## 0.49.1 (build 297) — 2026-11-11 — CURRENT
+## 0.49.1 (build 297) — 2026-11-11
 - Every dialog uses the app's own look in light and dark, including the ones that were stock white system dialogs.
 - The new controls for the redesign (rocker switch, mode knob, hold key, readout, LEDs, punch) are built and tested; screens adopt them in the next releases.
 - The hold key can no longer approve after it is disabled or disarmed mid-hold; it returns to idle and ignores keyboard holds while disabled.
+
+## 0.49.2 (build 298) — 2026-11-12 — CURRENT
+- The approval screen leads with the exact command or payload on a dark readout, with risky shell tokens such as sudo, rm -rf and | sh underlined; the AI summary sits below it, marked as possibly wrong.
+- Requests that run or delete something, and sudo commands, are approved by holding the key for 1.2 seconds; deny is always one tap.
+- After you decide, a punch and a short receipt confirm what happened, and pressing back shows the DENIED punch and receipt like a DENY tap.
+- When approving needs the fingerprint, a contacts request asks for the fingerprint first; granting the contacts permission can no longer approve without it.
+- A hold can no longer approve after another app covers the screen or the screen loses focus mid-hold; the key returns to idle.
 
 ## Keeping this file honest
 

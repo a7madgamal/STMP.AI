@@ -50,7 +50,7 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
             validate = { requirePackageFilter(it); requireCount(it) }
         ) { list(it) },
         Route("POST", "/notifications/{id}/action", "Fire a notification action", Verb.EXECUTE) { action(it) },
-        Route("POST", "/notifications/{id}/dismiss", "Dismiss a notification", Verb.EXECUTE) { dismiss(it) }
+        Route("POST", "/notifications/{id}/dismiss", "Dismiss a notification", Verb.EXECUTE, holdExempt = true) { dismiss(it) }
     )
 
     /**

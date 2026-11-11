@@ -137,4 +137,14 @@ class HoldKeyTest : KitTest() {
         advance(1200)
         assertEquals(1, held)
     }
+    @Test
+    fun `losing window focus mid-hold never approves`() {
+        var held = 0
+        val (k, _) = key({ held++ })
+        touch(k, MotionEvent.ACTION_DOWN)
+        advance(600)
+        k.onWindowFocusChanged(false)
+        advance(2000)
+        assertEquals(0, held)
+    }
 }

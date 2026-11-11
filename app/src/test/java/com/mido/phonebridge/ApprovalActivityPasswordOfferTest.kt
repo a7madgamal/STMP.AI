@@ -49,7 +49,9 @@ class ApprovalActivityPasswordOfferTest {
         exceptionOffer = ApprovalGate.ExceptionOffer(
             Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), "ALWAYS NOTIFY"
         ),
-        needsPassword = needsPassword
+        needsPassword = needsPassword,
+        verb = Verb.EXECUTE,
+        routeKey = "POST /ssh/{name}"
     )
 
     private fun texts(v: View): List<String> = when (v) {

@@ -1,6 +1,6 @@
 package com.mido.phonebridge.ui
 
-import android.graphics.Typeface
+import android.content.res.Resources
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -8,6 +8,7 @@ import io.github.a7madgamal.shellhl.highlight.Highlight
 import io.github.a7madgamal.shellhl.highlight.Region
 import io.github.a7madgamal.shellhl.highlight.StyleKey
 import io.github.a7madgamal.shellhl.highlight.lineBreakOffsets
+import com.mido.phonebridge.ui.tokens.Palette
 
 /**
  * A shell command rendered for the approval card: coloured by token role, broken at
@@ -93,6 +94,7 @@ object ShellCode {
     fun render(
         command: String,
         palette: Map<String, Int> = palette(),
+        fallback: Int? = null,
     ): CharSequence {
         if (command.isEmpty()) return command
 
@@ -119,7 +121,7 @@ object ShellCode {
             val start = displayOffset(region.start - 1, cuts)
             val end = displayOffset(region.end, cuts)
             if (end <= start) continue
-            val colour = palette[region.styleKey] ?: Theme.ON_SURFACE
+            val colour = palette[region.styleKey] ?: fallback ?: Theme.ON_SURFACE
             text.setSpan(
                 ForegroundColorSpan(colour),
                 start,
@@ -133,8 +135,83 @@ object ShellCode {
         return text
     }
 
-    /** Monospace face that cannot be substituted by the handwritten default. */
-    val typeface: Typeface = Typeface.MONOSPACE
+    /**
+     * The same style keys as [palette], mapped onto the gate's dark readout (TOKENS 3.4): the
+     * command in readoutText, its arguments in readoutCommand, strings in readoutString, syntax
+     * errors in readoutDanger and structure in readoutMuted.
+     */
+    fun readoutPalette(p: Palette): Map<String, Int> = mapOf(
+        StyleKey.DEFAULT to p.readoutCommand,
+        StyleKey.SINGLE_HYPHEN_OPTION to p.readoutCommand,
+        StyleKey.DOUBLE_HYPHEN_OPTION to p.readoutCommand,
+
+        StyleKey.COMMAND to p.readoutText,
+        StyleKey.BUILTIN to p.readoutText,
+        StyleKey.FUNCTION to p.readoutText,
+        StyleKey.ALIAS to p.readoutText,
+        StyleKey.PRECOMMAND to p.readoutText,
+        StyleKey.RESERVED_WORD to p.readoutText,
+        StyleKey.COMMANDSEPARATOR to p.readoutText,
+        StyleKey.REDIRECTION to p.readoutText,
+
+        StyleKey.SINGLE_QUOTED to p.readoutString,
+        StyleKey.DOUBLE_QUOTED to p.readoutString,
+        StyleKey.DOLLAR_QUOTED to p.readoutString,
+        StyleKey.BACKQUOTED to p.readoutString,
+        StyleKey.CMD_SUBST_UNQUOTED to p.readoutString,
+        StyleKey.CMD_SUBST_QUOTED to p.readoutString,
+        StyleKey.PROCESS_SUBSTITUTION to p.readoutString,
+
+        StyleKey.SINGLE_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.DOUBLE_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.DOLLAR_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.BACKQUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.UNKNOWN_TOKEN to p.readoutDanger,
+
+        StyleKey.CMD_SUBST_DELIM_UNQUOTED to p.readoutMuted,
+        StyleKey.CMD_SUBST_DELIM_QUOTED to p.readoutMuted,
+        StyleKey.PROCESS_SUBSTITUTION_DELIM to p.readoutMuted,
+        StyleKey.ARITHMETIC_EXPANSION to p.readoutMuted,
+        StyleKey.ASSIGN to p.readoutMuted,
+        StyleKey.NUMERIC_FD to p.readoutMuted,
+        StyleKey.GLOBBING to p.readoutMuted,
+        StyleKey.COMMENT to p.readoutMuted,
+    )
+
+    /** Style keys whose region is quoted text: a dangerous token inside one is not underlined. */
+    private val QUOTED_KEYS = setOf(
+        StyleKey.SINGLE_QUOTED, StyleKey.DOUBLE_QUOTED, StyleKey.DOLLAR_QUOTED, StyleKey.BACKQUOTED,
+    )
+
+    /**
+     * [command] for the gate's readout: [render] with [readoutPalette], plus the D11 underline on
+     * every dangerous token that is not entirely inside a quoted string. Characters are only ever
+     * inserted (the line breaks of [render]); nothing is removed or reordered.
+     */
+    fun renderForReadout(command: String, p: Palette): CharSequence {
+        val rendered = render(command, readoutPalette(p), fallback = p.readoutCommand)
+        if (command.isEmpty()) return rendered
+        val text = rendered as? android.text.Spannable ?: android.text.SpannableString(rendered)
+        val cuts = lineBreakOffsets(command)
+        // Regions are 1-based and inclusive; as half-open zero-based ranges they are [start-1, end).
+        val quoted = Highlight.highlight(command)
+            .filter { it.styleKey in QUOTED_KEYS }
+            .map { (it.start - 1) until it.end }
+        val thickness = DangerTokens.UNDERLINE_DP * Resources.getSystem().displayMetrics.density
+        for (r in DangerTokens.find(command)) {
+            val start = r.first
+            val endExclusive = r.last + 1
+            if (quoted.any { q -> start >= q.first && endExclusive <= q.last + 1 }) continue
+            DangerTokens.addSpans(text, displayStart(start, cuts), displayEnd(endExclusive, cuts), p, thickness)
+        }
+        return text
+    }
+
+    /** Display index of the character at original index [i]: a cut at or before it moved it. */
+    private fun displayStart(i: Int, cuts: List<Int>) = i + cuts.count { it <= i }
+
+    /** Display index of an exclusive end at original index [i]: only cuts strictly before it count. */
+    private fun displayEnd(i: Int, cuts: List<Int>) = i + cuts.count { it < i }
 
     /**
      * Where an original offset lands once newlines are inserted.

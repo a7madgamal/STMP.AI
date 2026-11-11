@@ -240,6 +240,12 @@ class HoldKey(ctx: Context) : View(ctx) {
         setMeasuredDimension(s, s)
     }
 
+    /** The window lost focus (shade, dialog, another app): a hold in progress is released. */
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) cancelHold()
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         cancelTimers()

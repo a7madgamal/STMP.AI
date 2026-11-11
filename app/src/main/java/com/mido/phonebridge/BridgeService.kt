@@ -1469,7 +1469,8 @@ class HttpServer(
                                 ),
                                 // The gate needs this to render the field and to refuse a
                                 // resolve that arrives without one.
-                                needsPassword = needsPassword
+                                needsPassword = needsPassword,
+                                effectiveVerb = verb,
                             ),
                             // **THE GATE'S OWN COPY, not just the view's.** The view above only
                             // decides what the modal DRAWS; `await` decides whether
@@ -1713,8 +1714,11 @@ class HttpServer(
          * from the REQUEST (`SudoCommand.invokes(command)`) and this function only sees
          * the body as a JSONObject it should not be re-deriving policy from.
          */
-        needsPassword: Boolean = false
+        needsPassword: Boolean = false,
+        /** Route.effectiveVerb(req): picks the approve gesture (D12). */
+        effectiveVerb: Verb
     ): ApprovalGate.ApprovalView {
+        val routeKey = "${route.method} ${route.path}"
         val routePath = route.path
 
         // /notifications/{id}/action -> resolve the action against live data.
@@ -1765,7 +1769,10 @@ class HttpServer(
                 destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
-                needsPassword = needsPassword
+                needsPassword = needsPassword,
+                verb = effectiveVerb,
+                routeKey = routeKey,
+                holdExempt = route.holdExempt,
             )
         }
 
@@ -1792,7 +1799,10 @@ class HttpServer(
                 destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
-                needsPassword = needsPassword
+                needsPassword = needsPassword,
+                verb = effectiveVerb,
+                routeKey = routeKey,
+                holdExempt = route.holdExempt,
             )
         }
 
@@ -1833,7 +1843,10 @@ class HttpServer(
             // feature that is absent on exactly the routes that use this path (calendar,
             // gmail). Every `return ApprovalView(...)` in this function must pass it.
             exceptionOffer = exceptionOffer,
-            needsPassword = needsPassword
+            needsPassword = needsPassword,
+            verb = effectiveVerb,
+            routeKey = routeKey,
+            holdExempt = route.holdExempt,
         )
     }
 

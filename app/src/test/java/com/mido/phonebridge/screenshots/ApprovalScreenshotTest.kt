@@ -1,130 +1,217 @@
 package com.mido.phonebridge.screenshots
 
-import android.content.Intent
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import androidx.biometric.BiometricManager
+import androidx.core.widget.NestedScrollView
 import com.mido.phonebridge.ApprovalActivity
 import com.mido.phonebridge.ApprovalGate
-import com.mido.phonebridge.ai.Risk
+import com.mido.phonebridge.ApprovalGate.Row
 import com.mido.phonebridge.ai.RequestSummary
+import com.mido.phonebridge.ai.Risk
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.Rule
+import com.mido.phonebridge.ui.kit.MaxHeightScrollView
 import org.junit.After
 import org.junit.Test
-import java.util.concurrent.CountDownLatch
 
-/** The approval modal in every state of WP00 section 5 that can be reached without a keystore. */
+/** BiometricManager's BIOMETRIC_ERROR_LOCKOUT; the gate maps it to LockedOut. */
+internal const val BIOMETRIC_ERROR_LOCKOUT = 7
+
+/** The gate's page scroll (not a readout's own scroll). */
+internal fun gateScroll(v: View): NestedScrollView? {
+    if (v is NestedScrollView && v !is MaxHeightScrollView) return v
+    if (v is ViewGroup) for (i in 0 until v.childCount) gateScroll(v.getChildAt(i))?.let { return it }
+    return null
+}
+
+/** A tap on the gate's touch guard whose window another app fully covers. */
+internal fun obscuredTap(a: ApprovalActivity, x: Float = 50f, y: Float = 50f) {
+    val guard = a.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+    val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
+    val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f })
+    val t = android.os.SystemClock.uptimeMillis()
+    for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+        guard.dispatchTouchEvent(
+            MotionEvent.obtain(t, t, action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, 0, MotionEvent.FLAG_WINDOW_IS_OBSCURED),
+        )
+    }
+}
+
+/** The Instrument gate in every state of WP03a section 18 (approval/). */
 class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     @After
-    fun clearGate() {
-        ApprovalGate.setCurrentForTest(null)
-        queue().clear()
-        val prefs = Fixtures.app.getSharedPreferences("phonebridge_vault", 0)
-        prefs.edit().clear().commit()
+    fun clearGate() = GateFixtures.reset()
+
+    private fun shot(a: ApprovalActivity, state: String, full: Boolean = false) {
+        Shots.window(a, "approval", state)
+        if (!full) return
+        val scroll = gateScroll(a.window.decorView) ?: return
+        val child = scroll.getChildAt(0) ?: return
+        if (child.height > scroll.height) Shots.full(child, "approval", state)
     }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun queue(): java.util.ArrayDeque<ApprovalGate.Pending> {
-        val f = ApprovalGate::class.java.getDeclaredField("queue").apply { isAccessible = true }
-        return f.get(ApprovalGate) as java.util.ArrayDeque<ApprovalGate.Pending>
-    }
-
-    private fun view(
-        needsPassword: Boolean = false,
-        offer: ApprovalGate.ExceptionOffer? = null,
-        biometric: Boolean = false,
-    ) = ApprovalGate.ApprovalView(
-        requester = "Work laptop",
-        account = "me@example.com",
-        actionLabel = "SEARCH CONTACTS",
-        appLabel = "",
-        notifTitle = "",
-        notifSender = "",
-        notifText = "",
-        messageCount = 0,
-        replyText = null,
-        sections = listOf(
-            ApprovalGate.Section("WHAT", listOf(ApprovalGate.Row("Search", "sara", ApprovalGate.Row.Style.MONO))),
-        ),
-        requiresBiometric = biometric,
-        exceptionOffer = offer,
-        needsPassword = needsPassword,
-    )
-
-    private fun show(
+    private fun contacts(
         state: String,
         ai: ApprovalGate.AiState = ApprovalGate.AiState.NotNeeded,
-        view: ApprovalGate.ApprovalView = view(),
         queued: Int = 0,
-        endpoint: String = "GET /contacts/search",
-        openDetails: Boolean = false,
-    ) {
-        val now = System.currentTimeMillis()
-        val pending = ApprovalGate.Pending(
-            requestId = 4242L,
-            latch = CountDownLatch(1),
-            detail = org.json.JSONObject().put("method", "GET").put("path", "/contacts/search").put("q", "sara"),
-            view = view,
-            remote = "100.64.0.7",
-            endpoint = endpoint,
-            summary = "Search contacts for sara",
-            account = "me@example.com",
-            createdAtMs = now,
-            shownAtMs = now,
-            aiState = ai,
-            enabledAtMs = if (ai is ApprovalGate.AiState.Loading) 0L else now - 1,
-            needsPassword = view.needsPassword,
-        )
-        ApprovalGate.setCurrentForTest(pending)
-        queue().clear()
-        queue().add(pending)
-        repeat(queued) { i ->
-            queue().add(ApprovalGate.Pending(requestId = 5000L + i, latch = CountDownLatch(1), createdAtMs = now))
-        }
-        val intent = Intent(Fixtures.app, ApprovalActivity::class.java)
-            .putExtra(ApprovalActivity.EXTRA_ID, 4242L)
-            .putExtra(ApprovalActivity.EXTRA_REMOTE, "100.64.0.7")
-            .putExtra(ApprovalActivity.EXTRA_ENDPOINT, endpoint)
-            .putExtra(ApprovalActivity.EXTRA_SUMMARY, "Search contacts for sara")
-            .putExtra(ApprovalActivity.EXTRA_ACCOUNT, "me@example.com")
-            .putExtra(ApprovalActivity.EXTRA_CREATED_AT, now)
-        val a = org.robolectric.Robolectric.buildActivity(ApprovalActivity::class.java, intent).setup().get()
-        if (openDetails) findByText(a.window.decorView, "▸ details")?.performClick()
-        capture(a, "approval", state)
-    }
+        view: ApprovalGate.ApprovalView = GateFixtures.contacts(),
+        enabled: Long? = GateFixtures.ARMED_13S,
+    ) = GateFixtures.launch(view, "GET /contacts", ai = ai, queued = queued, enabledAtOffsetMs = enabled).also { shot(it, state) }
 
     private fun summary(risk: Risk) = ApprovalGate.AiState.Ready(
         RequestSummary("Looks up one contact by name.", risk, "Read-only search; nothing is changed."),
     )
 
-    @Test fun ai_loading() = show("ai_loading", ai = ApprovalGate.AiState.Loading)
-    @Test fun ai_ready_low() = show("ai_ready_low", ai = summary(Risk.LOW))
-    @Test fun ai_ready_medium() = show("ai_ready_medium", ai = summary(Risk.MEDIUM))
-    @Test fun ai_ready_high() = show("ai_ready_high", ai = summary(Risk.HIGH))
-    @Test fun ai_failed() = show("ai_failed", ai = ApprovalGate.AiState.Failed("the model did not answer in time"))
-    @Test fun not_needed() = show("not_needed")
-    @Test fun password() = show("password", view = view(needsPassword = true))
+    private val sshDanger = "rm -rf ~/builds/stmp/app/build && ./gradlew :app:assembleDebug --no-daemon | tee log > out.txt"
+    private val offer = ApprovalGate.ExceptionOffer(Rule("contacts", Verb.READ, Mode.DONT_DISTURB), "ALWAYS NOTIFY")
+    private val sshOffer = ApprovalGate.ExceptionOffer(Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), "ALWAYS NOTIFY")
 
-    // bio_not_enrolled and bio_locked_out are not captured: Robolectric 4.14.1's
-    // ShadowBiometricManager only models "available" or "unavailable", so BIOMETRIC_ERROR_NONE_ENROLLED
-    // and the lockout code (7) cannot be produced without changing production code.
+    // --- WP00 states, re-recorded -----------------------------------------------------------------
 
-    @Test fun vault_broken() {
-        // A stored wrapped key makes `SecretVault.exists` true; Robolectric has no AndroidKeyStore,
-        // so preparing the unlock cipher throws, which is exactly the VaultBroken state.
-        Fixtures.app.getSharedPreferences("phonebridge_vault", 0).edit().putString("vault_dk_wrapped", "AAAA").commit()
-        show("vault_broken", view = view(biometric = true))
+    @Test fun ai_loading() { contacts("ai_loading", ai = ApprovalGate.AiState.Loading, enabled = null) }
+    @Test fun ai_ready_low() { contacts("ai_ready_low", ai = summary(Risk.LOW)) }
+    @Test fun ai_ready_medium() { contacts("ai_ready_medium", ai = summary(Risk.MEDIUM)) }
+    @Test fun ai_ready_high() { contacts("ai_ready_high", ai = summary(Risk.HIGH)) }
+    @Test fun ai_failed() { contacts("ai_failed", ai = ApprovalGate.AiState.Failed("the model did not answer in time")) }
+    @Test fun not_needed() { contacts("not_needed") }
+
+    @Test fun password() {
+        shot(GateFixtures.launch(GateFixtures.ssh("sudo -S apt update", sudo = true), "POST /ssh/kvm-box"), "password")
     }
 
-    @Test fun exception_offer() = show(
-        "exception_offer",
-        view = view(offer = ApprovalGate.ExceptionOffer(Rule("contacts", Verb.READ, Mode.DONT_DISTURB), "ALWAYS NOTIFY")),
-    )
+    @Test fun bio_not_enrolled() {
+        ApprovalActivity.canAuthenticateForTest = BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
+        contacts("bio_not_enrolled", view = GateFixtures.contacts(biometric = true))
+    }
 
-    @Test fun queued_2() = show("queued_2", queued = 2)
-    @Test fun details_open() = show("details_open", openDetails = true)
+    @Test fun bio_locked_out() {
+        ApprovalActivity.canAuthenticateForTest = BIOMETRIC_ERROR_LOCKOUT
+        contacts("bio_locked_out", view = GateFixtures.contacts(biometric = true))
+    }
 
-    // approval_stamp (approved_200ms, denied_200ms) is not captured: under Robolectric the stamp's
-    // AnimatorSet runs to its end inside the first animation frame, so the 200 ms impact frame
-    // cannot be isolated; driving it would need a clock seam in StampOverlay (WP03a owns that file).
+    @Test fun vault_broken() {
+        GateFixtures.vaultBroken()
+        contacts("vault_broken", view = GateFixtures.contacts(biometric = true))
+    }
+
+    @Test fun exception_offer() { contacts("exception_offer", view = GateFixtures.contacts(offer = offer)) }
+    @Test fun queued_2() { contacts("queued_2", queued = 2) }
+
+    @Test fun details_open() {
+        val a = GateFixtures.launch(GateFixtures.contacts(), "GET /contacts")
+        findByDescription(a.window.decorView, "Raw request, SHOW")!!.performClick()
+        shot(a, "details_open")
+    }
+
+    // --- WP03a states -------------------------------------------------------------------------------
+
+    @Test fun summary_pending() {
+        val a = GateFixtures.launch(
+            GateFixtures.ssh(sshDanger), "POST /ssh/kvm-box", ai = ApprovalGate.AiState.Loading, enabledAtOffsetMs = null,
+        )
+        shot(a, "summary_pending")
+    }
+
+    @Test fun guard_ready_1s() {
+        val a = GateFixtures.launch(GateFixtures.ssh(sshDanger), "POST /ssh/kvm-box", enabledAtOffsetMs = 1_000L, clockOffsetMs = 200L)
+        shot(a, "guard_ready_1s")
+    }
+
+    @Test fun hold_ssh_danger() { shot(GateFixtures.launch(GateFixtures.ssh(sshDanger), "POST /ssh/kvm-box"), "hold_ssh_danger") }
+
+    @Test fun hold_ssh_long() {
+        val long = buildString { while (length < 1_200) append("cp -r ~/src/module-$length /mnt/backup/ && ") }.take(1_200)
+        shot(GateFixtures.launch(GateFixtures.ssh(long), "POST /ssh/kvm-box"), "hold_ssh_long", full = true)
+    }
+
+    @Test fun tap_probe_read() {
+        val v = GateFixtures.view(Verb.READ, "GET /probe", actionLabel = "Check that the bridge answers")
+        shot(GateFixtures.launch(v, "GET /probe"), "tap_probe_read")
+    }
+
+    @Test fun tap_biometric() {
+        ApprovalActivity.canAuthenticateForTest = BiometricManager.BIOMETRIC_SUCCESS
+        contacts("tap_biometric", view = GateFixtures.contacts(biometric = true))
+    }
+
+    @Test fun delete_audit_signal() {
+        val v = GateFixtures.view(Verb.DELETE, "DELETE /audit", actionLabel = "Delete the request log")
+        shot(GateFixtures.launch(v, "DELETE /audit"), "delete_audit_signal")
+    }
+
+    @Test fun secrets_json_body() {
+        val v = GateFixtures.view(
+            Verb.WRITE, "POST /secrets/todoist/call",
+            listOf(
+                Row("SECRET", "todoist", Row.Style.NORMAL),
+                Row("TARGET", "POST https://api.todoist.com/rest/v2/tasks", Row.Style.MONO),
+                Row("BODY", """{"content":"Buy milk","due_string":"tomorrow","priority":2,"labels":["home"]}""", Row.Style.LONG),
+            ),
+            actionLabel = "Call an API with a stored secret",
+        )
+        shot(GateFixtures.launch(v, "POST /secrets/todoist/call"), "secrets_json_body")
+    }
+
+    @Test fun gmail_send() {
+        val v = GateFixtures.view(
+            Verb.WRITE, "POST /gmail/messages/send",
+            listOf(
+                Row("TO", "sara@example.com", Row.Style.WARN),
+                Row("CC", "team@example.com", Row.Style.WARN),
+                Row("SUBJECT", "Friday plan", Row.Style.WARN),
+                Row("BODY", "Hi Sara, the build is green. Shall we ship on Friday?", Row.Style.LONG),
+            ),
+            actionLabel = "Send an email",
+        )
+        shot(GateFixtures.launch(v, "POST /gmail/messages/send"), "gmail_send")
+    }
+
+    @Test fun notification_action_reply() {
+        val v = GateFixtures.view(
+            Verb.EXECUTE, "POST /notifications/{id}/action",
+            listOf(Row("ACTION", "Reply", Row.Style.WARN), Row("TITLE", "Sara"), Row("REPLY", "On my way, ten minutes.", Row.Style.LONG)),
+            actionLabel = "Reply", notifTitle = "Sara", notifSender = "Family", notifText = "Where are you?",
+            messageCount = 3, options = listOf("Mark as read", "Mute"),
+        )
+        shot(GateFixtures.launch(v, "POST /notifications/n1/action"), "notification_action_reply")
+    }
+
+    @Test fun dismiss_exempt_tap() {
+        val v = GateFixtures.view(
+            Verb.EXECUTE, "POST /notifications/{id}/dismiss",
+            listOf(Row("DISMISS", "notification from Chat", Row.Style.NORMAL), Row("TITLE", "Sara")),
+            actionLabel = "Dismiss a notification", holdExempt = true, notifTitle = "Sara", notifText = "Where are you?",
+        )
+        shot(GateFixtures.launch(v, "POST /notifications/n1/dismiss"), "dismiss_exempt_tap")
+    }
+
+    @Test fun exception_offer_hold_on() {
+        val a = GateFixtures.launch(GateFixtures.ssh("ls -la ~/builds", offer = sshOffer), "POST /ssh/kvm-box")
+        findByText(a.window.decorView, "ALWAYS NOTIFY")!!.performClick()
+        shot(a, "exception_offer_hold_on")
+    }
+
+    @Test fun password_bio_locked_out() {
+        ApprovalActivity.canAuthenticateForTest = BIOMETRIC_ERROR_LOCKOUT
+        val a = GateFixtures.launch(GateFixtures.ssh("sudo -S apt update", sudo = true, biometric = true), "POST /ssh/kvm-box")
+        obscuredTap(a)
+        shot(a, "password_bio_locked_out")
+    }
+
+    @Test fun obscured_banner() {
+        val a = GateFixtures.launch(GateFixtures.contacts(), "GET /contacts")
+        obscuredTap(a)
+        shot(a, "obscured_banner")
+    }
+
+    @Test fun reduced_motion_ai_loading() {
+        GateFixtures.reducedMotion(true)
+        contacts("reduced_motion_ai_loading", ai = ApprovalGate.AiState.Loading, enabled = null)
+    }
+
+    @Test fun no_view_fallback() { shot(GateFixtures.launch(null, "GET /logs"), "no_view_fallback") }
 }
