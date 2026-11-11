@@ -106,7 +106,7 @@ object VaultUnlock {
                 "re-add your secrets; nothing else is touched."
         }
 
-        android.app.AlertDialog.Builder(activity)
+        com.mido.phonebridge.ui.kit.StmpDialog.builder(activity)
             .setTitle("Secret vault needs a reset")
             .setMessage(message)
             .setPositiveButton("reset vault") { _, _ ->

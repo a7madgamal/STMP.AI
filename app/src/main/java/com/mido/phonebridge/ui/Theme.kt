@@ -1140,6 +1140,23 @@ object Theme {
      */
     const val ROW_GAP_DP = Dimens.SPACE_S
 
+    /**
+     * The rocker switch (COMPONENTS 4). Same callback contract as [toggle]: `onChange(!checked)`
+     * reads the live state, so a switch repainted in place never sends a stale value.
+     */
+    fun rocker(
+        ctx: Context,
+        on: Boolean,
+        label: String,
+        pending: Boolean = false,
+        onChange: (Boolean) -> Unit,
+    ): com.mido.phonebridge.ui.kit.RockerSwitch = com.mido.phonebridge.ui.kit.RockerSwitch(ctx).apply {
+        this.label = label
+        setCheckedImmediately(on)
+        this.pending = pending
+        setOnClickListener { onChange(!checked) }
+    }
+
     /** Vertical space. */
     fun spacer(ctx: Context, dp: Int): View = View(ctx).apply {
         layoutParams = LinearLayout.LayoutParams(1, dp(ctx, dp))

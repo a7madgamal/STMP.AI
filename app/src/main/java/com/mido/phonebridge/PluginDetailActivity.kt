@@ -7,7 +7,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
+import com.mido.phonebridge.ui.kit.StmpDialog
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginRegistry
@@ -500,7 +500,7 @@ class PluginDetailActivity : BridgeScreen() {
                 android.text.InputType.TYPE_CLASS_TEXT
             }
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle(setting.label)
             .setView(input)
             .setPositiveButton("Save") { _, _ ->

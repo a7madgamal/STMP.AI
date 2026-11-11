@@ -1137,7 +1137,7 @@ class ApprovalActivity : FragmentActivity() {
         val canAsk = shouldShowRequestPermissionRationale(
             android.Manifest.permission.READ_CONTACTS
         )
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        com.mido.phonebridge.ui.kit.StmpDialog.builder(this)
             .setTitle("Contacts permission needed")
             .setMessage(
                 if (canAsk) {

@@ -26,8 +26,13 @@ object Haptics {
         }
     }
 
+    /** Tests set this to record haptics instead of performing them. */
+    @androidx.annotation.VisibleForTesting
+    internal var sink: ((View, Int) -> Unit)? = null
+
     fun perform(view: View, event: HapticEvent) {
         val constant = constantFor(event) ?: return
-        view.performHapticFeedback(constant)
+        val test = sink
+        if (test != null) test(view, constant) else view.performHapticFeedback(constant)
     }
 }

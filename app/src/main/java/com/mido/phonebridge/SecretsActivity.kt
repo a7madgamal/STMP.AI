@@ -1,7 +1,7 @@
 package com.mido.phonebridge
 
 import android.app.Activity
-import android.app.AlertDialog
+import com.mido.phonebridge.ui.kit.StmpDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -297,7 +297,7 @@ class SecretsActivity : Activity() {
             toast("cannot reveal: ${e.code}")
             return
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle(name)
             .setMessage(value)
             .setPositiveButton("hide", null)
@@ -347,7 +347,7 @@ class SecretsActivity : Activity() {
             addView(docsField)
             addView(keyField)
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Links for '$name'")
             .setView(box)
             .setPositiveButton("save") { _, _ ->
@@ -389,7 +389,7 @@ class SecretsActivity : Activity() {
         val labels = SecretTemplates.ALL.map { t ->
             if (t.name in existing) "${t.displayName} — already added" else "${t.displayName} — ${t.note}"
         }.toTypedArray()
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Add from template")
             .setItems(labels) { _, which ->
                 val t = SecretTemplates.ALL[which]
@@ -489,7 +489,7 @@ class SecretsActivity : Activity() {
             addView(keyField)
             addView(hostsField)
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle(
                 when {
                     existing != null -> "Replace '$existing'"
@@ -531,7 +531,7 @@ class SecretsActivity : Activity() {
             .filter { it.isNotEmpty() }
 
     private fun confirmDelete(name: String) {
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Delete '$name'?")
             .setMessage("The secret is removed from the vault and its ciphertext goes with the next write.")
             .setPositiveButton("delete") { _, _ ->
@@ -561,7 +561,7 @@ class SecretsActivity : Activity() {
                 Theme.dp(this@SecretsActivity, 16), 0)
             addView(field)
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Allow a host for '$secret'")
             .setView(box)
             .setPositiveButton("allow") { _, _ ->

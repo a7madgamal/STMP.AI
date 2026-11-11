@@ -1,0 +1,121 @@
+package com.mido.phonebridge
+
+import android.graphics.Rect
+import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.core.widget.NestedScrollView
+import com.google.android.material.chip.ChipGroup
+import com.mido.phonebridge.debug.KitHostActivity
+import com.mido.phonebridge.kit.allViews
+import com.mido.phonebridge.screenshots.KitFixtures
+import com.mido.phonebridge.ui.kit.HoldKey
+import com.mido.phonebridge.ui.kit.KnobSelector
+import com.mido.phonebridge.ui.kit.RuleLinearLayout
+import com.mido.phonebridge.ui.kit.TabBar
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.Robolectric
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+
+/**
+ * Every clickable view of every enrolled fixture is at least 48dp both ways, and two targets that
+ * do not overlap are at least 8dp apart (TESTING 6.4). `ENROLLED` is every kit fixture; each screen
+ * WP appends its screens in a block headed `// WPnn`.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(sdk = [33], qualifiers = "w411dp-h891dp-xhdpi")
+class TouchTargetTest(private val fontScale: Float) {
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "font {0}")
+        fun scales() = listOf(arrayOf<Any>(1f), arrayOf<Any>(1.35f))
+
+        private const val MIN_DP = 48f
+        private const val MIN_GAP_DP = 8f
+        private const val TOLERANCE_DP = 0.5f
+    }
+
+    /** WP02: every kit fixture. */
+    private val enrolled get() = KitFixtures.all
+
+    @Test
+    fun `every enrolled fixture meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        for (f in enrolled) {
+            val a = Robolectric.buildActivity(KitHostActivity::class.java).setup().get()
+            val view = f.build(a)
+            a.column.addView(
+                view,
+                view.layoutParams ?: LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
+            shadowOf(Looper.getMainLooper()).idle()
+            check(a, "${f.screen}/${f.state}", failures)
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    private fun isTarget(v: View): Boolean {
+        if (!v.isShown) return false
+        if (v is ScrollView || v is NestedScrollView) return false
+        // Selectable text is clickable only because the text machinery makes it so (copy handles);
+        // its size is the text's, not a button's.
+        if (v is TextView && v.isTextSelectable) return false
+        return v is HoldKey || v.isClickable || v.isLongClickable || v.hasOnClickListeners()
+    }
+
+    private fun check(a: KitHostActivity, name: String, failures: MutableList<String>) {
+        val d = a.resources.displayMetrics.density
+        val targets = a.column.allViews().filter(::isTarget)
+        for (t in targets) {
+            val w = t.width / d
+            val h = t.height / d
+            if (w < MIN_DP - TOLERANCE_DP || h < MIN_DP - TOLERANCE_DP) {
+                failures += "$name: ${t.javaClass.simpleName} is ${w}x${h}dp"
+            }
+        }
+        val rects = targets.associateWith { v ->
+            val loc = IntArray(2); v.getLocationInWindow(loc)
+            Rect(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
+        }
+        for (i in targets.indices) for (j in i + 1 until targets.size) {
+            val x = targets[i]; val y = targets[j]
+            if (isAncestor(x, y) || isAncestor(y, x)) continue
+            if (sameGroup(x, y)) continue
+            val r1 = rects.getValue(x); val r2 = rects.getValue(y)
+            val dx = maxOf(r2.left - r1.right, r1.left - r2.right)
+            val dy = maxOf(r2.top - r1.bottom, r1.top - r2.bottom)
+            if (dx < 0 && dy < 0) continue   // overlap or containment is not a gap problem
+            if (maxOf(dx, dy) / d < MIN_GAP_DP - TOLERANCE_DP) {
+                failures += "$name: ${x.javaClass.simpleName} and ${y.javaClass.simpleName} are ${maxOf(dx, dy) / d}dp apart"
+            }
+        }
+    }
+
+    private fun isAncestor(a: View, b: View): Boolean {
+        var p = b.parent
+        while (p is View) { if (p === a) return true; p = p.parent }
+        return false
+    }
+
+    /**
+     * Segments of a knob and cells of a tab bar are one control, and chip frames carry their own
+     * 8dp of breathing top and bottom (the pill is 32dp inside a 48dp frame).
+     */
+    private fun sameGroup(a: View, b: View): Boolean {
+        val pa = a.parent; val pb = b.parent
+        if (pa !== pb) return false
+        // Rows of one list (status rows, tape rows) sit edge to edge, separated by their dashed rule.
+        val listRows = a is RuleLinearLayout && b is RuleLinearLayout
+        return pa is KnobSelector || pa is TabBar || pa is ChipGroup || listRows
+    }
+}

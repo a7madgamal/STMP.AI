@@ -1,7 +1,8 @@
 package com.mido.phonebridge
 
 import android.app.Activity
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.mido.phonebridge.ui.kit.StmpDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -233,7 +234,7 @@ class SshActivity : Activity() {
                 Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
             )
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Public key — $label")
             .setMessage("Add this line to ~/.ssh/authorized_keys on ${conn.host}.")
             .setView(box)
@@ -301,7 +302,7 @@ class SshActivity : Activity() {
         //
         // So the button is wired manually and the dialog closes ONLY on success. The error is
         // reported IN the dialog, where the fields it refers to still are.
-        val dialog = AlertDialog.Builder(this)
+        val dialog = StmpDialog.builder(this)
             .setTitle("Add SSH connection")
             .setView(box)
             .setNegativeButton("cancel", null)
@@ -411,7 +412,7 @@ class SshActivity : Activity() {
     }
 
     private fun confirmDelete(label: String, vaultName: String) {
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Delete '$label'?")
             .setMessage(
                 "This removes the connection and its private key from the vault. The public key " +

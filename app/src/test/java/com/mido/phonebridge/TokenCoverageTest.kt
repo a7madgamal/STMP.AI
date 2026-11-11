@@ -31,6 +31,16 @@ class TokenCoverageTest {
             "TYPEFACE",
             Regex("""Typeface\.(MONOSPACE|DEFAULT|DEFAULT_BOLD|SANS_SERIF|SERIF|create|createFromAsset|createFromFile|BOLD|ITALIC|BOLD_ITALIC|NORMAL)\b|ResourcesCompat\.getFont|R\.font\."""),
         ) { it.startsWith("ui/tokens/") },
+        // Every dialog goes through StmpDialog (WP02); no baseline, the count is zero.
+        Rule(
+            "DIALOG",
+            Regex("""android\.app\.AlertDialog|AlertDialog\.Builder\("""),
+        ) { it == "ui/kit/StmpDialog.kt" },
+        // Every toast goes through Toasts.show (WP02); the remaining direct sites are baselined.
+        Rule(
+            "TOAST",
+            Regex("""Toast\.makeText"""),
+        ) { it == "ui/kit/Toasts.kt" },
     )
 
     private fun root(name: String): File? =

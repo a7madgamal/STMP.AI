@@ -5396,10 +5396,15 @@ devDependencies. `node_modules/` is gitignored.
 - Every screen and state is captured as a reference screenshot in light and dark at normal and large text, and CI fails when one changes unintentionally.
 - Unit tests run with a fixed English locale, so number formatting no longer depends on the machine.
 
-## 0.49.0 (build 296) — 2026-11-11 — CURRENT
+## 0.49.0 (build 296) — 2026-11-11
 - Dark mode follows the system on every screen, dialog, the approval modal and the floating notify card, all drawn from one palette.
 - Text is set in Geist and Geist Mono, bundled with the app; the handwritten face, paper grain and torn edges are gone.
 - The primary colour is ink; the old stamp red is removed, and error states use amber instead of red.
+
+## 0.49.1 (build 297) — 2026-11-11 — CURRENT
+- Every dialog uses the app's own look in light and dark, including the ones that were stock white system dialogs.
+- The new controls for the redesign (rocker switch, mode knob, hold key, readout, LEDs, punch) are built and tested; screens adopt them in the next releases.
+- The hold key can no longer approve after it is disabled or disarmed mid-hold; it returns to idle and ignores keyboard holds while disabled.
 
 ## Keeping this file honest
 

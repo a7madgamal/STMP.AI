@@ -1,7 +1,7 @@
 package com.mido.phonebridge
 
 import android.app.Activity
-import android.app.AlertDialog
+import com.mido.phonebridge.ui.kit.StmpDialog
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -183,7 +183,7 @@ class ExceptionsActivity : Activity() {
             // here would create rules that can never match a real request.
             listOf("gmail", "calendar", "notifications")
         }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Which plugin?")
             .setItems(plugins.toTypedArray()) { _, which -> pickVerb(policy, plugins[which]) }
             .show()
@@ -193,7 +193,7 @@ class ExceptionsActivity : Activity() {
         // ANY first, then the real verbs. Order matters for a picker: the broad rule is
         // the one you reach for when you do not want to enumerate, so it leads.
         val options = listOf(Rule.ANY) + Verb.values().map { it.name }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("$plugin — which verb?")
             .setItems(options.toTypedArray()) { _, which ->
                 val verb = if (which == 0) null else Verb.values()[which - 1]
@@ -208,7 +208,7 @@ class ExceptionsActivity : Activity() {
             "notify — 5s overlay, silence approves",
             "secure — full-screen + fingerprint"
         )
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("$plugin · ${verb?.name?.lowercase() ?: "any verb"}")
             .setItems(labels) { _, which ->
                 when (which) {

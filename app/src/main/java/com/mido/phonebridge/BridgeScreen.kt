@@ -3,7 +3,6 @@ package com.mido.phonebridge
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.widget.Toast
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -140,7 +139,7 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
     override fun go(intent: Intent) = startActivity(intent)
 
     override fun toast(message: String, duration: Int) =
-        Toast.makeText(this, message, duration).show()
+        com.mido.phonebridge.ui.kit.Toasts.show(this, message, duration)
 
     override fun ui(block: () -> Unit) = runOnUiThread(block)
 
@@ -152,7 +151,7 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         onNegative: (() -> Unit)?,
         onPositive: () -> Unit,
     ) {
-        android.app.AlertDialog.Builder(this)
+        com.mido.phonebridge.ui.kit.StmpDialog.builder(this)
             .setTitle(title)
             .setMessage(message)
             .setNegativeButton(negative) { _, _ -> onNegative?.invoke() }
