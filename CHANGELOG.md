@@ -5383,9 +5383,14 @@ devDependencies. `node_modules/` is gitignored.
 - The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
 - No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
 
-## 0.48.17 (build 293) — 2026-11-11 — CURRENT
+## 0.48.17 (build 293) — 2026-11-11
 - The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
 - A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
+
+## 0.48.18 (build 294) — 2026-11-11 — CURRENT
+- A sudo request no longer shows ALWAYS NOTIFY / ALWAYS ASK. That button approved without the password: one tap ran the command with an empty sudo password, skipped the password path, and wrote a rule relaxing every SSH command.
+- The gate now builds no exception offer for a request that needs a password, and the modal drops one if it arrives anyway.
+- The gate refuses any approval of a password request that does not carry the password, whichever button sent it. DENY still works.
 
 ## Keeping this file honest
 
