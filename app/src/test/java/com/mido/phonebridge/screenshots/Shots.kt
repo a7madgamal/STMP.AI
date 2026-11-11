@@ -39,16 +39,25 @@ object Shots {
         activity.window.decorView.captureRoboImage(path(screen, state), OPTIONS)
     }
 
-    /** The scroll content at its full measured height; call only for screens that scroll. */
+    /**
+     * The whole screen with its scroll content at full height: the window is re-laid-out taller by
+     * exactly what the content overflows by, so the tab bar and header stay where they belong.
+     * Call only for screens that scroll, and last (it leaves the window at the taller size).
+     */
     fun full(scrollChild: View, screen: String, state: String) {
         settle()
-        val width = scrollChild.width
-        scrollChild.measure(
+        val scroll = scrollChild.parent as View
+        val overflow = (scrollChild.height - scroll.height).coerceAtLeast(0)
+        val root = scrollChild.rootView
+        val width = root.width
+        val height = root.height + overflow
+        root.measure(
             MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
         )
-        scrollChild.layout(0, 0, width, scrollChild.measuredHeight)
-        scrollChild.captureRoboImage(path(screen, state, full = true), OPTIONS)
+        root.layout(0, 0, width, height)
+        settle()
+        root.captureRoboImage(path(screen, state, full = true), OPTIONS)
     }
 
     /** One view. */
