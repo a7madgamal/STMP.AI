@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.50.0 (build 298)**.
+Current build: **v0.50.1 (build 299)**.
 
 ---
 
@@ -5408,10 +5408,14 @@ devDependencies. `node_modules/` is gitignored.
 - Preferences opens again: the plugin inventory rendered itself before its own group list was initialised, so every construction threw a NullPointerException. The exception surfaced as the tab freezing, then as a crash.
 - A construction test now asserts the declaration order the initialiser depends on, and renders the inventory for real, so this cannot ship again.
 
-## 0.50.0 (build 298) — 2026-11-11 — CURRENT
+## 0.50.0 (build 298) — 2026-11-11
 - Every animation plays, always. The reduced-motion branch collapsed the approval stamp to a 110ms static fade with no contact frame, so the receipt for a security decision was invisible; it is gone, along with the whole `reducedMotion` path.
 - A request that cannot be shown an approval prompt is now REFUSED immediately as `prompt_unreachable`, naming the grant to give. Previously it waited the full 60 seconds and answered `approval_timeout`, which is indistinguishable from a human declining.
 - Home states it outright when neither full-screen intent nor draw-over-apps is available, because that combination makes the entire gate unreachable.
+
+## 0.50.1 (build 299) — 2026-11-11 — CURRENT
+- The approval stamp is visible again after a fingerprint. Its clock started while the biometric window was still closing, so the whole animation elapsed behind that dialog and finished on its first visible frame; it now waits for window focus, with a bounded fallback so a platform that never reports focus plays a late stamp instead of none.
+- The exit backstop includes that wait, so it can no longer dismiss the modal mid-wait and cancel the stamp it protects.
 
 ## Keeping this file honest
 

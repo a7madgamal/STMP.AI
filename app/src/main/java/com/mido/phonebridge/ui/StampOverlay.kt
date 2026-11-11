@@ -47,9 +47,31 @@ class StampOverlay(
     private val matrix = android.graphics.Matrix()
     private var inkProgress = 0f
 
+    /** When [stamp] was called. The clock starts later; this only measures how long we waited. */
+    private var requestedAt = 0L
+
     private val tick: Runnable = object : Runnable {
         override fun run() {
             if (finished || !isAttachedToWindow) return
+            if (startedAt == 0L) {
+                // **Wait for the window to be ours again.** The biometric prompt is a separate
+                // window that is still dismissing when the approve callback fires, so arming with
+                // it on top spends the animation where nobody can see it.
+                //
+                // The fallback exists so a window that never regains focus cannot swallow the
+                // receipt entirely: after STAMP_ARM_FALLBACK_MS the stamp plays regardless. Without it,
+                // "wait until visible" would mean "never" on an OEM that handles focus oddly.
+                val waited = SystemClock.uptimeMillis() - requestedAt
+                if (!hasWindowFocus() && waited < PaperMotion.STAMP_ARM_FALLBACK_MS) {
+                    postOnAnimation(this)
+                    return
+                }
+                startedAt = SystemClock.uptimeMillis()
+                android.util.Log.i(
+                    "StampOverlay",
+                    "armed after ${waited}ms (focus=${hasWindowFocus()}): $verdict",
+                )
+            }
             val elapsed = SystemClock.uptimeMillis() - startedAt
             // The contact frame. The thud, the ink bleed and the sheet compression are all keyed
             // off this single instant, so they can never disagree about when impact happened.
@@ -77,26 +99,51 @@ class StampOverlay(
             resources,
             if (value == Verdict.APPROVED) R.drawable.stamp_approved else R.drawable.stamp_rejected,
         )
-        startedAt = SystemClock.uptimeMillis()
+        // **The clock does NOT start here.** It starts on the first frame that can be seen — see
+        // the tick's arming branch. Reported 2026-11-11: *"still no fucking approval animation
+        // just a fingerprint request"*. With a biometric prompt, this method runs while the
+        // fingerprint window is still dismissing; 650ms of the animation burned behind that
+        // dialog, and by the time the modal was visible again `elapsed` was past the total, so it
+        // finished on its first frame. Every frame was correct and none was visible.
+        requestedAt = SystemClock.uptimeMillis()
+        startedAt = 0L
         impactSent = false
         finished = false
         inkProgress = 0f
         removeCallbacks(tick)
-        if (width > 0 && height > 0) postOnAnimation(tick)
+        // Start the arming loop NOW, so it can notice focus returning. Waiting for a draw would
+        // never start anything while another window is on top and this one is not drawn.
+        postOnAnimation(tick)
         invalidate()
+    }
+
+    /** Arm on a draw that happens while nothing is on top of us. */
+    private fun armIfVisible() {
+        if (startedAt != 0L || bitmap == null || !hasWindowFocus()) return
+        startedAt = SystemClock.uptimeMillis()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // The biometric window has gone: this is the first moment the stamp can be seen, so ask
+        // for a draw, which arms the clock.
+        if (hasFocus) {
+            android.util.Log.i("StampOverlay", "focus gained; armed=${startedAt != 0L}")
+            invalidate()
+        }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (startedAt > 0L && w > 0 && h > 0) {
-            removeCallbacks(tick)
-            postOnAnimation(tick)
-        }
+        // No arming here: a measured view is not a visible one, and the whole bug was arming
+        // before the biometric window had gone. The next draw arms it.
+        invalidate()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (startedAt > 0L) postOnAnimation(tick)
+        // Same reason: attached is not visible. onDraw arms it.
+        invalidate()
     }
 
     override fun onDetachedFromWindow() {
@@ -109,14 +156,19 @@ class StampOverlay(
     private fun finishOnce() {
         if (finished) return
         finished = true
+        android.util.Log.i("StampOverlay", "finished: $verdict")
         onFinished?.invoke()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (startedAt == 0L) return
         val art = bitmap ?: return
         if (art.width <= 0 || art.height <= 0 || width <= 0 || height <= 0) return
+        // Arm on the first draw that happens while no other window is on top.
+        armIfVisible()
+        // Still covered (the fingerprint window is closing): draw nothing yet, so no part of the
+        // animation is spent where it cannot be seen.
+        if (startedAt == 0L) return
         val elapsed = SystemClock.uptimeMillis() - startedAt
         if (scrimAlpha > 0) canvas.drawColor(scrimAlpha.coerceIn(0, 255) shl 24)
         val cx = width / 2f

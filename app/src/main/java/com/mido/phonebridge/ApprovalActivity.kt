@@ -1086,7 +1086,12 @@ class ApprovalActivity : FragmentActivity() {
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
         forcedExit.postDelayed(
             { if (!isFinishing) finish() },
-            PaperMotion.STAMP_TOTAL_MS + (if (!approved) PaperMotion.TEAR_MS else 0L) + 500L,
+            // The arm fallback is part of the budget. The stamp may legitimately wait for the
+            // biometric window to hand focus back, and a backstop sized only for the animation
+            // would call finish() mid-wait — killing the receipt it exists to protect.
+            PaperMotion.STAMP_ARM_FALLBACK_MS +
+                PaperMotion.STAMP_TOTAL_MS +
+                (if (!approved) PaperMotion.TEAR_MS else 0L) + 500L,
         )
     }
 

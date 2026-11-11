@@ -14,6 +14,16 @@ import android.content.Context
 object PaperMotion {
     const val PRESENT_MS = 300L
     const val STAMP_TOTAL_MS = 650L
+
+    /**
+     * How long the stamp may wait for the window to be visible before playing anyway.
+     *
+     * A biometric prompt is its own window and is still dismissing when the approve callback
+     * fires, so the stamp's clock must not start until that window is gone. The ceiling exists
+     * so a platform that never reports focus plays a late receipt instead of no receipt — and
+     * every backstop that waits for the stamp must use it, or it fires mid-arm and kills it.
+     */
+    const val STAMP_ARM_FALLBACK_MS = 2_500L
     const val TEAR_MS = 300L
     const val PRESENT_TOP_WIDTH_FACTOR = 1.09f
     const val PRESENT_TILT_DEGREES = 2.5f
