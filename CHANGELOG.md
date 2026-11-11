@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.49.3 (build 296)**.
+Current build: **v0.49.4 (build 297)**.
 
 ---
 
@@ -5399,10 +5399,14 @@ devDependencies. `node_modules/` is gitignored.
 - A crash now records its own stack trace to a file, and `GET /debug` reports it as `lastCrash`. Previously the trace rotated out of logcat before it could be read, so a crash report had no evidence to act on.
 - The plugin inventory no longer re-orders its own children while Android is still attaching them, which could tear the hierarchy apart mid-dispatch.
 
-## 0.49.3 (build 296) — 2026-11-11 — CURRENT
+## 0.49.3 (build 296) — 2026-11-11
 - A frozen screen is now detected and its stack recorded, reported as `lastStall`. A hang produces no exception, so the crash handler added in 0.49.2 could never have seen it.
 - Home shows the last crash or freeze and copies the full trace on tap, so the evidence is readable when the bridge itself is what failed.
 - One plugin whose stored state is corrupt can no longer take Preferences down with it; its row names the failure instead.
+
+## 0.49.4 (build 297) — 2026-11-11 — CURRENT
+- Preferences opens again: the plugin inventory rendered itself before its own group list was initialised, so every construction threw a NullPointerException. The exception surfaced as the tab freezing, then as a crash.
+- A construction test now asserts the declaration order the initialiser depends on, and renders the inventory for real, so this cannot ship again.
 
 ## Keeping this file honest
 

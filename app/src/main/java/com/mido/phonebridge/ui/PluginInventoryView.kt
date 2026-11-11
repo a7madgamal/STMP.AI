@@ -25,12 +25,6 @@ class PluginInventoryView(
     /** A coalescing flag so a burst of refresh requests becomes one rebuild. */
     private var renderPosted = false
 
-    init {
-        orientation = VERTICAL
-        render()
-        arrange()
-    }
-
     /**
      * The groups, in the order Mido asked for (2026-11-03): *"group related plugins... all google
      * in one large group with header / phone data like notifications and sound etc / misc like
@@ -56,6 +50,25 @@ class PluginInventoryView(
         "SSH" to setOf("ssh"),
         "Developer" to setOf("help", "debug", "logs", "probe"),
     )
+
+    /**
+     * Built here, AFTER [groups] — and that ordering is load-bearing.
+     *
+     * **Kotlin runs property initialisers and `init` blocks in DECLARATION order.** This block
+     * used to sit above [groups], so `render()` iterated a field that was still `null` and threw
+     * `NullPointerException` on every construction. The crash surfaced as the tab freezing,
+     * because `MainActivity.show()` runs `commitNow()` and an exception there leaves the screen
+     * half-transitioned. Reported 2026-11-11 as "hangs on preference click", then as a crash, then
+     * as a hang again — all one ordering mistake.
+     *
+     * It is a `by lazy`-free, plain `init` on purpose: the cost is one render at construction. But
+     * anything this block reads must be declared ABOVE it. Do not move it back.
+     */
+    init {
+        orientation = VERTICAL
+        render()
+        arrange()
+    }
 
     fun add(group: String, view: android.view.View, params: LayoutParams? = null) {
         val host = groupFor(group)
