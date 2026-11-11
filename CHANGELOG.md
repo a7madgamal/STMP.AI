@@ -5427,7 +5427,7 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.49.6 (build 302) — 2026-11-12
 - Two-line labels on small keys stay inside the key face instead of touching the outline.
 
-## 0.49.7 (build 303) — 2026-11-12 — CURRENT
+## 0.49.7 (build 303) — 2026-11-12
 - Settings is redrawn in the new look in light and dark, with the page and every label named Settings.
 - Settings → Permissions now lists Notification access, the permission behind "needs attention", and says what each permission affects.
 - The AI section shows what is wrong in words for every model state, and the re-download dialog quotes the real model size.
@@ -5435,6 +5435,12 @@ devDependencies. `node_modules/` is gitignored.
 - The debug log is a mono readout with a copy button, and forgetting a caller asks first and sits clear of the caller's name.
 - In the remote model server form, Save and Refresh models now use the address and token you typed, not the ones from before you started typing.
 - Switching the AI knob away from "On this phone" while the model downloads no longer repaints the page four times a second, so the remote server form keeps its focus and keyboard.
+
+## 0.49.8 (build 304) — 2026-11-12 — CURRENT
+- Home is rebuilt as a control panel: the bridge switch with its address on a dark display, the gate mode as a three-position knob, and the latest requests listed underneath.
+- When the bridge says "needs attention" it now names the reason and links straight to the setting that fixes it.
+- The bottom tab bar is taller, has icons, and no longer shrinks its labels at large text sizes; switching tabs slides and plays the tab sound again.
+- Update problems appear in a dialog you can read instead of a toast that vanishes.
 
 ## Keeping this file honest
 

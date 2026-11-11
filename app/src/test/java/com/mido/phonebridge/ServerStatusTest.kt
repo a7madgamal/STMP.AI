@@ -65,7 +65,7 @@ class ServerStatusTest {
         )
         assertEquals(ServerStatus.State.STOPPED, state)
         // The control is a switch now, not a button — there is no "START SERVER" to tap.
-        assertEquals("Switch the server on to begin", ServerStatus.detail(state, "", "", 8787))
+        assertEquals("Switch the bridge on to begin.", ServerStatus.detail(state, "", "", 8787))
     }
 
     @Test
@@ -123,7 +123,7 @@ class ServerStatusTest {
         assertEquals(ServerStatus.State.UNRESPONSIVE, state)
         // Must NOT say "Running": that word is the lie being fixed.
         assertTrue(!ServerStatus.title(state).contains("Running"))
-        assertEquals("● Not answering", ServerStatus.title(state))
+        assertEquals("Not answering", ServerStatus.title(state))
         // The checklist row must not contradict the hero above it.
         assertTrue(!ServerStatus.checklistValue(state, "100.64.0.11", 8787).contains("running"))
     }
@@ -155,7 +155,7 @@ class ServerStatusTest {
         val state = ServerStatus.state(
             serverUp = false, alive = false, listenerOk = true, notifOk = true, lastError = err,
         )
-        assertEquals("● Could not start", ServerStatus.title(state))
+        assertEquals("Could not start", ServerStatus.title(state))
         // Verbatim: the reason is the payload. Paraphrasing it would mean two strings to keep
         // in step, and the one on screen would be the one nobody tested.
         assertEquals(err, ServerStatus.detail(state, err, "", 8787))
@@ -182,5 +182,45 @@ class ServerStatusTest {
         // again — the enum would still be right while the screen told the old story.
         val titles = ServerStatus.State.entries.map { ServerStatus.title(it) }
         assertEquals(titles.size, titles.toSet().size)
+    }
+
+    @Test
+    fun `titles carry no bullet because the LED carries it`() {
+        assertEquals("Running", ServerStatus.title(ServerStatus.State.RUNNING_HEALTHY))
+        assertEquals("Running — needs attention", ServerStatus.title(ServerStatus.State.RUNNING_ATTENTION))
+        assertEquals("Stopped", ServerStatus.title(ServerStatus.State.STOPPED))
+        assertTrue(ServerStatus.State.entries.none { ServerStatus.title(it).contains("●") })
+    }
+
+    @Test
+    fun `attention lists the reasons in display order`() {
+        assertEquals(emptyList<ServerStatus.Attention>(), ServerStatus.attention(true, true))
+        assertEquals(listOf(ServerStatus.Attention.NOTIFICATIONS_BLOCKED), ServerStatus.attention(true, false))
+        assertEquals(listOf(ServerStatus.Attention.LISTENER_OFF), ServerStatus.attention(false, true))
+        assertEquals(
+            listOf(ServerStatus.Attention.NOTIFICATIONS_BLOCKED, ServerStatus.Attention.LISTENER_OFF),
+            ServerStatus.attention(false, false),
+        )
+    }
+
+    @Test
+    fun `RUNNING_ATTENTION holds exactly when there is a reason to show`() {
+        for (listenerOk in listOf(true, false)) for (notifOk in listOf(true, false)) {
+            val attention = ServerStatus.state(true, true, listenerOk, notifOk, "") ==
+                ServerStatus.State.RUNNING_ATTENTION
+            assertEquals("listener=$listenerOk notif=$notifOk", attention,
+                ServerStatus.attention(listenerOk, notifOk).isNotEmpty())
+        }
+    }
+
+    @Test
+    fun `every attention reason has distinct copy and a link word`() {
+        val all = ServerStatus.Attention.entries
+        assertEquals(all.size, all.map { ServerStatus.attentionTitle(it) }.toSet().size)
+        for (a in all) {
+            assertTrue(ServerStatus.attentionTitle(a).isNotBlank())
+            assertTrue(ServerStatus.attentionDetail(a).isNotBlank())
+            assertTrue(ServerStatus.attentionAction(a).isNotBlank())
+        }
     }
 }

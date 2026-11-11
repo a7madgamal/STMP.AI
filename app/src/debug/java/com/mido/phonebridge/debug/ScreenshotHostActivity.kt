@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentTransaction
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.TabBar
 import com.mido.phonebridge.TopInset
 
 /**
@@ -24,20 +25,11 @@ class ScreenshotHostActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Theme.sheet(Theme.BG)
+            setBackgroundColor(Theme.palette(this@ScreenshotHostActivity).body)
         }
         val container = FrameLayout(this).apply { id = CONTAINER_ID }
         root.addView(container, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f,
-        ))
-        val barHost = LinearLayout(this).apply {
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, Theme.dp(this@ScreenshotHostActivity, SHADOW_ROOM_DP), 0, 0)
-        }
-        root.addView(barHost, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
         TopInset.apply(root)
         setContentView(root)
@@ -50,8 +42,9 @@ class ScreenshotHostActivity : AppCompatActivity() {
             .replace(CONTAINER_ID, fragment)
             .setTransition(FragmentTransaction.TRANSIT_NONE)
             .commitNow()
-        barHost.addView(
-            Theme.bottomNav(this, tab) { },
+        // Same bar as MainActivity: built once, under the container.
+        root.addView(
+            TabBar(this, current = tab) { },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -63,6 +56,5 @@ class ScreenshotHostActivity : AppCompatActivity() {
         const val EXTRA_FRAGMENT = "fragment"
         const val EXTRA_TAB = "tab"
         private const val CONTAINER_ID = 0x5E1A
-        private const val SHADOW_ROOM_DP = 14
     }
 }

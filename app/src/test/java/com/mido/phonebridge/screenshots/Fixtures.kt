@@ -219,7 +219,7 @@ object Fixtures {
         }
     }
 
-    private fun auditRecord(id: String, ts: Long, outcome: com.mido.phonebridge.audit.AuditOutcome, i: Int) =
+    internal fun auditRecord(id: String, ts: Long, outcome: com.mido.phonebridge.audit.AuditOutcome, i: Int) =
         com.mido.phonebridge.audit.AuditRecord(
             id = id, ts = ts, outcome = outcome,
             label = "contacts.read", plugin = "contacts", verb = "READ",
@@ -309,12 +309,76 @@ object Fixtures {
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
     }
 
+    // --- WP04: Home ------------------------------------------------------------------------------
+
+    /** A running bridge with exactly one of the two attention reasons (or both when both are false). */
+    fun serverAttention(listenerOk: Boolean, notifOk: Boolean) {
+        server(Server.RUNNING_HEALTHY)
+        BridgeService.listenerRef =
+            if (listenerOk) Robolectric.setupService(NotifListenerService::class.java) else null
+        val shadow = shadowOf(app)
+        if (notifOk) shadow.grantPermissions(POST_NOTIFICATIONS) else shadow.denyPermissions(POST_NOTIFICATIONS)
+    }
+
+    /** Fingerprint hardware missing, so the Home rocker is disabled and says why. */
+    fun fingerprintUnusable() {
+        val manager = app.getSystemService(android.hardware.biometrics.BiometricManager::class.java)
+        org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowBiometricManager>(manager)
+            .setCanAuthenticate(false)
+    }
+
+    /**
+     * Three visible requests (READ, EXECUTE, DELETE) plus one noise row that must not show,
+     * one minute apart from [NOW_MS].
+     */
+    fun auditTape() {
+        val store = com.mido.phonebridge.audit.AuditLog.from(app)
+        val verbs = listOf("READ", "EXECUTE", "DELETE")
+        verbs.forEachIndexed { i, verb ->
+            val id = "2026-11-11T09-4$i-00-tape0$i"
+            store.append(
+                auditRecord(id, NOW_MS + i * 60_000L, com.mido.phonebridge.audit.AuditOutcome.APPROVED, i)
+                    .copy(verb = verb, summary = "Request number $i ($verb)"),
+            )
+        }
+        store.append(
+            auditRecord("2026-11-11T09-59-00-noise00", NOW_MS + 10 * 60_000L, com.mido.phonebridge.audit.AuditOutcome.APPROVED, 9)
+                .copy(noise = true, summary = "Background poll"),
+        )
+    }
+
+    fun updatesChecking() { Updater.lastOutcome = null; Updater.checking = true }
+
+    fun updatesInstalling() {
+        updatesAvailable()
+        Updater.installingVersion = "0.49.0"
+        Updater.installing = true
+    }
+
+    fun updatesAvailableBeta() {
+        updatesAvailable()
+        UpdatePrefs.setChannel(app, UpdatePrefs.Channel.BETA)
+        Updater.lastOutcome = (Updater.lastOutcome as Updater.Outcome.Available).copy(isBeta = true)
+    }
+
+    fun updatesUnavailable() {
+        UpdatePrefs.setLastCheckAt(app, System.currentTimeMillis() - FOUR_HOURS_MS)
+        Updater.lastOutcome = Updater.Outcome.Unavailable("GitHub did not answer")
+    }
+
+    fun resetHome() {
+        Updater.installing = false
+        Updater.installingVersion = null
+        Updater.installCancelled = false
+    }
+
     // --- everything ----------------------------------------------------------------------------
 
     fun reset() {
         resetServer()
         resetAudit()
         resetUpdates()
+        resetHome()
         resetDebugLog()
         resetSettings()
         clearPlugins()

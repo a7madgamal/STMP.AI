@@ -6,11 +6,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import com.google.android.material.transition.MaterialSharedAxis
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.OnboardingPrefs
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.TabBar
+import com.mido.phonebridge.ui.tokens.Motion
 
 /**
  * The app shell: one Activity, one bar, three fragments.
@@ -35,17 +38,12 @@ import com.mido.phonebridge.ui.Theme
 class MainActivity : AppCompatActivity() {
 
     private lateinit var container: FrameLayout
-    private lateinit var barHost: LinearLayout
 
     /**
-     * The bar, built ONCE.
-     *
-     * It used to be rebuilt on every tab change, which is why the selection could not fade: a
-     * brand-new bar has no previous state to animate from, and the fade animated `1f` to `1f`.
-     * Keeping the instance means the outgoing tab still exists when the incoming one is selected,
-     * so the marker visibly travels.
+     * The bar, built ONCE in `onCreate` and repainted in place by [TabBar.select], so the marker
+     * visibly travels from the outgoing tab to the incoming one.
      */
-    private var bottomBar: Theme.BottomBar? = null
+    private lateinit var tabBar: TabBar
 
     /**
      * The visible tab, as a field rather than re-derived at save time.
@@ -55,6 +53,9 @@ class MainActivity : AppCompatActivity() {
      */
     private var currentTab: Theme.Tab = Theme.Tab.HOME
 
+    /** False until the first tab is on screen, so the first paint is not a "change" (no slide, no sound). */
+    private var hasShownTab = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -62,37 +63,22 @@ class MainActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Theme.sheet(Theme.BG)
+            setBackgroundColor(Theme.palette(this@MainActivity).body)
         }
 
         // The body takes the remaining height and the bar sits under it at its natural size, so
         // a short screen still has its bar at the bottom rather than floating under the content.
-        // The container stops above the shadow band, so the bottom of a scrolling body is never
-        // hidden behind the blur.
         container = FrameLayout(this).apply { id = CONTAINER_ID }
         root.addView(container, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
-        // A stable host for the bar, so a tab change replaces one child instead of re-finding
-        // the root and guessing which child the bar is.
-        barHost = LinearLayout(this).apply {
-            // **The shadow needs room to exist.**
-            //
-            // The bar carries real elevation, and the platform draws that shadow OUTSIDE the
-            // bar's own bounds. This host had no padding and `clipChildren` defaults to true, so
-            // the shadow was clipped away the moment it was drawn -- which is why the bar looked
-            // like it had no shadow at all while the elevation code was perfectly correct.
-            //
-            // Top padding reserves the band the blur occupies; `clipChildren = false` lets it
-            // paint into that band instead of being cut at the child's edge.
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, Theme.dp(this@MainActivity, SHADOW_ROOM_DP), 0, 0)
-        }
-        // MATCH_PARENT explicitly: the default layout params are WRAP_CONTENT, which made the bar
-        // measure to its labels and huddle at the left edge instead of spanning the screen.
-        root.addView(barHost, LinearLayout.LayoutParams(
+        // The bar is a sibling of the container, built once. It applies the bottom inset itself,
+        // so its panel extends behind the gesture bar; the top inset sits on the root.
+        val initialTab = (savedInstanceState?.getString(STATE_TAB) ?: intent?.getStringExtra(Tabs.EXTRA_TAB))
+            ?.let(::tabNamed) ?: Theme.Tab.HOME
+        tabBar = TabBar(this, current = initialTab) { selected -> show(selected) }
+        root.addView(tabBar, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
@@ -105,9 +91,7 @@ class MainActivity : AppCompatActivity() {
 
         // Restore across a config change or process death, then honour a tab requested by a
         // caller (a notification tap, or a non-tab screen asking to leave).
-        val wanted = savedInstanceState?.getString(STATE_TAB)
-            ?: intent?.getStringExtra(Tabs.EXTRA_TAB)
-        show(wanted?.let(::tabNamed) ?: Theme.Tab.HOME)
+        show(initialTab)
 
         // **First launch explains itself.** A fresh install otherwise lands on a server switch
         // and three unexplained mode radios, with nothing saying why any of it exists.
@@ -213,22 +197,30 @@ class MainActivity : AppCompatActivity() {
             Debug.log("tab switch to $tab ignored: state already saved")
             return
         }
+        // Read BEFORE `currentTab` is reassigned: after it, this is always false and the tab
+        // sound never plays.
+        val before = currentTab
+        val changing = hasShownTab && before != tab
+        hasShownTab = true
         currentTab = tab
         val fragment: Fragment = when (tab) {
             Theme.Tab.HOME -> HomeFragment()
             Theme.Tab.PLUGINS -> PluginsFragment()
             Theme.Tab.SETTINGS -> OptionsFragment()
         }
-        // Read BEFORE `currentTab` is reassigned below; otherwise this is always false.
-        val changing = currentTab != tab
+        // A sideways slide on a real change; none on first paint or with animations off.
+        if (changing && !Motion.reduced(this)) {
+            val forward = tab.ordinal > before.ordinal
+            supportFragmentManager.findFragmentById(CONTAINER_ID)?.exitTransition =
+                MaterialSharedAxis(MaterialSharedAxis.X, forward).apply { duration = Motion.DURATION_SHARED_AXIS }
+            fragment.enterTransition =
+                MaterialSharedAxis(MaterialSharedAxis.X, forward).apply { duration = Motion.DURATION_SHARED_AXIS }
+        }
         supportFragmentManager.beginTransaction()
+            .setReorderingAllowed(true)
             .replace(CONTAINER_ID, fragment)
-            // No transition: the point of this whole change is that switching tabs does not
-            // animate. A default cross-fade here would reintroduce exactly the movement the
-            // migration exists to remove.
-            .setTransition(androidx.fragment.app.FragmentTransaction.TRANSIT_NONE)
             .commitNow()
-        rebuildBar(tab)
+        tabBar.select(tab, animate = changing)
 
         // **The same paper-crease as the approval modal.**
         //
@@ -247,38 +239,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
                 Debug.log("tab switch sound unavailable: ${e.message}")
             }
-        }
-    }
-
-    /**
-     * Repaint the bar for a tab change.
-     *
-     * Only the SELECTED marker differs, so this replaces one child of a stable parent. It never
-     * runs on a timer: a bar rebuilt under a press is the tap-eating defect this codebase has
-     * already paid for twice.
-     */
-    /**
-     * Move the bar's selection.
-     *
-     * Not a rebuild. The bar is created on the first call and reused after that, which is what
-     * makes the fade work and what keeps its elevation shadow from being recreated (and briefly
-     * missing) on every tab change.
-     */
-    private fun rebuildBar(tab: Theme.Tab) {
-        val existing = bottomBar
-        if (existing == null) {
-            val bar = Theme.bottomNav(this, tab) { selected -> show(selected) }
-            bottomBar = bar
-            barHost.addView(
-                bar,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        } else {
-            // Animated: this is a real selection change, and the fade is the point.
-            existing.select(tab, animate = true)
         }
     }
 
@@ -319,14 +279,6 @@ class MainActivity : AppCompatActivity() {
          * already populated.
          */
         const val CONTAINER_ID = 0x5E1A
-
-        /**
-         * Vertical room reserved above the bar for its shadow blur, in dp.
-         *
-         * Slightly more than `Theme.BAR_ELEVATION_DP`: the blur reaches past the elevation value,
-         * and a band exactly as tall as the elevation clips the faint outer edge into a hard line.
-         */
-        const val SHADOW_ROOM_DP = 14
 
         /** Once per process. A deliberate STOP must survive a tab switch. */
         var autoStartAttempted = false

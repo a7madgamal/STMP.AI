@@ -189,6 +189,49 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP04: Home states, inside the shell (the 64 dp tab bar is part of every capture).
+    private val homeStates: List<Pair<String, () -> Unit>> get() = listOf(
+        "home/stopped" to { Fixtures.server(Fixtures.Server.STOPPED) },
+        "home/running_healthy" to { Fixtures.server(Fixtures.Server.RUNNING_HEALTHY) },
+        "home/running_attention_both" to { Fixtures.serverAttention(listenerOk = false, notifOk = false) },
+        "home/failed" to { Fixtures.server(Fixtures.Server.FAILED) },
+        "home/audit_degraded" to { Fixtures.auditDegraded() },
+        "home/gate_paranoid" to { Fixtures.gate(com.mido.phonebridge.policy.GlobalMode.PARANOID) },
+        "home/gate_dont_disturb" to { Fixtures.gate(com.mido.phonebridge.policy.GlobalMode.DONT_DISTURB) },
+        "home/gate_unreadable" to { Fixtures.gateUnreadable() },
+        "home/tape_three" to { Fixtures.auditTape() },
+        "home/updates_available" to { Fixtures.updatesAvailable() },
+        "home/updates_installing" to { Fixtures.updatesInstalling() },
+        "home/updates_checking" to { Fixtures.updatesChecking() },
+        "home/updates_unavailable" to { Fixtures.updatesUnavailable() },
+    )
+
+    @Test
+    fun `every enrolled home state meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, setup) in homeStates) {
+                Fixtures.dropSingletons()
+                setup()
+                val intent = android.content.Intent(Fixtures.app, com.mido.phonebridge.debug.ScreenshotHostActivity::class.java)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_FRAGMENT, HomeFragment::class.java.name)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_TAB, com.mido.phonebridge.ui.Theme.Tab.HOME.name)
+                val a = Robolectric.buildActivity(com.mido.phonebridge.debug.ScreenshotHostActivity::class.java, intent).setup().get()
+                shadowOf(Looper.getMainLooper()).idle()
+                // The scrolling body and the bar are checked apart: a scroll view clips its content
+                // at the bar, so a key near the clip edge is not "close to" a tab cell.
+                val body = com.mido.phonebridge.screenshots.firstScroll(a.window.decorView)!!.getChildAt(0) as ViewGroup
+                check(body, name, failures)
+                check(a.window.decorView.allViews().filterIsInstance<TabBar>().first(), "$name/tabbar", failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     private fun isTarget(v: View): Boolean {
         if (!v.isShown) return false
         if (v is ScrollView || v is NestedScrollView) return false
