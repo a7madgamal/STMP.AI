@@ -5413,9 +5413,12 @@ devDependencies. `node_modules/` is gitignored.
 - When approving needs the fingerprint, a contacts request asks for the fingerprint first; granting the contacts permission can no longer approve without it.
 - A hold can no longer approve after another app covers the screen or the screen loses focus mid-hold; the key returns to idle.
 
-## 0.49.3 (build 299) — 2026-11-12 — CURRENT
+## 0.49.3 (build 299) — 2026-11-12
 - The floating Don't-disturb card uses the new look in light and dark: a clear verb chip, a larger ✕ target and a thin countdown bar; tapping, the ✕ and silence still behave exactly as before.
 - Decisions on the card show the new punch, and neither the card nor the new-device screen accepts taps while another app is drawn over them.
+
+## 0.49.4 (build 300) — 2026-11-12 — CURRENT
+- The Don't-disturb card now refuses an approve tap if another app covered it at any point during the tap, not only when the finger lifted. A cover pulled away just before release could otherwise steer an approval.
 
 ## Keeping this file honest
 

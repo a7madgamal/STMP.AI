@@ -542,6 +542,9 @@ object NotifyOverlay {
         var originX = 0
         var originY = 0
         var dragging = false
+        // Latched for the whole gesture: a cover that was there at the press or at any move
+        // counts, even if it is gone by the release (D17).
+        var isGestureObscured = false
         card.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -550,10 +553,12 @@ object NotifyOverlay {
                     originX = params.x
                     originY = params.y
                     dragging = false
+                    isGestureObscured = ObscuredTouchGuard.isObscured(ev)
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
+                    if (ObscuredTouchGuard.isObscured(ev)) isGestureObscured = true
                     val dx = ev.rawX - downX
                     val dy = ev.rawY - downY
                     if (!dragging && (abs(dx) > slop || abs(dy) > slop)) dragging = true
@@ -610,8 +615,10 @@ object NotifyOverlay {
                         // the card could have steered the finger here, so the approve is refused
                         // and the card says why. Only the approve is filtered: the ✕ denies, which
                         // is the safe direction, and it always works (D55). Partial cover is
-                        // allowed, the platform's own rule (D60).
-                        if (ObscuredTouchGuard.isObscured(ev)) {
+                        // allowed, the platform's own rule (D60). The check covers the whole
+                        // gesture, not only the release: a cover can be pulled away just before
+                        // the finger lifts.
+                        if (isGestureObscured || ObscuredTouchGuard.isObscured(ev)) {
                             entry.obscuredLine?.visibility = View.VISIBLE
                             Haptics.perform(card, HapticEvent.REJECT)
                             com.mido.phonebridge.Debug.log(

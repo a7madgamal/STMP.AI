@@ -67,9 +67,12 @@ class NotifyObscuredTapTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun tap(view: View, flags: Int) {
+    private fun tap(view: View, flags: Int) = gesture(view, MotionEvent.ACTION_DOWN to flags, MotionEvent.ACTION_UP to flags)
+
+    /** One gesture, each event with its own flags, so a cover can come and go mid-gesture. */
+    private fun gesture(view: View, vararg events: Pair<Int, Int>) {
         val t = SystemClock.uptimeMillis()
-        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+        for ((action, flags) in events) {
             val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
             val coords = arrayOf(MotionEvent.PointerCoords().apply { x = 20f; y = 20f; pressure = 1f; size = 1f })
             val ev = MotionEvent.obtain(t, SystemClock.uptimeMillis(), action, 1, props, coords, 0, 0, 1f, 1f, 0, 0, 0, flags)
@@ -94,6 +97,36 @@ class NotifyObscuredTapTest {
 
         assertTrue("an obscured tap must not decide: $outcomes", outcomes.isEmpty())
         assertEquals(View.VISIBLE, line.visibility)
+    }
+
+    @Test
+    fun `a tap whose press was obscured decides nothing even if the cover is gone at release`() {
+        val card = showCard(9105L)
+        waitPastGuard()
+
+        gesture(
+            card,
+            MotionEvent.ACTION_DOWN to MotionEvent.FLAG_WINDOW_IS_OBSCURED,
+            MotionEvent.ACTION_UP to 0,
+        )
+
+        assertTrue("a press under a cover must not approve on a clear release: $outcomes", outcomes.isEmpty())
+        assertEquals(View.VISIBLE, obscuredLine(card)!!.visibility)
+    }
+
+    @Test
+    fun `a tap obscured while the finger moved decides nothing`() {
+        val card = showCard(9106L)
+        waitPastGuard()
+
+        gesture(
+            card,
+            MotionEvent.ACTION_DOWN to 0,
+            MotionEvent.ACTION_MOVE to MotionEvent.FLAG_WINDOW_IS_OBSCURED,
+            MotionEvent.ACTION_UP to 0,
+        )
+
+        assertTrue("a cover during the gesture must not approve: $outcomes", outcomes.isEmpty())
     }
 
     @Test
