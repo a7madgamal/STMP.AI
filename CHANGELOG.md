@@ -5406,12 +5406,16 @@ devDependencies. `node_modules/` is gitignored.
 - The new controls for the redesign (rocker switch, mode knob, hold key, readout, LEDs, punch) are built and tested; screens adopt them in the next releases.
 - The hold key can no longer approve after it is disabled or disarmed mid-hold; it returns to idle and ignores keyboard holds while disabled.
 
-## 0.49.2 (build 298) — 2026-11-12 — CURRENT
+## 0.49.2 (build 298) — 2026-11-12
 - The approval screen leads with the exact command or payload on a dark readout, with risky shell tokens such as sudo, rm -rf and | sh underlined; the AI summary sits below it, marked as possibly wrong.
 - Requests that run or delete something, and sudo commands, are approved by holding the key for 1.2 seconds; deny is always one tap.
 - After you decide, a punch and a short receipt confirm what happened, and pressing back shows the DENIED punch and receipt like a DENY tap.
 - When approving needs the fingerprint, a contacts request asks for the fingerprint first; granting the contacts permission can no longer approve without it.
 - A hold can no longer approve after another app covers the screen or the screen loses focus mid-hold; the key returns to idle.
+
+## 0.49.3 (build 299) — 2026-11-12 — CURRENT
+- The floating Don't-disturb card uses the new look in light and dark: a clear verb chip, a larger ✕ target and a thin countdown bar; tapping, the ✕ and silence still behave exactly as before.
+- Decisions on the card show the new punch, and neither the card nor the new-device screen accepts taps while another app is drawn over them.
 
 ## Keeping this file honest
 

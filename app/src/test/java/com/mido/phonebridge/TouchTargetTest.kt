@@ -102,6 +102,45 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP03b: the Don't-disturb card (the ✕ is 48 x 48; the card itself is at least 48 tall).
+    private val notifyVerbs = listOf(com.mido.phonebridge.core.Verb.READ, com.mido.phonebridge.core.Verb.EXECUTE)
+
+    @Test
+    fun `every enrolled notify card meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val wm = app.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager
+        val failures = ArrayList<String>()
+        try {
+            for ((i, verb) in notifyVerbs.withIndex()) {
+                com.mido.phonebridge.notify.NotifyOverlay.show(
+                    ctx = app, id = 9_300L + i, summary = "Run uptime on kvm-box and report the load",
+                    label = "RUN", verb = verb, windowMs = 60_000L, facts = null, needsAi = false,
+                    fetchCapMs = 0L, onOutcome = { },
+                )
+                shadowOf(Looper.getMainLooper()).idle()
+                val card = org.robolectric.shadow.api.Shadow
+                    .extract<org.robolectric.shadows.ShadowWindowManagerImpl>(wm).views.last() as ViewGroup
+                val name = "notify_card/${verb.name.lowercase()}"
+                check(card, name, failures)
+                val d = card.resources.displayMetrics.density
+                val close = card.allViews().firstOrNull { it.contentDescription?.startsWith("Deny: ") == true }
+                if (close == null || !close.isShown) failures += "$name: no visible ✕"
+                else if (close.width / d < MIN_DP - TOLERANCE_DP || close.height / d < MIN_DP - TOLERANCE_DP) {
+                    failures += "$name: ✕ is ${close.width / d}x${close.height / d}dp"
+                }
+                if (card.height / d < MIN_DP - TOLERANCE_DP) failures += "$name: card is ${card.height / d}dp tall"
+                com.mido.phonebridge.notify.NotifyOverlay.dismissAll()
+                shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(3_000))
+            }
+        } finally {
+            com.mido.phonebridge.notify.NotifyOverlay.dismissAll()
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(3_000))
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     private fun isTarget(v: View): Boolean {
         if (!v.isShown) return false
         if (v is ScrollView || v is NestedScrollView) return false

@@ -3,6 +3,7 @@ package com.mido.phonebridge
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -16,6 +17,9 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
+import com.mido.phonebridge.ui.tokens.HapticEvent
+import com.mido.phonebridge.ui.tokens.Haptics
 import java.util.concurrent.Executor
 
 /**
@@ -161,7 +165,19 @@ class CallerActivity : FragmentActivity() {
         )
         root.addView(buttons)
 
-        setContentView(Theme.inset(ScrollView(this).apply { addView(root) }))
+        // Tapjacking (D17): while another window fully covers this screen, no touch reaches
+        // allow, block, not now or the name field, and the banner says why. Partial cover is
+        // allowed (D60). System back still works; it resolves Unavailable, which is safe.
+        val banner = ObscuredTouchGuard.banner(this)
+        root.addView(banner, 0)
+        val guard = ObscuredTouchGuard(this)
+        guard.onObscuredTouch = {
+            banner.visibility = View.VISIBLE
+            Haptics.perform(guard, HapticEvent.REJECT)
+        }
+        guard.onClearTouch = { banner.visibility = View.GONE }
+        guard.addView(Theme.inset(ScrollView(this).apply { addView(root) }))
+        setContentView(guard)
     }
 
     private fun decide(allow: Boolean) {
