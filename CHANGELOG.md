@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.1 (build 303)**.
+Current build: **v0.51.2 (build 304)**.
 
 ---
 
@@ -5429,9 +5429,13 @@ devDependencies. `node_modules/` is gitignored.
 - The frame counter that claimed "105 frames" was incrementing in the tick, not in `onDraw`, so it measured the timer rather than the paint. It now counts real draws and logs the first one, which is what makes an invisible stamp diagnosable.
 - Pressing back after a decision resolves the request and leaves the stamp on screen instead of destroying the window in the same frame.
 
-## 0.51.1 (build 303) — 2026-11-11 — CURRENT
+## 0.51.1 (build 303) — 2026-11-11
 - The stamp is visible. It was painted on every frame and then covered: `PaperEntranceView` carries 4dp of elevation, and a ViewGroup draws children in ascending Z order once any child has elevation, so the sheet was painted over an overlay sitting at the default Z=0. The overlay and the denial tear now carry 32dp, above the sheet's 28dp entrance peak.
 - The same cause made the modal appear frozen: the sheet on top received the taps the stamp was waiting for. Both are fixed by the one elevation change.
+
+## 0.51.2 (build 304) — 2026-11-11 — CURRENT
+- The stamp no longer leaves a doubled shadow: the ink bleed was held at full strength for as long as the stamp stayed on screen, and it draws the mark plus two offset copies. It is a 240ms transient at impact again.
+- The modal dismisses itself after the stamp is read; the previous "wait for a tap" turned every approval into a screen that never closed. A tap still dismisses early.
 
 ## Keeping this file honest
 

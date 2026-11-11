@@ -26,8 +26,9 @@ class StampOverlay(
     var onImpact: (() -> Unit)? = null
 
     init {
-        // A stamp that waits for a human must also yield to one. Tapping anywhere dismisses it,
-        // so the receipt can never become a surface the human is stuck behind.
+        // A tap dismisses early. The stamp also leaves on its own after STAMP_HOLD_MS, so this is
+        // a shortcut for an impatient human, never the only way out — the "wait for a tap" version
+        // made every approval a stuck screen (reported 2026-11-11).
         isClickable = true
         setOnClickListener {
             android.util.Log.i("StampOverlay", "dismissed by tap after ${paintCount} paints")
@@ -64,9 +65,6 @@ class StampOverlay(
      */
     private var paintCount = 0
 
-    /** True once the motion has completed: the ink stays put until a human taps. */
-    private var settled = false
-
     /** When [stamp] was called. The clock starts later; this only measures how long we waited. */
     private var requestedAt = 0L
 
@@ -102,27 +100,29 @@ class StampOverlay(
                 onImpact?.invoke()
                 invalidate()
             }
-            inkProgress = ((elapsed - impactAt).toFloat() / 240f).coerceIn(0f, 1f)
-            invalidate()
-            // **The motion ends; the RESULT stays.** Reported 2026-11-11, five times, in escalating
-            // capitals: the stamp was never visible. Two of my own fixes chased the clock and both
-            // were wrong, because a duration cannot fix "it is not there". So the stamp is now
-            // DISMISSED BY THE HUMAN: the animation plays, the ink settles at full, and it waits.
-            //
-            // `settled` is what stops the tick. No timer can make the receipt vanish before it has
-            // been read, which was the part every previous attempt got wrong.
-            if (elapsed >= PaperMotion.STAMP_TOTAL_MS) {
-                if (!settled) {
-                    settled = true
-                    android.util.Log.i(
-                        "StampOverlay",
-                        "settled: $verdict (paints=$paintCount, tickMs=$elapsed) — waiting for a tap",
-                    )
-                }
-                // One last invalidate already happened above; no scheduling, no expiry.
-                return
+            // **The bleed is TRANSIENT.** It draws the mark plus two offset copies, which reads as
+            // ink soaking into paper for a quarter second and as a permanent ghost if it is held.
+            // Holding at 1.0 made it permanent and was reported as *"a weird shadow duplicate
+            // effect"* (2026-11-11). It now peaks at the contact frame and decays to nothing.
+            val bleedElapsed = elapsed - impactAt
+            inkProgress = if (!impactSent || bleedElapsed <= 0L) {
+                0f
+            } else {
+                1f - (bleedElapsed.toFloat() / PaperMotion.STAMP_BLEED_MS).coerceIn(0f, 1f)
             }
-            postOnAnimation(this)
+            invalidate()
+            // **The stamp leaves on its own.** A permanent stamp was the previous overcorrection:
+            // it fixed invisibility by making every approval a stuck screen (same report). The
+            // receipt needs to be readable, not to require a tap.
+            if (elapsed >= PaperMotion.STAMP_TOTAL_MS + PaperMotion.STAMP_HOLD_MS) {
+                android.util.Log.i(
+                    "StampOverlay",
+                    "finished: $verdict (paints=$paintCount, ${elapsed}ms)",
+                )
+                finishOnce()
+            } else {
+                postOnAnimation(this)
+            }
         }
     }
 
@@ -145,7 +145,6 @@ class StampOverlay(
         finished = false
         inkProgress = 0f
         paintCount = 0
-        settled = false
         removeCallbacks(tick)
         // Start the arming loop NOW, so it can notice focus returning. Waiting for a draw would
         // never start anything while another window is on top and this one is not drawn.
@@ -221,13 +220,11 @@ class StampOverlay(
             elapsed < 210L -> 0.985f
             else -> 1f
         }
+        val total = PaperMotion.STAMP_TOTAL_MS + PaperMotion.STAMP_HOLD_MS
         val alpha = when {
-            // Fade IN over the first frames, then stay at full ink FOREVER.
-            //
-            // The old form faded OUT after the motion, which is the opposite of a receipt. Now
-            // that the stamp waits for a tap, any fade would make "waiting" mean "invisible",
-            // and the report would be identical to the one this whole change exists to fix.
+            // In over the first frames, full ink while it is being read, out at the very end.
             elapsed < 50L -> elapsed / 50f
+            elapsed > total - 200L -> ((total - elapsed).toFloat() / 200f).coerceIn(0f, 1f)
             else -> 1f
         }
         canvas.save()

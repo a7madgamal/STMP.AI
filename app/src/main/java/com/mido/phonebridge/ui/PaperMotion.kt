@@ -16,6 +16,25 @@ object PaperMotion {
     const val STAMP_TOTAL_MS = 650L
 
     /**
+     * How long the ink bleed spreads after the stamp lands.
+     *
+     * **Transient, not permanent.** The bleed draws the artwork three times (the mark plus two
+     * offset copies), which reads as ink absorbing into paper for a quarter second and as a
+     * doubled shadow if it is ever held. It sat at full strength for as long as the stamp
+     * remained on screen and was reported as *"a weird shadow duplicate effect"* (2026-11-11).
+     */
+    const val STAMP_BLEED_MS = 240L
+
+    /**
+     * How long the finished stamp stays readable before it leaves.
+     *
+     * Long enough to register after a fingerprint dialog, short enough that the modal does not
+     * need a tap to get out of the way. The earlier "wait for a tap" was an overcorrection made
+     * while the stamp was invisible: it turned every approval into a stuck screen.
+     */
+    const val STAMP_HOLD_MS = 900L
+
+    /**
      * How long the stamp may wait for the window to be visible before playing anyway.
      *
      * A biometric prompt is its own window and is still dismissing when the approve callback
