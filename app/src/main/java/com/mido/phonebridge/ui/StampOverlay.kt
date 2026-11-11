@@ -25,6 +25,16 @@ class StampOverlay(
     var onFinished: (() -> Unit)? = null
     var onImpact: (() -> Unit)? = null
 
+    init {
+        // A stamp that waits for a human must also yield to one. Tapping anywhere dismisses it,
+        // so the receipt can never become a surface the human is stuck behind.
+        isClickable = true
+        setOnClickListener {
+            android.util.Log.i("StampOverlay", "dismissed by tap after ${paintCount} paints")
+            finishOnce()
+        }
+    }
+
     private var bitmap: android.graphics.Bitmap? = null
     private var verdict = Verdict.APPROVED
     private var startedAt = 0L
@@ -47,8 +57,15 @@ class StampOverlay(
     private val matrix = android.graphics.Matrix()
     private var inkProgress = 0f
 
-    /** Frames actually drawn while armed. Proves the animation ran, rather than asserting it. */
-    private var drawnFrames = 0
+    /**
+     * Actual `onDraw` calls. **The old counter incremented in the tick**, so it measured the
+     * timer and not the paint — and it said "105 frames" for a stamp nobody could see. A number
+     * that cannot answer the question it is quoted for is worse than no number.
+     */
+    private var paintCount = 0
+
+    /** True once the motion has completed: the ink stays put until a human taps. */
+    private var settled = false
 
     /** When [stamp] was called. The clock starts later; this only measures how long we waited. */
     private var requestedAt = 0L
@@ -87,25 +104,25 @@ class StampOverlay(
             }
             inkProgress = ((elapsed - impactAt).toFloat() / 240f).coerceIn(0f, 1f)
             invalidate()
-            drawnFrames++
-            // **HOLD, do not vanish.** Reported four times on 2026-11-11 ("still no fucking
-            // approval animation"). The logs proved the stamp ran for its full 650ms with window
-            // focus — it was never broken, it was too fast. A fingerprint dialog closes and the
-            // eye needs a beat to re-focus on the page; 650ms of presentation is over before that
-            // happens, so the receipt is real and invisible.
+            // **The motion ends; the RESULT stays.** Reported 2026-11-11, five times, in escalating
+            // capitals: the stamp was never visible. Two of my own fixes chased the clock and both
+            // were wrong, because a duration cannot fix "it is not there". So the stamp is now
+            // DISMISSED BY THE HUMAN: the animation plays, the ink settles at full, and it waits.
             //
-            // So the ink stays fully drawn for STAMP_HOLD_MS after the motion completes, then
-            // fades out. The animation is unchanged; the RESULT is given time to be seen.
-            val holdUntil = PaperMotion.STAMP_TOTAL_MS + PaperMotion.STAMP_HOLD_MS
-            if (elapsed >= holdUntil) {
-                android.util.Log.i(
-                    "StampOverlay",
-                    "finished: $verdict after ${drawnFrames}f/${elapsed}ms",
-                )
-                finishOnce()
-            } else {
-                postOnAnimation(this)
+            // `settled` is what stops the tick. No timer can make the receipt vanish before it has
+            // been read, which was the part every previous attempt got wrong.
+            if (elapsed >= PaperMotion.STAMP_TOTAL_MS) {
+                if (!settled) {
+                    settled = true
+                    android.util.Log.i(
+                        "StampOverlay",
+                        "settled: $verdict (paints=$paintCount, tickMs=$elapsed) — waiting for a tap",
+                    )
+                }
+                // One last invalidate already happened above; no scheduling, no expiry.
+                return
             }
+            postOnAnimation(this)
         }
     }
 
@@ -127,7 +144,8 @@ class StampOverlay(
         impactSent = false
         finished = false
         inkProgress = 0f
-        drawnFrames = 0
+        paintCount = 0
+        settled = false
         removeCallbacks(tick)
         // Start the arming loop NOW, so it can notice focus returning. Waiting for a draw would
         // never start anything while another window is on top and this one is not drawn.
@@ -184,6 +202,13 @@ class StampOverlay(
         if (art.width <= 0 || art.height <= 0 || width <= 0 || height <= 0) return
         // Arm on the first draw that happens while no other window is on top.
         armIfVisible()
+        paintCount++
+        if (paintCount == 1) {
+            android.util.Log.i(
+                "StampOverlay",
+                "first paint: ${width}x${height} art=${art.width}x${art.height}",
+            )
+        }
         // Still covered (the fingerprint window is closing): draw nothing yet, so no part of the
         // animation is spent where it cannot be seen.
         if (startedAt == 0L) return
@@ -197,11 +222,12 @@ class StampOverlay(
             else -> 1f
         }
         val alpha = when {
+            // Fade IN over the first frames, then stay at full ink FOREVER.
+            //
+            // The old form faded OUT after the motion, which is the opposite of a receipt. Now
+            // that the stamp waits for a tap, any fade would make "waiting" mean "invisible",
+            // and the report would be identical to the one this whole change exists to fix.
             elapsed < 50L -> elapsed / 50f
-            // Fade only during the hold's tail, so the mark sits at full ink where it can be read.
-            elapsed > PaperMotion.STAMP_TOTAL_MS ->
-                1f - ((elapsed - PaperMotion.STAMP_TOTAL_MS).toFloat() /
-                    PaperMotion.STAMP_HOLD_MS).coerceIn(0f, 1f)
             else -> 1f
         }
         canvas.save()

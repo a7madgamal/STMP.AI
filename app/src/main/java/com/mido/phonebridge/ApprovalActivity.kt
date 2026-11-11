@@ -1084,16 +1084,14 @@ class ApprovalActivity : FragmentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
-        forcedExit.postDelayed(
-            { if (!isFinishing) finish() },
-            // The arm fallback is part of the budget. The stamp may legitimately wait for the
-            // biometric window to hand focus back, and a backstop sized only for the animation
-            // would call finish() mid-wait — killing the receipt it exists to protect.
-            PaperMotion.STAMP_ARM_FALLBACK_MS +
-                PaperMotion.STAMP_TOTAL_MS +
-                PaperMotion.STAMP_HOLD_MS +
-                (if (!approved) PaperMotion.TEAR_MS else 0L) + 500L,
-        )
+        // **No timed exit any more.**
+        //
+        // The stamp is dismissed by the human, so a wall-clock backstop would recreate exactly
+        // the failure it was protecting against: closing the Activity while the receipt is still
+        // unread. The overlay owns its own exit now via `onFinished`, and it is the ONLY thing
+        // that closes this screen after a decision.
+        //
+        // `forcedExit` is kept for the arming fallback inside the overlay — not for closing here.
     }
 
     private fun showDenialTear(root: android.view.ViewGroup, sheet: View) {
@@ -1441,9 +1439,13 @@ class ApprovalActivity : FragmentActivity() {
         // Back == deny. Never leave a request dangling open by accident.
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         finishWith(id, approved = false)
-        // super AFTER the decision, not instead of it. Lint requires the call; the ordering
-        // matters because `finishWith` is what settles the gate — letting the platform tear
-        // the Activity down first would leave the request pending until its own timeout.
+        // **Do NOT tear the Activity down while the stamp is playing.**
+        //
+        // `finishWith` starts the stamp, and `super.onBackPressed()` finishes the Activity — so
+        // pressing back used to show the receipt and destroy the window in the same frame. The
+        // stamp now owns the exit (it waits for a tap), so back must resolve the request and then
+        // leave the screen alone.
+        if (stamping) return
         @Suppress("DEPRECATION")
         super.onBackPressed()
     }

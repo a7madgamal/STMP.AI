@@ -16,15 +16,6 @@ object PaperMotion {
     const val STAMP_TOTAL_MS = 650L
 
     /**
-     * How long the finished stamp stays on screen at full ink before it fades.
-     *
-     * The motion is 650ms, which is shorter than the beat a human needs to look back at the
-     * page after dismissing a fingerprint dialog. The stamp therefore HOLDS its result: the
-     * animation is unchanged, the outcome is simply given time to be read (2026-11-11).
-     */
-    const val STAMP_HOLD_MS = 1_100L
-
-    /**
      * How long the stamp may wait for the window to be visible before playing anyway.
      *
      * A biometric prompt is its own window and is still dismissing when the approve callback
