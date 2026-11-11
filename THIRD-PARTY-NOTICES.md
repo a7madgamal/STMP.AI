@@ -23,6 +23,7 @@ that is not true.
 | `androidx.credentials:credentials` | Apache-2.0 | Copyright The Android Open Source Project |
 | `androidx.credentials:credentials-play-services-auth` | Apache-2.0 | Copyright The Android Open Source Project |
 | `com.google.android.material:material` | Apache-2.0 | Copyright The Android Open Source Project |
+| `androidx.dynamicanimation:dynamicanimation` | Apache-2.0 | Copyright The Android Open Source Project |
 | `com.google.ai.edge.litertlm:litertlm-android` | Apache-2.0 | Copyright Google LLC |
 | `org.jetbrains.kotlinx:kotlinx-coroutines-android` | Apache-2.0 | Copyright JetBrains s.r.o. and contributors |
 | `org.jetbrains.kotlinx:kotlinx-coroutines-core` | Apache-2.0 | Copyright JetBrains s.r.o. and contributors |
@@ -87,6 +88,10 @@ STMP's own.
 (http://www.vissol.co.uk/mavenpro/), with Reserved Font Name "Handlee".
 Licensed under the SIL Open Font License, Version 1.1. The full text is in
 `OFL-Handlee.txt`.
+
+**Geist** and **Geist Mono** (v1.9.2) — Copyright 2026 The Geist Project Authors
+(https://github.com/vercel/geist-font). Licensed under the SIL Open Font License, Version 1.1.
+The full text is in `OFL-Geist.txt`. Bundled as static TTF files in `app/src/main/res/font/`.
 
 ## Audio
 

@@ -1,6 +1,7 @@
 package com.mido.phonebridge.ui
 
 import android.content.Context
+import com.mido.phonebridge.ui.tokens.Colors
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
@@ -64,27 +65,12 @@ class RuggedToggle(context: Context) : View(context) {
      * So the outline is built the same way here, and a switch and a button now differ only in
      * shape and behaviour rather than in material.
      */
-    private fun surfaceDrawable(fillColor: Int, radiusDp: Int): Drawable {
-        val radius = Theme.dpF(context, radiusDp.toFloat())
-        val bg = android.graphics.drawable.GradientDrawable().apply {
+    private fun surfaceDrawable(fillColor: Int, radiusDp: Int): Drawable =
+        android.graphics.drawable.GradientDrawable().apply {
             setColor(fillColor)
-            cornerRadius = radius
+            cornerRadius = Theme.dpF(context, radiusDp.toFloat())
+            setStroke(Theme.dp(context, 1), Theme.current().outline)
         }
-        // Tint-equivalent background, then grain, then the wobbling edge — the same three layers,
-        // in the same order, as `Theme.button`'s foreground.
-        return android.graphics.drawable.LayerDrawable(
-            arrayOf(
-                bg,
-                GrainOverlay(radius),
-                SquiggleBorder(
-                    color = Theme.ON_SURFACE and 0x00FFFFFF or (0x55 shl 24),
-                    strokePx = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP),
-                    radiusPx = radius,
-                    amplitudePx = Theme.dpF(context, Theme.SQUIGGLE_DP),
-                ),
-            )
-        )
-    }
 
     private val track: Drawable = surfaceDrawable(Theme.SURFACE, 3)
 
@@ -214,7 +200,7 @@ class RuggedToggle(context: Context) : View(context) {
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
 
         val color = when {
-            pending -> withAlpha(Theme.WARNING, 0xB0)
+            pending -> Colors.withAlpha(Theme.WARNING, 0xB0)
             checked -> Theme.SUCCESS
             else -> Theme.ON_SURFACE_VARIANT
         }
@@ -237,8 +223,6 @@ class RuggedToggle(context: Context) : View(context) {
         super.performClick()
         return true
     }
-
-    private fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 
     private fun dp(v: Float): Float = Theme.dpF(context, v)
     private fun dp(v: Int): Float = Theme.dpF(context, v.toFloat())

@@ -1,5 +1,6 @@
 package com.mido.phonebridge.screenshots
 
+import com.mido.phonebridge.ui.tokens.Palettes
 import org.robolectric.RuntimeEnvironment
 
 /** One cell of the screenshot matrix: theme x font scale (TESTING 4.1). */
@@ -13,6 +14,7 @@ data class Variant(val night: Boolean, val fontScale: Float) {
      */
     fun apply() {
         RuntimeEnvironment.setQualifiers(if (night) "+night" else "+notnight")
+        Palettes.clearCacheForTest()
         RuntimeEnvironment.setFontScale(fontScale)
         Matrix.current = this
     }

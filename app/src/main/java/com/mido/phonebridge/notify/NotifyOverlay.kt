@@ -1308,19 +1308,19 @@ object NotifyOverlay {
 
     // Muted on purpose: this must never look like an alarm. The ✕ and the draining
     // background carry the interaction; the text carries the fact.
-    private const val BG = 0xF5F5EEDF.toInt()
+    private val BG: Int get() = com.mido.phonebridge.ui.tokens.Colors.withAlpha(com.mido.phonebridge.ui.Theme.SURFACE, 0xF5)
 
     /** ~30% alpha: clearly visible as motion, still quiet as a colour. */
-    private const val ACCENT_FILL = 0x4DB23A2F.toInt()
-    private const val TEXT = 0xFF2B2318.toInt()
-    private const val MUTED = 0xFF7A6B52.toInt()
+    private val ACCENT_FILL: Int get() = com.mido.phonebridge.ui.tokens.Colors.withAlpha(com.mido.phonebridge.ui.Theme.ON_SURFACE, 0x4D)
+    private val TEXT: Int get() = com.mido.phonebridge.ui.Theme.ON_SURFACE
+    private val MUTED: Int get() = com.mido.phonebridge.ui.Theme.ON_SURFACE_VARIANT
 
     // Badge palette. Light fills with near-black text, because the card is dark: a dark
     // badge on a dark card is unreadable, which defeats the point of colour-coding.
-    private const val VERB_READ = 0xFFDCEBD7.toInt()
-    private const val VERB_WRITE = 0xFFF0E4C8.toInt()
-    private const val VERB_DEL = 0xFFF1D9D0.toInt()
-    private const val BADGE_TEXT = 0xFF2B2318.toInt()
+    private val VERB_READ: Int get() = com.mido.phonebridge.ui.Theme.SUCCESS_SURFACE
+    private val VERB_WRITE: Int get() = com.mido.phonebridge.ui.Theme.WARNING_SURFACE
+    private val VERB_DEL: Int get() = com.mido.phonebridge.ui.Theme.current().signalSurface
+    private val BADGE_TEXT: Int get() = com.mido.phonebridge.ui.Theme.ON_SURFACE
 
 
     private const val CARD_WIDTH_DP = 216

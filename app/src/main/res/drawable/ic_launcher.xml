@@ -20,19 +20,19 @@
 
     <!-- Paper background. -->
     <path
-        android:fillColor="#FFF5EEDF"
+        android:fillColor="@color/stmp_launcher_bg"
         android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
 
     <!-- Ink disc: filled circle as four cubic curves, centre (54,54), r=30. -->
     <path
-        android:fillColor="#FFB23A2F"
+        android:fillColor="@color/stmp_launcher_fg"
         android:pathData="M54,24 C70.57,24 84,37.43 84,54 C84,70.57 70.57,84 54,84 C37.43,84 24,70.57 24,54 C24,37.43 37.43,24 54,24 Z" />
 
     <!-- Inner rim: paper-coloured stroke, r≈22, so the disc reads as a stamp face. -->
     <path
-        android:strokeColor="#FFF5EEDF"
+        android:strokeColor="@color/stmp_launcher_bg"
         android:strokeWidth="2.5"
-        android:fillColor="#00000000"
+        android:fillColor="@color/stmp_launcher_1"
         android:pathData="M54,32 C66.15,32 76,41.85 76,54 C76,66.15 66.15,76 54,76 C41.85,76 32,66.15 32,54 C32,41.85 41.85,32 54,32 Z" />
 
     <!-- Letters, drawn as strokes in paper colour.
@@ -40,37 +40,37 @@
 
     <!-- S -->
     <path
-        android:strokeColor="#FFF5EEDF"
+        android:strokeColor="@color/stmp_launcher_bg"
         android:strokeWidth="2.6"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:fillColor="#00000000"
+        android:fillColor="@color/stmp_launcher_1"
         android:pathData="M51.5,41 C49,38.6 43,38.8 43,43 C43,47 51.5,45.5 51.5,50 C51.5,54.2 45,54.4 42.5,52" />
 
     <!-- T -->
     <path
-        android:strokeColor="#FFF5EEDF"
+        android:strokeColor="@color/stmp_launcher_bg"
         android:strokeWidth="2.6"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:fillColor="#00000000"
+        android:fillColor="@color/stmp_launcher_1"
         android:pathData="M56.5,39.5 L66.5,39.5 M61.5,39.5 L61.5,53" />
 
     <!-- M -->
     <path
-        android:strokeColor="#FFF5EEDF"
+        android:strokeColor="@color/stmp_launcher_bg"
         android:strokeWidth="2.6"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:fillColor="#00000000"
+        android:fillColor="@color/stmp_launcher_1"
         android:pathData="M42.5,66.5 L42.5,57.5 L47.2,63 L52,57.5 L52,66.5" />
 
     <!-- P -->
     <path
-        android:strokeColor="#FFF5EEDF"
+        android:strokeColor="@color/stmp_launcher_bg"
         android:strokeWidth="2.6"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:fillColor="#00000000"
+        android:fillColor="@color/stmp_launcher_1"
         android:pathData="M56.5,66.5 L56.5,57.5 L62,57.5 C65,57.5 65,63 62,63 L56.5,63" />
 </vector>

@@ -23,6 +23,13 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.BottomInset
 import com.mido.phonebridge.R
+import com.mido.phonebridge.ui.tokens.Bevel
+import com.mido.phonebridge.ui.tokens.Colors
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.FontFace
+import com.mido.phonebridge.ui.tokens.Fonts
+import com.mido.phonebridge.ui.tokens.Palette
+import com.mido.phonebridge.ui.tokens.Palettes
 
 /**
  * The app's single source of design truth.
@@ -47,53 +54,57 @@ import com.mido.phonebridge.R
  */
 object Theme {
 
-    // --- palette (warm paper + ink: one stamp accent, three semantic states) ---
+    // --- palette: one source (res/values*/colors.xml) read through Palettes ---
     //
-    // STMP rebrand (2026-10-26). The old palette was a cold, near-black dark UI with a
-    // single blue accent. The new identity is "ink on paper": a warm cream paper base,
-    // near-black brown ink for text, and one deep stamp-red accent that is the ONLY
-    // saturated hit of colour on the screen. Success/warning/danger keep their meaning
-    // but are re-tinted as ink analogues (green ink, amber ink, red ink) so the risk
-    // semantics the approval flow depends on survive unchanged.
+    // The legacy role names below are getters over the current palette, so a call site keeps
+    // compiling while its owner WP migrates it to `Theme.palette(ctx)`. They resolve from the
+    // application context, so they work in services and overlay windows too.
 
-    /** Paper background: warm cream, not white, not grey. */
-    const val BG = 0xFFF5EEDF.toInt()
+    @Volatile private var app: android.app.Application? = null
 
-    /** Raised paper: slightly darker kraft, like a card sitting on the desk. */
-    const val SURFACE = 0xFFEDE3CB.toInt()
+    /** Called once by [com.mido.phonebridge.StmpApp]. */
+    fun install(application: android.app.Application) { app = application }
 
-    /** Secondary paper: chips, secondary buttons, inset blocks. */
-    const val SURFACE_VARIANT = 0xFFE3D6B8.toInt()
+    /** The palette for the app's current configuration. Throws if [install] has not run. */
+    fun current(): Palette = Palettes.of(
+        checkNotNull(app) { "Theme.install was not called; StmpApp must be the application class" }
+    )
 
-    /** Ink line: hairline borders, drawn separators. */
-    const val BORDER = 0xFFC9B98F.toInt()
+    /** The palette for [ctx]. New code reads this once per build. */
+    fun palette(ctx: Context): Palette = Palettes.of(ctx)
 
-    /** Primary ink: near-black brown, never pure black. */
+    /** Screen background. */
+    val BG: Int get() = current().body
+
+    /** Modules, neutral keys, dialogs. */
+    val SURFACE: Int get() = current().panel
+
+    /** Chips, secondary buttons, inset blocks. */
+    val SURFACE_VARIANT: Int get() = current().sunken
+
+    /** Hairline borders and separators. */
+    val BORDER: Int get() = current().hairline
+
     /**
-     * Body text on a light surface.
+     * Body text.
      *
-     * **Every `EditText` must set this explicitly.** The platform's default input colour comes
-     * from the launch theme and reads white-ish — invisible on this app's cream background — so
-     * a field left to default hides what the human typed: a sudo password, a secret value, a
-     * host. Set `setTextColor(ON_SURFACE)` and `setHintTextColor(ON_SURFACE_VARIANT)` on every
-     * input, or the value is there and unreadable.
+     * **Every `EditText` must set this explicitly** (`setTextColor(ON_SURFACE)` and
+     * `setHintTextColor(ON_SURFACE_VARIANT)`), so a typed value is never unreadable.
      */
-    const val ON_SURFACE = 0xFF2B2318.toInt()
+    val ON_SURFACE: Int get() = current().ink
 
-    /** Faded ink: secondary text, captions. */
-    const val ON_SURFACE_VARIANT = 0xFF7A6B52.toInt()
+    /** Secondary text, captions. */
+    val ON_SURFACE_VARIANT: Int get() = current().etched
 
-    /** The one stamp accent: deep rubber-stamp red. */
-    const val ACCENT = 0xFFB23A2F.toInt()
+    /** The primary action and brand colour: ink. Never equal to [DANGER]. */
+    val ACCENT: Int get() = current().ink
 
-    // Ink re-tints for the existing semantic states. Deliberately muted so they read as
-    // ink, not as neon over paper.
-    const val SUCCESS = 0xFF2F7D4F.toInt()
-    const val SUCCESS_SURFACE = 0xFFDCEBD7.toInt()
-    const val WARNING = 0xFFB07A1F.toInt()
-    const val WARNING_SURFACE = 0xFFF0E4C8.toInt()
-    const val DANGER = 0xFFB23A2F.toInt()
-    const val DANGER_SURFACE = 0xFFF1D9D0.toInt()
+    val SUCCESS: Int get() = current().okText
+    val SUCCESS_SURFACE: Int get() = current().okSurface
+    val WARNING: Int get() = current().cautionText
+    val WARNING_SURFACE: Int get() = current().cautionSurface
+    val DANGER: Int get() = current().cautionText
+    val DANGER_SURFACE: Int get() = current().cautionSurface
 
     /**
      * How a RISK bucket looks, in one place.
@@ -109,9 +120,9 @@ object Theme {
      * and a risk badge that introduced a fourth green would just be decoration.
      */
     fun riskColor(risk: com.mido.phonebridge.ai.Risk): Int = when (risk) {
-        com.mido.phonebridge.ai.Risk.LOW -> SUCCESS
-        com.mido.phonebridge.ai.Risk.MEDIUM -> WARNING
-        com.mido.phonebridge.ai.Risk.HIGH -> DANGER
+        com.mido.phonebridge.ai.Risk.LOW -> current().okText
+        com.mido.phonebridge.ai.Risk.MEDIUM -> current().cautionText
+        com.mido.phonebridge.ai.Risk.HIGH -> current().cautionText
     }
 
     /**
@@ -128,21 +139,21 @@ object Theme {
      * "safe", so it must not wear the green.
      */
     fun riskSurface(risk: com.mido.phonebridge.ai.Risk?): Int = when (risk) {
-        com.mido.phonebridge.ai.Risk.LOW -> SUCCESS_SURFACE
-        com.mido.phonebridge.ai.Risk.MEDIUM -> WARNING_SURFACE
-        com.mido.phonebridge.ai.Risk.HIGH -> DANGER_SURFACE
-        null -> BG
+        com.mido.phonebridge.ai.Risk.LOW -> current().okSurface
+        com.mido.phonebridge.ai.Risk.MEDIUM -> current().cautionSurface
+        com.mido.phonebridge.ai.Risk.HIGH -> current().cautionSurface
+        null -> current().body
     }
 
     /** Text/icons on a filled coloured control. On paper the only filled controls are the
      *  stamp red and the ink-tinted semantic buttons, so this stays cream-white for legibility. */
-    const val ON_COLOR = 0xFFFBF6EA.toInt()
+    val ON_COLOR: Int get() = current().onInk
 
     // --- metrics ---
 
-    const val RADIUS_CARD = 12
-    const val RADIUS_CONTROL = 10
-    const val RADIUS_CHIP = 8
+    const val RADIUS_CARD = Dimens.RADIUS_MODULE
+    const val RADIUS_CONTROL = Dimens.RADIUS_KEY
+    const val RADIUS_CHIP = Dimens.RADIUS_KNOB_THUMB
 
     /**
      * How far a drawn line wanders from true, in dp.
@@ -159,7 +170,7 @@ object Theme {
      * transparent shadow beneath the view. A gradient inside the view's own bounds can only ever
      * look like a grey rectangle sitting above the paper, which is exactly what it looked like.
      */
-    const val BAR_ELEVATION_DP = 8f
+    const val BAR_ELEVATION_DP = 0f
 
     /** The pen width of a drawn outline, in dp. Hairline but not invisible. */
     const val SQUIGGLE_STROKE_DP = 1.2f
@@ -174,7 +185,7 @@ object Theme {
     const val CARD_STROKE_DP = 1.5f
 
     /** Minimum touch target. Below this a tap is a coin flip. */
-    const val MIN_TARGET_DP = 48
+    const val MIN_TARGET_DP = Dimens.MIN_TARGET
 
     /**
      * The type scale, as sp values.
@@ -205,32 +216,14 @@ object Theme {
     const val TEXT_TITLE_SP = 20f
 
     /** Ripple colour for controls on paper. A translucent ink tint, not the old white ripple. */
-    private const val RIPPLE = 0x332B2318
+    private val RIPPLE: Int get() = current().ripple
 
     fun dp(ctx: Context, v: Int): Int = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics
     ).toInt()
 
-    /**
-     * The STMP handwritten face, loaded once. Cached because `ResourcesCompat.getFont`
-     * re-inflates and multi-font documents would otherwise be re-read on every TextView;
-     * a cache keeps the cost to a single font load per process.
-     *
-     * Never null in practice (the font ships with the APK), but a missing resource must
-     * fail loudly rather than silently fall back to a system face that would quietly undo
-     * the whole handwritten look. See [handFont].
-     */
-    @Volatile private var handleeCache: Typeface? = null
-
-    /** The display face for headings and labels. [Handlee] under the SIL OFL 1.1. */
-    fun handFont(ctx: Context): Typeface = handleeCache ?: synchronized(this) {
-        handleeCache ?: run {
-            val f = androidx.core.content.res.ResourcesCompat.getFont(ctx, R.font.handlee)
-                ?: error("STMP font missing: R.font.handlee not found in APK")
-            handleeCache = f
-            f
-        }
-    }
+    /** The default text face (Geist Regular). Kept as a forwarder until the legacy callers migrate. */
+    fun handFont(ctx: Context): Typeface = Fonts.get(ctx, FontFace.SANS_400)
 
     private fun radiusPx(ctx: Context, radiusDp: Int): Float = dp(ctx, radiusDp).toFloat()
 
@@ -399,8 +392,6 @@ object Theme {
             column.contentDescription =
                 if (selected) "${tab.label}, selected" else tab.label
             label.setTextColor(if (selected) accent else variant)
-            // Synthesised bold: Handlee ships one weight, so Android thickens the glyphs itself.
-            // It reads as weight rather than as a different face, which is what is wanted here.
             label.setTypeface(if (selected) bold else normal)
 
             val target = if (selected) 1f else 0f
@@ -462,11 +453,11 @@ object Theme {
         column.addView(label)
 
         val rule = View(ctx)
-        val ruleHeight = dp(ctx, 6)
+        val ruleHeight = dp(ctx, 2)
         // Measured with the same face and at the SMALLEST size the label may take, so the rule
         // cannot come out wider than the word it underlines.
         val measure = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = handFont(ctx)
+            typeface = Fonts.get(ctx, FontFace.SANS_400)
             textSize = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_SP, TEXT_FLOOR_SP, ctx.resources.displayMetrics
             )
@@ -478,13 +469,10 @@ object Theme {
             LinearLayout.LayoutParams(ruleWidth.coerceAtLeast(dp(ctx, 16)), ruleHeight)
                 .apply { topMargin = dp(ctx, 2) },
         )
-        rule.background = SquiggleRule(
-            color = ACCENT,
-            strokePx = dpF(ctx, 2.6f),
-            amplitudePx = dpF(ctx, SQUIGGLE_DP),
-            spanFraction = 1.0f,
-            atBottom = true,
-        )
+        rule.background = GradientDrawable().apply {
+            setColor(ACCENT)
+            cornerRadius = dpF(ctx, 1f)
+        }
 
         val parts = TabView(
             tab = tab,
@@ -493,10 +481,8 @@ object Theme {
             rule = rule,
             accent = ACCENT,
             variant = ON_SURFACE_VARIANT,
-            // Synthesised bold, since Handlee ships one weight. It thickens the glyphs rather
-            // than swapping a face, which is exactly the effect wanted here.
-            bold = android.graphics.Typeface.create(handFont(ctx), android.graphics.Typeface.BOLD),
-            normal = handFont(ctx),
+            bold = Fonts.get(ctx, FontFace.SANS_600),
+            normal = Fonts.get(ctx, FontFace.SANS_400),
         )
         parts.onSelectClicked = { onSelect(tab) }
         // First paint: no animation, because nothing moved.
@@ -516,70 +502,36 @@ object Theme {
      * while the code claimed paper. `GrainCoverageTest` scans the source and fails the build on
      * any raw background assignment outside this file, so this is enforced, not remembered.
      */
-    fun sheet(color: Int, radiusPx: Float = 0f, squigglePx: Float = 0f): android.graphics.drawable.Drawable {
-        val base = GradientDrawable().apply {
+    fun sheet(color: Int, radiusPx: Float = 0f, squigglePx: Float = 0f): android.graphics.drawable.Drawable =
+        GradientDrawable().apply {
             setColor(color)
             if (radiusPx > 0f) cornerRadius = radiusPx
         }
-        val layers = mutableListOf<android.graphics.drawable.Drawable>(base, GrainOverlay(radiusPx))
-        // A drawn edge only makes sense on a bounded surface. A full-bleed sheet has no outline
-        // to wobble, so it stays fill + grain.
-        if (radiusPx > 0f && squigglePx > 0f) {
-            layers += SquiggleBorder(
-                color = BORDER,
-                strokePx = squigglePx * (SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
-                radiusPx = radiusPx,
-                amplitudePx = squigglePx,
-            )
-        }
-        return LayerDrawable(layers.toTypedArray())
-    }
 
-    /** Convenience: [sheet] sized in dp, with the standard hand-drawn edge. */
+    /** Convenience: [sheet] sized in dp. */
     fun sheetDp(ctx: Context, color: Int, radiusDp: Int = 0): android.graphics.drawable.Drawable =
-        if (radiusDp > 0) {
-            sheet(color, radiusPx(ctx, radiusDp), dpF(ctx, SQUIGGLE_DP))
-        } else {
-            sheet(color)
-        }
+        if (radiusDp > 0) sheet(color, radiusPx(ctx, radiusDp)) else sheet(color)
 
-    /** dp as a Float — the drawn-edge constructors work in pixels. */
+    /** dp as a Float. */
     fun dpF(ctx: Context, v: Float): Float = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v, ctx.resources.displayMetrics
     )
 
-    /** A filled, rounded surface (card / block / badge), with paper grain and a drawn edge. */
+    /** A bevelled module surface (card / block / badge). */
     fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable =
-        sheet(color, radiusPx(ctx, radiusDp), dpF(ctx, SQUIGGLE_DP))
+        Bevel.module(ctx, fill = color, r = radiusDp)
 
-    /** A filled surface with a hairline border — the standard card look, grain and drawn edge. */
+    /** A filled surface with a hairline border. */
     fun outlined(
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
         strokeColor: Int = BORDER,
         strokeDp: Int = 1
-    ): android.graphics.drawable.Drawable {
-        val r = radiusPx(ctx, radiusDp)
-        val base = GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = r
-            // No `setStroke` here: the drawn SquiggleBorder IS the border. Two strokes would
-            // disagree about where the edge is, and the straight one would show through the
-            // wobble at every peak.
-        }
-        return LayerDrawable(
-            arrayOf(
-                base,
-                GrainOverlay(r),
-                SquiggleBorder(
-                    color = strokeColor,
-                    strokePx = dpF(ctx, strokeDp.toFloat() * SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
-                    radiusPx = r,
-                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
-                )
-            )
-        )
+    ): android.graphics.drawable.Drawable = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = radiusPx(ctx, radiusDp)
+        setStroke(dp(ctx, strokeDp), strokeColor)
     }
 
     /** A filled surface that ripples when tapped (for tappable rows). */
@@ -587,7 +539,10 @@ object Theme {
         RippleDrawable(
             ColorStateList.valueOf(RIPPLE),
             surface(ctx, color, radiusDp),
-            null
+            GradientDrawable().apply {
+                setColor(current().ink)
+                cornerRadius = radiusPx(ctx, radiusDp)
+            },
         )
 
     /**
@@ -718,10 +673,13 @@ object Theme {
         ctx: Context,
         fill: Int = BG,
         tearDp: Int = 5,
-    ): android.graphics.drawable.Drawable = TornTopBar(
-        fill = fill,
-        tearPx = dp(ctx, tearDp).toFloat(),
-    )
+    ): android.graphics.drawable.Drawable {
+        val line = GradientDrawable().apply { setColor(current().hairline) }
+        return LayerDrawable(arrayOf(sheet(fill), line)).apply {
+            setLayerGravity(1, Gravity.TOP)
+            setLayerHeight(1, dp(ctx, 1))
+        }
+    }
 
     /**
      * Paper with a torn top edge, and an outline that lets the platform draw the shadow.
@@ -804,38 +762,13 @@ object Theme {
         override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
-    /** A card with a genuinely torn bottom edge. See [TornPaper]. */
+    /** Formerly a torn card; now a flat bevelled module. [tearDp] is ignored. */
     fun tornCard(
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
         tearDp: Int = 6,
-    ): android.graphics.drawable.Drawable {
-        // The ONE card stroke, in dp. Every tornCard in the app uses it: 6dp of tear on a card or
-        // 2dp on a 31dp switch, the LINE is the same weight, so the set reads as one hand rather
-        // than as one bold card and one faint control.
-        val r = radiusPx(ctx, radiusDp)
-        // **ONE OUTLINE, NOT TWO.** Mido, 2026-11-03: *"why is the paper effect now seems done
-        // twice in this list?"*
-        //
-        // `TornPaper` already paints a hairline along its own torn path — the exact silhouette the
-        // fill was cut to. Stacking a `SquiggleBorder` on top drew a SECOND outline along a
-        // DIFFERENT curve: a rounded rectangle with a wobble, which does not follow the tear.
-        // Two edges that agree nowhere read as a double-printed card, not as craft.
-        //
-        // The tear wins because it is the shape: the hairline follows the fill's own cut, so the
-        // paper reads as having thickness. A wobble that ignores the tear is decoration on top of
-        // an existing edge.
-        return TornPaper(
-            fill = color,
-            edge = withAlpha(ON_SURFACE, 0x2E),
-            cornerPx = r,
-            tearPx = dp(ctx, tearDp).toFloat(),
-            // The card's own 6dp tear used to imply this; declared so a smaller tear cannot
-            // silently thin it.
-            strokePx = dpF(ctx, CARD_STROKE_DP),
-        )
-    }
+    ): android.graphics.drawable.Drawable = Bevel.module(ctx, fill = color, r = radiusDp)
 
     // --- text ---
 
@@ -850,7 +783,7 @@ object Theme {
         // underneath instead of out-ranking them.
         textSize = 16f
         letterSpacing = 0.12f
-        typeface = handFont(ctx)
+        typeface = Fonts.get(ctx, FontFace.SANS_600)
         setTextColor(ACCENT)
         // Bottom padding is the room the RULE lives in. Without it the wave has nowhere to go
         // inside the view and gets clipped into a straight line.
@@ -863,19 +796,6 @@ object Theme {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(ctx, 6) }
-        // A drawn rule, not a printed one.
-        //
-        // `atBottom` and a 1.0 span, both deliberate: the rule used to be drawn through the
-        // vertical CENTRE of the view, which struck a line through the text, and it covered only
-        // 60% of the width, which ended mid-word. Now it sits under the text and runs the full
-        // width of the header.
-        background = SquiggleRule(
-            color = ACCENT,
-            strokePx = dpF(ctx, 2f),
-            amplitudePx = dpF(ctx, SQUIGGLE_DP),
-            spanFraction = 1.0f,
-            atBottom = true,
-        )
     }
 
     /** A plain line of text. [mono] keeps the monospace face for log/code strings; the
@@ -883,14 +803,14 @@ object Theme {
     fun text(
         ctx: Context,
         text: String,
-        size: Float = 15f,
+        size: Float = TEXT_BODY_SP,
         color: Int = ON_SURFACE,
         mono: Boolean = false
     ): TextView = TextView(ctx).apply {
         this.text = text
         textSize = size
         setTextColor(color)
-        typeface = if (mono) android.graphics.Typeface.MONOSPACE else handFont(ctx)
+        typeface = Fonts.get(ctx, if (mono) FontFace.MONO_400 else FontFace.SANS_400)
         setLineSpacing(0f, 1.15f)
     }
 
@@ -901,10 +821,10 @@ object Theme {
 
     private fun styleColors(style: ButtonStyle): Pair<Int, Int> = when (style) {
         ButtonStyle.PRIMARY -> ACCENT to ON_COLOR
-        ButtonStyle.NEUTRAL -> SURFACE_VARIANT to ON_SURFACE
-        ButtonStyle.SUCCESS -> SUCCESS to ON_COLOR
-        ButtonStyle.DANGER -> DANGER to ON_COLOR
-        ButtonStyle.GHOST -> Color.TRANSPARENT to ACCENT
+        ButtonStyle.NEUTRAL -> SURFACE to ON_SURFACE
+        ButtonStyle.SUCCESS -> ACCENT to ON_COLOR
+        ButtonStyle.DANGER -> Color.TRANSPARENT to ON_SURFACE
+        ButtonStyle.GHOST -> Color.TRANSPARENT to ON_SURFACE
     }
 
     /**
@@ -926,7 +846,7 @@ object Theme {
             text = label
             textSize = if (small) 12f else 14f
             isAllCaps = false
-            typeface = handFont(ctx)
+            typeface = Fonts.get(ctx, FontFace.SANS_500)
             minHeight = h
             minimumHeight = h
             setTextColor(fg)
@@ -936,33 +856,11 @@ object Theme {
             insetTop = 0
             insetBottom = 0
             setPadding(dp(ctx, if (small) 12 else 20), 0, dp(ctx, if (small) 12 else 20), 0)
-            if (style == ButtonStyle.GHOST) {
+            if (style == ButtonStyle.GHOST || style == ButtonStyle.DANGER) {
                 strokeWidth = dp(ctx, 1)
-                strokeColor = ColorStateList.valueOf(ACCENT)
+                strokeColor = ColorStateList.valueOf(ON_SURFACE)
             }
-            // **GRAIN AND THE DRAWN EDGE GO IN FOREGROUND, not background.**
-            //
-            // `backgroundTintList` is what preserves the ripple, the pressed/disabled state and
-            // the corner radius — replacing the background with a drawable drops all three, which
-            // is the exact regression this file's header exists to prevent. But a tint paints
-            // over the entire button, so grain in the background could never show through: that
-            // is why buttons were the last flat elements on screen (Mido, 2026-10-27: *"EVERY
-            // FUCKING ELEMENT MUST HAVE IT"*).
-            //
-            // A LayerDrawable in the foreground draws grain first, then the wobbly border, over
-            // the tinted background. The ripple still fires underneath because the foreground
-            // layers are not clickable and do not consume touch.
-            foreground = LayerDrawable(
-                arrayOf(
-                    GrainOverlay(radiusPx(ctx, RADIUS_CONTROL)),
-                    SquiggleBorder(
-                        color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
-                        strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
-                        radiusPx = radiusPx(ctx, RADIUS_CONTROL),
-                        amplitudePx = dpF(ctx, SQUIGGLE_DP),
-                    )
-                )
-            )
+            foreground = null
             setOnClickListener { onClick() }
         }
     }
@@ -1046,7 +944,7 @@ object Theme {
                     // SURFACE_VARIANT when unselected and SURFACE when selected, and this
                     // branch only runs when unselected. So one constant is correct at both.
                     setColor(SURFACE_VARIANT)
-                    setStroke(ring, BORDER)
+                    setStroke(ring, current().outline)
                 }
             }
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
@@ -1151,12 +1049,12 @@ object Theme {
         // On completion the caller swaps back to [button] and the ripple returns with it.
         // Grain ON TOP of the two-tone track/fill: the progress button is the one control that
         // sets its own background, so this is the only place the texture can go.
-        val layered = LayerDrawable(arrayOf(track, fill, GrainOverlay(radius)))
+        val layered = LayerDrawable(arrayOf(track, fill))
         return MaterialButton(ctx).apply {
             text = label
             textSize = 14f
             isAllCaps = false
-            typeface = handFont(ctx)
+            typeface = Fonts.get(ctx, FontFace.SANS_500)
             minHeight = h
             minimumHeight = h
             setTextColor(fg)
@@ -1172,8 +1070,7 @@ object Theme {
     }
 
     /** [color] with its alpha replaced. For tinting a token without a second literal. */
-    private fun withAlpha(color: Int, alpha: Int): Int =
-        (color and 0x00FFFFFF) or (alpha shl 24)
+    private fun withAlpha(color: Int, alpha: Int): Int = Colors.withAlpha(color, alpha)
 
     /** A status row: coloured dot + label + value, optionally tappable. */
     fun statusRow(
@@ -1241,7 +1138,7 @@ object Theme {
      * same amount — the alternative is a different number per screen, which is how a UI
      * drifts into looking assembled rather than designed.
      */
-    const val ROW_GAP_DP = 8
+    const val ROW_GAP_DP = Dimens.SPACE_S
 
     /** Vertical space. */
     fun spacer(ctx: Context, dp: Int): View = View(ctx).apply {

@@ -2,6 +2,8 @@ package com.mido.phonebridge.ui
 
 import android.app.Dialog
 import android.content.Context
+import com.mido.phonebridge.ui.tokens.FontFace
+import com.mido.phonebridge.ui.tokens.Fonts
 import android.graphics.Color
 import android.view.Gravity
 import android.view.View
@@ -59,7 +61,7 @@ object PaperDialog {
         }
 
         sheet.addView(Theme.text(ctx, title, 18f, Theme.ON_SURFACE).apply {
-            typeface = Theme.handFont(ctx)
+            typeface = Fonts.get(ctx, FontFace.SANS_600)
         })
 
         // ScrollView with weight-less WRAP_CONTENT: the dialog measures to content, and only
@@ -128,7 +130,7 @@ object PaperDialog {
     /** A small heading inside a dialog body. */
     fun heading(ctx: Context, text: String): TextView =
         Theme.text(ctx, text, 13f, Theme.ACCENT).apply {
-            typeface = Theme.handFont(ctx)
+            typeface = Fonts.get(ctx, FontFace.SANS_600)
             setPadding(0, Theme.dp(ctx, 14), 0, Theme.dp(ctx, 2))
         }
 }

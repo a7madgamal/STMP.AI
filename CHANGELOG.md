@@ -5392,9 +5392,14 @@ devDependencies. `node_modules/` is gitignored.
 - The gate now builds no exception offer for a request that needs a password, and the modal drops one if it arrives anyway.
 - The gate refuses any approval of a password request that does not carry the password, whichever button sent it. DENY still works.
 
-## 0.48.19 (build 295) — 2026-11-11 — CURRENT
+## 0.48.19 (build 295) — 2026-11-11
 - Every screen and state is captured as a reference screenshot in light and dark at normal and large text, and CI fails when one changes unintentionally.
 - Unit tests run with a fixed English locale, so number formatting no longer depends on the machine.
+
+## 0.49.0 (build 296) — 2026-11-11 — CURRENT
+- Dark mode follows the system on every screen, dialog, the approval modal and the floating notify card, all drawn from one palette.
+- Text is set in Geist and Geist Mono, bundled with the app; the handwritten face, paper grain and torn edges are gone.
+- The primary colour is ink; the old stamp red is removed, and error states use amber instead of red.
 
 ## Keeping this file honest
 

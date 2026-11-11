@@ -74,8 +74,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 295
-        versionName = "0.48.19"
+        versionCode = 296
+        versionName = "0.49.0"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -245,6 +245,7 @@ dependencies {
     // the components and the theme machinery are exactly what we do not want to
     // hand-roll (a custom GradientDrawable background is what killed the ripple).
     implementation("com.google.android.material:material:1.12.0")
+implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
     // On-device LLM inference for the request summariser (LiteRT-LM — Google's
     // supported successor to the deprecated MediaPipe tasks-genai API). The model
     // FILE is not bundled — it is a separate ~475MB asset (see ai/ModelRegistry.kt).
