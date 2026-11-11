@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.49.0 (build 293)**.
+Current build: **v0.49.1 (build 294)**.
 
 ---
 
@@ -5383,13 +5383,17 @@ devDependencies. `node_modules/` is gitignored.
 - The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
 - No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
 
-## 0.49.0 (build 293) — 2026-11-11 — CURRENT
+## 0.49.0 (build 293) — 2026-11-11
 - The Refined Paper foundation bundles Atkinson Hyperlegible Next for readable UI text and JetBrains Mono NL for exact payloads, while Handlee remains the display and stamp face.
 - Semantic text and control colours meet the agreed contrast floor; the stamp accent and destructive danger are now distinct.
 - Paper switches expose their role, checked state, pending state and keyboard activation to accessibility services without moving before a real state change.
 - Home now separates live health and specific remedies from pending requests and recent decisions; Activity keeps queue snapshots and recorded request details read-only.
 - Home, Activity and Preferences replace the artificial Plugins/Settings split. Plugin-owned settings and the verified update/install flow keep one implementation in the consolidated Preferences screen.
 - Approval facts come before optional model context, long payloads have visible overflow guidance, and the paper entrance, stamp impact and denial tear have reduced-motion and forced-exit paths.
+
+## 0.49.1 (build 294) — 2026-11-11 — CURRENT
+- Preference taps no longer freeze: rebuilding the screen now waits until the tap finishes instead of tearing down the view mid-click, and bursts of updates coalesce into one rebuild.
+- The Activity filter chips now carry real gaps and margins instead of rendering as one touching bar; the same spacing reaches the older log screen.
 
 ## Keeping this file honest
 

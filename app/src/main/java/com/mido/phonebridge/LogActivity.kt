@@ -62,12 +62,17 @@ class LogActivity : Activity() {
         // The label names what the tap DOES, so it flips with the state.
         // A fixed label lies half the time: it reads "hide noise" even while
         // noise is already visible.
+        fun addChip(view: android.view.View) {
+            chips.addView(view, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = Theme.dp(this@LogActivity, Theme.ROW_GAP_DP) })
+        }
         noiseChip = chip("") { hideNoise = !hideNoise; render() }
-        chips.addView(noiseChip)
-        chips.addView(chip("all") { pluginFilter = null; outcomeFilter = null; render() })
-        chips.addView(chip("denied") { outcomeFilter = AuditOutcome.DENIED; render() })
-        chips.addView(chip("timeout") { outcomeFilter = AuditOutcome.TIMEOUT; render() })
-        chips.addView(chip("failed") { outcomeFilter = AuditOutcome.HANDLER_FAILED; render() })
+        addChip(noiseChip)
+        addChip(chip("all") { pluginFilter = null; outcomeFilter = null; render() })
+        addChip(chip("denied") { outcomeFilter = AuditOutcome.DENIED; render() })
+        addChip(chip("timeout") { outcomeFilter = AuditOutcome.TIMEOUT; render() })
+        addChip(chip("failed") { outcomeFilter = AuditOutcome.HANDLER_FAILED; render() })
         root.addView(HorizontalScrollView(this).apply { addView(chips) })
 
         val scroll = ScrollView(this)

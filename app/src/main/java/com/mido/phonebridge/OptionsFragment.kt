@@ -44,6 +44,28 @@ class OptionsFragment : BridgeFragment() {
     /** Android Settings only changes these on a trip away from the tab. */
     private var accessSignature = ""
 
+    /** A coalescing flag so a burst of repaint requests becomes one rebuild. */
+    private var renderQueued = false
+
+    /**
+     * Rebuild on the NEXT loop, never inside the tap that asked for it.
+     *
+     * `save()` used to end in a synchronous `render()`, which rebuilt the whole screen — a fresh
+     * `PluginInventoryView` plus every plugin's `status()` read — while the toggle's click was
+     * still being dispatched. The press never completed: that is the "hangs on preference click"
+     * report (2026-11-11), and the same tap-eating defect `UpdatesSection.refresh()` documents
+     * for the update card. Posting lets touch dispatch finish; the flag coalesces bursts (model
+     * download progress fires one callback per chunk).
+     */
+    private fun renderPosted() {
+        if (renderQueued) return
+        renderQueued = true
+        container.post {
+            renderQueued = false
+            if (isAdded) render()
+        }
+    }
+
     // This screen IS the Settings tab. It inherits the bar and the insets from BridgeScreen,
     // which also carries the `ApprovalGate.relaunchCurrent` call that MainActivity used to own —
     // sitting here while a request was pending used to strand the modal off-screen.
@@ -207,7 +229,7 @@ class OptionsFragment : BridgeFragment() {
         pluginInventory.add("System", Theme.statusRow(ctx, "Secret vault",
             if (SecretVault.isUnlocked()) "unlocked (this session)" else "locked — tap to unlock",
             if (SecretVault.isUnlocked()) Theme.SUCCESS else Theme.WARNING,
-            onClick = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
+            onClick = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { renderPosted() } }
         ))
         // Request history belongs to Activity. SSH stays in its plugin's existing add flow.
         pluginInventory.add("Developer", toolRow("Diagnostics") {
@@ -313,7 +335,7 @@ class OptionsFragment : BridgeFragment() {
                     } catch (e: Exception) {
                         toast("could not forget: ${e.message}")
                     }
-                    render()
+                    renderPosted()
                 }
             )
             block.addView(row)
@@ -743,8 +765,9 @@ class OptionsFragment : BridgeFragment() {
             toast("saved, but the audit log could not record it: ${e.message}")
         }
         // Re-render from the stored value rather than from what we just sent: if the write
-        // silently failed, the screen must show the truth, not the intent.
-        render()
+        // silently failed, the screen must show the truth, not the intent. POSTED — see
+        // [renderPosted]: a synchronous rebuild here froze the tap that asked for it.
+        renderPosted()
     }
 
     private fun confirmRedownload() {
@@ -760,17 +783,17 @@ class OptionsFragment : BridgeFragment() {
 
     private fun startModelDownload(force: Boolean = false) {
         Debug.log("model download requested (force=$force)")
-        render()
+        renderPosted()
         Thread({
             val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
                 requireContext(),
                 force = force,
-                onProgress = { ui { render() } },
+                onProgress = { ui { renderPosted() } },
             )
             ui {
                 Debug.log("model provision: ${result.detail}")
                 toast(result.detail)
-                render()
+                renderPosted()
             }
         }, "model-download").apply { isDaemon = true }.start()
     }

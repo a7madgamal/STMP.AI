@@ -48,17 +48,33 @@ class ActivityFragment : BridgeFragment() {
         pendingHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(pendingHost)
         summaryLine = Theme.text(ctx, "", Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT)
-        container.addView(summaryLine)
+        container.addView(summaryLine, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, Theme.ROW_GAP_DP) })
         val chips = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        // Every chip carries its own gap. They used to be added bare, so the whole strip rendered
+        // as one long touching bar (Mido, 2026-11-11: "the filter buttons in the middle screen
+        // are touching everything"). A trailing margin on the last chip is harmless inside the
+        // scroll strip — it becomes end padding.
+        fun addChip(view: android.view.View) {
+            chips.addView(view, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = Theme.dp(ctx, Theme.ROW_GAP_DP) })
+        }
         noiseChip = chip("") { hideNoise = !hideNoise; renderHistory() }
-        chips.addView(noiseChip)
-        chips.addView(chip("all") { pluginFilter = null; outcomeFilter = null; renderHistory() })
+        addChip(noiseChip)
+        addChip(chip("all") { pluginFilter = null; outcomeFilter = null; renderHistory() })
         pluginChip = chip("plugin ▾") { showPluginFilter() }
-        chips.addView(pluginChip)
-        chips.addView(chip("denied") { outcomeFilter = AuditOutcome.DENIED; renderHistory() })
-        chips.addView(chip("timeout") { outcomeFilter = AuditOutcome.TIMEOUT; renderHistory() })
-        chips.addView(chip("failed") { outcomeFilter = AuditOutcome.HANDLER_FAILED; renderHistory() })
-        container.addView(HorizontalScrollView(ctx).apply { addView(chips) })
+        addChip(pluginChip)
+        addChip(chip("denied") { outcomeFilter = AuditOutcome.DENIED; renderHistory() })
+        addChip(chip("timeout") { outcomeFilter = AuditOutcome.TIMEOUT; renderHistory() })
+        addChip(chip("failed") { outcomeFilter = AuditOutcome.HANDLER_FAILED; renderHistory() })
+        container.addView(HorizontalScrollView(ctx).apply { addView(chips) }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            topMargin = Theme.dp(ctx, 4)
+            bottomMargin = Theme.dp(ctx, Theme.ROW_GAP_DP)
+        })
         listContainer = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(listContainer)
         render()

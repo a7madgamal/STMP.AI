@@ -22,6 +22,9 @@ class PluginInventoryView(
     private val groupsByName = LinkedHashMap<String, LinearLayout>()
     private val inventoryHosts = LinkedHashMap<String, LinearLayout>()
 
+    /** A coalescing flag so a burst of refresh requests becomes one rebuild. */
+    private var renderPosted = false
+
     init {
         orientation = VERTICAL
         render()
@@ -347,7 +350,9 @@ class PluginInventoryView(
             val toggle = Theme.toggle(context, showsOn) { want ->
                 store.setEnabled(plugin, want)
                 Debug.log("plugin ${plugin.id}: enabled=$want")
-                render()
+                // POSTED, not inline: rebuilding this row inside the knob's own click dispatch
+                // eats the tap — the same defect that froze preference toggles (2026-11-11).
+                resume()
             }
             toggle.setAccessibilityLabel(plugin.displayName)
             toggle.setOnTouchListener { v, _ ->
@@ -456,7 +461,17 @@ class PluginInventoryView(
         // A toggle changed on the detail screen must be visible on the way back. This rebuilds
         // ONLY the list — the bar and the header are outside `list` and never move, so a press in
         // flight on them cannot be cancelled.
-        render()
+        //
+        // POSTED and coalesced: this runs from `OptionsFragment.onResume` and from the plugin
+        // toggle's own click callback, and `render()` calls every plugin's `status()`
+        // synchronously. Running that inside click dispatch is the "hangs on preference click"
+        // defect (2026-11-11); deferring to the next loop lets the tap complete first.
+        if (renderPosted) return
+        renderPosted = true
+        post {
+            renderPosted = false
+            if (isAttachedToWindow) render()
+        }
     }
 
     /**
