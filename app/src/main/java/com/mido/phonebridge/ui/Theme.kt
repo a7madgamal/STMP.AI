@@ -1047,24 +1047,35 @@ object Theme {
      * never navigates the row underneath it.
      */
     fun bulbBadge(ctx: Context, describe: String, onClick: () -> Unit): FrameLayout {
-        val touch = dp(ctx, Theme.MIN_TARGET_DP)
-        val disc = dp(ctx, 28)
+        // **Half-size, flush against the row title** (Mido, 2026-11-11: *"make the ? icon half as
+        // big, and 0 right margin"*).
+        //
+        // The touch frame is halved with the disc rather than kept at MIN_TARGET_DP: a 48dp box
+        // around a 14dp dot left ~17dp of dead air on each side, which read as a margin the human
+        // could not see the source of. This is a help affordance rather than a decision control,
+        // so the smaller target is a compromise the owner asked for explicitly — the alternative
+        // was a dot that looked half-size inside a box that still reserved full-size space.
+        val touch = dp(ctx, 24)
+        val disc = dp(ctx, 14)
         val holder = FrameLayout(ctx)
         holder.contentDescription = describe
         holder.isClickable = true
         holder.isFocusable = true
         holder.setOnClickListener { onClick() }
         holder.layoutParams = LinearLayout.LayoutParams(touch, touch).apply {
-            marginEnd = dp(ctx, 8)
+            marginEnd = 0
         }
         holder.addView(View(ctx).apply {
             background = surface(ctx, WARNING_SURFACE, 15)
         }, FrameLayout.LayoutParams(disc, disc, Gravity.CENTER))
         holder.addView(TextView(ctx).apply {
             text = "?"
-            textSize = TEXT_BODY_SP
+            // The scale's floor: `TypographyTest` refuses anything smaller, and a glyph below it
+            // is unreadable at arm's length even when the disc is small.
+            textSize = TEXT_FLOOR_SP
             typeface = bodyFont(ctx, bold = true)
             gravity = Gravity.CENTER
+            includeFontPadding = false
             // No hand font and no ink colour: the glyph is drawn by the system emoji font, so the
             // typeface and colour are ignored. Kept explicit so a later pass does not wonder.
             setTextColor(ON_SURFACE)

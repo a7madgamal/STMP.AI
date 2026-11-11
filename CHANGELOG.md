@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.50.1 (build 299)**.
+Current build: **v0.50.2 (build 300)**.
 
 ---
 
@@ -5413,9 +5413,12 @@ devDependencies. `node_modules/` is gitignored.
 - A request that cannot be shown an approval prompt is now REFUSED immediately as `prompt_unreachable`, naming the grant to give. Previously it waited the full 60 seconds and answered `approval_timeout`, which is indistinguishable from a human declining.
 - Home states it outright when neither full-screen intent nor draw-over-apps is available, because that combination makes the entire gate unreachable.
 
-## 0.50.1 (build 299) — 2026-11-11 — CURRENT
+## 0.50.1 (build 299) — 2026-11-11
 - The approval stamp is visible again after a fingerprint. Its clock started while the biometric window was still closing, so the whole animation elapsed behind that dialog and finished on its first visible frame; it now waits for window focus, with a bounded fallback so a platform that never reports focus plays a late stamp instead of none.
 - The exit backstop includes that wait, so it can no longer dismiss the modal mid-wait and cancel the stamp it protects.
+
+## 0.50.2 (build 300) — 2026-11-11 — CURRENT
+- The help badge is half its previous size and sits flush against the row title, so it no longer reserves dead space beside the name it belongs to.
 
 ## Keeping this file honest
 
