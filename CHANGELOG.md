@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.12 (build 166)**.
+Current build: **v0.49.0 (build 293)**.
 
 ---
 
@@ -5379,9 +5379,17 @@ devDependencies. `node_modules/` is gitignored.
 - A plugin's help is a 💡 badge on the left of the row instead of a `?` beside the switch. A question mark beside a control reads as a fault on that control; on the left it marks the thing being explained.
 - The badge sits in a 44dp touch frame with a drawn disc inside it, so it is easy to hit without being a large target on screen.
 
-## 0.48.16 (build 292) — 2026-11-10 — CURRENT
+## 0.48.16 (build 292) — 2026-11-10
 - The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
 - No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
+
+## 0.49.0 (build 293) — 2026-11-11 — CURRENT
+- The Refined Paper foundation bundles Atkinson Hyperlegible Next for readable UI text and JetBrains Mono NL for exact payloads, while Handlee remains the display and stamp face.
+- Semantic text and control colours meet the agreed contrast floor; the stamp accent and destructive danger are now distinct.
+- Paper switches expose their role, checked state, pending state and keyboard activation to accessibility services without moving before a real state change.
+- Home now separates live health and specific remedies from pending requests and recent decisions; Activity keeps queue snapshots and recorded request details read-only.
+- Home, Activity and Preferences replace the artificial Plugins/Settings split. Plugin-owned settings and the verified update/install flow keep one implementation in the consolidated Preferences screen.
+- Approval facts come before optional model context, long payloads have visible overflow guidance, and the paper entrance, stamp impact and denial tear have reduced-motion and forced-exit paths.
 
 ## Keeping this file honest
 
