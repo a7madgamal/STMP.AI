@@ -5387,10 +5387,14 @@ devDependencies. `node_modules/` is gitignored.
 - The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
 - A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
 
-## 0.48.18 (build 294) — 2026-11-11 — CURRENT
+## 0.48.18 (build 294) — 2026-11-11
 - A sudo request no longer shows ALWAYS NOTIFY / ALWAYS ASK. That button approved without the password: one tap ran the command with an empty sudo password, skipped the password path, and wrote a rule relaxing every SSH command.
 - The gate now builds no exception offer for a request that needs a password, and the modal drops one if it arrives anyway.
 - The gate refuses any approval of a password request that does not carry the password, whichever button sent it. DENY still works.
+
+## 0.48.19 (build 295) — 2026-11-11 — CURRENT
+- Every screen and state is captured as a reference screenshot in light and dark at normal and large text, and CI fails when one changes unintentionally.
+- Unit tests run with a fixed English locale, so number formatting no longer depends on the machine.
 
 ## Keeping this file honest
 
