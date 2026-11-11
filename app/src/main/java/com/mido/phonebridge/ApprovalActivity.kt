@@ -1023,10 +1023,9 @@ class ApprovalActivity : FragmentActivity() {
         ))
         setContentView(presentation)
         val entrance = PaperMotion.entrance(
-            reduced = PaperMotion.reducedMotion(this),
             alreadyPresented = !entranceRegistry.claim(id),
         )
-        if (entrance.durationMs > 0L) presentation.present(!entrance.perspective)
+        if (entrance.durationMs > 0L) presentation.present()
     }
 
     /**
@@ -1069,18 +1068,16 @@ class ApprovalActivity : FragmentActivity() {
         armBar.visibility = ViewGroup.GONE
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
         val sheet = root.getChildAt(root.childCount - 1)
-        val reduced = PaperMotion.reducedMotion(this)
         val overlay = StampOverlay(this).apply {
             onFinished = {
-                if (!approved && !reduced) showDenialTear(root, sheet) else finish()
+                if (!approved) showDenialTear(root, sheet) else finish()
             }
             onImpact = {
                 playStampImpact()
-                if (!reduced) sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {
+                sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {
                     sheet.animate().scaleY(1f).setDuration(90L).start()
                 }.start()
             }
-            reducedMotion = PaperMotion.reducedMotion(this@ApprovalActivity)
         }
         // Full-screen, on top of everything in this window (the modal).
         root.addView(overlay, ViewGroup.LayoutParams(
@@ -1089,7 +1086,7 @@ class ApprovalActivity : FragmentActivity() {
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
         forcedExit.postDelayed(
             { if (!isFinishing) finish() },
-            PaperMotion.STAMP_TOTAL_MS + (if (!approved && !reduced) PaperMotion.TEAR_MS else 0L) + 500L,
+            PaperMotion.STAMP_TOTAL_MS + (if (!approved) PaperMotion.TEAR_MS else 0L) + 500L,
         )
     }
 
