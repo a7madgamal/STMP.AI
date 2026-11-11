@@ -22,9 +22,13 @@ class PaperMotionTest {
         assertTrue(registry.claim(41L))
         assertFalse(registry.claim(41L))
         assertTrue(registry.claim(42L))
-        assertTrue(PaperMotion.entrance(reduced = false, alreadyPresented = true).durationMs == 0L)
-        assertTrue(PaperMotion.entrance(reduced = false, alreadyPresented = true).initialAlpha == 1f)
-        assertFalse(PaperMotion.entrance(reduced = true, alreadyPresented = false).perspective)
-        assertEquals(PaperMotion.REDUCED_FADE_MS, PaperMotion.entrance(true, false).durationMs)
+        // Already on screen: no entrance, so no second announcement for something nobody did.
+        assertEquals(0L, PaperMotion.entrance(alreadyPresented = true).durationMs)
+        assertEquals(1f, PaperMotion.entrance(alreadyPresented = true).initialAlpha)
+        // First presentation always animates, in full. There is no reduced branch: the stamp and
+        // the entrance are the app's receipt for a decision, and deleting them was the bug
+        // reported on 2026-11-11.
+        assertTrue(PaperMotion.entrance(alreadyPresented = false).perspective)
+        assertEquals(PaperMotion.PRESENT_MS, PaperMotion.entrance(alreadyPresented = false).durationMs)
     }
 }

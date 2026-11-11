@@ -1252,7 +1252,6 @@ object NotifyOverlay {
             }
         }
         overlay.onFinished = { finish() }
-        overlay.reducedMotion = com.mido.phonebridge.ui.PaperMotion.reducedMotion(ctx)
         overlay.onImpact = {
             try {
                 com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)

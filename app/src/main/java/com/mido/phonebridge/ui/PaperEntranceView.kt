@@ -23,12 +23,7 @@ class PaperEntranceView(context: Context) : android.widget.FrameLayout(context) 
         clipToOutline = false
     }
 
-    fun present(reduced: Boolean) {
-        if (reduced) {
-            alpha = 0f
-            animate().alpha(1f).setDuration(PaperMotion.REDUCED_FADE_MS).start()
-            return
-        }
+    fun present() {
         alpha = 1f
         progress = 0f
         val start = android.os.SystemClock.uptimeMillis()

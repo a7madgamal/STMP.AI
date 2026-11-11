@@ -45,7 +45,7 @@ object Crash {
             try {
                 val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()
                 File(app.filesDir, FILE).writeText(
-                    "at=${System.currentTimeMillis()}\nthread=${thread.name}\n$trace"
+                    Evidence.header(context = app) + trace
                 )
                 // Also into the ring buffer, so it appears in the on-screen log immediately.
                 Debug.log("CRASH ${error.javaClass.name}: ${error.message}")
@@ -58,9 +58,62 @@ object Crash {
     }
 
     /** The last recorded crash, or null when the app has not crashed since install. */
-    fun last(ctx: Context): String? = try {
-        File(ctx.applicationContext.filesDir, FILE).takeIf { it.isFile }?.readText()
-    } catch (e: Exception) {
-        null
+    fun last(ctx: Context): String? = Evidence.read(ctx, FILE)
+}
+
+/**
+ * The header every self-report carries, and the rule that keeps old reports out of the UI.
+ *
+ * **Why a timestamp alone is not enough.** The first version wrote the stack and nothing else,
+ * so after an upgrade the app kept showing a crash that had already been fixed. Reported
+ * 2026-11-11, immediately after the real fix landed: *"works now / but i see this"* — the trace
+ * was from the PREVIOUS build, and the report gave no way to tell. A diagnostic surface that
+ * cries wolf after every fix is worse than none, because it trains the reader to ignore it.
+ *
+ * So each record states when it happened and which build wrote it, and [read] returns null when
+ * the record predates the installed package. That comparison is a fact the platform keeps
+ * (`lastUpdateTime`), not something this code has to infer.
+ */
+internal object Evidence {
+
+    fun header(context: Context): String = buildString {
+        append("at=").append(System.currentTimeMillis()).append('\n')
+        append("version=").append(com.mido.phonebridge.BuildConfig.VERSION_NAME)
+            .append(" (").append(com.mido.phonebridge.BuildConfig.VERSION_CODE).append(")\n")
+        append("thread=").append(Thread.currentThread().name).append('\n')
+    }
+
+    /**
+     * The record, or null when it is absent or was written by a build that is no longer installed.
+     *
+     * A stale file is DELETED, not merely hidden, so it cannot resurface on the next render or
+     * be pasted into a bug report as if it were current.
+     */
+    fun read(ctx: Context, name: String): String? {
+        val app = ctx.applicationContext
+        val file = File(app.filesDir, name)
+        if (!file.isFile) return null
+        val text = try {
+            file.readText()
+        } catch (e: Exception) {
+            return null
+        }
+        val writtenAt = text.lineSequence()
+            .firstOrNull { it.startsWith("at=") }
+            ?.removePrefix("at=")?.trim()?.toLongOrNull()
+        val installedAt = try {
+            app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime
+        } catch (e: Exception) {
+            0L
+        }
+        if (writtenAt != null && installedAt > 0L && writtenAt < installedAt) {
+            android.util.Log.i(
+                "PhoneBridge",
+                "$name predates this install (${writtenAt} < $installedAt); discarding",
+            )
+            file.delete()
+            return null
+        }
+        return text
     }
 }

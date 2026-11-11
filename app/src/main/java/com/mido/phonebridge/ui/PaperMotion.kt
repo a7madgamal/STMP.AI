@@ -1,18 +1,18 @@
 package com.mido.phonebridge.ui
 
 import android.content.Context
-import android.provider.Settings
 
 /**
  * Presentation-only motion choices. Nothing here may resolve a request or move its deadline.
  *
- * System animation scale is the platform's reduced-motion signal. A direct setting read is
- * used because it is available from minSdk 26 and makes the branch testable without inventing
- * an app-specific reduced-motion preference.
+ * **There is no reduced-motion branch, and that is deliberate.** It used to read the system
+ * `ANIMATOR_DURATION_SCALE` and collapse the stamp to a 110ms static fade with no contact frame.
+ * Reported 2026-11-11: *"in paranoid mode i didn't see the stamp approval animation at all"* —
+ * the confirmation had been deleted to avoid vestibular motion, which is the wrong trade. The
+ * stamp is the app's receipt for a security decision; it must always play.
  */
 object PaperMotion {
     const val PRESENT_MS = 300L
-    const val REDUCED_FADE_MS = 110L
     const val STAMP_TOTAL_MS = 650L
     const val TEAR_MS = 300L
     const val PRESENT_TOP_WIDTH_FACTOR = 1.09f
@@ -32,13 +32,6 @@ object PaperMotion {
     fun dp(context: Context, value: Int): Float =
         value * context.resources.displayMetrics.density
 
-    fun reducedMotion(context: Context): Boolean =
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) == 0f
-
     /** A request gets one entrance per id, across Activity recreation and re-show. */
     class EntranceRegistry {
         private val presented = HashSet<Long>()
@@ -56,9 +49,10 @@ object PaperMotion {
         val initialAlpha: Float,
     )
 
-    fun entrance(reduced: Boolean, alreadyPresented: Boolean): Entrance = when {
+    fun entrance(alreadyPresented: Boolean): Entrance = when {
+        // Re-shown after a return or a rotation: it is already on screen, so an entrance would
+        // announce something nobody did.
         alreadyPresented -> Entrance(perspective = false, durationMs = 0L, initialAlpha = 1f)
-        reduced -> Entrance(perspective = false, durationMs = REDUCED_FADE_MS, initialAlpha = 0f)
         else -> Entrance(perspective = true, durationMs = PRESENT_MS, initialAlpha = 0f)
     }
 }

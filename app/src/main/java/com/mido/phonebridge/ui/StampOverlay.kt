@@ -24,7 +24,6 @@ class StampOverlay(
 
     var onFinished: (() -> Unit)? = null
     var onImpact: (() -> Unit)? = null
-    var reducedMotion: Boolean = false
 
     private var bitmap: android.graphics.Bitmap? = null
     private var verdict = Verdict.APPROVED
@@ -52,17 +51,18 @@ class StampOverlay(
         override fun run() {
             if (finished || !isAttachedToWindow) return
             val elapsed = SystemClock.uptimeMillis() - startedAt
-            val total = if (reducedMotion) PaperMotion.REDUCED_FADE_MS else PaperMotion.STAMP_TOTAL_MS
-            val impactAt = if (reducedMotion) 0L else 150L
+            // The contact frame. The thud, the ink bleed and the sheet compression are all keyed
+            // off this single instant, so they can never disagree about when impact happened.
+            val impactAt = IMPACT_MS
             if (!impactSent && elapsed >= impactAt) {
                 impactSent = true
-                inkProgress = if (reducedMotion) 1f else 0f
+                inkProgress = 0f
                 onImpact?.invoke()
                 invalidate()
             }
             inkProgress = ((elapsed - impactAt).toFloat() / 240f).coerceIn(0f, 1f)
             invalidate()
-            if (elapsed >= total) {
+            if (elapsed >= PaperMotion.STAMP_TOTAL_MS) {
                 finishOnce()
             } else {
                 postOnAnimation(this)
@@ -80,7 +80,7 @@ class StampOverlay(
         startedAt = SystemClock.uptimeMillis()
         impactSent = false
         finished = false
-        inkProgress = if (reducedMotion) 1f else 0f
+        inkProgress = 0f
         removeCallbacks(tick)
         if (width > 0 && height > 0) postOnAnimation(tick)
         invalidate()
@@ -121,41 +121,33 @@ class StampOverlay(
         if (scrimAlpha > 0) canvas.drawColor(scrimAlpha.coerceIn(0, 255) shl 24)
         val cx = width / 2f
         val cy = height / 2f
-        val reduced = reducedMotion
-        val scale = if (reduced) 1f else when {
-            elapsed < 150L -> 2.0f + (1f - 2.0f) * (elapsed / 150f)
+        val scale = when {
+            elapsed < IMPACT_MS -> 2.0f + (1f - 2.0f) * (elapsed / IMPACT_MS.toFloat())
             elapsed < 210L -> 0.985f
-            elapsed < 260L -> 1f
             else -> 1f
         }
-        val alpha = if (reduced) {
-            (elapsed.toFloat() / PaperMotion.REDUCED_FADE_MS).coerceIn(0f, 1f)
-        } else {
-            when {
-                elapsed < 50L -> elapsed / 50f
-                elapsed > 560L -> 1f - ((elapsed - 560L).toFloat() / 90f).coerceIn(0f, 1f)
-                else -> 1f
-            }
+        val alpha = when {
+            elapsed < 50L -> elapsed / 50f
+            elapsed > 560L -> 1f - ((elapsed - 560L).toFloat() / 90f).coerceIn(0f, 1f)
+            else -> 1f
         }
         canvas.save()
-        if (!reduced) {
-            val tilt = -52f * (1f - (elapsed / 190f).coerceIn(0f, 1f))
-            camera.save()
-            camera.setLocation(0f, 0f, -12f * resources.displayMetrics.density)
-            camera.rotateX(tilt)
-            camera.getMatrix(matrix)
-            camera.restore()
-            matrix.preTranslate(-cx, -cy)
-            matrix.postTranslate(cx, cy)
-            canvas.concat(matrix)
-        }
+        val tilt = -52f * (1f - (elapsed / 190f).coerceIn(0f, 1f))
+        camera.save()
+        camera.setLocation(0f, 0f, -12f * resources.displayMetrics.density)
+        camera.rotateX(tilt)
+        camera.getMatrix(matrix)
+        camera.restore()
+        matrix.preTranslate(-cx, -cy)
+        matrix.postTranslate(cx, cy)
+        canvas.concat(matrix)
         canvas.save()
         canvas.rotate(-6f, cx, cy)
         val fit = minOf(width * 0.94f / art.width, height * 0.50f / art.height) * scale
         val w = art.width * fit
         val h = art.height * fit
         dst.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
-        if (!reduced && impactSent && inkProgress > 0f) {
+        if (impactSent && inkProgress > 0f) {
             drawMaskedBleed(canvas, art, dst, alpha)
         }
         paint.alpha = (alpha * 0.88f * 255f).toInt()
@@ -191,4 +183,15 @@ class StampOverlay(
 
     @androidx.annotation.VisibleForTesting
     internal fun inkBleedProgressForTest(): Float = inkProgress
+
+    private companion object {
+        /**
+         * The contact frame, in milliseconds from `stamp()`.
+         *
+         * The thud, the ink bleed and the sheet compression are all keyed off this one instant
+         * so they can never disagree about when the stamp hit the paper. 150ms lets the art
+         * travel from the 2× overshoot down to size first.
+         */
+        const val IMPACT_MS = 150L
+    }
 }

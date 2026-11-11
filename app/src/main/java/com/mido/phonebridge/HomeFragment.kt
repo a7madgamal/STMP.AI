@@ -795,6 +795,24 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 "Quiet approval cards cannot appear over other apps. Grant overlay access.",
                 Theme.WARNING) { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(ctx) }
         }
+        // **Neither grant means NO approval can be shown at all.**
+        //
+        // With both off, a background Activity launch is illegal and the card cannot replace
+        // another app's window, so every gated request is refused with `prompt_unreachable`
+        // instead of silently timing out (reported 2026-11-11: *"i didn't get the modal!"*).
+        // Stated as its own DANGER row because it is not a warning about a degraded case — it is
+        // the whole gate being unreachable, and it is the one row that must be fixed first.
+        if (PromptSurface.of(
+                fullScreenIntent = ApprovalGate.canUseFullScreenIntent(ctx),
+                overlayGranted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx),
+            ) == null
+        ) {
+            add("Approvals cannot be shown at all",
+                "No prompt can reach the screen, so every request is refused. " +
+                    PromptSurface.remedy(),
+                Theme.DANGER,
+            ) { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(ctx) }
+        }
         if (!com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) {
             add("Background activity is restricted",
                 "Android may stop the bridge while the screen is off. Allow background use.",
