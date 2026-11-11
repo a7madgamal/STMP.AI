@@ -16,6 +16,7 @@ They are kept because the "why" behind a rule is usually invisible in the code â
 | [TASKER-PLAN.md](TASKER-PLAN.md) | Notification-driven automation. |
 | [SECURITY-REVIEW.md](SECURITY-REVIEW.md) | The threat model and what it deliberately does not defend against. |
 | [SHELL-HIGHLIGHT-PLAN.md](SHELL-HIGHLIGHT-PLAN.md) | The zsh-compatible shell lexer, and what the SSH card does with it. |
+| [REFINED-PAPER-CLEANUP-PLAN.md](REFINED-PAPER-CLEANUP-PLAN.md) | The locked Direction A UI/UX cleanup: paper visual system, three-tab structure, approval hierarchy and motion. |
 
 ## Reading order
 
