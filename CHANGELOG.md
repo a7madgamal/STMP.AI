@@ -5379,9 +5379,13 @@ devDependencies. `node_modules/` is gitignored.
 - A plugin's help is a 💡 badge on the left of the row instead of a `?` beside the switch. A question mark beside a control reads as a fault on that control; on the left it marks the thing being explained.
 - The badge sits in a 44dp touch frame with a drawn disc inside it, so it is easy to hit without being a large target on screen.
 
-## 0.48.16 (build 292) — 2026-11-10 — CURRENT
+## 0.48.16 (build 292) — 2026-11-10
 - The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
 - No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
+
+## 0.48.17 (build 293) — 2026-11-11 — CURRENT
+- The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
+- A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
 
 ## Keeping this file honest
 

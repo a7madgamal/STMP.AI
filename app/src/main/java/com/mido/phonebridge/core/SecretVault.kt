@@ -1,10 +1,7 @@
 package com.mido.phonebridge.core
 
 import android.content.Context
-import android.os.Build
-import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
 import android.util.Log
 import org.json.JSONObject
@@ -562,77 +559,10 @@ object SecretVault {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getEntry(VK_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
 
-        val builder = KeyGenParameterSpec.Builder(
-            VK_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            // The whole point: no cipher init without a fresh finger.
-            .setUserAuthenticationRequired(true)
-            .setInvalidatedByBiometricEnrollment(true)
-
-        // setUnlockedDeviceRequired is API 28+; minSdk is 26, so it is added only where
-        // the platform has it. Below 28 the auth-per-use requirement above is the
-        // guarantee — this is belt, not the only brace.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            builder.setUnlockedDeviceRequired(true)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // timeout 0 => auth-per-use (every single use needs authentication).
-            builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-        } else {
-            @Suppress("DEPRECATION")
-            builder.setUserAuthenticationValidityDurationSeconds(-1)
-        }
-
-        return generate(ks, builder, strongBox = true)
-            ?: generate(ks, builder, strongBox = false)
-            ?: throw PluginError("secure_storage_error", "could not create the vault key")
-    }
-
-    /**
-     * Generate VK, optionally StrongBox-backed. Returns null when StrongBox is
-     * requested and unavailable — the caller retries without it, which is a real
-     * capability fallback (the key still lives in the TEE), not a silent downgrade.
-     */
-    private fun generate(
-        ks: KeyStore,
-        builder: KeyGenParameterSpec.Builder,
-        strongBox: Boolean
-    ): SecretKey? {
-        return try {
-            if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                builder.setIsStrongBoxBacked(true)
-            }
+        return VaultKeySpec.generate(VK_ALIAS) { spec ->
             val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            gen.init(builder.build())
-            val k = gen.generateKey()
-            Log.i(TAG, "vault key created (strongBox=$strongBox)")
-            k
-        } catch (e: Exception) {
-            // **Checked by CLASS NAME, never by TYPE.** `StrongBoxUnavailableException` was
-            // added in API 28, and naming it in an `is` check puts it in the verified bytecode:
-            // on API 26-27 the verifier resolves every type in the method and the whole catch
-            // fails with NoClassDefFoundError — turning a recoverable "no StrongBox here" into a
-            // crash on exactly the devices least able to handle it. Lint's NewApi flagged this;
-            // it had been shipping because the local build never ran `lint`.
-            //
-            // A string compare is honest here: the class name is stable, the value is only used
-            // to choose between two log lines, and a miss falls through to the general handler
-            // below rather than changing behaviour.
-            if (e.javaClass.simpleName == "StrongBoxUnavailableException") {
-                Log.i(TAG, "StrongBox unavailable; falling back to TEE")
-                return null
-            }
-            if (strongBox) {
-                Log.i(TAG, "StrongBox key failed (${e.javaClass.simpleName}); falling back to TEE")
-                null
-            } else {
-                throw PluginError("secure_storage_error", "vault key generation failed: ${e.message}")
-            }
+            gen.init(spec)
+            gen.generateKey()
         }
     }
 
