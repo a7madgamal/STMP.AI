@@ -1,58 +1,31 @@
-package com.mido.phonebridge
+package com.mido.phonebridge.ui
 
+import android.content.Context
 import android.content.Intent
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.mido.phonebridge.Debug
+import com.mido.phonebridge.PluginDetailActivity
+import com.mido.phonebridge.ScreenHost
+import com.mido.phonebridge.SecretsActivity
+import com.mido.phonebridge.SshActivity
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSettingsStore
 import com.mido.phonebridge.core.PluginStatus
-import com.mido.phonebridge.ui.Theme
-import com.mido.phonebridge.ui.PluginHelp
 
-/**
- * The Plugins screen: every capability the bridge exposes, whether it is on, and why not.
- *
- * **This screen exists because Home had become a wall.** Twelve plugins rendered as status cards
- * between the server control and the tools section, which pushed the one thing Home is FOR —
- * is the bridge running — off the first screen. Capability inventory belongs on its own page.
- *
- * **Two different "not working" states are kept apart**, and the distinction is the point of the
- * screen:
- *
- *  - **OFF — you turned it off.** The switch is the remedy, and the row says so.
- *  - **NEEDS ATTENTION — it is on but cannot serve.** No OAuth client, no SSH connections, a
- *    missing model. The switch is NOT the remedy, so offering it would be a lie that costs the
- *    human a tap and teaches them the wrong thing about their own app.
- *
- * Collapsing those two into one grey row is the easiest possible mistake here and the one that
- * makes the screen useless.
- */
-class PluginsFragment : BridgeFragment() {
+/** The single plugin inventory implementation, hosted directly by Preferences. */
+class PluginInventoryView(
+    context: Context,
+    private val host: ScreenHost,
+) : LinearLayout(context) {
 
-    override val tab = Theme.Tab.PLUGINS
+    private val groupsByName = LinkedHashMap<String, LinearLayout>()
+    private val inventoryHosts = LinkedHashMap<String, LinearLayout>()
 
-    private lateinit var list: LinearLayout
-
-    override fun buildContent(container: LinearLayout) {
-        container.addView(Theme.text(ctx, "PLUGINS", 20f).apply {
-            typeface = Theme.handFont(ctx)
-            setTextColor(Theme.ON_SURFACE)
-        })
-        container.addView(Theme.text(
-            ctx,
-            "Each plugin owns its own routes, settings and permissions. Turning one off " +
-                "keeps its routes answering — with a refusal that says it is off.",
-            13f,
-        ).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
-        })
-
-        list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(list)
-
+    init {
+        orientation = VERTICAL
         render()
+        arrange()
     }
 
     /**
@@ -68,7 +41,7 @@ class PluginsFragment : BridgeFragment() {
      * Misc and logs it, so a new plugin cannot quietly vanish from the screen.
      */
     private val groups: List<Pair<String, Set<String>>> = listOf(
-        "Google" to setOf("google", "gmail", "calendar", "drive"),
+        "Accounts & services" to setOf("google", "gmail", "calendar", "drive"),
         "Phone" to setOf("notifications", "contacts", "audio", "tts"),
         // **Secrets and SSH are separate headers, each with its own items.**
         //
@@ -78,13 +51,55 @@ class PluginsFragment : BridgeFragment() {
         // server. Merging them put two different add flows under one word.
         "Secrets" to setOf("secrets"),
         "SSH" to setOf("ssh"),
-        "Misc" to setOf("help", "debug", "logs", "probe"),
+        "Developer" to setOf("help", "debug", "logs", "probe"),
     )
 
-    private fun render() {
-        list.removeAllViews()
+    fun add(group: String, view: android.view.View, params: LayoutParams? = null) {
+        val host = groupFor(group)
+        if (params == null) host.addView(view) else host.addView(view, params)
+    }
 
-        val store = PluginSettingsStore.from(requireContext())
+    /** Inventory-owned rows are replaced on refresh; global settings added by Preferences are not. */
+    private fun addPlugin(group: String, view: android.view.View, params: LayoutParams? = null) {
+        groupFor(group)
+        val host = inventoryHosts.getValue(group)
+        if (params == null) host.addView(view) else host.addView(view, params)
+    }
+
+    private fun groupFor(group: String): LinearLayout = groupsByName.getOrPut(group) {
+        LinearLayout(context).apply { orientation = VERTICAL }
+    }.also { host ->
+        if (host.childCount == 0) {
+            addView(host)
+            host.addView(Theme.sectionHeader(context, group))
+            val inventory = LinearLayout(context).apply { orientation = VERTICAL }
+            inventoryHosts[group] = inventory
+            host.addView(inventory)
+        }
+    }
+
+    /** Keep the intent-based order even though plugin rows are discovered before global settings. */
+    fun arrange() {
+        val rank = listOf("Phone", "Accounts & services", "Secrets & connections", "AI",
+            "Approval & exceptions", "System", "About & updates", "Developer",
+            "Capabilities", "Other")
+        val ordered = groupsByName.values.sortedBy { host ->
+            rank.indexOf(groupsByName.entries.first { it.value == host }.key)
+                .let { if (it < 0) rank.size else it }
+        }
+        removeAllViews()
+        ordered.forEach(::addView)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        arrange()
+    }
+
+    private fun render() {
+        inventoryHosts.values.forEach(LinearLayout::removeAllViews)
+
+        val store = PluginSettingsStore.from(context)
         // **Per-secret plugins are not rows on this screen.**
         //
         // Mido, 2026-11-04: *"delete the duplicate others list, currently showing 2 secrets
@@ -105,9 +120,9 @@ class PluginsFragment : BridgeFragment() {
         if (plugins.isEmpty()) {
             // Real state: the service has not registered yet. Say so rather than showing a blank
             // page that reads as "no plugins exist".
-            list.addView(Theme.text(ctx, "No plugins registered yet.", 13f).apply {
+            addPlugin("Capabilities", Theme.text(context, "No plugins registered yet.", Theme.TEXT_CAPTION_SP).apply {
                 setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(ctx, 16), 0, 0)
+                setPadding(0, Theme.dp(context, 16), 0, 0)
             })
             return
         }
@@ -116,13 +131,14 @@ class PluginsFragment : BridgeFragment() {
         val claimed = mutableSetOf<String>()
 
         for ((heading, ids) in groups) {
+            val group = if (heading == "Secrets" || heading == "SSH") {
+                "Secrets & connections"
+            } else heading
             val members = ids.mapNotNull { byId[it] }.sortedBy { it.displayName }
             if (members.isEmpty()) continue
             claimed += members.map { it.id }
 
-            list.addView(Theme.sectionHeader(ctx, heading))
-
-            if (heading == "Google") {
+            if (heading == "Accounts & services") {
                 // **ONE card for the whole Google group.**
                 //
                 // Mido, 2026-11-04: *"the google plugin should be one card, show the email once"*.
@@ -133,30 +149,30 @@ class PluginsFragment : BridgeFragment() {
                 // The account row comes FIRST because it is the precondition: the three services
                 // below cannot serve until it is signed in, and reading top-down tells you that
                 // before you wonder why they are greyed.
-                val googleCard = LinearLayout(ctx).apply {
+                val googleCard = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
-                    background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+                    background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
                 }
                 googleCard.layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = Theme.dp(ctx, 10) }
+                ).apply { topMargin = Theme.dp(context, 10) }
 
                 val ordered = members.sortedBy { if (it.id == "google") 0 else 1 }
                 for ((index, plugin) in ordered.withIndex()) {
                     if (index > 0) {
                         // A hairline between capabilities, so one card does not read as one blob.
-                        googleCard.addView(android.view.View(ctx).apply {
-                            setBackgroundColor(Theme.BORDER)
+                        googleCard.addView(android.view.View(context).apply {
+                            background = Theme.sheet(Theme.BORDER)
                         }, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(ctx, 1),
-                        ).apply { topMargin = Theme.dp(ctx, 2); bottomMargin = Theme.dp(ctx, 2) })
+                            LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(context, 1),
+                        ).apply { topMargin = Theme.dp(context, 2); bottomMargin = Theme.dp(context, 2) })
                     }
                     googleCard.addView(row(plugin, store, bare = true))
                 }
-                list.addView(googleCard)
+                addPlugin(group, googleCard)
             } else {
-                for (plugin in members) list.addView(row(plugin, store))
+                for (plugin in members) addPlugin(group, row(plugin, store))
                 if (heading == "Secrets") addSecretsActions(members)
                 if (heading == "SSH") addSshActions(members)
             }
@@ -169,8 +185,7 @@ class PluginsFragment : BridgeFragment() {
         val unlisted = plugins.filter { it.id !in claimed }.sortedBy { it.displayName }
         if (unlisted.isNotEmpty()) {
             Debug.log("plugins: ungrouped ids ${unlisted.map { it.id }}")
-            list.addView(Theme.sectionHeader(ctx, "Other"))
-            for (plugin in unlisted) list.addView(row(plugin, store))
+            for (plugin in unlisted) addPlugin("Other", row(plugin, store))
         }
     }
 
@@ -181,7 +196,7 @@ class PluginsFragment : BridgeFragment() {
      * vault's name index is plaintext precisely so this works while it is locked.
      */
     private fun sshConnectionNames(): List<String> = try {
-        com.mido.phonebridge.core.SecretVault.names(requireContext())
+        com.mido.phonebridge.core.SecretVault.names(context)
             .filter { it.startsWith("ssh-") }
             .map { it.removePrefix("ssh-") }
     } catch (e: Exception) {
@@ -193,18 +208,20 @@ class PluginsFragment : BridgeFragment() {
 
     /** One SSH connection, as its own row opening that connection's detail screen. */
     private fun sshRow(name: String): LinearLayout {
-        val card = LinearLayout(ctx).apply {
+        val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
+                Theme.dp(context, 14), Theme.dp(context, 12),
+                Theme.dp(context, 14), Theme.dp(context, 12),
             )
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
             isClickable = true
+            isFocusable = true
+            minimumHeight = Theme.dp(context, Theme.MIN_TARGET_DP)
             contentDescription = "SSH connection $name"
             setOnClickListener {
-                go(
-                    Intent(ctx, PluginDetailActivity::class.java)
+                host.go(
+                    Intent(context, PluginDetailActivity::class.java)
                         .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
                         .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name)
                 )
@@ -214,24 +231,24 @@ class PluginsFragment : BridgeFragment() {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
         // Set as a statement, not inside `.apply`: there `this` is the LayoutParams, so
-        // `Theme.dp(ctx, ...)` would be handed a params object where it wants a Context.
-        lp.topMargin = Theme.dp(ctx, 10)
+        // `Theme.dp(context, ...)` would be handed a params object where it wants a Context.
+        lp.topMargin = Theme.dp(context, 10)
         card.layoutParams = lp
 
-        val titleRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(Theme.text(ctx, name, 16f).apply {
+        val titleRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        titleRow.addView(Theme.text(context, name, Theme.TEXT_BODY_SP).apply {
             setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(ctx)
+            typeface = Theme.bodyFont(context)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         titleRow.gravity = android.view.Gravity.CENTER_VERTICAL
-        titleRow.addView(Theme.text(ctx, "SSH", 12f).apply {
+        titleRow.addView(Theme.text(context, "SSH", Theme.TEXT_CAPTION_SP).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
         })
         card.addView(titleRow)
 
-        card.addView(Theme.text(ctx, "One connection. POST /ssh/$name", 12f).apply {
+        card.addView(Theme.text(context, "One connection. POST /ssh/$name", Theme.TEXT_CAPTION_SP).apply {
             setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
+            setPadding(0, Theme.dp(context, 4), 0, 0)
         })
         return card
     }
@@ -248,16 +265,18 @@ class PluginsFragment : BridgeFragment() {
         // switch that is off is the confusion this screen exists to remove.
         val status = if (on) plugin.status() else null
 
-        val card = LinearLayout(ctx).apply {
+        val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             // A bare row has no card of its own: the group draws ONE surface around the set, so
             // four Google services read as one subject rather than four unrelated cards.
             setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
+                Theme.dp(context, 14), Theme.dp(context, if (bare) 8 else 12),
+                Theme.dp(context, 14), Theme.dp(context, if (bare) 8 else 12),
             )
-            if (!bare) background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.rippled(context, if (bare) Theme.SURFACE else Theme.BG, Theme.RADIUS_CONTROL)
             isClickable = true
+            isFocusable = true
+            minimumHeight = Theme.dp(context, Theme.MIN_TARGET_DP)
             contentDescription = "${plugin.displayName}: ${stateLabel(on, status)}"
             setOnClickListener { openDetail(plugin.id) }
         }
@@ -265,11 +284,11 @@ class PluginsFragment : BridgeFragment() {
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.topMargin = Theme.dp(ctx, 10)
+            lp.topMargin = Theme.dp(context, 10)
             card.layoutParams = lp
         }
 
-        val titleRow = LinearLayout(ctx).apply {
+        val titleRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             // CENTER_VERTICAL so the knob lines up with the name rather than the top of the word.
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -285,86 +304,96 @@ class PluginsFragment : BridgeFragment() {
         // child wins the touch. That is the point: the row already opens the detail screen, and a
         // help affordance that navigated somewhere would be the same door twice.
         titleRow.addView(
-            Theme.bulbBadge(ctx, "What ${plugin.displayName} does") {
-                PluginHelp.show(ctx, plugin, on)
+            Theme.bulbBadge(context, "What ${plugin.displayName} does") {
+                PluginHelp.show(context, plugin, on)
             },
         )
 
         // Weight 1 on the name: it absorbs all the slack, which is what pushes the state word and
         // then the knob to the right edge. Without it the knob sat wherever the text happened to
         // end, so rows disagreed about where the switch lived.
-        titleRow.addView(Theme.text(ctx, plugin.displayName, 16f).apply {
+        titleRow.addView(Theme.text(context, plugin.displayName, Theme.TEXT_BODY_SP).apply {
             setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(ctx)
+            typeface = Theme.bodyFont(context)
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         // The state chip. Colour carries the meaning and the WORD carries it too, because a
         // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
         val stateText = stateLabel(on, status)
         if (stateText.isNotEmpty()) {
-            titleRow.addView(Theme.text(ctx, stateText, 12f).apply {
+            titleRow.addView(Theme.text(context, stateText, Theme.TEXT_CAPTION_SP).apply {
                 setTextColor(stateColour(on, status))
             }, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { marginEnd = Theme.dp(ctx, 10) })
+            ).apply { marginEnd = Theme.dp(context, 10) })
         }
 
-        // The switch. EVERY plugin, no exceptions (Mido, 2026-11-04).
-        run {
-            // **The knob shows OFF when the plugin cannot serve.**
-            //
-            // Mido, 2026-11-10: *"for plugins when action needed or disabled the toggles should
-            // be off"*. The knob used to render the STORED flag, so a plugin switched on but
-            // unable to work (no permission, not signed in, no secrets) showed a knob pointing
-            // right beside the word ACTION NEEDED — the control claiming one thing and the label
-            // saying another.
-            //
-            // Only `OK` counts as on. `OFF`, `NEEDS_ATTENTION` and `ERROR` all mean the plugin
-            // cannot currently serve, which is exactly when a knob pointing right is a lie.
-            // A null status (not registered yet) keeps the stored value: that is a settling
-            // state, not a defect, and flipping the knob while it settles would flicker.
-            //
-            // **Display only.** `store.setEnabled` is untouched, so the plugin's own preference
-            // survives: granting the permission makes the knob spring back without anybody
-            // re-enabling it. Writing `false` here would silently disable a plugin because of a
-            // temporary condition, and the human would have to find it and turn it on again.
-            //
-            // Tapping therefore means "turn it off" while it reads off — harmless: the write
-            // lands on the stored value the human actually wants, and a plugin that cannot serve
-            // does nothing either way.
+        val needsSetup = on && status != null && status.state != PluginStatus.State.OK
+        if (needsSetup) {
+            titleRow.addView(Theme.text(context, "›", Theme.TEXT_TITLE_SP,
+                Theme.ON_SURFACE_VARIANT).apply {
+                contentDescription = "Open settings"
+                setPadding(Theme.dp(context, 4), 0, Theme.dp(context, 4), 0)
+            })
+            val grant = plugin.permissions().isNotEmpty() || plugin.specialAccess().isNotEmpty()
+            card.addView(Theme.button(context, if (grant) "GRANT" else "SET UP",
+                Theme.ButtonStyle.NEUTRAL, small = true) { openDetail(plugin.id) },
+                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = Theme.dp(context, 6)
+                })
+        } else {
             val showsOn = on && (status == null || status.state == PluginStatus.State.OK)
-            val toggle = Theme.toggle(ctx, showsOn) { want ->
-                // Write, then repaint from what was written. The knob is NOT flipped optimistically:
-                // a failed write would leave it showing a state the store does not hold.
+            val toggle = Theme.toggle(context, showsOn) { want ->
                 store.setEnabled(plugin, want)
                 Debug.log("plugin ${plugin.id}: enabled=$want")
                 render()
             }
-            // **The knob must not become the row's click.**
-            //
-            // The card opens the detail screen on tap, and the knob sits inside it. A clickable
-            // child wins the touch in Android, so tapping the knob flips the switch and does NOT
-            // navigate -- which is what we want. This line makes that explicit rather than
-            // accidental: the knob refuses to let its parent intercept a drag that starts on it,
-            // so a slightly sloppy tap cannot be stolen mid-gesture by the row above.
-            toggle.setOnTouchListener { v, event ->
+            toggle.setAccessibilityLabel(plugin.displayName)
+            toggle.setOnTouchListener { v, _ ->
                 v.parent?.requestDisallowInterceptTouchEvent(true)
                 false
             }
             titleRow.addView(toggle)
+            titleRow.addView(Theme.text(context, "›", Theme.TEXT_TITLE_SP,
+                Theme.ON_SURFACE_VARIANT).apply {
+                contentDescription = "Open settings"
+                setPadding(Theme.dp(context, 4), 0, 0, 0)
+            })
         }
 
         card.addView(titleRow)
 
+        card.addView(Theme.text(context, purpose(plugin), Theme.TEXT_DETAIL_SP,
+            Theme.ON_SURFACE_VARIANT))
+
         val detail = stateDetail(on, status)
         if (detail.isNotEmpty()) {
-            card.addView(Theme.text(ctx, detail, 12f).apply {
+            card.addView(Theme.text(context, detail, Theme.TEXT_CAPTION_SP).apply {
                 setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(ctx, 4), 0, 0)
+                setPadding(0, Theme.dp(context, 4), 0, 0)
             })
         }
         return card
+    }
+
+    /** Plain job language, independent of route names and implementation details. */
+    private fun purpose(plugin: com.mido.phonebridge.core.Plugin): String = when (plugin.id) {
+        "notifications" -> "Read notifications and perform their actions."
+        "contacts" -> "Find phone numbers and email addresses."
+        "audio" -> "Play a short attention cue on this phone."
+        "tts" -> "Speak caller-supplied text aloud."
+        "google" -> "Connect the Google account shared by Google services."
+        "gmail" -> "Read, search and manage Gmail messages."
+        "calendar" -> "Read and manage calendar events."
+        "drive" -> "Read, upload and manage Drive files."
+        "secrets" -> "Store credentials and broker approved calls."
+        "ssh" -> "Run commands through configured SSH connections."
+        "help" -> "Describe available bridge routes."
+        "debug" -> "Inspect bridge health and recent state."
+        "logs" -> "Read this app's diagnostic log."
+        "probe" -> "Check whether the bridge is reachable."
+        else -> "Open ${plugin.displayName} settings and current status."
     }
 
     /**
@@ -416,19 +445,18 @@ class PluginsFragment : BridgeFragment() {
         } else {
             PluginDetailActivity::class.java
         }
-        val intent = Intent(ctx, target)
+        val intent = Intent(context, target)
         if (target == PluginDetailActivity::class.java) {
             intent.putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
         }
-        go(intent)
+        host.go(intent)
     }
 
-    override fun onResume() {
-        super.onResume()
+    fun resume() {
         // A toggle changed on the detail screen must be visible on the way back. This rebuilds
         // ONLY the list — the bar and the header are outside `list` and never move, so a press in
         // flight on them cannot be cancelled.
-        if (::list.isInitialized) render()
+        render()
     }
 
     /**
@@ -446,15 +474,15 @@ class PluginsFragment : BridgeFragment() {
     private fun addSecretsActions(members: List<com.mido.phonebridge.core.Plugin>) {
         if (members.none { it.id == "secrets" }) return
         // The SecretsActivity manages secret values and their links; it has its own add flow.
-        list.addView(
-            Theme.button(ctx, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
+        addPlugin("Secrets & connections",
+            Theme.button(context, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
                 // Same destination as the Secrets row: one screen, one way to add.
-                go(Intent(ctx, SecretsActivity::class.java))
+                host.go(Intent(context, SecretsActivity::class.java))
             },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 10) },
+            ).apply { topMargin = Theme.dp(context, 10) },
         )
     }
 
@@ -466,17 +494,17 @@ class PluginsFragment : BridgeFragment() {
      */
     private fun addSshActions(members: List<com.mido.phonebridge.core.Plugin>) {
         if (members.none { it.id == "ssh" }) return
-        for (name in sshConnectionNames()) list.addView(sshRow(name))
-        list.addView(
-            Theme.button(ctx, "+ ADD CONNECTION", Theme.ButtonStyle.SUCCESS) {
+        for (name in sshConnectionNames()) addPlugin("Secrets & connections", sshRow(name))
+        addPlugin("Secrets & connections",
+            Theme.button(context, "+ ADD CONNECTION", Theme.ButtonStyle.SUCCESS) {
                 // The SSH screen owns the generate-and-install flow: a connection needs a key
                 // before it can do anything, so adding one is a screen, not a form here.
-                go(Intent(ctx, SshActivity::class.java))
+                host.go(Intent(context, SshActivity::class.java))
             },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 10) },
+            ).apply { topMargin = Theme.dp(context, 10) },
         )
     }
 }

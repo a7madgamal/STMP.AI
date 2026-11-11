@@ -43,9 +43,9 @@ class LogDetailActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             background = Theme.sheet(Theme.BG)
         }
-        val scroll = ScrollView(this)
+        val scroll = com.mido.phonebridge.ui.OverflowScrollView(this)
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content)
+        scroll.setContent(content)
         root.addView(scroll, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
@@ -71,7 +71,7 @@ class LogDetailActivity : Activity() {
 
         fun labelled(label: String, value: String, mono: Boolean = false, color: Int = Theme.ON_SURFACE) {
             if (value.isBlank()) return
-            content.addView(Theme.text(this, label, 12f, Theme.ON_SURFACE_VARIANT).apply {
+            content.addView(Theme.text(this, label, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(this@LogDetailActivity, 8), 0, 0)
             })
             // **JSON renders rich wherever it appears**, without every call site having to
@@ -79,13 +79,13 @@ class LogDetailActivity : Activity() {
             // a string — so the detector decides. Rendering only touches the copy on screen;
             // the stored audit line is untouched.
             val view = if (mono && JsonCode.looksJson(value)) {
-                Theme.text(this, "", 12f, color).apply {
+                Theme.text(this, "", Theme.TEXT_CAPTION_SP, color).apply {
                     text = JsonCode.render(value)
-                    typeface = Typeface.MONOSPACE
+                    typeface = Theme.monoFont(this@LogDetailActivity)
                     setTextIsSelectable(true)
                 }
             } else {
-                Theme.text(this, value, 14f, color, mono = mono).apply {
+                Theme.text(this, value, Theme.TEXT_BODY_SP, color, mono = mono).apply {
                     setTextIsSelectable(true)
                 }
             }
@@ -94,7 +94,7 @@ class LogDetailActivity : Activity() {
 
         val outcome = o.optString("outcome")
         content.addView(Theme.text(this, "$outcome   ${o.optString("label").ifBlank { "—" }}", 20f).apply {
-            typeface = Theme.handFont(this@LogDetailActivity)
+            typeface = Theme.bodyFont(this@LogDetailActivity)
         })
         content.addView(Theme.text(
             this,
@@ -170,7 +170,7 @@ class LogDetailActivity : Activity() {
         }
 
         content.addView(Theme.sectionHeader(this, "raw"))
-        content.addView(Theme.text(this, raw, 12f, Theme.ON_SURFACE_VARIANT, mono = true).apply {
+        content.addView(Theme.text(this, raw, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT, mono = true).apply {
             setTextIsSelectable(true)
             setPadding(0, Theme.dp(this@LogDetailActivity, 4), 0, 0)
         })

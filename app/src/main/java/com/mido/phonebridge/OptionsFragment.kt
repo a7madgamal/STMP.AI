@@ -15,6 +15,7 @@ import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.PluginInventoryView
 
 /**
  * Device-level PREFERENCES — not security decisions.
@@ -37,25 +38,16 @@ class OptionsFragment : BridgeFragment() {
     private lateinit var logView: TextView
 
     private lateinit var container: LinearLayout
+    private lateinit var updatesSection: com.mido.phonebridge.ui.UpdatesSection
+    private lateinit var pluginInventory: PluginInventoryView
 
-    /**
-     * Work to run when this screen comes back to the front.
-     *
-     * The install-permission dialog sends the human to Android settings and tells them the install
-     * will carry on when they return. Without this the dialog would be making a promise the code
-     * does not keep — and they would land back on a row that still says "install" with no way to
-     * tell whether their trip to settings worked.
-     *
-     * `onResume` is the right hook: returning from another activity re-enters it, and the permission
-     * check is re-run on the way through, so a refusal that is still refused stays a dialog rather
-     * than looping silently.
-     */
-    private var pendingAfterResume: (() -> Unit)? = null
+    /** Android Settings only changes these on a trip away from the tab. */
+    private var accessSignature = ""
 
     // This screen IS the Settings tab. It inherits the bar and the insets from BridgeScreen,
     // which also carries the `ApprovalGate.relaunchCurrent` call that MainActivity used to own —
     // sitting here while a request was pending used to strand the modal off-screen.
-    override val tab = Theme.Tab.SETTINGS
+    override val tab = Theme.Tab.PREFERENCES
 
     override fun buildContent(container: LinearLayout) {
         this.container = container
@@ -80,22 +72,38 @@ class OptionsFragment : BridgeFragment() {
         // Cheap and safe: `render()` rebuilds the container wholesale, and it does not own a
         // control whose press could be interrupted — that hazard is why Home rebuilds its update
         // section separately rather than inside render().
-        render()
-
-        val pending = pendingAfterResume ?: return
-        pendingAfterResume = null
-        // Posted, not called inline: this runs during the fragment's resume, and the pending
-        // action may open another dialog or start a download, both of which want a settled frame
-        // first. Calling inline produced "commit already called" style errors in similar screens.
-        container.post(pending)
+        // Rebuilding this View would lose UpdatesSection's return-from-permission continuation.
+        // Keep its identity unless a device-access state actually changed on the trip away.
+        val access = accessSignature()
+        if (access != accessSignature) {
+            render()
+            accessSignature = access
+        }
+        if (::updatesSection.isInitialized) updatesSection.resume()
+        if (::pluginInventory.isInitialized) pluginInventory.resume()
     }
+
+    private fun accessSignature(): String = listOf(
+        ApprovalGate.canUseFullScreenIntent(ctx),
+        com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx),
+        com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx),
+        SecretVault.isUnlocked(),
+    ).joinToString("|")
 
     private fun render() {
         container.removeAllViews()
 
-        container.addView(Theme.text(ctx, "OPTIONS", 20f).apply {
+        container.addView(Theme.text(ctx, "Preferences", Theme.TEXT_TITLE_SP).apply {
             typeface = Theme.handFont(ctx)
         })
+        container.addView(Theme.text(
+            ctx, "Capabilities and app behavior. Tap a capability row to open its settings.",
+            Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT,
+        ))
+
+        // The actual plugin inventory lives here, not behind a second Plugins destination.
+        pluginInventory = PluginInventoryView(ctx, this)
+        container.addView(pluginInventory)
 
         val store = PolicyStore.from(requireContext())
         val policy = try {
@@ -112,12 +120,8 @@ class OptionsFragment : BridgeFragment() {
             return
         }
 
-        // --- BRIDGE: how the server behaves ---
-        container.addView(Theme.sectionHeader(ctx, "Bridge"))
-
-        // --- auto-start ---
-        container.addView(
-            toggleRow(
+        // --- SYSTEM: how the bridge and device behave ---
+        pluginInventory.add("System", toggleRow(
                 title = "Auto-start on boot",
                 state = if (policy.autoStartOnBoot) "ON" else "OFF",
                 detail = if (policy.autoStartOnBoot) {
@@ -138,8 +142,7 @@ class OptionsFragment : BridgeFragment() {
         // Mido, 2026-11-04: *"add option to toggle sound effects, should be enabled by default"*.
         // It sits with the bridge because it is a property of the APP, not of any plugin: it gates
         // the approval crease and the tab switch, both of which are the app's own voice.
-        container.addView(
-            toggleRow(
+        pluginInventory.add("System", toggleRow(
                 title = "Sound effects",
                 state = if (policy.soundEffects) "ON" else "OFF",
                 detail = if (policy.soundEffects) {
@@ -158,37 +161,41 @@ class OptionsFragment : BridgeFragment() {
         // asked, and how you prove it — so splitting them across two screens meant neither could
         // be reasoned about in full.
 
-        container.addView(Theme.sectionHeader(ctx, "AI"))
+        pluginInventory.add("AI", aiSummariesBlock(store, policy))
 
-        // AI summaries: one toggle, then two radio cards when on. The model row is gone — its
-        // content is the on-device card's own state line, because two places showing the same
-        // fact is how they drift apart.
-        container.addView(aiSummariesBlock(store, policy))
+        pluginInventory.add("Approval & exceptions", Theme.statusRow(ctx,
+            "Approval mode & fingerprint", "Edit the same live controls shown on Home; no second policy state.",
+            Theme.ACCENT, onClick = { (activity as? MainActivity)?.openTab(Theme.Tab.HOME) },
+        ))
+        pluginInventory.add("Approval & exceptions", Theme.statusRow(ctx,
+            "Exceptions", "Choose how individual capabilities ask for approval.",
+            Theme.ACCENT, onClick = { go(Intent(ctx, ExceptionsActivity::class.java)) },
+        ))
+        pluginInventory.add("System", Theme.sectionHeader(ctx, "Callers"))
+        pluginInventory.add("System", callerRows())
+        pluginInventory.add("System", Theme.text(ctx,
+            "These are caller identities, not approval rules. Use Exceptions to change when you are asked.",
+            Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+        ))
 
         // Speak used to be configured here. It now lives on the plugin that owns it — Plugins →
         // Speak — so the settings sit with the routes they govern instead of in a second list
         // that had to be kept in step by hand.
 
-        container.addView(Theme.sectionHeader(ctx, "Permissions"))
-
-        // These five rows came OFF Home (Mido, 2026-11-03: *"rethink each button screen"*).
-        // They are device and service state, not live answers about whether the bridge is
-        // running — which is the one question Home now answers. Kept in the same order the
-        // right-hand bracket in Mido's drawing ran down the screen.
-        container.addView(Theme.statusRow(ctx, "Lock-screen popup",
+        pluginInventory.add("System", Theme.statusRow(ctx, "Lock-screen popup",
             if (ApprovalGate.canUseFullScreenIntent(ctx)) "granted (wakes a locked screen)"
             else "optional — tap if approvals miss on a locked screen",
             if (ApprovalGate.canUseFullScreenIntent(ctx)) Theme.SUCCESS
             else Theme.ON_SURFACE_VARIANT,
             onClick = { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(ctx) }
         ))
-        container.addView(Theme.statusRow(ctx, "Draw over apps",
+        pluginInventory.add("System", Theme.statusRow(ctx, "Draw over apps",
             if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx)) "granted" else "tap to grant",
             if (com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx)) Theme.SUCCESS
             else Theme.WARNING,
             onClick = { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(ctx) }
         ))
-        container.addView(Theme.statusRow(ctx, "Battery optimization",
+        pluginInventory.add("System", Theme.statusRow(ctx, "Battery optimization",
             if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) "exempt"
             else "tap to allow background",
             if (com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) Theme.SUCCESS
@@ -197,58 +204,37 @@ class OptionsFragment : BridgeFragment() {
         ))
         // The vault: locked on every new process, one scan opens it for the session. Shown here
         // because a locked vault is why a secret call answers `secret_locked`.
-        container.addView(Theme.statusRow(ctx, "Secret vault",
+        pluginInventory.add("System", Theme.statusRow(ctx, "Secret vault",
             if (SecretVault.isUnlocked()) "unlocked (this session)" else "locked — tap to unlock",
             if (SecretVault.isUnlocked()) Theme.SUCCESS else Theme.WARNING,
             onClick = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
         ))
-        // --- TOOLS: the destinations that are not tabs ---
-        container.addView(Theme.sectionHeader(ctx, "Tools"))
-        container.addView(toolRow("Request log") {
-            go(Intent(ctx, LogActivity::class.java))
-        })
-        container.addView(toolRow("Exceptions") {
-            go(Intent(ctx, ExceptionsActivity::class.java))
-        })
-        container.addView(toolRow("SSH") {
-            go(Intent(ctx, SshActivity::class.java))
+        // Request history belongs to Activity. SSH stays in its plugin's existing add flow.
+        pluginInventory.add("Developer", toolRow("Diagnostics") {
+            go(Intent(ctx, PluginDetailActivity::class.java).apply {
+                putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "debug")
+            })
         })
 
-        // --- DEBUG ---
-        container.addView(Theme.sectionHeader(ctx, "Debug"))
-        container.addView(Theme.button(ctx, "SHOW LOG", Theme.ButtonStyle.GHOST) {
+        // --- DEVELOPER ---
+        pluginInventory.add("Developer", Theme.button(ctx, "SHOW LOG", Theme.ButtonStyle.GHOST) {
             DebugLogOpen.open = !DebugLogOpen.open
             logView.visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
         })
         logView = TextView(ctx).apply {
-            textSize = 12f
+            textSize = Theme.TEXT_CAPTION_SP
             setTextColor(Theme.ON_SURFACE_VARIANT)
-            typeface = android.graphics.Typeface.MONOSPACE
+            typeface = Theme.monoFont(ctx)
             setTextIsSelectable(true)
             visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
             text = Debug.dump()
         }
-        container.addView(logView)
+        pluginInventory.add("Developer", logView)
 
-        // --- CALLERS: who may reach the bridge at all ---
-        container.addView(Theme.sectionHeader(ctx, "Callers"))
-
-        // --- who may reach the bridge ---
-        //
-        // Not a preference: an unnamed address is REFUSED, so this list is the allow rule. It is
-        // visible and editable because a block you cannot undo without hand-editing JSON is a
-        // trap, and because a misheard name should be fixable without a rebuild.
-        container.addView(callerRows())
-
-        container.addView(Theme.spacer(ctx, 16))
-        container.addView(
-            Theme.text(
-                ctx,
-                "These are preferences, not gate rules. To change WHEN you are asked, use " +
-                    "EXCEPTIONS.",
-                12f, Theme.ON_SURFACE_VARIANT
-            )
-        )
+        updatesSection = com.mido.phonebridge.ui.UpdatesSection(ctx, this)
+        pluginInventory.add("About & updates", updatesSection)
+        pluginInventory.arrange()
+        accessSignature = accessSignature()
     }
 
     /**
@@ -308,7 +294,7 @@ class OptionsFragment : BridgeFragment() {
                 com.mido.phonebridge.callers.CallerState.Denied -> Theme.DANGER
             }
             row.addView(
-                Theme.text(ctx, "$label · ${entry.ip}", 14f, colour).apply { isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END }.apply {
+                Theme.text(ctx, "$label · ${entry.ip}", Theme.TEXT_BODY_SP, colour).apply { isSingleLine = true; ellipsize = android.text.TextUtils.TruncateAt.END }.apply {
                     layoutParams = LinearLayout.LayoutParams(
                         0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                     )
@@ -361,7 +347,7 @@ class OptionsFragment : BridgeFragment() {
             setPadding(0, Theme.dp(ctx, 12), 0, 0)
         }
         row.addView(
-            Theme.text(ctx, label, 13f, Theme.ON_SURFACE)
+            Theme.text(ctx, label, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE)
         )
         val field = EditText(ctx).apply {
             setText(value)
@@ -377,8 +363,8 @@ class OptionsFragment : BridgeFragment() {
             setTextColor(Theme.ON_SURFACE)
             setHintTextColor(Theme.ON_SURFACE_VARIANT)
             highlightColor = Theme.ACCENT
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 14f
+            typeface = Theme.monoFont(ctx)
+            textSize = Theme.TEXT_BODY_SP
             background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
             setPadding(
                 Theme.dp(ctx, 12), Theme.dp(ctx, 10),
@@ -387,11 +373,11 @@ class OptionsFragment : BridgeFragment() {
         }
         row.addView(field)
         row.addView(
-            Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
+            Theme.text(ctx, detail, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
         )
-        val error = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
+        val error = Theme.text(ctx, "", Theme.TEXT_CAPTION_SP, Theme.DANGER).apply {
             setPadding(0, Theme.dp(ctx, 6), 0, 0)
             visibility = android.view.View.GONE
         }
@@ -464,7 +450,7 @@ class OptionsFragment : BridgeFragment() {
         }
         header.addView(
             Theme.text(ctx, "AI summaries", 16f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(ctx)
+                typeface = Theme.bodyFont(ctx)
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
@@ -585,8 +571,8 @@ class OptionsFragment : BridgeFragment() {
         row.addView(Theme.radioDot(ctx, selected))
         val text = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            addView(Theme.text(ctx, title, 15f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(ctx)
+            addView(Theme.text(ctx, title, Theme.TEXT_BODY_SP, Theme.ON_SURFACE).apply {
+                typeface = Theme.bodyFont(ctx)
             })
             addView(
                 Theme.text(
@@ -708,8 +694,8 @@ class OptionsFragment : BridgeFragment() {
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
         header.addView(
-            Theme.text(ctx, title, 15f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(ctx)
+            Theme.text(ctx, title, Theme.TEXT_BODY_SP, Theme.ON_SURFACE).apply {
+                typeface = Theme.bodyFont(ctx)
                 layoutParams = LinearLayout.LayoutParams(
                     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
                 )
@@ -724,10 +710,10 @@ class OptionsFragment : BridgeFragment() {
         // wrong the moment anyone made the callback asymmetrical.
         header.addView(Theme.toggle(ctx, state == "ON") { want ->
             if (want != (state == "ON")) onToggle()
-        })
+        }.apply { setAccessibilityLabel(title) })
         block.addView(header)
         block.addView(
-            Theme.text(ctx, detail, 12f, Theme.ON_SURFACE_VARIANT).apply {
+            Theme.text(ctx, detail, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(ctx, 6), 0, 0)
             }
         )
@@ -830,8 +816,8 @@ class OptionsFragment : BridgeFragment() {
                 setTextColor(Theme.ON_SURFACE)
                 setHintTextColor(Theme.ON_SURFACE_VARIANT)
                 highlightColor = Theme.ACCENT
-                typeface = android.graphics.Typeface.MONOSPACE
-                textSize = 14f
+                typeface = Theme.monoFont(ctx)
+                textSize = Theme.TEXT_BODY_SP
                 background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
                 setPadding(
                     Theme.dp(ctx, 12), Theme.dp(ctx, 10),
@@ -842,7 +828,7 @@ class OptionsFragment : BridgeFragment() {
             // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
             // route fail, and saving it would hide the mistake behind a "not reachable" that
             // looks like the server's fault rather than the address's.
-            val errorLine = Theme.text(ctx, "", 12f, Theme.DANGER).apply {
+            val errorLine = Theme.text(ctx, "", Theme.TEXT_CAPTION_SP, Theme.DANGER).apply {
                 setPadding(0, Theme.dp(ctx, 6), 0, 0)
                 visibility = android.view.View.GONE
             }
@@ -881,8 +867,8 @@ class OptionsFragment : BridgeFragment() {
                 setTextColor(Theme.ON_SURFACE)
                 setHintTextColor(Theme.ON_SURFACE_VARIANT)
                 highlightColor = Theme.ACCENT
-                typeface = android.graphics.Typeface.MONOSPACE
-                textSize = 14f
+                typeface = Theme.monoFont(ctx)
+                textSize = Theme.TEXT_BODY_SP
                 background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
                 setPadding(
                     Theme.dp(ctx, 12), Theme.dp(ctx, 10),
@@ -904,7 +890,7 @@ class OptionsFragment : BridgeFragment() {
             // unknown tag with its loaded default instead of failing, so a wrong name is not an
             // error a human sees — it is a silent substitution.
             body.addView(
-                Theme.text(ctx, "Model", 13f, Theme.ON_SURFACE)
+                Theme.text(ctx, "Model", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE)
                     .apply {
                         setPadding(
                             0, Theme.dp(ctx, 14), 0,

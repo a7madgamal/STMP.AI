@@ -103,6 +103,15 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(root)
 
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (currentTab != Theme.Tab.HOME) show(Theme.Tab.HOME) else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
         // Restore across a config change or process death, then honour a tab requested by a
         // caller (a notification tap, or a non-tab screen asking to leave).
         val wanted = savedInstanceState?.getString(STATE_TAB)
@@ -191,12 +200,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Swap the visible fragment.
-     *
-     * `replace`, not `add`/`hide`. `hide` leaves a fragment `RESUMED`, so Home's 5s repaint tick
-     * would keep firing while Plugins is on screen — an invisible timer rebuilding a screen
-     * nobody is looking at, which is the same family of bug that ate taps for three releases.
-     * Losing scroll position is the cheaper cost, and it is visible rather than silent.
+     * Home + Activity + Preferences: app health, request activity, configuration.
+     * Plugins and Settings remain accepted legacy intent aliases.
      */
     /** Whether the app should make its own sounds. Unreadable policy means quiet, not noisy. */
     private fun soundEffectsOn(): Boolean = try {
@@ -213,21 +218,23 @@ class MainActivity : AppCompatActivity() {
             Debug.log("tab switch to $tab ignored: state already saved")
             return
         }
-        currentTab = tab
-        val fragment: Fragment = when (tab) {
-            Theme.Tab.HOME -> HomeFragment()
-            Theme.Tab.PLUGINS -> PluginsFragment()
-            Theme.Tab.SETTINGS -> OptionsFragment()
-        }
-        // Read BEFORE `currentTab` is reassigned below; otherwise this is always false.
         val changing = currentTab != tab
-        supportFragmentManager.beginTransaction()
-            .replace(CONTAINER_ID, fragment)
-            // No transition: the point of this whole change is that switching tabs does not
-            // animate. A default cross-fade here would reintroduce exactly the movement the
-            // migration exists to remove.
-            .setTransition(androidx.fragment.app.FragmentTransaction.TRANSIT_NONE)
-            .commitNow()
+        currentTab = tab
+        val tag = "tab-${tab.name}"
+        val fragment = supportFragmentManager.findFragmentByTag(tag) ?: when (tab) {
+            Theme.Tab.HOME -> HomeFragment()
+            Theme.Tab.ACTIVITY -> ActivityFragment()
+            Theme.Tab.PREFERENCES -> OptionsFragment()
+        }
+        supportFragmentManager.beginTransaction().apply {
+            supportFragmentManager.fragments.forEach {
+                hide(it)
+                setMaxLifecycle(it, androidx.lifecycle.Lifecycle.State.STARTED)
+            }
+            if (!fragment.isAdded) add(CONTAINER_ID, fragment, tag) else show(fragment)
+            setMaxLifecycle(fragment, androidx.lifecycle.Lifecycle.State.RESUMED)
+            setTransition(androidx.fragment.app.FragmentTransaction.TRANSIT_NONE)
+        }.commitNow()
         rebuildBar(tab)
 
         // **The same paper-crease as the approval modal.**
@@ -284,16 +291,37 @@ class MainActivity : AppCompatActivity() {
 
     /** Whatever screen is on screen, for a repaint request that comes from the shell. */
     private fun visibleFragment(): BridgeFragment? =
-        supportFragmentManager.findFragmentById(CONTAINER_ID) as? BridgeFragment
+        supportFragmentManager.findFragmentByTag("tab-${currentTab.name}") as? BridgeFragment
 
     /** An unknown tab name falls back to Home: a wrong tab is recoverable, a crash on launch is not. */
-    private fun tabNamed(name: String): Theme.Tab? =
-        Theme.Tab.entries.firstOrNull { it.name == name }
+    private fun tabNamed(name: String): Theme.Tab? = when (name) {
+        "PLUGINS", "SETTINGS" -> Theme.Tab.PREFERENCES
+        else -> Theme.Tab.entries.firstOrNull { it.name == name }
+    }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        // A tab requested while this Activity is already the top of its task.
-        intent.getStringExtra(Tabs.EXTRA_TAB)?.let(::tabNamed)?.let(::show)
+    fun openTab(tab: Theme.Tab) {
+        if (currentTab != tab) show(tab)
+    }
+
+    private val pendingListener: (List<PendingDecisionSnapshot>) -> Unit = { pending ->
+        setPendingCount(pending.size)
+        (visibleFragment() as? HomeFragment)?.renderPending(pending)
+        (visibleFragment() as? ActivityFragment)?.renderPending(pending)
+    }
+
+    fun setPendingCount(count: Int) {
+        bottomBar?.setPendingCount(count)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        PendingDecisionChanges.attach(this, pendingListener)
+        container.post { refreshPending() }
+    }
+
+    override fun onStop() {
+        PendingDecisionChanges.detach(this)
+        super.onStop()
     }
 
     override fun onResume() {
@@ -301,6 +329,18 @@ class MainActivity : AppCompatActivity() {
         // An approval prompt lives in its own task, so returning to the app lands here. Without
         // this the modal stays stranded off-screen until its window expires.
         ApprovalGate.relaunchCurrent(this)
+        container.post { refreshPending() }
+    }
+
+    private fun refreshPending() {
+        pendingListener(ApprovalGate.pendingSnapshots() +
+            com.mido.phonebridge.notify.NotifyOverlay.pendingSnapshots())
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // A tab requested while this Activity is already the top of its task.
+        intent.getStringExtra(Tabs.EXTRA_TAB)?.let(::tabNamed)?.let(::show)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

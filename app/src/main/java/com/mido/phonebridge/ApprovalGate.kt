@@ -399,6 +399,36 @@ object ApprovalGate {
      */
     fun waitingBehindCurrent(): Int = synchronized(this) { (queue.size - 1).coerceAtLeast(0) }
 
+    /** Notify after membership settles. Never called under the gate lock. */
+    private fun publishPending() {
+        PendingDecisionChanges.publish(pendingSnapshots() +
+            com.mido.phonebridge.notify.NotifyOverlay.pendingSnapshots())
+    }
+
+    /** Display-only copies, FIFO. Never exposes a Pending, latch or resolver. */
+    fun pendingSnapshots(): List<PendingDecisionSnapshot> = synchronized(this) {
+        queue.map { pending ->
+            PendingDecisionSnapshot(
+                id = "secure-${pending.requestId}",
+                caller = pending.view?.requester?.ifBlank { pending.remote } ?: pending.remote,
+                action = pending.view?.actionLabel?.ifBlank { pending.summary } ?: pending.summary,
+                endpoint = pending.endpoint,
+                verb = endpointVerb(pending.endpoint),
+                state = if (current?.requestId == pending.requestId) "On the approval sheet" else "Waiting in line",
+                enqueuedAtMs = pending.createdAtMs,
+                awaitingSinceMs = pending.createdAtMs,
+            )
+        }
+    }
+
+    private fun endpointVerb(endpoint: String): String = when {
+        endpoint.startsWith("GET ") -> "Read"
+        endpoint.startsWith("DELETE ") -> "Delete"
+        endpoint.startsWith("POST ") || endpoint.startsWith("PUT ") ||
+            endpoint.startsWith("PATCH ") -> "Write"
+        else -> "Request"
+    }
+
     /** How many requests are waiting behind the one on screen (0 when none). */
     private fun waitingBehind(): Int = waitingBehindCurrent()
 
@@ -605,6 +635,7 @@ object ApprovalGate {
             }
         }
         // Only the request that became head posts. Everyone waits on their latch.
+        publishPending()
         try {
             if (shouldPost) {
                 postApprovalNotification(ctx, pending)
@@ -666,6 +697,7 @@ object ApprovalGate {
             if (next != null) {
                 postApprovalNotification(ctx, next)
             }
+            publishPending()
         }
     }
 

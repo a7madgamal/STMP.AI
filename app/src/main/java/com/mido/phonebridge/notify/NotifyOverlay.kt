@@ -163,6 +163,7 @@ object NotifyOverlay {
         val id: Long,
         val summary: String,
         val label: String,
+        val callerLabel: String,
         /** What the request would DO. Drives the coloured badge, nothing else. */
         val verb: Verb,
         val windowMs: Long,
@@ -176,7 +177,8 @@ object NotifyOverlay {
         val needsAi: Boolean,
         /** How long the fetch may take before the clock starts regardless. */
         val fetchCapMs: Long,
-        val onOutcome: (Outcome) -> Unit
+        val onOutcome: (Outcome) -> Unit,
+        val enqueuedAt: Long = System.currentTimeMillis(),
     ) {
         /** True once a result has been reported. Guards the tap-versus-timer race. */
         var settled = false
@@ -231,6 +233,27 @@ object NotifyOverlay {
 
     }
 
+    private fun publishPending() {
+        com.mido.phonebridge.PendingDecisionChanges.publish(
+            com.mido.phonebridge.ApprovalGate.pendingSnapshots() + pendingSnapshots()
+        )
+    }
+
+    /** Immutable display-only copies; no Entry or outcome callback escapes. */
+    fun pendingSnapshots(): List<com.mido.phonebridge.PendingDecisionSnapshot> =
+        queue.snapshot { entry, onScreen ->
+            com.mido.phonebridge.PendingDecisionSnapshot(
+                id = "notify-${entry.id}",
+                caller = entry.callerLabel,
+                action = entry.summary,
+                endpoint = entry.facts?.routeLabel ?: entry.label,
+                verb = entry.verb.name,
+                state = if (onScreen) "On the hint card" else "Waiting in line",
+                enqueuedAtMs = entry.enqueuedAt,
+                awaitingSinceMs = entry.enqueuedAt,
+            )
+        }
+
     /**
      * Where the card sits, remembered across cards so a drag sticks: y is measured UP
      * from the bottom edge (the card is bottom-anchored). [Int.MIN_VALUE] means "not
@@ -262,11 +285,12 @@ object NotifyOverlay {
         facts: RequestFacts?,
         needsAi: Boolean,
         fetchCapMs: Long,
+        callerLabel: String = "Caller",
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
             val entry = Entry(
-                ctx.applicationContext, id, summary, label, verb, windowMs, facts, needsAi,
+                ctx.applicationContext, id, summary, label, callerLabel, verb, windowMs, facts, needsAi,
                 fetchCapMs, onOutcome
             )
             when (val admission = queue.admit(entry)) {
@@ -279,6 +303,7 @@ object NotifyOverlay {
                     "line full: ${admission.ahead} prompt(s) ahead; refused without showing"
                 )
             }
+            publishPending()
         }
     }
 
@@ -380,9 +405,9 @@ object NotifyOverlay {
             text = verbShort(entry.verb)
             // Was 9sp: unreadable on a phone at arm's length, and this badge carries the ONE
             // word that says what the request does. 12sp is the app's floor.
-            textSize = 12f
+            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
             setTextColor(BADGE_TEXT)
-            setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
+            setTypeface(com.mido.phonebridge.ui.Theme.bodyFont(ctx))
             gravity = Gravity.CENTER
             background = com.mido.phonebridge.ui.Theme.sheetDp(ctx, verbColor(entry.verb), 4)
             setPadding(dp(5), dp(1), dp(5), dp(1))
@@ -399,11 +424,11 @@ object NotifyOverlay {
         // targets the local instead.
         val summaryView = TextView(ctx).apply {
             text = entry.summary
-            textSize = 13f
+            textSize = com.mido.phonebridge.ui.Theme.TEXT_DETAIL_SP
             setTextColor(TEXT)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setTypeface(com.mido.phonebridge.ui.Theme.handFont(ctx))
+            setTypeface(com.mido.phonebridge.ui.Theme.bodyFont(ctx))
         }
         row.addView(summaryView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
 
@@ -420,7 +445,7 @@ object NotifyOverlay {
         // keeps the full-card drain it already had.
         val close = TextView(ctx).apply {
             text = "✕"
-            textSize = 12f
+            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
             setTextColor(MUTED)
             gravity = Gravity.CENTER
             isClickable = true
@@ -439,7 +464,7 @@ object NotifyOverlay {
         val aiLine = TextView(ctx).apply {
             text = if (entry.facts != null) "◌ summarising…" else ""
             // Was 10sp for the same reason; 12sp is the floor.
-            textSize = 12f
+            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
             setTextColor(MUTED)
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -642,6 +667,7 @@ object NotifyOverlay {
             Log.w(TAG, "overlay refused for id=${entry.id}: ${e.message}")
             queue.retire(entry.id)
             reply(entry, Reason.UNAVAILABLE, e.message ?: "overlay unavailable")
+            publishPending()
             promoteNext()
             return
         }
@@ -927,6 +953,7 @@ object NotifyOverlay {
 
         // Retire now so ordering is correct even while the fade-out runs.
         queue.retire(entry.id)
+        publishPending()
 
         // A card that never attached has no view to fade or remove.
         val card = entry.root
@@ -1134,6 +1161,7 @@ object NotifyOverlay {
         // for the head of the queue would otherwise re-present a card that is already attached —
         // which attaches a SECOND window and orphans the first. The guard in `present` stops the
         // damage; this stops the attempt, so the log stays honest about what happened.
+        publishPending()
         if (next.root != null) return
         present(next)
     }
@@ -1146,6 +1174,7 @@ object NotifyOverlay {
     fun dismissAll() {
         main.post {
             for (entry in queue.clear()) {
+                publishPending()
                 entry.tick?.let(main::removeCallbacks)
                 entry.timeout?.let(main::removeCallbacks)
                 if (!entry.settled) {
@@ -1223,6 +1252,14 @@ object NotifyOverlay {
             }
         }
         overlay.onFinished = { finish() }
+        overlay.reducedMotion = com.mido.phonebridge.ui.PaperMotion.reducedMotion(ctx)
+        overlay.onImpact = {
+            try {
+                com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
+            } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
+                Log.e(TAG, "STAMP SOUND FAILED: ${e.message}", e)
+            }
+        }
         // The deadline, posted before the window is even added so no ordering can skip it.
         // Longer than the stamp's own ~740ms sequence, short enough that a stamp which failed to
         // start does not sit over the screen.
@@ -1234,12 +1271,8 @@ object NotifyOverlay {
         }, STAMP_BACKSTOP_MS)
         try {
             wm(ctx).addView(overlay, lp)
-            // Reported, not substituted: no beep, no silence-by-accident.
-            try {
-                com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
-            } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
-                Log.e(TAG, "STAMP SOUND FAILED: ${e.message}", e)
-            }
+            // The impact callback owns the synchronized sound. Firing it here as well would
+            // play the same thud twice: once before contact and once on contact.
             overlay.stamp(
                 if (approved) com.mido.phonebridge.ui.StampOverlay.Verdict.APPROVED
                 else com.mido.phonebridge.ui.StampOverlay.Verdict.DENIED

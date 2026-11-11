@@ -46,10 +46,10 @@ class LogActivity : Activity() {
         }
 
         root.addView(Theme.text(this, "Request log", 22f).apply {
-            typeface = Theme.handFont(this@LogActivity)
+            typeface = Theme.bodyFont(this@LogActivity)
         })
 
-        summaryLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
+        summaryLine = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, Theme.dp(this@LogActivity, 4), 0, Theme.dp(this@LogActivity, 8))
         }
         root.addView(summaryLine)
