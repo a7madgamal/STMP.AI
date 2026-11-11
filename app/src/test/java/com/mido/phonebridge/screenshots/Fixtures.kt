@@ -245,6 +245,70 @@ object Fixtures {
         store.set(rules.fold(store.get()) { p, r -> p.withRule(r) })
     }
 
+    // --- WP07: Settings -----------------------------------------------------------------------
+
+    private const val LISTENER = "com.mido.phonebridge/com.mido.phonebridge.NotifListenerService"
+
+    /** A sparse file of [length] bytes where the on-device model lives, or none when null. */
+    fun modelFile(length: Long?) {
+        val f = com.mido.phonebridge.ai.ModelRegistry.modelFile(app)
+        f.parentFile?.mkdirs()
+        f.delete()
+        if (length != null) java.io.RandomAccessFile(f, "rw").use { it.setLength(length) }
+    }
+
+    fun provisioner(running: Boolean, progress: com.mido.phonebridge.ai.ModelProvisioner.Progress?, lastError: String) =
+        com.mido.phonebridge.ai.ModelProvisioner.setStateForTest(running, progress, lastError)
+
+    /** Notification access: [granted] in Android settings, [connected] when the listener service is bound. */
+    fun notificationListener(granted: Boolean, connected: Boolean) {
+        android.provider.Settings.Secure.putString(
+            app.contentResolver, "enabled_notification_listeners", if (granted) LISTENER else "",
+        )
+        BridgeService.listenerRef =
+            if (connected) Robolectric.setupService(NotifListenerService::class.java) else null
+    }
+
+    fun systemAccess(overlay: Boolean, batteryExempt: Boolean, postNotifications: Boolean, phoneDnd: Boolean) {
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(overlay)
+        val pm = app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        shadowOf(pm).setIgnoringBatteryOptimizations(app.packageName, batteryExempt)
+        val shadow = shadowOf(app)
+        if (postNotifications) shadow.grantPermissions(POST_NOTIFICATIONS) else shadow.denyPermissions(POST_NOTIFICATIONS)
+        val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        shadowOf(nm).setNotificationPolicyAccessGranted(true)
+        nm.setInterruptionFilter(
+            if (phoneDnd) android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY
+            else android.app.NotificationManager.INTERRUPTION_FILTER_ALL,
+        )
+    }
+
+    fun autoStartAndSound(autoStart: Boolean, sound: Boolean) {
+        val store = PolicyStore.from(app)
+        store.set(store.get().withAutoStartOnBoot(autoStart).withSoundEffects(sound))
+    }
+
+    fun externalModel(url: String, model: String, dialect: com.mido.phonebridge.policy.ExternalDialect?) {
+        val store = PolicyStore.from(app)
+        var p = store.get().withAiBackend(com.mido.phonebridge.policy.AiBackend.EXTERNAL).withAiExternalUrl(url)
+        if (dialect != null) p = p.withAiExternalModel(model, dialect)
+        store.set(p)
+    }
+
+    /** Bytes no JSON parser accepts where the caller registry lives. */
+    fun callersUnreadable() {
+        val dir = File(app.filesDir, "callers").apply { mkdirs() }
+        File(dir, "callers.json").writeText("not json {{{")
+        dropSingletons()
+    }
+
+    fun resetSettings() {
+        runCatching { com.mido.phonebridge.ai.ModelRegistry.modelFile(app).delete() }
+        com.mido.phonebridge.ai.ModelProvisioner.setStateForTest(false, null, "")
+        android.provider.Settings.Secure.putString(app.contentResolver, "enabled_notification_listeners", "")
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+    }
+
     // --- everything ----------------------------------------------------------------------------
 
     fun reset() {
@@ -252,6 +316,7 @@ object Fixtures {
         resetAudit()
         resetUpdates()
         resetDebugLog()
+        resetSettings()
         clearPlugins()
         previousZone?.let { TimeZone.setDefault(it) }
         previousZone = null

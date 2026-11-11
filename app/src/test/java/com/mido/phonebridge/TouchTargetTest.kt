@@ -11,6 +11,7 @@ import androidx.core.widget.NestedScrollView
 import com.google.android.material.chip.ChipGroup
 import com.mido.phonebridge.debug.KitHostActivity
 import com.mido.phonebridge.kit.allViews
+import com.mido.phonebridge.screenshots.Fixtures
 import com.mido.phonebridge.screenshots.GateFixtures
 import com.mido.phonebridge.screenshots.KitFixtures
 import com.mido.phonebridge.ui.kit.HoldKey
@@ -137,6 +138,53 @@ class TouchTargetTest(private val fontScale: Float) {
         } finally {
             com.mido.phonebridge.notify.NotifyOverlay.dismissAll()
             shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(3_000))
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    // WP07: the Settings tab in the states that add controls.
+    private val settingsStates: List<Pair<String, () -> Unit>> get() = listOf(
+        "settings/default" to { },
+        "settings/ai_local_ready" to {
+            Fixtures.aiBackend(com.mido.phonebridge.policy.AiBackend.LOCAL)
+            Fixtures.modelFile(com.mido.phonebridge.ai.ModelRegistry.EXPECTED_SIZE)
+        },
+        "settings/ai_local_failed" to {
+            Fixtures.aiBackend(com.mido.phonebridge.policy.AiBackend.LOCAL)
+            Fixtures.provisioner(false, null, "HTTP 503 from huggingface.co")
+        },
+        "settings/ai_remote_ready" to {
+            Fixtures.externalModel("http://192.168.1.9:8888", "qwen3:8b", com.mido.phonebridge.policy.ExternalDialect.entries.first())
+        },
+        "settings/callers_and_log" to {
+            Fixtures.callers(
+                "192.168.1.25" to com.mido.phonebridge.callers.CallerState.Verified("home laptop"),
+                "192.168.1.77" to com.mido.phonebridge.callers.CallerState.Denied,
+            )
+            Fixtures.debugLog(listOf("09:40:00  server started", "09:40:03  GET /help -> 200"))
+        },
+    )
+
+    @Test
+    fun `every enrolled settings state meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, setup) in settingsStates) {
+                Fixtures.dropSingletons()
+                setup()
+                val intent = android.content.Intent(Fixtures.app, com.mido.phonebridge.debug.ScreenshotHostActivity::class.java)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_FRAGMENT, OptionsFragment::class.java.name)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_TAB, com.mido.phonebridge.ui.Theme.Tab.SETTINGS.name)
+                val a = Robolectric.buildActivity(com.mido.phonebridge.debug.ScreenshotHostActivity::class.java, intent).setup().get()
+                shadowOf(Looper.getMainLooper()).idle()
+                // The fragment only: the host's tab bar is the shell's (WP04), not this screen's.
+                val screen = a.supportFragmentManager.fragments.filterIsInstance<OptionsFragment>().first().view as ViewGroup
+                check(screen, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
         }
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }

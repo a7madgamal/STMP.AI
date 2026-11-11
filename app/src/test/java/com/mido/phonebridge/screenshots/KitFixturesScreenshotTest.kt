@@ -31,6 +31,7 @@ import com.mido.phonebridge.ui.kit.StateBlock
 import com.mido.phonebridge.ui.kit.StatusRow
 import com.mido.phonebridge.ui.kit.TabBar
 import com.mido.phonebridge.ui.kit.Tape
+import com.mido.phonebridge.ui.kit.ToggleRow
 import com.mido.phonebridge.ui.kit.TopBar
 import com.mido.phonebridge.ui.kit.VerbChip
 import com.mido.phonebridge.ui.tokens.Type
@@ -348,6 +349,20 @@ object KitFixtures {
             add(KitFixture("kit_punch", "denied_reduced", reduced = true, drive = { view, _ ->
                 (view as PunchView).stamp(PunchView.Verdict.DENIED)
             }, build = punch(PunchView.Verdict.DENIED, true)))
+            // 26 ToggleRow (WP07)
+            val toggleDetail = "A short sound when an approval appears and when you switch tabs."
+            add(KitFixture("kit_toggle_row", "on") { a -> panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, true) {}, ToggleRow.create(a, "Auto-start on boot", toggleDetail, true) {}) })
+            add(KitFixture("kit_toggle_row", "off") { a -> panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, false) {}) })
+            add(KitFixture("kit_toggle_row", "pressed", drive = { view, _ ->
+                val row = (view as ViewGroup).getChildAt(0)
+                touch(row, MotionEvent.ACTION_DOWN, SystemClock.uptimeMillis())
+            }) { a -> panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, false) {}) })
+            add(KitFixture("kit_toggle_row", "focused", drive = { view, _ -> (view as ViewGroup).getChildAt(0).requestFocus() }) { a ->
+                panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, true) {})
+            })
+            add(KitFixture("kit_toggle_row", "disabled") { a ->
+                panelOf(a, ToggleRow.create(a, "Fingerprint for approvals", "No fingerprint is set up on this phone.", false, enabled = false) {})
+            })
             // 24 ObscuredTouchGuard banner
             add(KitFixture("kit_obscured_guard", "banner") { a -> ObscuredTouchGuard.banner(a).also { it.visibility = View.VISIBLE } })
         }

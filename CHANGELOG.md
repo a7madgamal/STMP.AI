@@ -5424,8 +5424,15 @@ devDependencies. `node_modules/` is gitignored.
 - Small keys keep their side padding, so their labels no longer touch the outline.
 - An approval that arrives after a request expired no longer shows APPROVED.
 
-## 0.49.6 (build 302) — 2026-11-12 — CURRENT
+## 0.49.6 (build 302) — 2026-11-12
 - Two-line labels on small keys stay inside the key face instead of touching the outline.
+
+## 0.49.7 (build 303) — 2026-11-12 — CURRENT
+- Settings is redrawn in the new look in light and dark, with the page and every label named Settings.
+- Settings → Permissions now lists Notification access, the permission behind "needs attention", and says what each permission affects.
+- The AI section shows what is wrong in words for every model state, and the re-download dialog quotes the real model size.
+- Fingerprint for approvals is now on by default for new installs, and it can be changed in Settings → Approvals as well as on Home. A phone without a fingerprint keeps it off.
+- The debug log is a mono readout with a copy button, and forgetting a caller asks first and sits clear of the caller's name.
 
 ## Keeping this file honest
 
