@@ -71,11 +71,11 @@ class CallerActivity : FragmentActivity() {
 
         root.addView(
             Theme.text(this, "NEW DEVICE", 20f).apply {
-                typeface = Theme.handFont(this@CallerActivity)
+                typeface = Theme.bodyFont(this@CallerActivity)
             }
         )
         root.addView(
-            Theme.text(this, ip, 15f, Theme.WARNING, mono = true).apply {
+            Theme.text(this, ip, Theme.TEXT_BODY_SP, Theme.WARNING, mono = true).apply {
                 setPadding(0, Theme.dp(this@CallerActivity, 8), 0, 0)
             }
         )
@@ -122,7 +122,7 @@ class CallerActivity : FragmentActivity() {
             ).apply { topMargin = Theme.dp(this@CallerActivity, 18) }
         )
 
-        status = Theme.text(this, "", 12f, Theme.ON_SURFACE_VARIANT).apply {
+        status = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, Theme.dp(this@CallerActivity, 10), 0, 0)
         }
         root.addView(status)

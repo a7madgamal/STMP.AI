@@ -22,10 +22,10 @@ class TypographyTest {
     private val root = File("src/main/java/com/mido/phonebridge")
 
     /**
-     * Below this, text is unreadable at normal phone distance. 12sp is the scale's floor; this
-     * test enforces it rather than trusting that the previous sweep stayed swept.
+     * 13sp is the scale's floor; supporting text may be smaller than body copy but never tiny.
+     * guard enforces it rather than trusting that the previous sweep stayed swept.
      */
-    private val floorSp = 12.0
+    private val floorSp = 13.0
 
     @Test
     fun `no text renders below the floor`() {

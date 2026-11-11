@@ -58,7 +58,7 @@ class SecretsActivity : Activity() {
         scroll.addView(content)
 
         header = TextView(this).apply {
-            textSize = 13f
+            textSize = Theme.TEXT_DETAIL_SP
             setTextColor(Theme.ON_SURFACE_VARIANT)
         }
         content.addView(header)
@@ -244,7 +244,7 @@ class SecretsActivity : Activity() {
 
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
         text = "$title\n$detail"
-        textSize = 15f
+        textSize = Theme.TEXT_BODY_SP
         setTextColor(Theme.ON_SURFACE)
         setPadding(Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10),
             Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10))
@@ -264,7 +264,7 @@ class SecretsActivity : Activity() {
     private fun linkLine(url: String, onClick: () -> Unit): android.widget.TextView =
         TextView(this).apply {
             text = url
-            textSize = 13f
+            textSize = Theme.TEXT_DETAIL_SP
             setTextColor(Theme.ACCENT)
             paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
             // A long URL must WRAP, not be split mid-token by hyphenation: a broken URL cannot be

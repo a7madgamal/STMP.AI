@@ -88,6 +88,16 @@ STMP's own.
 Licensed under the SIL Open Font License, Version 1.1. The full text is in
 `OFL-Handlee.txt`.
 
+**Atkinson Hyperlegible Next** — Copyright 2020–2024 The Atkinson Hyperlegible Next
+Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next).
+Regular and Bold static instances, licensed under the SIL Open Font License 1.1.
+The full text ships at `app/src/main/assets/licenses/atkinson_ofl.txt`.
+
+**JetBrains Mono NL** — Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono). Regular and Bold, licensed under the
+SIL Open Font License 1.1. The full text ships at
+`app/src/main/assets/licenses/jetbrains_mono_ofl.txt`.
+
 ## Audio
 
 **Notification cues** (`cue_ping.ogg`, `cue_chime.ogg`, `cue_alarm.ogg`) — from

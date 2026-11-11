@@ -8,9 +8,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import com.mido.phonebridge.ui.OverflowScrollView
 import com.mido.phonebridge.ui.Theme
 
 /**
@@ -90,7 +90,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
             body = LinearLayout(ctx)
             center = body
         } else {
-            val scroll = ScrollView(ctx).apply { isFillViewport = true }
+            val scroll = OverflowScrollView(ctx)
             body = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(
@@ -100,7 +100,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
                     Theme.dp(ctx, 24),
                 )
             }
-            scroll.addView(body)
+            scroll.setContent(body)
             center = scroll
         }
 

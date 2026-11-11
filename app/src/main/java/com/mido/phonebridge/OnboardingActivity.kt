@@ -76,7 +76,7 @@ class OnboardingActivity : FragmentActivity() {
         }
 
         root.addView(Theme.text(this, "STMP", 26f).apply {
-            typeface = Theme.handFont(this@OnboardingActivity)
+            typeface = Theme.bodyFont(this@OnboardingActivity)
         })
 
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -204,7 +204,7 @@ class OnboardingActivity : FragmentActivity() {
             card {
                 addView(
                     Theme.text(this@OnboardingActivity, "Your keys never leave here", 18f, Theme.ON_SURFACE).apply {
-                        typeface = Theme.handFont(this@OnboardingActivity)
+                        typeface = Theme.bodyFont(this@OnboardingActivity)
                     }
                 )
                 addView(
@@ -239,7 +239,7 @@ class OnboardingActivity : FragmentActivity() {
         for ((group, items) in GROUPS) {
             body.addView(
                 Theme.text(this, group, 17f, Theme.ACCENT).apply {
-                    typeface = Theme.handFont(this@OnboardingActivity)
+                    typeface = Theme.bodyFont(this@OnboardingActivity)
                     setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, Theme.dp(this@OnboardingActivity, 2))
                 }
             )
@@ -349,7 +349,7 @@ class OnboardingActivity : FragmentActivity() {
 
         row.addView(
             Theme.text(this, title, 17f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OnboardingActivity)
+                typeface = Theme.bodyFont(this@OnboardingActivity)
             },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
@@ -368,7 +368,7 @@ class OnboardingActivity : FragmentActivity() {
         card.addView(row)
 
         card.addView(
-            Theme.text(this, why, 14f, Theme.ON_SURFACE_VARIANT).apply {
+            Theme.text(this, why, Theme.TEXT_BODY_SP, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, 0)
             }
         )
@@ -391,12 +391,12 @@ class OnboardingActivity : FragmentActivity() {
         for (mode in GlobalMode.entries) {
             body.addView(
                 Theme.text(this, mode.title, 17f, Theme.ON_SURFACE).apply {
-                    typeface = Theme.handFont(this@OnboardingActivity)
+                    typeface = Theme.bodyFont(this@OnboardingActivity)
                     setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0)
                 }
             )
             body.addView(
-                Theme.text(this, mode.blurb, 15f, Theme.ON_SURFACE_VARIANT).apply {
+                Theme.text(this, mode.blurb, Theme.TEXT_BODY_SP, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0)
                 }
             )
@@ -511,7 +511,7 @@ class OnboardingActivity : FragmentActivity() {
     /** A step heading, large enough to be the thing you read first. */
     private fun heading(text: String): TextView =
         Theme.text(this, text, 24f, Theme.ON_SURFACE).apply {
-            typeface = Theme.handFont(this@OnboardingActivity)
+            typeface = Theme.bodyFont(this@OnboardingActivity)
             setPadding(0, Theme.dp(this@OnboardingActivity, 10), 0, Theme.dp(this@OnboardingActivity, 6))
         }
 
@@ -593,10 +593,10 @@ class OnboardingActivity : FragmentActivity() {
         val text = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(Theme.text(this@OnboardingActivity, title, 17f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OnboardingActivity)
+                typeface = Theme.bodyFont(this@OnboardingActivity)
             })
             addView(
-                Theme.text(this@OnboardingActivity, blurb, 14f, Theme.ON_SURFACE_VARIANT)
+                Theme.text(this@OnboardingActivity, blurb, Theme.TEXT_BODY_SP, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0) }
             )
         }
@@ -620,8 +620,8 @@ class OnboardingActivity : FragmentActivity() {
         setTextColor(Theme.ON_SURFACE)
         setHintTextColor(Theme.ON_SURFACE_VARIANT)
         highlightColor = Theme.ACCENT
-        typeface = android.graphics.Typeface.MONOSPACE
-        textSize = 14f
+        typeface = Theme.monoFont(this@OnboardingActivity)
+        textSize = Theme.TEXT_BODY_SP
         background = Theme.outlined(this@OnboardingActivity, Theme.SURFACE, Theme.RADIUS_CARD)
         setPadding(
             Theme.dp(this@OnboardingActivity, 12), Theme.dp(this@OnboardingActivity, 12),

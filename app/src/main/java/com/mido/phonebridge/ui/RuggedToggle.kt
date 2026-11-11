@@ -4,8 +4,14 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import android.view.KeyEvent
 import android.view.View
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat
+import android.widget.Switch
 
 /**
  * A rugged, grained, rectangular on/off switch.
@@ -26,6 +32,7 @@ import android.view.animation.DecelerateInterpolator
  * **Flat.** No gradient, no drop shadow, no highlight. The texture and the torn edge carry it.
  */
 class RuggedToggle(context: Context) : View(context) {
+    private var accessibilityLabel: CharSequence = "Switch"
 
     // --- geometry, in dp, resolved once ---
 
@@ -114,6 +121,7 @@ class RuggedToggle(context: Context) : View(context) {
         set(value) {
             if (field == value) return
             field = value
+            refreshAccessibilityState()
             knob = null
             invalidate()
         }
@@ -125,17 +133,42 @@ class RuggedToggle(context: Context) : View(context) {
         // hit, and a switch that misses is worse than one that looks slightly small.
         minimumWidth = Theme.dp(context, 64)
         minimumHeight = Theme.dp(context, 48)
-        contentDescription = "Off"
+        contentDescription = accessibilityLabel
+        refreshAccessibilityState()
+    }
+
+    /** A stable subject, not a second source of checked-state truth. */
+    fun setAccessibilityLabel(label: CharSequence) {
+        accessibilityLabel = label
+        refreshAccessibilityState()
+    }
+
+    private fun refreshAccessibilityState() {
+        val state = when {
+            pending -> "changing"
+            checked -> "on"
+            else -> "off"
+        }
+        contentDescription = "$accessibilityLabel, $state"
+    }
+
+    private fun announceState() {
+        val state = if (checked) "on" else "off"
+        announceForAccessibility("$accessibilityLabel $state")
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
     }
 
     /** Set the state WITHOUT animating. Used on first render, where motion would be a lie. */
     fun setCheckedImmediately(value: Boolean) {
+        val changed = checked != value
         animator?.cancel()
+        animator = null
         checked = value
         fraction = if (value) 1f else 0f
-        contentDescription = if (value) "On" else "Off"
+        refreshAccessibilityState()
         knob = null
         invalidate()
+        if (changed) announceState()
     }
 
     /** Set the state and animate to it. Used after a real change. */
@@ -145,7 +178,7 @@ class RuggedToggle(context: Context) : View(context) {
             return
         }
         checked = value
-        contentDescription = if (value) "On" else "Off"
+        refreshAccessibilityState()
         knob = null
         val from = fraction
         val to = if (value) 1f else 0f
@@ -216,7 +249,7 @@ class RuggedToggle(context: Context) : View(context) {
         val color = when {
             pending -> withAlpha(Theme.WARNING, 0xB0)
             checked -> Theme.SUCCESS
-            else -> Theme.ON_SURFACE_VARIANT
+            else -> Theme.ON_SURFACE
         }
         // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
         val current = knob.let { if (it != null && knobColorKey == color) it else null }
@@ -236,6 +269,43 @@ class RuggedToggle(context: Context) : View(context) {
     override fun performClick(): Boolean {
         super.performClick()
         return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER ||
+            keyCode == KeyEvent.KEYCODE_SPACE
+        ) {
+            return performClick()
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        val compat = AccessibilityNodeInfoCompat.wrap(info)
+        compat.className = Switch::class.java.name
+        compat.isCheckable = true
+        compat.isChecked = checked
+        compat.text = accessibilityLabel
+        compat.contentDescription = contentDescription
+        compat.isEnabled = isEnabled
+        compat.stateDescription = when {
+            !isEnabled -> "Unavailable"
+            pending -> "Changing"
+            checked -> "On"
+            else -> "Off"
+        }
+        compat.addAction(AccessibilityActionCompat(
+            AccessibilityNodeInfo.ACTION_CLICK,
+            if (checked) "Turn off" else "Turn on",
+        ))
+    }
+
+    override fun onPopulateAccessibilityEvent(event: AccessibilityEvent) {
+        super.onPopulateAccessibilityEvent(event)
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            event.text.add(contentDescription)
+        }
     }
 
     private fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)

@@ -62,7 +62,7 @@ class ExceptionsActivity : Activity() {
         container.removeAllViews()
 
         container.addView(Theme.text(this, "EXCEPTIONS", 20f).apply {
-            typeface = Theme.handFont(this@ExceptionsActivity)
+            typeface = Theme.bodyFont(this@ExceptionsActivity)
         })
 
         val policy = try {
@@ -97,7 +97,7 @@ class ExceptionsActivity : Activity() {
 
         // --- existing rules ---
         if (policy.rules.isEmpty()) {
-            container.addView(Theme.text(this, "No rules yet. Every pair asks you first.", 12f, Theme.ON_SURFACE_VARIANT))
+            container.addView(Theme.text(this, "No rules yet. Every pair asks you first.", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
         } else {
             for (rule in policy.rules) container.addView(ruleRow(policy, rule))
         }

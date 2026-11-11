@@ -134,7 +134,7 @@ object ShellCode {
     }
 
     /** Monospace face that cannot be substituted by the handwritten default. */
-    val typeface: Typeface = Typeface.MONOSPACE
+    fun typeface(context: android.content.Context): Typeface = Theme.monoFont(context)
 
     /**
      * Where an original offset lands once newlines are inserted.

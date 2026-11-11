@@ -8,7 +8,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 
 /**
@@ -53,25 +52,26 @@ object PaperDialog {
                 Theme.dp(ctx, 20), Theme.dp(ctx, 18),
                 Theme.dp(ctx, 20), Theme.dp(ctx, 14),
             )
-            // The same paper the cards use, WITH the drawn edge: a rounded rectangle would be
-            // the flat surface this app has spent a lot of effort removing everywhere else.
             background = Theme.sheetDp(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
+        val dialogBody = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                Theme.dp(ctx, 20), Theme.dp(ctx, 18),
+                Theme.dp(ctx, 20), Theme.dp(ctx, 14),
+            )
+        }
+        val scroll = OverflowScrollView(ctx)
+        scroll.setContent(dialogBody)
+        sheet.addView(scroll, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
 
-        sheet.addView(Theme.text(ctx, title, 18f, Theme.ON_SURFACE).apply {
+        sheet.addView(Theme.text(ctx, title, Theme.TEXT_TITLE_SP, Theme.ON_SURFACE).apply {
             typeface = Theme.handFont(ctx)
         })
 
-        // ScrollView with weight-less WRAP_CONTENT: the dialog measures to content, and only
-        // starts scrolling once the content exceeds the screen.
-        val scroll = ScrollView(ctx).apply {
-            addView(body)
-            isFillViewport = false
-        }
-        sheet.addView(scroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(ctx, 8) })
+        dialogBody.addView(body)
 
         if (actions.isNotEmpty()) {
             val row = LinearLayout(ctx).apply {
@@ -115,20 +115,20 @@ object PaperDialog {
 
     /** A label/value line for dialog bodies, in the app's own type. */
     fun line(ctx: Context, label: String, value: String): TextView =
-        Theme.text(ctx, "$label\n$value", 13f, Theme.ON_SURFACE).apply {
+        Theme.text(ctx, "$label\n$value", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
             setPadding(0, Theme.dp(ctx, 8), 0, 0)
         }
 
     /** A quiet caption. */
     fun caption(ctx: Context, text: String): TextView =
-        Theme.text(ctx, text, 13f, Theme.ON_SURFACE_VARIANT).apply {
+        Theme.text(ctx, text, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, Theme.dp(ctx, 6), 0, 0)
         }
 
     /** A small heading inside a dialog body. */
     fun heading(ctx: Context, text: String): TextView =
-        Theme.text(ctx, text, 13f, Theme.ACCENT).apply {
-            typeface = Theme.handFont(ctx)
+        Theme.text(ctx, text, Theme.TEXT_CAPTION_SP, Theme.ACCENT).apply {
+            typeface = Theme.bodyFont(ctx, bold = true)
             setPadding(0, Theme.dp(ctx, 14), 0, Theme.dp(ctx, 2))
         }
 }

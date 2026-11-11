@@ -1362,7 +1362,8 @@ class HttpServer(
                                         url = body.optString("url", "")
                                     )
                                 else null,
-                                needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
+                                needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary),
+                                callerLabel = callerLabelFor(remote),
                             )
                             when (decision) {
                                 is NotifyGate.Result.Approved -> {

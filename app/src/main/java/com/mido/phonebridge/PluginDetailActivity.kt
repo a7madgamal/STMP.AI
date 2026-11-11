@@ -30,7 +30,7 @@ import com.mido.phonebridge.ui.Theme
  */
 class PluginDetailActivity : BridgeScreen() {
 
-    override val tab = Theme.Tab.PLUGINS
+    override val tab = Theme.Tab.PREFERENCES
 
     private lateinit var plugin: Plugin
     private lateinit var store: PluginSettingsStore
@@ -71,7 +71,7 @@ class PluginDetailActivity : BridgeScreen() {
             if (secret != null) secret.uppercase() else plugin.displayName.uppercase(),
             20f,
         ).apply {
-            typeface = Theme.handFont(this@PluginDetailActivity)
+            typeface = Theme.bodyFont(this@PluginDetailActivity)
             setTextColor(Theme.ON_SURFACE)
         })
 
@@ -84,7 +84,7 @@ class PluginDetailActivity : BridgeScreen() {
                 setPadding(0, Theme.dp(this@PluginDetailActivity, 4), 0, 0)
             })
             content.addView(Theme.sectionHeader(this, "Route"))
-            content.addView(Theme.text(this, "POST /ssh/$secret", 12f, mono = true).apply {
+            content.addView(Theme.text(this, "POST /ssh/$secret", Theme.TEXT_CAPTION_SP, mono = true).apply {
                 setTextColor(Theme.ON_SURFACE_VARIANT)
             })
             content.addView(Theme.sectionHeader(this, "Key"))
@@ -136,14 +136,14 @@ class PluginDetailActivity : BridgeScreen() {
                     if (showsOn) "Enabled" else "Disabled",
                     15f,
                     if (showsOn) Theme.ON_SURFACE else Theme.ON_SURFACE_VARIANT,
-                ).apply { typeface = Theme.handFont(this@PluginDetailActivity) },
+                ).apply { typeface = Theme.bodyFont(this@PluginDetailActivity) },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
             )
             switchRow.addView(Theme.toggle(this, showsOn) { want ->
                 store.setEnabled(plugin, want)
                 Debug.log("plugin ${plugin.id}: enabled=$want")
                 render()
-            })
+            }.apply { setAccessibilityLabel(plugin.displayName) })
             content.addView(switchRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -464,7 +464,7 @@ class PluginDetailActivity : BridgeScreen() {
                 // field in a scrolling list steals focus and pops the keyboard on scroll, which
                 // is the classic form-in-a-list defect. Editing happens in a dialog.
                 val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                row.addView(Theme.text(this, current.ifEmpty { "—" }, 13f, mono = true).apply {
+                row.addView(Theme.text(this, current.ifEmpty { "—" }, Theme.TEXT_CAPTION_SP, mono = true).apply {
                     setTextColor(Theme.ON_SURFACE_VARIANT)
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 row.addView(Theme.button(this, "EDIT", Theme.ButtonStyle.NEUTRAL, small = true) {

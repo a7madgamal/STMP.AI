@@ -46,7 +46,7 @@ object PluginHelp {
             body.addView(PaperDialog.heading(ctx, "Ask it things like"))
             for (example in info.examples) {
                 body.addView(
-                    Theme.text(ctx, "“$example”", 13f, Theme.ON_SURFACE).apply {
+                    Theme.text(ctx, "“$example”", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
                         setPadding(
                             Theme.dp(ctx, 10), Theme.dp(ctx, 6),
                             Theme.dp(ctx, 10), Theme.dp(ctx, 6),

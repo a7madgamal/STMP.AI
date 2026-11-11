@@ -66,7 +66,7 @@ object Theme {
     const val SURFACE_VARIANT = 0xFFE3D6B8.toInt()
 
     /** Ink line: hairline borders, drawn separators. */
-    const val BORDER = 0xFFC9B98F.toInt()
+    const val BORDER = 0xFF8F805F.toInt()
 
     /** Primary ink: near-black brown, never pure black. */
     /**
@@ -81,18 +81,18 @@ object Theme {
     const val ON_SURFACE = 0xFF2B2318.toInt()
 
     /** Faded ink: secondary text, captions. */
-    const val ON_SURFACE_VARIANT = 0xFF7A6B52.toInt()
+    const val ON_SURFACE_VARIANT = 0xFF67563C.toInt()
 
     /** The one stamp accent: deep rubber-stamp red. */
     const val ACCENT = 0xFFB23A2F.toInt()
 
     // Ink re-tints for the existing semantic states. Deliberately muted so they read as
     // ink, not as neon over paper.
-    const val SUCCESS = 0xFF2F7D4F.toInt()
+    const val SUCCESS = 0xFF27673F.toInt()
     const val SUCCESS_SURFACE = 0xFFDCEBD7.toInt()
-    const val WARNING = 0xFFB07A1F.toInt()
+    const val WARNING = 0xFF745410.toInt()
     const val WARNING_SURFACE = 0xFFF0E4C8.toInt()
-    const val DANGER = 0xFFB23A2F.toInt()
+    const val DANGER = 0xFF94372D.toInt()
     const val DANGER_SURFACE = 0xFFF1D9D0.toInt()
 
     /**
@@ -150,7 +150,7 @@ object Theme {
      * 1.5dp reads as ink dragged by hand. Below ~1dp it is invisible at phone density; above ~3dp
      * a 40dp button starts looking like a doodle instead of a control.
      */
-    const val SQUIGGLE_DP = 1.5f
+    const val SQUIGGLE_DP = 0.85f
 
     /**
      * The bottom bar's elevation, in dp.
@@ -187,22 +187,22 @@ object Theme {
      *
      * The rule, in one place:
      *
-     *  - **12sp is the floor.** Nothing renders smaller, including the modal's badge and the AI
-     *    status line, which were 9 and 10sp. A size nobody can read is not information.
-     *  - **13sp** — captions and status detail under a row.
-     *  - **14sp** — body text and row values.
-     *  - **16sp** — row labels, control labels, tab labels.
-     *  - **20sp** — screen titles only.
+     *  - **13sp** — captions, never smaller functional text.
+     *  - **14sp** — supporting detail and secondary rows.
+     *  - **16sp** — body copy and ordinary controls.
+     *  - **17–18sp** — row titles and emphasized controls.
+     *  - **22sp** — section/page headings in the handwritten display face.
      *
      * Two steps between adjacent roles, which is the smallest gap that still reads as deliberate
      * hierarchy rather than an accident.
      */
-    const val TEXT_FLOOR_SP = 12f
-    const val TEXT_CAPTION_SP = 12f
-    const val TEXT_DETAIL_SP = 13f
-    const val TEXT_BODY_SP = 14f
-    const val TEXT_LABEL_SP = 16f
-    const val TEXT_TITLE_SP = 20f
+    const val TEXT_FLOOR_SP = 13f
+    const val TEXT_CAPTION_SP = 13f
+    const val TEXT_DETAIL_SP = 14f
+    const val TEXT_BODY_SP = 16f
+    const val TEXT_LABEL_SP = 17f
+    const val TEXT_ROW_TITLE_SP = 18f
+    const val TEXT_TITLE_SP = 22f
 
     /** Ripple colour for controls on paper. A translucent ink tint, not the old white ripple. */
     private const val RIPPLE = 0x332B2318
@@ -221,14 +221,50 @@ object Theme {
      * the whole handwritten look. See [handFont].
      */
     @Volatile private var handleeCache: Typeface? = null
+    @Volatile private var bodyRegularCache: Typeface? = null
+    @Volatile private var bodyBoldCache: Typeface? = null
+    @Volatile private var monoRegularCache: Typeface? = null
+    @Volatile private var monoBoldCache: Typeface? = null
 
-    /** The display face for headings and labels. [Handlee] under the SIL OFL 1.1. */
+    private fun bundledFont(ctx: Context, resource: Int, name: String): Typeface =
+        ResourcesCompat.getFont(ctx, resource)
+            ?: error("STMP font missing: $name not found in APK")
+
+    /** Handlee is reserved for expressive headings and the rubber-stamp identity. */
     fun handFont(ctx: Context): Typeface = handleeCache ?: synchronized(this) {
-        handleeCache ?: run {
-            val f = androidx.core.content.res.ResourcesCompat.getFont(ctx, R.font.handlee)
-                ?: error("STMP font missing: R.font.handlee not found in APK")
-            handleeCache = f
-            f
+        handleeCache ?: bundledFont(ctx, R.font.handlee, "R.font.handlee").also { handleeCache = it }
+    }
+
+    /** Named separately so future stamp styling cannot accidentally leak into body text. */
+    fun stampFont(ctx: Context): Typeface = handFont(ctx)
+
+    /** Atkinson Hyperlegible Next: body copy, status text and controls, never the stamp. */
+    fun bodyFont(ctx: Context, bold: Boolean = false): Typeface {
+        val cached = if (bold) bodyBoldCache else bodyRegularCache
+        return cached ?: synchronized(this) {
+            val current = if (bold) bodyBoldCache else bodyRegularCache
+            current ?: bundledFont(
+                ctx,
+                if (bold) R.font.atkinson_bold else R.font.atkinson_regular,
+                if (bold) "R.font.atkinson_bold" else "R.font.atkinson_regular",
+            ).also {
+                if (bold) bodyBoldCache = it else bodyRegularCache = it
+            }
+        }
+    }
+
+    /** JetBrains Mono NL: exact commands, JSON, paths and identifiers, without ligatures. */
+    fun monoFont(ctx: Context, bold: Boolean = false): Typeface {
+        val cached = if (bold) monoBoldCache else monoRegularCache
+        return cached ?: synchronized(this) {
+            val current = if (bold) monoBoldCache else monoRegularCache
+            current ?: bundledFont(
+                ctx,
+                if (bold) R.font.jetbrains_mono_nl_bold else R.font.jetbrains_mono_nl_regular,
+                if (bold) "R.font.jetbrains_mono_nl_bold" else "R.font.jetbrains_mono_nl_regular",
+            ).also {
+                if (bold) monoBoldCache = it else monoRegularCache = it
+            }
         }
     }
 
@@ -271,8 +307,8 @@ object Theme {
     /** The three top-level screens. Order is the order they appear in the bar. */
     enum class Tab(val label: String) {
         HOME("Home"),
-        PLUGINS("Plugins"),
-        SETTINGS("Settings"),
+        ACTIVITY("Activity"),
+        PREFERENCES("Preferences"),
     }
 
     /**
@@ -369,6 +405,10 @@ object Theme {
                 parts.setSelected(parts.tab == tab, animate)
             }
         }
+
+        fun setPendingCount(count: Int) {
+            tabs.firstOrNull { it.tab == Tab.ACTIVITY }?.setPendingCount(count)
+        }
     }
 
     /**
@@ -381,6 +421,8 @@ object Theme {
         val tab: Tab,
         val column: LinearLayout,
         private val label: TextView,
+        private val icon: TabIcon,
+        private val badge: TextView,
         private val rule: View,
         private val accent: Int,
         private val variant: Int,
@@ -395,7 +437,13 @@ object Theme {
          * away while the INCOMING one fades in, which is what makes the marker look like it
          * travelled instead of teleporting.
          */
+        fun setPendingCount(count: Int) {
+            badge.text = if (count > 0) count.toString() else ""
+            badge.visibility = if (count > 0) View.VISIBLE else View.GONE
+        }
+
         fun setSelected(selected: Boolean, animate: Boolean) {
+            icon.isActive = selected
             column.contentDescription =
                 if (selected) "${tab.label}, selected" else tab.label
             label.setTextColor(if (selected) accent else variant)
@@ -449,7 +497,7 @@ object Theme {
             // ALL CAPS by request (Mido, 2026-11-04). The hand font is informal; caps give the
             // three words the weight of labels rather than of prose, which is what a tab bar is.
             text = tab.label.uppercase(java.util.Locale.US)
-            textSize = 16f
+            textSize = Theme.TEXT_LABEL_SP
             gravity = Gravity.CENTER
             // One line, always. "Settings" wrapped to "Setting / s" as a third of a narrow bar.
             isSingleLine = true
@@ -459,6 +507,18 @@ object Theme {
                 12, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP
             )
         }
+        val icon = TabIcon(ctx, tab).apply { isActive = initiallySelected }
+        column.addView(icon, LinearLayout.LayoutParams(dp(ctx, 22), dp(ctx, 22)))
+        val badge = TextView(ctx).apply {
+            textSize = TEXT_CAPTION_SP
+            setTextColor(ON_COLOR)
+            gravity = Gravity.CENTER
+            typeface = bodyFont(ctx, bold = true)
+            background = surface(ctx, DANGER, 8)
+            visibility = View.GONE
+            setPadding(dp(ctx, 5), 0, dp(ctx, 5), 0)
+        }
+        column.addView(badge)
         column.addView(label)
 
         val rule = View(ctx)
@@ -466,7 +526,8 @@ object Theme {
         // Measured with the same face and at the SMALLEST size the label may take, so the rule
         // cannot come out wider than the word it underlines.
         val measure = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = handFont(ctx)
+            // Functional navigation uses the readable UI face, not tiny handwriting.
+            typeface = bodyFont(ctx)
             textSize = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_SP, TEXT_FLOOR_SP, ctx.resources.displayMetrics
             )
@@ -490,13 +551,14 @@ object Theme {
             tab = tab,
             column = column,
             label = label,
+            icon = icon,
+            badge = badge,
             rule = rule,
             accent = ACCENT,
             variant = ON_SURFACE_VARIANT,
-            // Synthesised bold, since Handlee ships one weight. It thickens the glyphs rather
-            // than swapping a face, which is exactly the effect wanted here.
-            bold = android.graphics.Typeface.create(handFont(ctx), android.graphics.Typeface.BOLD),
-            normal = handFont(ctx),
+            // Real bundled weights, so selection never depends on Handlee synthesis.
+            bold = bodyFont(ctx, bold = true),
+            normal = bodyFont(ctx),
         )
         parts.onSelectClicked = { onSelect(tab) }
         // First paint: no animation, because nothing moved.
@@ -848,8 +910,8 @@ object Theme {
         // 16sp (Mido, 2026-11-03: *"increase its font size a little"*). These are the only
         // structural landmarks on a page of body text, so at 14 they competed with the 15sp rows
         // underneath instead of out-ranking them.
-        textSize = 16f
-        letterSpacing = 0.12f
+        textSize = TEXT_TITLE_SP
+        letterSpacing = 0.025f
         typeface = handFont(ctx)
         setTextColor(ACCENT)
         // Bottom padding is the room the RULE lives in. Without it the wave has nowhere to go
@@ -878,19 +940,18 @@ object Theme {
         )
     }
 
-    /** A plain line of text. [mono] keeps the monospace face for log/code strings; the
-     *  default face is the handwritten (STMP) face so body copy reads as a note. */
+    /** Functional text uses Atkinson; exact payloads use the bundled no-ligature mono face. */
     fun text(
         ctx: Context,
         text: String,
-        size: Float = 15f,
+        size: Float = TEXT_BODY_SP,
         color: Int = ON_SURFACE,
         mono: Boolean = false
     ): TextView = TextView(ctx).apply {
         this.text = text
         textSize = size
         setTextColor(color)
-        typeface = if (mono) android.graphics.Typeface.MONOSPACE else handFont(ctx)
+        typeface = if (mono) monoFont(ctx) else bodyFont(ctx)
         setLineSpacing(0f, 1.15f)
     }
 
@@ -921,14 +982,13 @@ object Theme {
         onClick: () -> Unit
     ): MaterialButton {
         val (bg, fg) = styleColors(style)
-        val h = if (small) dp(ctx, 40) else dp(ctx, MIN_TARGET_DP)
         return MaterialButton(ctx).apply {
             text = label
-            textSize = if (small) 12f else 14f
+            textSize = if (small) TEXT_DETAIL_SP else TEXT_BODY_SP
             isAllCaps = false
-            typeface = handFont(ctx)
-            minHeight = h
-            minimumHeight = h
+            typeface = bodyFont(ctx, bold = true)
+            minHeight = dp(ctx, MIN_TARGET_DP)
+            minimumHeight = dp(ctx, MIN_TARGET_DP)
             setTextColor(fg)
             backgroundTintList = ColorStateList.valueOf(bg)
             rippleColor = ColorStateList.valueOf(RIPPLE)
@@ -987,8 +1047,8 @@ object Theme {
      * never navigates the row underneath it.
      */
     fun bulbBadge(ctx: Context, describe: String, onClick: () -> Unit): FrameLayout {
-        val touch = dp(ctx, 44)
-        val disc = dp(ctx, 30)
+        val touch = dp(ctx, Theme.MIN_TARGET_DP)
+        val disc = dp(ctx, 28)
         val holder = FrameLayout(ctx)
         holder.contentDescription = describe
         holder.isClickable = true
@@ -1001,8 +1061,9 @@ object Theme {
             background = surface(ctx, WARNING_SURFACE, 15)
         }, FrameLayout.LayoutParams(disc, disc, Gravity.CENTER))
         holder.addView(TextView(ctx).apply {
-            text = "\uD83D\uDCA1"
-            textSize = 14f
+            text = "?"
+            textSize = TEXT_BODY_SP
+            typeface = bodyFont(ctx, bold = true)
             gravity = Gravity.CENTER
             // No hand font and no ink colour: the glyph is drawn by the system emoji font, so the
             // typeface and colour are ignored. Kept explicit so a later pass does not wonder.
@@ -1127,10 +1188,11 @@ object Theme {
         style: ButtonStyle = ButtonStyle.SUCCESS
     ): MaterialButton {
         val (bg, fg) = styleColors(style)
-        val h = dp(ctx, MIN_TARGET_DP)
+        dp(ctx, MIN_TARGET_DP)
         val pct = progress.coerceIn(0, 100)
         val radius = radiusPx(ctx, RADIUS_CONTROL)
         // Track = the button's own colour, dimmed; fill = the solid colour. So the
+        val h = dp(ctx, MIN_TARGET_DP)
         // control reads as itself, partially completed, rather than as a separate bar.
         val track = GradientDrawable().apply {
             setColor(withAlpha(bg, 0x33))
@@ -1154,9 +1216,9 @@ object Theme {
         val layered = LayerDrawable(arrayOf(track, fill, GrainOverlay(radius)))
         return MaterialButton(ctx).apply {
             text = label
-            textSize = 14f
+            textSize = TEXT_BODY_SP
             isAllCaps = false
-            typeface = handFont(ctx)
+            typeface = bodyFont(ctx, bold = true)
             minHeight = h
             minimumHeight = h
             setTextColor(fg)
@@ -1204,22 +1266,14 @@ object Theme {
             }
         }
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(TextView(ctx).apply {
-            text = label
-            textSize = 15f
-            setTextColor(ON_SURFACE)
-        })
-        body.addView(TextView(ctx).apply {
-            text = value
-            textSize = 13f
-            setTextColor(ON_SURFACE_VARIANT)
-        })
+        body.addView(text(ctx, label, TEXT_LABEL_SP))
+        body.addView(text(ctx, value, TEXT_DETAIL_SP, ON_SURFACE_VARIANT))
         row.addView(dot)
         row.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         if (onClick != null) {
             row.addView(TextView(ctx).apply {
                 text = "›"
-                textSize = 20f
+                textSize = Theme.TEXT_TITLE_SP
                 setTextColor(ON_SURFACE_VARIANT)
             })
         }

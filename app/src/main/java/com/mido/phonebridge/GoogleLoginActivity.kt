@@ -32,17 +32,17 @@ class GoogleLoginActivity : Activity() {
 
         root.addView(Theme.text(this, "Login with Google", 22f))
 
-        status = Theme.text(this, "", 14f, Theme.ON_SURFACE_VARIANT).apply {
+        status = Theme.text(this, "", Theme.TEXT_BODY_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, pad / 2, 0, pad / 2)
         }
         root.addView(status)
 
         root.addView(Theme.button(this, "CANCEL", Theme.ButtonStyle.NEUTRAL) { finish() })
 
-        root.addView(Theme.text(this, "\u2014 log \u2014", 12f, Theme.ON_SURFACE_VARIANT).apply {
+        root.addView(Theme.text(this, "\u2014 log \u2014", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, pad, 0, 0)
         })
-        val log = Theme.text(this, "", 12f, Theme.ON_SURFACE_VARIANT, mono = true)
+        val log = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT, mono = true)
         root.addView(ScrollView(this).apply { addView(log) },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0).apply { weight = 1f })
 

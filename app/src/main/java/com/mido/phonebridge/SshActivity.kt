@@ -56,7 +56,7 @@ class SshActivity : Activity() {
         scroll.addView(content)
 
         header = TextView(this).apply {
-            textSize = 13f
+            textSize = Theme.TEXT_DETAIL_SP
             setTextColor(Theme.ON_SURFACE_VARIANT)
         }
         content.addView(header)
@@ -143,7 +143,7 @@ class SshActivity : Activity() {
             // The key type is worth stating: it is the thing a server's authorized_keys cares
             // about, and an unexpected type is a clue something is wrong before a call fails.
             SshKeygen.keyTypeOf(conn.privateKey)?.let {
-                card.addView(Theme.text(this, it, 12f, Theme.ON_SURFACE_VARIANT))
+                card.addView(Theme.text(this, it, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
             }
 
             // HOST KEY state. A connection with no pin has never been confirmed, and the next call
@@ -172,31 +172,31 @@ class SshActivity : Activity() {
             val fingerprint = pub?.let { SshKeygen.fingerprintOf(it) }
             if (fingerprint != null) {
                 card.addView(
-                    Theme.text(this, "key fingerprint", 12f, Theme.ON_SURFACE_VARIANT)
+                    Theme.text(this, "key fingerprint", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
                         .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
                 )
                 card.addView(
-                    Theme.text(this, fingerprint, 12f, Theme.ON_SURFACE).apply {
-                        typeface = android.graphics.Typeface.MONOSPACE
+                    Theme.text(this, fingerprint, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
+                        typeface = Theme.monoFont(this@SshActivity)
                         setTextIsSelectable(true)
                     }
                 )
             }
             if (pub != null) {
                 card.addView(
-                    Theme.text(this, "public key", 12f, Theme.ON_SURFACE_VARIANT)
+                    Theme.text(this, "public key", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
                         .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
                 )
                 card.addView(
-                    Theme.text(this, pub, 12f, Theme.ON_SURFACE).apply {
-                        typeface = android.graphics.Typeface.MONOSPACE
+                    Theme.text(this, pub, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
+                        typeface = Theme.monoFont(this@SshActivity)
                         setTextIsSelectable(true)
                     }
                 )
             }
             // The vault entry name, so a duplicate label on two hosts is tellable apart.
             card.addView(
-                Theme.text(this, "vault entry: $vaultName", 12f, Theme.ON_SURFACE_VARIANT)
+                Theme.text(this, "vault entry: $vaultName", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
                     .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
             )
 
@@ -224,8 +224,8 @@ class SshActivity : Activity() {
         }
         val box = TextView(this).apply {
             text = pub
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = Theme.TEXT_CAPTION_SP
+            typeface = Theme.monoFont(this@SshActivity)
             setTextIsSelectable(true)
             setTextColor(Theme.ON_SURFACE)
             setPadding(
@@ -269,7 +269,7 @@ class SshActivity : Activity() {
 
         // The reason a failure left the dialog empty, shown INSIDE it.
         val errorLine = TextView(this).apply {
-            textSize = 12f
+            textSize = Theme.TEXT_CAPTION_SP
             setTextColor(Theme.DANGER)
             visibility = android.view.View.GONE
             setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0)
@@ -433,7 +433,7 @@ class SshActivity : Activity() {
 
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
         text = "$title\n$detail"
-        textSize = 14f
+        textSize = Theme.TEXT_BODY_SP
         setTextColor(Theme.ON_SURFACE)
         setPadding(
             Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12),

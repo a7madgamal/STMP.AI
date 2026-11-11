@@ -60,7 +60,7 @@ class GrainCoverageTest {
         // A 1dp hairline between rows inside the Google card. Grain cannot live in a 1dp strip --
         // there is no surface to texture, and the grain tile is 96px -- so this is deliberately a
         // flat coloured line, the same as `SquiggleRule`'s flat mode.
-        "PluginsFragment.kt" to "setBackgroundColor(Theme.BORDER)",
+        "PluginInventoryView.kt" to "setBackgroundColor(Theme.BORDER)",
         // A 10dp status dot: an OVAL, so grain inside it would be clipped to a circle smaller
         // than one grain tile and would render as a flat speck.
         "Theme.kt" to "shape = GradientDrawable.OVAL",
