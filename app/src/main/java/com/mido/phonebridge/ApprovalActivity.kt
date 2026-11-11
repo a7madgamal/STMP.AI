@@ -29,6 +29,10 @@ import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.ShellCode
 import com.mido.phonebridge.ui.JsonCode
 import com.mido.phonebridge.ui.StampOverlay
+import com.mido.phonebridge.ui.PaperMotion
+import com.mido.phonebridge.ui.PaperEntranceView
+import com.mido.phonebridge.ui.PaperTearView
+import com.mido.phonebridge.ui.OverflowScrollView
 import com.mido.phonebridge.alert.SoundAlerts
 
 /**
@@ -87,6 +91,7 @@ class ApprovalActivity : FragmentActivity() {
     private var denyDrain: android.graphics.drawable.ClipDrawable? = null
 
     companion object {
+        private val entranceRegistry = PaperMotion.EntranceRegistry()
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
         const val EXTRA_ENDPOINT = "endpoint"
@@ -214,7 +219,9 @@ class ApprovalActivity : FragmentActivity() {
                         ).apply { marginEnd = Theme.dp(this@ApprovalActivity, 12) }
                     }
                 )
-                addView(Theme.text(this@ApprovalActivity, "awaiting your stamp", 20f))
+                addView(Theme.text(this@ApprovalActivity, "awaiting your stamp", Theme.TEXT_TITLE_SP).apply {
+                    typeface = Theme.handFont(this@ApprovalActivity)
+                })
             }
         )
 
@@ -222,15 +229,14 @@ class ApprovalActivity : FragmentActivity() {
         // The modal now appears immediately and the model answers in the background (Mido,
         // 2026-10-19), so these views cannot be filled from the intent — they are created
         // empty and driven by the tick below, from ApprovalGate.currentAiState().
-        val aiHeader = Theme.sectionHeader(this, "SUMMARY")
+        val aiHeader = Theme.sectionHeader(this, "OPTIONAL MODEL READING")
         // The summary is the ONE thing the human actually reads, so it is the largest text
         // on the screen (Mido, 2026-10-19: *"make the ui summary more concise and larger"*).
         // "Concise" is enforced by BOUNDING it (3 lines, ellipsized) rather than by cutting
         // the model's sentence — the shape is already one short line, and silently dropping
         // its tail would hide exactly the detail a summary exists to surface.
-        val aiLine = Theme.text(this, "", 26f, Theme.ON_SURFACE).apply {
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            maxLines = 3
+        val aiLine = Theme.text(this, "", Theme.TEXT_BODY_SP, Theme.ON_SURFACE).apply {
+            maxLines = 5
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 10))
         }
@@ -238,32 +244,32 @@ class ApprovalActivity : FragmentActivity() {
         // `applyRiskSurface`). What remains here is the REASON, which a background colour
         // cannot state: "risk: high — sends mail to an external address" is the part a human
         // actually needs, and it stays readable on every tint because it uses ON_SURFACE_VARIANT.
-        val aiRiskLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
+        val aiRiskLine = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
             visibility = ViewGroup.GONE
         }
-        content.addView(aiHeader)
-        content.addView(aiLine)
-        content.addView(aiRiskLine)
+        // Optional model reading is attached AFTER deterministic request facts below.
+        // Never move this block back above WHO/WHAT: AI is advisory, not the request.
 
         if (view != null) {
             // --- WHO ---
             content.addView(Theme.sectionHeader(this, "WHO"))
-            content.addView(label(view.requester, 15f, Theme.WARNING))
+            content.addView(label("Who is asking: ${view.requester}", Theme.TEXT_ROW_TITLE_SP, Theme.WARNING))
             if (view.account.isNotBlank() && view.account != "—") {
-                content.addView(label("as ${view.account}", 13f, Theme.SUCCESS))
+                content.addView(label("as ${view.account}", Theme.TEXT_BODY_SP, Theme.SUCCESS))
             }
 
             // --- WHAT (the resolved action, in words) ---
             content.addView(Theme.sectionHeader(this, "WHAT"))
-            content.addView(label("\"${view.actionLabel}\"", 16f))
+            content.addView(label(view.actionLabel, Theme.TEXT_TITLE_SP))
+            content.addView(label(endpoint, Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT))
 
             // Render a labelled row: label on its own quiet line, value below in the
             // style the row asked for. This is the ONE renderer; it knows nothing
             // about Gmail, Calendar, or notifications — only rows. Never print a
             // label with nothing under it (an empty row is a defect, not a state).
             fun row(r: ApprovalGate.Row) {
-                content.addView(Theme.text(this, r.label, 12f, Theme.ON_SURFACE_VARIANT).apply {
+                content.addView(Theme.text(this, r.label, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
                     setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
                 })
 
@@ -275,9 +281,9 @@ class ApprovalActivity : FragmentActivity() {
                 val view = when (r.style) {
                     ApprovalGate.Row.Style.CODE -> TextView(this).apply {
                         text = ShellCode.render(r.value)
-                        textSize = 13f
+                        textSize = Theme.TEXT_BODY_SP
                         setTextColor(Theme.ON_SURFACE)
-                        typeface = ShellCode.typeface
+                        typeface = ShellCode.typeface(this@ApprovalActivity)
                         setTextIsSelectable(true)
                         setLineSpacing(0f, 1.25f) // room for the inserted breaks
                         setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
@@ -285,9 +291,9 @@ class ApprovalActivity : FragmentActivity() {
 
                     ApprovalGate.Row.Style.JSON -> TextView(this).apply {
                         text = JsonCode.render(r.value)
-                        textSize = 13f
+                        textSize = Theme.TEXT_BODY_SP
                         setTextColor(Theme.ON_SURFACE)
-                        typeface = Typeface.MONOSPACE
+                        typeface = Theme.monoFont(this@ApprovalActivity)
                         setTextIsSelectable(true)
                         setLineSpacing(0f, 1.15f)
                         setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
@@ -308,9 +314,9 @@ class ApprovalActivity : FragmentActivity() {
                         if (asJson) {
                             TextView(this).apply {
                                 text = JsonCode.render(r.value)
-                                textSize = 13f
+                                textSize = Theme.TEXT_BODY_SP
                                 setTextColor(Theme.ON_SURFACE)
-                                typeface = Typeface.MONOSPACE
+                                typeface = Theme.monoFont(this@ApprovalActivity)
                                 setTextIsSelectable(true)
                                 setLineSpacing(0f, 1.15f)
                                 setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
@@ -319,7 +325,7 @@ class ApprovalActivity : FragmentActivity() {
                             Theme.text(
                                 this,
                                 r.value,
-                                13f,
+                                Theme.TEXT_BODY_SP,
                                 if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
                                 mono = r.style == ApprovalGate.Row.Style.MONO ||
                                     r.style == ApprovalGate.Row.Style.WARN
@@ -354,15 +360,15 @@ class ApprovalActivity : FragmentActivity() {
             // "count=3, package=com.whatsapp", never a bare verb.
             if (view.filters.isNotEmpty()) {
                 val scope = view.filters.entries.joinToString(", ") { "${it.key}=${it.value}" }
-                content.addView(label("filter: $scope", 13f, Theme.WARNING))
+                content.addView(label("filter: $scope", Theme.TEXT_BODY_SP, Theme.WARNING))
             }
             if (!view.replyText.isNullOrBlank()) {
-                content.addView(label("reply: ${view.replyText}", 13f, Theme.SUCCESS))
+                content.addView(label("reply: ${view.replyText}", Theme.TEXT_BODY_SP, Theme.SUCCESS))
             }
             // Other buttons the same notification offers (options are a menu, the
             // resolved WHAT is the pick). Show them so the human sees the space.
             if (view.options.isNotEmpty()) {
-                content.addView(label("other actions: " + view.options.joinToString(" · "), 12f, Theme.ON_SURFACE_VARIANT))
+                content.addView(label("other actions: " + view.options.joinToString(" · "), Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
             }
 
             // Notification content as ordinary rows — the same renderer as every
@@ -382,10 +388,14 @@ class ApprovalActivity : FragmentActivity() {
             }
         } else {
             // No structured view (e.g. non-notification routes): keep the old fields.
-            content.addView(label("Source: $remote", 12f, Theme.WARNING))
-            content.addView(label("Endpoint: $endpoint", 12f, Theme.WARNING))
-            content.addView(label("Summary: $summary", 13f))
+            content.addView(label("Source: $remote", Theme.TEXT_CAPTION_SP, Theme.WARNING))
+            content.addView(label("Endpoint: $endpoint", Theme.TEXT_CAPTION_SP, Theme.WARNING))
+            content.addView(label("Summary: $summary", Theme.TEXT_BODY_SP))
         }
+
+        content.addView(aiHeader)
+        content.addView(aiLine)
+        content.addView(aiRiskLine)
 
         // --- Details: raw endpoint + full JSON, collapsed by default. ---
         val detailBody = Theme.text(
@@ -399,7 +409,7 @@ class ApprovalActivity : FragmentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, Theme.dp(this@ApprovalActivity, 220)
             )
         }
-        val detailToggle = Theme.text(this, "▸ details", 13f, Theme.ON_SURFACE_VARIANT).apply {
+        val detailToggle = Theme.text(this, "▸ details", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, Theme.dp(this@ApprovalActivity, 14), 0, Theme.dp(this@ApprovalActivity, 8))
             isClickable = true
             setOnClickListener {
@@ -420,14 +430,14 @@ class ApprovalActivity : FragmentActivity() {
         // The `countdown` TextView stays as an invisible accessibility carrier: a screen reader
         // still needs the remaining seconds spoken, and deleting the view would leave a blind
         // user with a bar they cannot perceive.
-        val countdown = Theme.text(this, "", 13f, Theme.WARNING).apply {
+        val countdown = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.WARNING).apply {
             visibility = ViewGroup.GONE
         }
 
         // --- Queue position: only when others are actually waiting. The queue is
         // FIFO, so this request is the one on screen and the rest wait their turn.
         // Never render a "0 waiting" line — an empty statement is noise.
-        val queueLine = Theme.text(this, "", 13f, Theme.ON_SURFACE_VARIANT).apply {
+        val queueLine = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
             setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
             visibility = ViewGroup.GONE
         }
@@ -485,7 +495,7 @@ class ApprovalActivity : FragmentActivity() {
                 // than trusting a value captured at build time.
                 when (val ai = ApprovalGate.currentAiState()) {
                     is ApprovalGate.AiState.Loading -> {
-                        aiHeader.text = "SUMMARY"
+                        aiHeader.text = "OPTIONAL MODEL READING"
                         // A thinking word + a dot cycle (Mido, 2026-10-19). The words are
                         // honest about being indeterminate: there is no token stream to
                         // measure, so a percentage would be invented. The dots loop
@@ -502,7 +512,7 @@ class ApprovalActivity : FragmentActivity() {
                         if (dotCount == 0) wordIdx++
                     }
                     is ApprovalGate.AiState.Ready -> {
-                        aiHeader.text = "SUMMARY"
+                        aiHeader.text = "OPTIONAL MODEL READING"
                         aiLine.text = ai.summary.description
                         aiLine.setTextColor(Theme.ON_SURFACE)
                         val reason = ai.summary.reason
@@ -532,7 +542,7 @@ class ApprovalActivity : FragmentActivity() {
                         // Fail LOUDLY but unlock (Mido, 2026-10-19). The human sees the
                         // error and can still decide — a modal with dead buttons because
                         // one transient call failed is a dead end, not a safety property.
-                        aiHeader.text = "SUMMARY"
+                        aiHeader.text = "OPTIONAL MODEL READING"
                         aiLine.text = "⚠ could not summarise — ${ai.detail}"
                         aiLine.setTextColor(Theme.DANGER)
                         aiRiskLine.visibility = ViewGroup.GONE
@@ -772,7 +782,7 @@ class ApprovalActivity : FragmentActivity() {
                         "approves this request, and sets ${off.rule.plugin} · " +
                             "${off.rule.verb?.name?.lowercase() ?: "any verb"} to " +
                             "${off.rule.mode.name.lowercase()} from now on",
-                        11f, Theme.ON_SURFACE_VARIANT
+                        Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT
                     )
                 )
             }
@@ -913,7 +923,7 @@ class ApprovalActivity : FragmentActivity() {
                     label(
                         "runs as root — the password goes to sudo's stdin on this device, " +
                             "not over the network",
-                        11f, Theme.ON_SURFACE_VARIANT
+                        Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT
                     )
                 )
             }
@@ -929,10 +939,8 @@ class ApprovalActivity : FragmentActivity() {
         // countdown, details toggle, buttons) to the bottom of the screen so they
         // are always reachable no matter how long the notification is. Buttons
         // that scroll away are buttons the user misses -> a timed-out request.
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(content)
-        }
+        val scroll = OverflowScrollView(this, guidance = "Scroll for full request ↓")
+        scroll.setContent(content)
 
         val pinned = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -966,7 +974,7 @@ class ApprovalActivity : FragmentActivity() {
                         "Options and re-add the secrets."
             }
             if (msg.isNotEmpty()) {
-                pinned.addView(label(msg, 14f, Theme.DANGER))
+                pinned.addView(label(msg, Theme.TEXT_BODY_SP, Theme.DANGER))
             }
         }
         // The icon moved to the header, so the duplicate row here is gone (Mido, 2026-10-27:
@@ -1009,7 +1017,16 @@ class ApprovalActivity : FragmentActivity() {
             v.setPadding(0, bars.top, 0, bars.bottom)
             insets
         }
-        setContentView(outer)
+        val presentation = PaperEntranceView(this)
+        presentation.addView(outer, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        setContentView(presentation)
+        val entrance = PaperMotion.entrance(
+            reduced = PaperMotion.reducedMotion(this),
+            alreadyPresented = !entranceRegistry.claim(id),
+        )
+        if (entrance.durationMs > 0L) presentation.present(!entrance.perspective)
     }
 
     /**
@@ -1024,6 +1041,7 @@ class ApprovalActivity : FragmentActivity() {
      * The tick must not decide the modal is dead while a stamp is playing: the stamp IS the exit.
      */
     private var stamping = false
+    private val forcedExit = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun finishWith(id: Long, approved: Boolean) {
         val resolved = ApprovalGate.resolve(id, approved)
@@ -1050,16 +1068,51 @@ class ApprovalActivity : FragmentActivity() {
         // the human has decided, it must not reappear behind the stamp.
         armBar.visibility = ViewGroup.GONE
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
+        val sheet = root.getChildAt(root.childCount - 1)
+        val reduced = PaperMotion.reducedMotion(this)
         val overlay = StampOverlay(this).apply {
-            val verdict = if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED
-            onFinished = { finish() }
+            onFinished = {
+                if (!approved && !reduced) showDenialTear(root, sheet) else finish()
+            }
+            onImpact = {
+                playStampImpact()
+                if (!reduced) sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {
+                    sheet.animate().scaleY(1f).setDuration(90L).start()
+                }.start()
+            }
+            reducedMotion = PaperMotion.reducedMotion(this@ApprovalActivity)
         }
         // Full-screen, on top of everything in this window (the modal).
         root.addView(overlay, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        // A missing sound is REPORTED, never substituted and never swallowed. The animation is
-        // the primary signal, so a sound failure must not cancel it — but it must be visible.
+        overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
+        forcedExit.postDelayed(
+            { if (!isFinishing) finish() },
+            PaperMotion.STAMP_TOTAL_MS + (if (!approved && !reduced) PaperMotion.TEAR_MS else 0L) + 500L,
+        )
+    }
+
+    private fun showDenialTear(root: android.view.ViewGroup, sheet: View) {
+        val tear = PaperTearView(this)
+        root.addView(tear, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        tear.onFinished = { finish() }
+        // Capture before hiding the live children. The gate was already resolved; no bitmap or
+        // animation callback participates in its outcome.
+        val captured = tear.tear(sheet)
+        if (captured) {
+            sheet.visibility = View.INVISIBLE
+        } else {
+            // Low memory or no measured surface: fail closed to the ordinary exit, never strand.
+            root.removeView(tear)
+            finish()
+        }
+    }
+
+    private fun playStampImpact() {
+        // Fired at the visual contact frame, never before it and never used as a completion path.
         try {
             SoundAlerts.stamp(this)
         } catch (e: SoundAlerts.SoundUnavailable) {
@@ -1068,7 +1121,6 @@ class ApprovalActivity : FragmentActivity() {
                 this, "Stamp sound failed: ${e.message}", android.widget.Toast.LENGTH_LONG
             ).show()
         }
-        overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
     }
 
     /**
@@ -1402,6 +1454,8 @@ class ApprovalActivity : FragmentActivity() {
      * the field then removes the last easy path to them.
      */
     override fun onDestroy() {
+        forcedExit.removeCallbacksAndMessages(null)
+
         passwordField?.text?.clear()
         passwordField = null
         super.onDestroy()
