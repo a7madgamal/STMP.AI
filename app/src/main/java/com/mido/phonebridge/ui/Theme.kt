@@ -173,6 +173,20 @@ object Theme {
      */
     const val CARD_STROKE_DP = 1.5f
 
+    /**
+     * Elevation for a full-screen overlay inside the modal window.
+     *
+     * **This is load-bearing, not decoration.** `ViewGroup.dispatchDraw` draws children in
+     * ascending Z order as soon as ANY child has non-zero elevation — and `PaperEntranceView`
+     * carries 4dp for its sheet shadow. An overlay added at the default Z=0 was therefore painted
+     * FIRST and then covered by that sheet: correct frames, zero visible pixels, and the modal
+     * looked frozen because the top child took every tap. Reported 2026-11-11 as *"I saw nothing,
+     * and the modal stuck after success"*.
+     *
+     * 32dp clears the sheet's resting 4dp and its 28dp entrance peak with room to spare.
+     */
+    const val OVERLAY_ELEVATION_DP = 32
+
     /** Minimum touch target. Below this a tap is a coin flip. */
     const val MIN_TARGET_DP = 48
 

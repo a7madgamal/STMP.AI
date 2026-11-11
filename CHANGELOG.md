@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.0 (build 302)**.
+Current build: **v0.51.1 (build 303)**.
 
 ---
 
@@ -5424,10 +5424,14 @@ devDependencies. `node_modules/` is gitignored.
 - The approval stamp now HOLDS its result for over a second after the motion finishes. The animation was running correctly at 650ms, but that is shorter than the beat it takes to look back at the page after dismissing a fingerprint dialog, so the receipt was real and never seen.
 - A drawn-frame count is logged with the stamp's completion, so "the animation did not play" is now distinguishable from "it played too briefly" without guessing.
 
-## 0.51.0 (build 302) — 2026-11-11 — CURRENT
+## 0.51.0 (build 302) — 2026-11-11
 - The approval stamp no longer expires. It plays, settles at full ink, and stays until the human taps it, so no clock can remove the receipt before it has been read.
 - The frame counter that claimed "105 frames" was incrementing in the tick, not in `onDraw`, so it measured the timer rather than the paint. It now counts real draws and logs the first one, which is what makes an invisible stamp diagnosable.
 - Pressing back after a decision resolves the request and leaves the stamp on screen instead of destroying the window in the same frame.
+
+## 0.51.1 (build 303) — 2026-11-11 — CURRENT
+- The stamp is visible. It was painted on every frame and then covered: `PaperEntranceView` carries 4dp of elevation, and a ViewGroup draws children in ascending Z order once any child has elevation, so the sheet was painted over an overlay sitting at the default Z=0. The overlay and the denial tear now carry 32dp, above the sheet's 28dp entrance peak.
+- The same cause made the modal appear frozen: the sheet on top received the taps the stamp was waiting for. Both are fixed by the one elevation change.
 
 ## Keeping this file honest
 

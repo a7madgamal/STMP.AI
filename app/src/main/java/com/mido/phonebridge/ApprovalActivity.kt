@@ -1079,6 +1079,14 @@ class ApprovalActivity : FragmentActivity() {
                 }.start()
             }
         }
+        // **Above the sheet, or it is invisible.**
+        //
+        // `PaperEntranceView` carries 4dp of elevation for its sheet shadow, and a ViewGroup draws
+        // children in ascending Z order once any child has elevation. The overlay defaulted to
+        // Z=0, so the sheet was painted OVER it on every frame — which is exactly what the device
+        // showed: 37 real paints, nothing visible, and a modal that looked frozen because the
+        // sheet on top received the taps.
+        overlay.elevation = Theme.dp(this, Theme.OVERLAY_ELEVATION_DP).toFloat()
         // Full-screen, on top of everything in this window (the modal).
         root.addView(overlay, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -1096,6 +1104,9 @@ class ApprovalActivity : FragmentActivity() {
 
     private fun showDenialTear(root: android.view.ViewGroup, sheet: View) {
         val tear = PaperTearView(this)
+        // Same Z-order rule as the stamp: without this the tear is drawn under the sheet and the
+        // denial looks like a frozen modal rather than a torn page.
+        tear.elevation = Theme.dp(this, Theme.OVERLAY_ELEVATION_DP).toFloat()
         root.addView(tear, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
         ))
