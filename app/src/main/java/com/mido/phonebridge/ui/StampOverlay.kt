@@ -47,6 +47,9 @@ class StampOverlay(
     private val matrix = android.graphics.Matrix()
     private var inkProgress = 0f
 
+    /** Frames actually drawn while armed. Proves the animation ran, rather than asserting it. */
+    private var drawnFrames = 0
+
     /** When [stamp] was called. The clock starts later; this only measures how long we waited. */
     private var requestedAt = 0L
 
@@ -84,7 +87,21 @@ class StampOverlay(
             }
             inkProgress = ((elapsed - impactAt).toFloat() / 240f).coerceIn(0f, 1f)
             invalidate()
-            if (elapsed >= PaperMotion.STAMP_TOTAL_MS) {
+            drawnFrames++
+            // **HOLD, do not vanish.** Reported four times on 2026-11-11 ("still no fucking
+            // approval animation"). The logs proved the stamp ran for its full 650ms with window
+            // focus — it was never broken, it was too fast. A fingerprint dialog closes and the
+            // eye needs a beat to re-focus on the page; 650ms of presentation is over before that
+            // happens, so the receipt is real and invisible.
+            //
+            // So the ink stays fully drawn for STAMP_HOLD_MS after the motion completes, then
+            // fades out. The animation is unchanged; the RESULT is given time to be seen.
+            val holdUntil = PaperMotion.STAMP_TOTAL_MS + PaperMotion.STAMP_HOLD_MS
+            if (elapsed >= holdUntil) {
+                android.util.Log.i(
+                    "StampOverlay",
+                    "finished: $verdict after ${drawnFrames}f/${elapsed}ms",
+                )
                 finishOnce()
             } else {
                 postOnAnimation(this)
@@ -110,6 +127,7 @@ class StampOverlay(
         impactSent = false
         finished = false
         inkProgress = 0f
+        drawnFrames = 0
         removeCallbacks(tick)
         // Start the arming loop NOW, so it can notice focus returning. Waiting for a draw would
         // never start anything while another window is on top and this one is not drawn.
@@ -180,7 +198,10 @@ class StampOverlay(
         }
         val alpha = when {
             elapsed < 50L -> elapsed / 50f
-            elapsed > 560L -> 1f - ((elapsed - 560L).toFloat() / 90f).coerceIn(0f, 1f)
+            // Fade only during the hold's tail, so the mark sits at full ink where it can be read.
+            elapsed > PaperMotion.STAMP_TOTAL_MS ->
+                1f - ((elapsed - PaperMotion.STAMP_TOTAL_MS).toFloat() /
+                    PaperMotion.STAMP_HOLD_MS).coerceIn(0f, 1f)
             else -> 1f
         }
         canvas.save()

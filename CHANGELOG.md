@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.50.2 (build 300)**.
+Current build: **v0.50.3 (build 301)**.
 
 ---
 
@@ -5417,8 +5417,12 @@ devDependencies. `node_modules/` is gitignored.
 - The approval stamp is visible again after a fingerprint. Its clock started while the biometric window was still closing, so the whole animation elapsed behind that dialog and finished on its first visible frame; it now waits for window focus, with a bounded fallback so a platform that never reports focus plays a late stamp instead of none.
 - The exit backstop includes that wait, so it can no longer dismiss the modal mid-wait and cancel the stamp it protects.
 
-## 0.50.2 (build 300) — 2026-11-11 — CURRENT
+## 0.50.2 (build 300) — 2026-11-11
 - The help badge is half its previous size and sits flush against the row title, so it no longer reserves dead space beside the name it belongs to.
+
+## 0.50.3 (build 301) — 2026-11-11 — CURRENT
+- The approval stamp now HOLDS its result for over a second after the motion finishes. The animation was running correctly at 650ms, but that is shorter than the beat it takes to look back at the page after dismissing a fingerprint dialog, so the receipt was real and never seen.
+- A drawn-frame count is logged with the stamp's completion, so "the animation did not play" is now distinguishable from "it played too briefly" without guessing.
 
 ## Keeping this file honest
 

@@ -1091,6 +1091,7 @@ class ApprovalActivity : FragmentActivity() {
             // would call finish() mid-wait — killing the receipt it exists to protect.
             PaperMotion.STAMP_ARM_FALLBACK_MS +
                 PaperMotion.STAMP_TOTAL_MS +
+                PaperMotion.STAMP_HOLD_MS +
                 (if (!approved) PaperMotion.TEAR_MS else 0L) + 500L,
         )
     }
