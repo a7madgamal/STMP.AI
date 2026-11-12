@@ -10,6 +10,7 @@ import com.mido.phonebridge.core.PluginSettingsStore
 import com.mido.phonebridge.ui.PluginHelp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.robolectric.shadows.ShadowDialog
 import org.junit.Test
@@ -62,6 +63,41 @@ class PluginHelpScreenshotTest(variant: Variant) : ShotTest(variant) {
         PluginFixtures.register()
         Fixtures.pluginsSwitchedOff("contacts")
         open("Contacts", "contacts", "contacts_off", null, listOf("Close", "Open plugin"))
+    }
+
+    @Test
+    fun dialog_reads_the_status_when_it_opens_not_when_the_tab_drew() {
+        Fixtures.googleClient("fixture-client")
+        PluginFixtures.register()
+        val activity = hostTab(PluginsFragment::class.java, Theme.Tab.PLUGINS)
+        val plugin = PluginRegistry.get("tts")!!
+        val enabled = PluginSettingsStore.from(Fixtures.app).isEnabled(plugin)
+        val old = PluginHelp.lineFor(plugin, enabled).text
+        (plugin as FixturePlugin).apply { state = PluginStatus.State.ERROR; detail = "Status unavailable: disk full" }
+        val fresh = PluginHelp.lineFor(plugin, enabled).text
+        assertTrue("fixture must change the line", old != fresh)
+
+        findByDescription(activity.window.decorView, "About Speak")!!.performClick()
+        val root = (ShadowDialog.getLatestDialog() as AlertDialog).window!!.decorView
+        assertNotNull("the dialog shows the new line '$fresh'", findByText(root, fresh))
+        assertNull("the dialog must not show the old line '$old'", findByText(root, old))
+    }
+
+    @Test
+    fun dialog_reads_the_enabled_flag_when_it_opens_not_when_the_tab_drew() {
+        Fixtures.googleClient("fixture-client")
+        PluginFixtures.register()
+        val activity = hostTab(PluginsFragment::class.java, Theme.Tab.PLUGINS)
+        val plugin = PluginRegistry.get("tts")!!
+        val old = PluginHelp.lineFor(plugin, true).text
+        PluginSettingsStore.from(Fixtures.app).setEnabled(plugin, false)
+        val fresh = PluginHelp.lineFor(plugin, false).text
+        assertTrue("fixture must change the line", old != fresh)
+
+        findByDescription(activity.window.decorView, "About Speak")!!.performClick()
+        val root = (ShadowDialog.getLatestDialog() as AlertDialog).window!!.decorView
+        assertNotNull("the dialog shows the new line '$fresh'", findByText(root, fresh))
+        assertNull("the dialog must not show the old line '$old'", findByText(root, old))
     }
 
     /**

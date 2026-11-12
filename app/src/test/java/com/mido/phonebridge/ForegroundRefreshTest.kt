@@ -26,6 +26,7 @@ class ForegroundRefreshTest {
     @After
     fun reset() {
         BridgeService.serverUp = false
+        BridgeService.serviceAlive = false
         BridgeService.bindAddress = ""
     }
 
@@ -43,6 +44,7 @@ class ForegroundRefreshTest {
 
     @Test
     fun `a mode change re-posts at once and an unchanged state posts nothing`() {
+        BridgeService.serviceAlive = true
         BridgeService.serverUp = true
         BridgeService.bindAddress = "100.101.7.22"
         // A distinct address makes the dedupe key differ from any earlier test's.

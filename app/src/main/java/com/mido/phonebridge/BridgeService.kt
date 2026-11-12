@@ -72,12 +72,19 @@ class BridgeService : Service() {
         @Volatile private var lastForegroundKey = ""
 
         /**
+         * True from `onCreate` to `onDestroy`. [refreshForegroundNotice] posts nothing outside that
+         * window, so a late probe or an app-side call can never leave a notice with no service behind it.
+         */
+        @Volatile var serviceAlive = false
+
+        /**
          * D51: rebuild and re-post the running notification. Called by the service on bind, rebind and the
          * 60 s watchdog tick, and by the app right after it changes the gate mode (HomeFragment.applyGate).
-         * From the app it is a no-op while the bridge is not up, so it never posts a notification for a
-         * service that is not running.
+         * It is a no-op while the service is not running (any caller), and from the app also while the
+         * bridge is not up, so it never posts a notification for a service that is not there.
          */
         fun refreshForegroundNotice(ctx: Context, forceStarting: Boolean = false, fromApp: Boolean = false) {
+            if (!serviceAlive) return
             if (fromApp && !serverUp) return
             val app = ctx.applicationContext
             val address = if (forceStarting || !serverUp) null else bindAddress.takeIf { it.isNotBlank() }
@@ -274,6 +281,8 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        destroyed = false
+        serviceAlive = true
         createChannel()
         Debug.log("service onCreate")
         // Decode the stamp sample NOW, so the first decision after a cold start already has it.
@@ -638,18 +647,28 @@ class BridgeService : Service() {
     // itself and gives up with "recursive problem".
     private val watchdogTick: Runnable = object : Runnable {
         override fun run() {
-            Thread({
-                val ok = probe()
-                lastProbeOk = ok
-                lastProbeAtMs = System.currentTimeMillis()
-                if (!ok && server != null) {
-                    Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
-                    watchdogHandler.post { rebind() }
-                }
-                refreshForegroundNotice(this@BridgeService)
-                watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
-            }, "bridge-probe").apply { isDaemon = true }.start()
+            if (destroyed) return
+            Thread({ finishWatchdogProbe(probe()) }, "bridge-probe").apply { isDaemon = true }.start()
         }
+    }
+
+    @Volatile private var destroyed = false
+
+    /**
+     * What the probe thread does with its result. The probe can outlive `onDestroy` by up to
+     * PROBE_TIMEOUT_MS, so a torn-down service returns without touching the notice or the schedule.
+     */
+    internal fun finishWatchdogProbe(ok: Boolean) {
+        if (destroyed) return
+        lastProbeOk = ok
+        lastProbeAtMs = System.currentTimeMillis()
+        if (!ok && server != null) {
+            Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
+            watchdogHandler.post { rebind() }
+        }
+        refreshForegroundNotice(this)
+        if (destroyed) return
+        watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
     }
 
     /**
@@ -728,6 +747,9 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // First, so a probe thread that finishes from here on posts and schedules nothing.
+        destroyed = true
+        serviceAlive = false
         // A pending retry must not outlive the service: it would start a new instance after a
         // deliberate STOP, which is the same bug `maybeAutoStartServer` guards against on the
         // app side. The watchdog likewise has nothing left to watch.

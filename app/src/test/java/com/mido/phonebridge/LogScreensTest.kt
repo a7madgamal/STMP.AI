@@ -134,6 +134,72 @@ class LogScreensTest {
         }
     }
 
+    @Test fun `tapping a filter chip keeps the same chip views on screen and only repaints them`() {
+        Fixtures.logList()
+        val a = log()
+        val all = chip(a, "All")
+        val denied = chip(a, "Denied")
+        assertTrue((all as com.mido.phonebridge.ui.kit.Chips.FilterChip).checked)
+
+        denied.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        assertTrue("same All instance", all === chip(a, "All"))
+        assertTrue("same Denied instance", denied === chip(a, "Denied"))
+        assertTrue(all.isAttachedToWindow)
+        assertTrue(denied.isAttachedToWindow)
+        assertFalse("All is unchecked", all.checked)
+        assertTrue("Denied is checked", (denied as com.mido.phonebridge.ui.kit.Chips.FilterChip).checked)
+
+        denied.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertTrue("All is checked again", all.checked)
+        assertFalse(denied.checked)
+    }
+
+    @Test fun `Set and Remove apply to the policy as stored now and audit its gate mode`() {
+        Fixtures.registerNamedPlugins()
+        Fixtures.exceptionsOnly(Rule("gmail", Verb.EDIT, Mode.PARANOID))
+        Fixtures.gate(GlobalMode.WHITELIST)
+        val a = Robolectric.buildActivity(ExceptionsActivity::class.java).setup().get()
+        assertTrue(texts(a).contains("Whitelist mode: these exceptions are in force"))
+
+        // Another writer (the approval modal, Home) changes the gate after this screen drew.
+        val store = PolicyStore.from(Fixtures.app)
+        store.set(store.get().withGlobal(GlobalMode.PARANOID))
+
+        // Set: Don't disturb on the row.
+        a.window.decorView.all().first { it.contentDescription == "Change Gmail · edit to Don't disturb" }.performClick()
+        assertEquals(GlobalMode.PARANOID, store.get().global)
+        assertEquals(Mode.DONT_DISTURB, store.get().rules.single().mode)
+        val setLine = AuditLog.from(Fixtures.app).let { it.line(it.headers().first().id)!! }
+        assertTrue(setLine, setLine.contains("switch PARANOID") && !setLine.contains("switch WHITELIST"))
+
+        // Remove, after the gate moves again.
+        store.set(store.get().withGlobal(GlobalMode.DONT_DISTURB))
+        a.window.decorView.all().first { it.contentDescription == "Remove the exception for Gmail · edit" }.performClick()
+        assertEquals(GlobalMode.DONT_DISTURB, store.get().global)
+        assertTrue(store.get().rules.isEmpty())
+        val removeLine = AuditLog.from(Fixtures.app).let { it.line(it.headers().first().id)!! }
+        assertTrue(removeLine, removeLine.contains("switch DONT_DISTURB"))
+    }
+
+    @Test fun `onResume repaints the banner after the gate mode changed elsewhere`() {
+        Fixtures.registerNamedPlugins()
+        Fixtures.exceptionsOnly(Rule("gmail", Verb.EDIT, Mode.PARANOID))
+        Fixtures.gate(GlobalMode.WHITELIST)
+        val c = Robolectric.buildActivity(ExceptionsActivity::class.java).setup()
+        assertTrue(texts(c.get()).contains("Whitelist mode: these exceptions are in force"))
+
+        val store = PolicyStore.from(Fixtures.app)
+        store.set(store.get().withGlobal(GlobalMode.PARANOID))
+        c.pause().resume()
+
+        val t = texts(c.get())
+        assertTrue(t.toString(), t.contains("Exceptions are paused"))
+        assertFalse(t.contains("Whitelist mode: these exceptions are in force"))
+    }
+
     @Test fun `exceptions banner names the paused mode in words`() {
         Fixtures.registerNamedPlugins()
         Fixtures.exceptionsOnly(Rule("gmail", Verb.EDIT, Mode.DONT_DISTURB))

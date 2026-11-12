@@ -5474,11 +5474,14 @@ devDependencies. `node_modules/` is gitignored.
 - The problem and new-device notifications say STMP, use the new icon and tell you the next step.
 - New launcher icon with a themed (monochrome) version, a new notification icon, and a new in-app logo; notifications, prompts and copied labels now say STMP.
 
-## 0.49.16 (build 312) — 2026-11-12 — CURRENT
+## 0.49.16 (build 312) — 2026-11-12
 - The last of the paper look is removed: the handwritten font, the stamp images and the old logo bitmap no longer ship, which also makes the app smaller.
 - Every control is at least 48dp with room between neighbours, every heading and switch is named for screen readers, and all text meets its contrast minimum in light and dark.
 - The new-device screen opens with the name field focused, the Exceptions screen applies each change to the policy as stored now instead of an older copy, and the request log filters keep screen reader focus when you tap one.
 - Google sign-in keeps the "Already signed in" note on screen while the account picker opens, and the fingerprint-unavailable messages use the name of the setting, "Fingerprint for approvals".
+
+## 0.49.17 (build 313) — 2026-11-12 — CURRENT
+- Stopping the bridge no longer leaves a "starting" notice behind, even when a network check was still running as it stopped.
 
 ## Keeping this file honest
 
