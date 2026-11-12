@@ -1,89 +1,107 @@
 package com.mido.phonebridge.ui
 
 import android.content.Context
+import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
- * The `?` beside a plugin: what it does, in words a person would use.
+ * The bulb beside a plugin: what it does, and what state it is really in.
  *
- * **This replaced a generated technical sheet.** The first version listed routes, HTTP methods and
- * permission ids, built from the plugin's own declarations. It was accurate and it was useless —
- * nobody deciding whether to switch on "Google Drive" wants to read `GET /drive/files/{id}`. Mido,
- * 2026-11-10: *"friendly not a fucking api documentation. a non developer simple description of
- * the features and example prompts"*.
- *
- * **The trade, stated rather than hidden.** Generated copy cannot drift; this copy can. It is kept
- * to PURPOSE rather than mechanism, because purpose changes rarely and routes change constantly.
- * `/help` remains the accurate contract for anything that needs one — this dialog exists to answer
- * "should I turn this on", which is a different question.
- *
- * **Example prompts are the load-bearing part.** "Read my last email" explains Gmail faster than
- * any description of it, and it is the shape of thing a human will actually type.
+ * **The status line is read when the dialog opens**, from the plugin itself. It used to print
+ * "On, and ready." whenever the stored switch was on, even for a plugin that was not set up or
+ * needed a permission, because it never asked the plugin. Purpose and examples are hand-written
+ * ([PluginCopy]); `/help` remains the accurate contract.
  */
 object PluginHelp {
 
-    /** Show the `?` dialog for [plugin]. */
-    fun show(ctx: Context, plugin: Plugin, enabled: Boolean) {
+    /** Show the help dialog for [plugin]; [onOpenDetail] adds an "Open plugin" action when it is not healthy. */
+    fun show(ctx: Context, plugin: Plugin, enabled: Boolean, onOpenDetail: (() -> Unit)? = null) {
         val info = PluginCopy.forId(plugin.id, plugin.displayName)
+        val line = PluginCopy.statusLine(plugin.id, enabled, PluginRowModel.statusOf(plugin))
+        val healthy = line.led == Led.State.OK
+        val p = Theme.palette(ctx)
 
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-
-        // State first, because the question is usually "why is this not working" rather than
-        // "what is this". Both sentences are short: the answer is the whole point of the row.
-        body.addView(
-            Theme.text(
-                ctx,
-                if (enabled) "On, and ready." else PluginCopy.OFF_NOTE,
-                13f,
-                if (enabled) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
-            )
+        val lineColor = when (line.tone) {
+            PluginCopy.LineTone.OK -> p.okText
+            PluginCopy.LineTone.CAUTION -> p.cautionText
+            PluginCopy.LineTone.NEUTRAL -> p.ink
+        }
+        val statusRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        statusRow.addView(
+            Led(ctx).apply { state = line.led; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+            LinearLayout.LayoutParams(Theme.dp(ctx, 16), Theme.dp(ctx, 16)).apply {
+                marginEnd = Theme.dp(ctx, 10)
+                topMargin = Theme.dp(ctx, 2)
+            },
         )
+        statusRow.addView(
+            Type.text(ctx, line.text, TypeRole.BODY_STRONG, lineColor),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        body.addView(statusRow)
 
-        body.addView(PaperDialog.caption(ctx, info.blurb))
+        body.addView(
+            Type.text(ctx, info.blurb, TypeRole.BODY, p.ink),
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(ctx, 12) },
+        )
 
         if (info.examples.isNotEmpty()) {
-            body.addView(PaperDialog.heading(ctx, "Ask it things like"))
+            body.addView(heading(ctx, "Ask it things like"))
             for (example in info.examples) {
                 body.addView(
-                    Theme.text(ctx, "“$example”", 13f, Theme.ON_SURFACE).apply {
-                        setPadding(
-                            Theme.dp(ctx, 10), Theme.dp(ctx, 6),
-                            Theme.dp(ctx, 10), Theme.dp(ctx, 6),
-                        )
-                        background = Theme.outlined(
-                            ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL,
-                        )
-                    },
+                    Readout.create(ctx, "“$example”", Readout.Kind.BODY).root,
                     LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = Theme.dp(ctx, 6) }
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(ctx, 6) },
                 )
             }
         }
 
-        // The permissions this plugin will ask for, in the plugin's own words. Kept because a
-        // prompt that appears later with no warning is the thing people refuse.
         val perms = plugin.permissions()
         if (perms.isNotEmpty()) {
-            body.addView(PaperDialog.heading(ctx, "It will ask for"))
-            for (p in perms) {
+            body.addView(heading(ctx, "It will ask for"))
+            for (perm in perms) {
                 body.addView(
-                    PaperDialog.caption(
+                    Type.text(
                         ctx,
-                        "• ${p.label} — ${p.why}${if (p.optional) " (optional)" else ""}",
-                    )
+                        "• ${perm.label} — ${perm.why}${if (perm.optional) " (optional)" else ""}",
+                        TypeRole.DETAIL, p.etched,
+                    ),
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(ctx, 4) },
                 )
             }
         }
 
-        PaperDialog.show(
-            ctx = ctx,
-            title = plugin.displayName,
-            body = body,
-            actions = listOf("got it" to {}),
-            style = { Theme.ButtonStyle.PRIMARY },
-        )
+        val actions: List<Pair<String, () -> Unit>> = when {
+            healthy -> listOf("Got it" to {})
+            onOpenDetail == null -> listOf("Close" to {})
+            else -> listOf("Close" to {}, "Open plugin" to onOpenDetail)
+        }
+        StmpDialog.show(ctx, PluginRowModel.title(plugin), body, actions)
     }
+
+    private fun heading(ctx: Context, text: String) = StmpDialog.heading(ctx, text).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(ctx, 16) }
+    }
+
+    /** The status the dialog would show now, for tests. */
+    internal fun lineFor(plugin: Plugin, enabled: Boolean): PluginCopy.StatusLine =
+        PluginCopy.statusLine(plugin.id, enabled, PluginRowModel.statusOf(plugin))
 }

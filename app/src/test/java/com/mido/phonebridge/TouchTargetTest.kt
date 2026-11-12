@@ -274,6 +274,69 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP05: the Plugins tab in each row state, the Developer group and the add keys.
+    private val pluginStates: List<Pair<String, () -> Unit>> get() {
+        val attention = com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION
+        val unconfigured = com.mido.phonebridge.core.PluginStatus.State.OFF
+        val client = { Fixtures.googleClient("fixture-client") }
+        return listOf(
+            "plugins/default" to { Fixtures.registerPlugins() },
+            "plugins/no_google_client" to { com.mido.phonebridge.screenshots.PluginFixtures.register() },
+            "plugins/google_not_set_up" to {
+                client()
+                com.mido.phonebridge.screenshots.PluginFixtures.registerWith(
+                    Triple("google", unconfigured, "no OAuth client id configured"),
+                    Triple("gmail", unconfigured, "no OAuth client id configured"),
+                )
+            },
+            "plugins/error_and_attention" to {
+                client()
+                com.mido.phonebridge.screenshots.PluginFixtures.registerWith(
+                    Triple("contacts", attention, "READ_CONTACTS not granted"), throwing = setOf("tts"),
+                )
+            },
+            "plugins/switched_off" to {
+                client()
+                com.mido.phonebridge.screenshots.PluginFixtures.register()
+                Fixtures.pluginsSwitchedOff("tts", "audio")
+            },
+            "plugins/ssh_two_connections" to {
+                client()
+                com.mido.phonebridge.screenshots.PluginFixtures.register()
+                Fixtures.secretNames("ssh-kvm-box", "ssh-nas")
+            },
+            "plugins/developer_open" to {
+                client()
+                com.mido.phonebridge.screenshots.PluginFixtures.register()
+                Fixtures.developerOpen(true)
+            },
+            "plugins/empty_registry" to { Fixtures.clearPlugins() },
+        )
+    }
+
+    @Test
+    fun `every enrolled plugins state meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, setup) in pluginStates) {
+                Fixtures.dropSingletons()
+                setup()
+                val intent = android.content.Intent(Fixtures.app, com.mido.phonebridge.debug.ScreenshotHostActivity::class.java)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_FRAGMENT, PluginsFragment::class.java.name)
+                    .putExtra(com.mido.phonebridge.debug.ScreenshotHostActivity.EXTRA_TAB, com.mido.phonebridge.ui.Theme.Tab.PLUGINS.name)
+                val a = Robolectric.buildActivity(com.mido.phonebridge.debug.ScreenshotHostActivity::class.java, intent).setup().get()
+                shadowOf(Looper.getMainLooper()).idle()
+                val body = com.mido.phonebridge.screenshots.firstScroll(a.window.decorView)!!.getChildAt(0) as ViewGroup
+                check(body, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     private fun isTarget(v: View): Boolean {
         if (!v.isShown) return false
         if (v is ScrollView || v is NestedScrollView) return false

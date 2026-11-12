@@ -5447,8 +5447,14 @@ devDependencies. `node_modules/` is gitignored.
 - Request detail shows times in your time zone with the zone named, and no longer prints "null", raw millisecond counts or a trailing dash.
 - Exceptions names plugins and modes the way the rest of the app does (Whitelist, Paranoid, Don't disturb), keeps Remove clear of the mode button, and its add-exception dialogs match the app.
 
-## 0.49.10 (build 306) — 2026-11-12 — CURRENT
+## 0.49.10 (build 306) — 2026-11-12
 - Exceptions keeps its top bar when you tap Remove, Set, Save or Try again, so the back arrow stays clear of the status bar and the list keeps its gesture-bar padding.
+
+## 0.49.11 (build 307) — 2026-11-12 — CURRENT
+- Plugins that need action now sort to the top of their group, and Debug, Help, Logs and Probe are tucked into a collapsed Developer group.
+- The plugin help dialog now tells you the real state of the plugin; it used to say "On, and ready" even when the plugin was not set up or needed a permission.
+- Plugin rows no longer break at large text sizes, the help bulb is a full-size tap target, and the technical route and error text under each plugin name is replaced with plain words.
+- In a build without Google sign-in, the Google, Gmail, Calendar and Drive rows say so instead of pretending to be set up.
 
 ## Keeping this file honest
 

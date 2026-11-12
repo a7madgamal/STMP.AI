@@ -1,8 +1,7 @@
 package com.mido.phonebridge.ui
 
-import android.content.Context
-import android.widget.LinearLayout
-import android.widget.TextView
+import com.mido.phonebridge.core.PluginStatus
+import com.mido.phonebridge.ui.kit.Led
 
 /**
  * Plain-English descriptions and example prompts, per plugin.
@@ -152,4 +151,79 @@ object PluginCopy {
     const val OFF_NOTE: String =
         "Switched off. Nothing is broken — its routes stay registered and simply answer that " +
             "the plugin is disabled, so no call starts failing with a 404."
+
+    // --- display text for the Plugins tab (WP05) ----------------------------------------------
+
+    enum class LineTone { OK, CAUTION, NEUTRAL }
+
+    /** The one-line truth shown at the top of the help dialog. */
+    data class StatusLine(val text: String, val tone: LineTone, val led: Led.State)
+
+    private val SECRET_COUNT = Regex("""(\d+) secret\(s\)""")
+    private val CONNECTION_COUNT = Regex("""(\d+) connection\(s\)""")
+    private val ROUTE_DETAIL = Regex("""^(GET|POST|DELETE|PUT) """)
+    private val GOOGLE_IDS = setOf("google", "gmail", "calendar", "drive")
+
+    /**
+     * What a plugin's own `status()` text says, in plain words. The plugins keep their routes and
+     * error codes in that text; this maps it at display time. Unknown text passes through.
+     */
+    fun humanDetail(id: String, state: PluginStatus.State, detail: String): String {
+        val d = detail.trim()
+        return when {
+            id == "contacts" && state == PluginStatus.State.NEEDS_ATTENTION ->
+                "Contacts permission isn't granted. Open this plugin to allow it."
+            id == "notifications" && state == PluginStatus.State.NEEDS_ATTENTION ->
+                "Notification access is off. Open this plugin to turn it on."
+            SECRET_COUNT.containsMatchIn(d) -> when (val n = SECRET_COUNT.find(d)!!.groupValues[1].toInt()) {
+                0 -> "No secrets yet"
+                1 -> "1 secret"
+                else -> "$n secrets"
+            }
+            CONNECTION_COUNT.containsMatchIn(d) -> when (val n = CONNECTION_COUNT.find(d)!!.groupValues[1].toInt()) {
+                1 -> "1 connection"
+                else -> "$n connections"
+            }
+            id == "ssh" && d == "no connections configured" -> "No connections yet \u2014 add one below."
+            id in GOOGLE_IDS && d.contains("no OAuth client id") -> "This build has no Google sign-in set up."
+            d.startsWith("not logged in") || d.startsWith("not signed in") -> "Sign in to your Google account first."
+            d.startsWith("re-login needed") -> "Sign in again to allow Drive access."
+            d.startsWith("index unreadable") -> "The secret list can't be read: " + d.substringAfter(":", "").trim()
+            id in GOOGLE_IDS && state == PluginStatus.State.OK && d.startsWith("ready") -> "Ready."
+            state == PluginStatus.State.OK &&
+                (ROUTE_DETAIL.containsMatchIn(d) || d.contains(" \u00b7 GET ") || d.contains("contract v")) -> summary(id)
+            else -> detail
+        }
+    }
+
+    private val SUMMARIES: Map<String, String> = mapOf(
+        "contacts" to "Search your contacts.",
+        "tts" to "Speaks text aloud on this phone.",
+        "audio" to "Plays a sound cue.",
+        "help" to "Tells agents what this phone can do.",
+        "debug" to "Phone diagnostics for agents.",
+        "logs" to "Recent phone logs for debugging.",
+        "probe" to "Checks that approval prompts reach you.",
+    )
+
+    /** A fixed one-liner for a healthy plugin whose own text is an API route. */
+    fun summary(id: String): String =
+        SUMMARIES[id] ?: forId(id, "").blurb.substringBefore(". ").trimEnd('.') + "."
+
+    /** The sentence at the top of the help dialog: the plugin's real state, read fresh. */
+    fun statusLine(id: String, enabled: Boolean, status: PluginStatus): StatusLine {
+        if (!enabled) return StatusLine(OFF_NOTE, LineTone.NEUTRAL, Led.State.OFF)
+        val human = humanDetail(id, status.state, status.detail).trim()
+        fun withDetail(lead: String) = if (human.isEmpty()) lead else lead + " " + if (human.last() in ".!?") human else "$human."
+        return when {
+            id == "secrets" && status.state == PluginStatus.State.NEEDS_ATTENTION && status.detail.startsWith("0 secret") ->
+                StatusLine("On, but not set up yet. No secrets yet \u2014 add one below.", LineTone.NEUTRAL, Led.State.OFF)
+            status.state == PluginStatus.State.OK -> StatusLine("On, and ready.", LineTone.OK, Led.State.OK)
+            status.state == PluginStatus.State.NEEDS_ATTENTION ->
+                StatusLine(withDetail("On, but it needs action."), LineTone.CAUTION, Led.State.CAUTION)
+            status.state == PluginStatus.State.ERROR ->
+                StatusLine(withDetail("On, but it hit an error."), LineTone.CAUTION, Led.State.CAUTION)
+            else -> StatusLine(withDetail("On, but not set up yet."), LineTone.NEUTRAL, Led.State.OFF)
+        }
+    }
 }

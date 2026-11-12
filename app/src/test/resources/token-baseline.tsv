@@ -4,10 +4,8 @@ TEXT_SIZE	CallerActivity.kt	3
 TEXT_SIZE	GoogleLoginActivity.kt	4
 TEXT_SIZE	OnboardingActivity.kt	14
 TEXT_SIZE	PluginDetailActivity.kt	13
-TEXT_SIZE	PluginsFragment.kt	8
 TEXT_SIZE	SecretsActivity.kt	4
 TEXT_SIZE	SshActivity.kt	11
-TEXT_SIZE	ui/PluginHelp.kt	1
 TEXT_SIZE	ui/Theme.kt	10
 TOAST	OnboardingActivity.kt	2
 TOAST	SecretsActivity.kt	1

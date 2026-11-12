@@ -6,6 +6,11 @@ import androidx.test.core.app.ApplicationProvider
 import com.mido.phonebridge.BridgeService
 import com.mido.phonebridge.NotifListenerService
 import com.mido.phonebridge.audit.AuditHealth
+import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.core.PluginPermission
+import com.mido.phonebridge.core.PluginRegistry
+import com.mido.phonebridge.core.PluginStatus
+import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.UpdatePrefs
 import com.mido.phonebridge.core.Updater
 import com.mido.phonebridge.policy.GlobalMode
@@ -553,6 +558,34 @@ object Fixtures {
             .forEach { (id, name) -> com.mido.phonebridge.core.PluginRegistry.register(com.mido.phonebridge.WpFakePlugin(id, name)) }
     }
 
+    // --- WP05: Plugins ---------------------------------------------------------------------------
+
+    /** Sets the Google OAuth client id the rows read (blank in a build without sign-in). */
+    fun googleClient(id: String) { com.mido.phonebridge.core.AuthManager.clientId = id }
+
+    /** Stored switches off for the plugins with these ids. */
+    fun pluginsSwitchedOff(vararg ids: String) {
+        val store = com.mido.phonebridge.core.PluginSettingsStore.from(app)
+        for (id in ids) com.mido.phonebridge.core.PluginRegistry.get(id)?.let { store.setEnabled(it, false) }
+    }
+
+    /** Names in the plaintext vault index (works while the vault is locked). */
+    fun secretNames(vararg names: String) {
+        val o = org.json.JSONObject()
+        for (n in names) o.put(n, org.json.JSONObject().put("docs", "").put("key", ""))
+        app.getSharedPreferences("phonebridge_vault", Context.MODE_PRIVATE).edit().putString("vault_meta", o.toString()).apply()
+    }
+
+    fun developerOpen(open: Boolean) {
+        app.getSharedPreferences("plugins_ui", Context.MODE_PRIVATE).edit().putBoolean("developer_open", open).apply()
+    }
+
+    fun resetPlugins() {
+        com.mido.phonebridge.core.AuthManager.clientId = ""
+        app.getSharedPreferences("phonebridge_vault", Context.MODE_PRIVATE).edit().remove("vault_meta").apply()
+        app.getSharedPreferences("plugins_ui", Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
     // --- everything ----------------------------------------------------------------------------
 
     fun reset() {
@@ -563,6 +596,7 @@ object Fixtures {
         resetHome()
         resetDebugLog()
         resetSettings()
+        resetPlugins()
         clearPlugins()
         previousZone?.let { TimeZone.setDefault(it) }
         previousZone = null
@@ -570,4 +604,66 @@ object Fixtures {
 
     @Suppress("unused")
     private fun unusedContext(): Context = app
+}
+
+// --- WP05: Plugins fixtures (appended) ---
+/** A plugin with a scripted status, for the Plugins tab screenshots (WP05). */
+class FixturePlugin(
+    override val id: String,
+    override val displayName: String,
+    var state: PluginStatus.State = PluginStatus.State.OK,
+    var detail: String = "",
+    private val throwing: Boolean = false,
+    private val perms: List<PluginPermission> = emptyList(),
+) : Plugin {
+    override fun routes() = emptyList<Route>()
+    override fun permissions() = perms
+    override fun status(): PluginStatus {
+        if (throwing) throw IllegalStateException("fixture status failure")
+        return PluginStatus(displayName, state, detail)
+    }
+}
+
+object PluginFixtures {
+    private val OK = PluginStatus.State.OK
+
+    /** Every production plugin id, healthy, with the route-style text the real plugins print. */
+    fun healthy(): List<FixturePlugin> = listOf(
+        FixturePlugin("google", "Google account", OK, "a@example.com"),
+        FixturePlugin("gmail", "Gmail", OK, "ready · token 42m"),
+        FixturePlugin("calendar", "Calendar", OK, "ready"),
+        FixturePlugin("drive", "Google Drive", OK, "ready"),
+        FixturePlugin("notifications", "Notifications", OK, "listener connected"),
+        FixturePlugin(
+            "contacts", "Contacts", OK, "GET /contacts?query= — names, numbers and emails, up to 20 people",
+            perms = listOf(PluginPermission("android.permission.READ_CONTACTS", "Contacts", "It searches your contacts.", false)),
+        ),
+        FixturePlugin("audio", "Audio", OK, "POST /audio/{cue} — chime, alarm"),
+        FixturePlugin("tts", "Speak", OK, "POST /tts — cap 500 chars, line 3, rate 1.0, pitch 1.0"),
+        FixturePlugin("secrets", "Secrets (metadata)", OK, "2 secret(s) · GET /secrets"),
+        FixturePlugin("ssh", "SSH", OK, "kvm-box, nas"),
+        FixturePlugin("help", "Help", OK, "GET /help — 14 plugin(s), contract v4"),
+        FixturePlugin("debug", "Debug", OK, "GET /debug"),
+        FixturePlugin("logs", "Logs", OK, "GET /logs?lines=100"),
+        FixturePlugin("probe", "Probe", OK, "POST /probe"),
+    )
+
+    /** Registers [healthy] with [change] applied to the plugin of the matching id, on a fresh registry. */
+    fun register(change: (FixturePlugin) -> FixturePlugin = { it }) {
+        Fixtures.clearPlugins()
+        for (p in healthy()) PluginRegistry.register(change(p))
+    }
+
+    /** Replaces the status of the plugins named in [overrides] (id to state and detail). */
+    fun registerWith(vararg overrides: Triple<String, PluginStatus.State, String>, throwing: Set<String> = emptySet()) {
+        val byId = overrides.associateBy { it.first }
+        register { p ->
+            val o = byId[p.id]
+            when {
+                p.id in throwing -> FixturePlugin(p.id, p.displayName, throwing = true)
+                o != null -> FixturePlugin(p.id, p.displayName, o.second, o.third, perms = p.permissions())
+                else -> p
+            }
+        }
+    }
 }

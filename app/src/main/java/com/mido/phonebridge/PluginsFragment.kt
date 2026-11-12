@@ -1,183 +1,209 @@
 package com.mido.phonebridge
 
+import android.content.Context
 import android.content.Intent
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.mido.phonebridge.Debug
+import androidx.core.view.ViewCompat
+import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSettingsStore
-import com.mido.phonebridge.core.PluginStatus
-import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.PluginHelp
+import com.mido.phonebridge.ui.PluginRowModel
+import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.dp
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.PluginRow
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StateBlock
+import com.mido.phonebridge.ui.kit.StatusRow
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * The Plugins screen: every capability the bridge exposes, whether it is on, and why not.
  *
- * **This screen exists because Home had become a wall.** Twelve plugins rendered as status cards
- * between the server control and the tools section, which pushed the one thing Home is FOR —
- * is the bridge running — off the first screen. Capability inventory belongs on its own page.
- *
- * **Two different "not working" states are kept apart**, and the distinction is the point of the
- * screen:
- *
- *  - **OFF — you turned it off.** The switch is the remedy, and the row says so.
- *  - **NEEDS ATTENTION — it is on but cannot serve.** No OAuth client, no SSH connections, a
- *    missing model. The switch is NOT the remedy, so offering it would be a lie that costs the
- *    human a tap and teaches them the wrong thing about their own app.
- *
- * Collapsing those two into one grey row is the easiest possible mistake here and the one that
- * makes the screen useless.
+ * Two different "not working" states stay apart, and the distinction is the point of the screen:
+ * OFF is "you turned it off" (the switch is the remedy); ACTION NEEDED / NOT SET UP / ERROR is
+ * "it is on but cannot serve" (the switch is not the remedy). Rows that need action sort first in
+ * their group (D24); Debug, Help, Logs and Probe live in a collapsed Developer group.
  */
 class PluginsFragment : BridgeFragment() {
 
     override val tab = Theme.Tab.PLUGINS
 
     private lateinit var list: LinearLayout
+    private lateinit var summaryLabel: TextView
+
+    /** One row's plugin and what it shows. */
+    private data class Item(val plugin: Plugin, val model: PluginRowModel.Model)
 
     override fun buildContent(container: LinearLayout) {
-        container.addView(Theme.text(ctx, "PLUGINS", 20f).apply {
-            typeface = Theme.handFont(ctx)
-            setTextColor(Theme.ON_SURFACE)
+        val p = Theme.palette(ctx)
+        container.addView(Type.text(ctx, "Plugins", TypeRole.TITLE, p.ink).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
         })
-        container.addView(Theme.text(
-            ctx,
-            "Each plugin owns its own routes, settings and permissions. Turning one off " +
-                "keeps its routes answering — with a refusal that says it is off.",
-            13f,
-        ).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
-        })
-
+        summaryLabel = Etched.label(ctx, "").apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ctx.dp(Dimens.SPACE_XS)
+        }
+        container.addView(summaryLabel)
+        container.addView(
+            Type.text(ctx, "Turning a plugin off keeps it answering; agents are told it is off.", TypeRole.CAPTION, p.etched),
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = ctx.dp(Dimens.SPACE_XS) },
+        )
         list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(list)
-
         render()
     }
 
     /**
-     * The groups, in the order Mido asked for (2026-11-03): *"group related plugins... all google
-     * in one large group with header / phone data like notifications and sound etc / misc like
-     * debug and help / group secrets"*.
-     *
-     * Grouped by WHAT THE PLUGIN IS ABOUT rather than by its id or its display name, because the
-     * list is a map of the phone: the Google services share an account, the phone ones share
-     * device permissions, and the misc ones are the machinery that explains the rest.
-     *
-     * An id in no group is a DEFECT, not a plugin to hide: `unlisted` below renders it under
-     * Misc and logs it, so a new plugin cannot quietly vanish from the screen.
+     * The groups, by what the plugin is ABOUT: the Google services share an account, the phone ones
+     * share device permissions, and the developer ones are the machinery that explains the rest.
+     * An id in no group is a defect, not a plugin to hide: it is shown under "Other" and logged.
      */
     private val groups: List<Pair<String, Set<String>>> = listOf(
         "Google" to setOf("google", "gmail", "calendar", "drive"),
         "Phone" to setOf("notifications", "contacts", "audio", "tts"),
-        // **Secrets and SSH are separate headers, each with its own items.**
-        //
-        // Mido, 2026-11-04: *"split secrets into secrets and ssh with its own header and related
-        // items"*. An earlier pass merged them because SSH IS a vault entry — but they are not the
-        // same work: Secrets holds API keys you paste, SSH holds generated keys you install on a
-        // server. Merging them put two different add flows under one word.
         "Secrets" to setOf("secrets"),
         "SSH" to setOf("ssh"),
-        "Misc" to setOf("help", "debug", "logs", "probe"),
+        DEVELOPER to setOf("help", "debug", "logs", "probe"),
     )
 
     private fun render() {
         list.removeAllViews()
-
         val store = PluginSettingsStore.from(requireContext())
-        // **Per-secret plugins are not rows on this screen.**
-        //
-        // Mido, 2026-11-04: *"delete the duplicate others list, currently showing 2 secrets
-        // already shown under secrets"*. `BridgeService.registerSecretPlugin` gives every secret
-        // its own plugin (id = the secret's name) so its route is reachable — that is a ROUTING
-        // fact, not a capability a human switches on. Listing them made each secret appear twice:
-        // once under Secrets, once in "Other".
-        //
-        // Filtered by "is one of the declared plugin ids", not by "is not in a group": an id in no
-        // group is still a DEFECT worth showing (see `unlisted` below), and that guard stays.
-        //
-        // Filtered by TYPE, not by a list of ids: a list would drift from `groups` above and
-        // silently hide the next plugin someone adds. `SecretPlugin` is the one class that
-        // exists per-secret, so excluding it is precise and cannot go stale.
-        val plugins = PluginRegistry.all()
-            .filterNot { it is com.mido.phonebridge.plugins.secrets.SecretPlugin }
-
-        if (plugins.isEmpty()) {
-            // Real state: the service has not registered yet. Say so rather than showing a blank
-            // page that reads as "no plugins exist".
-            list.addView(Theme.text(ctx, "No plugins registered yet.", 13f).apply {
-                setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(ctx, 16), 0, 0)
-            })
-            return
-        }
-
+        // Per-secret plugins exist for routing; they are not capabilities a human switches on.
+        val plugins = PluginRegistry.all().filterNot { it is com.mido.phonebridge.plugins.secrets.SecretPlugin }
         val byId = plugins.associateBy { it.id }
         val claimed = mutableSetOf<String>()
+        val shown = ArrayList<PluginRowModel.Model>()
 
-        for ((heading, ids) in groups) {
-            val members = ids.mapNotNull { byId[it] }.sortedBy { it.displayName }
-            if (members.isEmpty()) continue
-            claimed += members.map { it.id }
-
-            list.addView(Theme.sectionHeader(ctx, heading))
-
-            if (heading == "Google") {
-                // **ONE card for the whole Google group.**
-                //
-                // Mido, 2026-11-04: *"the google plugin should be one card, show the email once"*.
-                // Four separate cards said "these are four unrelated things" about one account.
-                // They share an OAuth session and the same email, so they are one subject with
-                // four capabilities — which is what a card should represent.
-                //
-                // The account row comes FIRST because it is the precondition: the three services
-                // below cannot serve until it is signed in, and reading top-down tells you that
-                // before you wonder why they are greyed.
-                val googleCard = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.VERTICAL
-                    background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-                }
-                googleCard.layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = Theme.dp(ctx, 10) }
-
-                val ordered = members.sortedBy { if (it.id == "google") 0 else 1 }
-                for ((index, plugin) in ordered.withIndex()) {
-                    if (index > 0) {
-                        // A hairline between capabilities, so one card does not read as one blob.
-                        googleCard.addView(android.view.View(ctx).apply {
-                            setBackgroundColor(Theme.BORDER)
-                        }, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, Theme.dp(ctx, 1),
-                        ).apply { topMargin = Theme.dp(ctx, 2); bottomMargin = Theme.dp(ctx, 2) })
-                    }
-                    googleCard.addView(row(plugin, store, bare = true))
-                }
-                list.addView(googleCard)
-            } else {
-                for (plugin in members) list.addView(row(plugin, store))
-                if (heading == "Secrets") addSecretsActions(members)
-                if (heading == "SSH") addSshActions(members)
-            }
-
-
+        fun itemsOf(members: List<Plugin>): List<Item> {
+            val items = members.map { Item(it, PluginRowModel.of(it, store.isEnabled(it))) }
+            shown += items.map { it.model }
+            val order = PluginRowModel.sorted(items.map { it.model }).map { it.id }
+            return items.sortedBy { order.indexOf(it.model.id) }
         }
 
-        // Anything not in a group is still shown. Silently dropping a plugin would make the
-        // screen lie about what the bridge can do.
-        val unlisted = plugins.filter { it.id !in claimed }.sortedBy { it.displayName }
+        for ((heading, ids) in groups) {
+            val members = ids.mapNotNull { byId[it] }
+            if (members.isEmpty()) continue
+            claimed += members.map { it.id }
+            val items = itemsOf(members)
+            if (heading == DEVELOPER) {
+                list.addView(developerPanel(items, store))
+                continue
+            }
+            list.addView(SectionHeader.create(ctx, heading))
+            list.addView(groupPanel(heading, items, store))
+        }
+
+        val unlisted = plugins.filter { it.id !in claimed }
         if (unlisted.isNotEmpty()) {
             Debug.log("plugins: ungrouped ids ${unlisted.map { it.id }}")
-            list.addView(Theme.sectionHeader(ctx, "Other"))
-            for (plugin in unlisted) list.addView(row(plugin, store))
+            list.addView(SectionHeader.create(ctx, "Other"))
+            list.addView(groupPanel("Other", itemsOf(unlisted), store))
+        }
+
+        summaryLabel.text = PluginRowModel.summary(shown)
+        if (plugins.isEmpty()) {
+            list.addView(emptyState().apply {
+                (layoutParams as? LinearLayout.LayoutParams)?.topMargin = ctx.dp(Dimens.SPACE_L)
+            })
         }
     }
 
+    private fun groupPanel(heading: String, items: List<Item>, store: PluginSettingsStore): LinearLayout {
+        val panel = Panel.create(ctx)
+        for (item in items) panel.addView(rowView(item, store))
+        if (heading == "SSH") {
+            for (name in sshConnectionNames()) {
+                panel.addView(StatusRow.create(
+                    ctx, label = name, value = "SSH", detail = "One connection",
+                    onClick = {
+                        go(
+                            Intent(ctx, PluginDetailActivity::class.java)
+                                .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
+                                .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name),
+                        )
+                    },
+                ))
+            }
+        }
+        val add = when (heading) {
+            "Secrets" -> "+ Add secret" to SecretsActivity::class.java
+            "SSH" -> "+ Add connection" to SshActivity::class.java
+            else -> null
+        }
+        if (add != null) {
+            panel.addView(
+                KeyButton.create(ctx, add.first, KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { go(Intent(ctx, add.second)) },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = ctx.dp(Dimens.SPACE_M) },
+            )
+        }
+        return panel
+    }
+
+    /** The collapsed-by-default Developer group (D24); open when one of its plugins needs action. */
+    private fun developerPanel(items: List<Item>, store: PluginSettingsStore): LinearLayout {
+        val prefs = ctx.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE)
+        val saved = prefs.getBoolean(KEY_DEVELOPER_OPEN, false)
+        val forced = items.any { it.model.rank <= PluginRowModel.RANK_ACTION }
+        val open = saved || forced
+        val panel = Panel.create(ctx)
+        val header = StatusRow.create(
+            ctx,
+            label = "Developer",
+            value = if (open) "HIDE" else "SHOW",
+            detail = if (forced) "Needs action" else "Help, Debug, Logs and Probe",
+            onClick = {
+                prefs.edit().putBoolean(KEY_DEVELOPER_OPEN, !saved).apply()
+                list.post { render() }
+            },
+        )
+        ViewCompat.setStateDescription(header, if (open) "Expanded" else "Collapsed")
+        panel.addView(header)
+        if (open) for (item in items) panel.addView(rowView(item, store))
+        return panel
+    }
+
+    private fun rowView(item: Item, store: PluginSettingsStore) = PluginRow.create(
+        ctx,
+        item.model,
+        onOpen = { openDetail(item.plugin.id) },
+        onHelp = { PluginHelp.show(ctx, item.plugin, store.isEnabled(item.plugin)) { openDetail(item.plugin.id) } },
+        onToggle = { want ->
+            // Write, then repaint from what was written. Posted: render() empties the list that
+            // holds the tapped rocker, and doing that inline eats the tap.
+            store.setEnabled(item.plugin, want)
+            Debug.log("plugin ${item.plugin.id}: enabled=$want")
+            list.post { render() }
+        },
+    )
+
+    private fun emptyState() = StateBlock.create(
+        ctx,
+        StateBlock.Kind.EMPTY,
+        title = "No plugins yet",
+        body = "STMP registers its plugins when the bridge starts. Switch the bridge on from Home.",
+        action = KeyButton.Spec(label = "Open Home", describe = "Open Home", onClick = {
+            go(
+                Intent(ctx, MainActivity::class.java)
+                    .putExtra(Tabs.EXTRA_TAB, Theme.Tab.HOME.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+        }),
+    )
+
     /**
-     * The stored SSH connections, by display name.
-     *
-     * Same source `HelpPlugin` reads: one vault secret named `ssh-<host>` per connection. The
+     * The stored SSH connections, by display name: one vault secret named `ssh-<host>` each. The
      * vault's name index is plaintext precisely so this works while it is locked.
      */
     private fun sshConnectionNames(): List<String> = try {
@@ -185,298 +211,29 @@ class PluginsFragment : BridgeFragment() {
             .filter { it.startsWith("ssh-") }
             .map { it.removePrefix("ssh-") }
     } catch (e: Exception) {
-        // A corrupt index must not blank the screen: the SSH plugin's own row still reports the
-        // failure through its status.
         Debug.log("plugins: cannot read ssh connections: ${e.message}")
         emptyList()
     }
 
-    /** One SSH connection, as its own row opening that connection's detail screen. */
-    private fun sshRow(name: String): LinearLayout {
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-            )
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-            isClickable = true
-            contentDescription = "SSH connection $name"
-            setOnClickListener {
-                go(
-                    Intent(ctx, PluginDetailActivity::class.java)
-                        .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, "ssh")
-                        .putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, name)
-                )
-            }
-        }
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        // Set as a statement, not inside `.apply`: there `this` is the LayoutParams, so
-        // `Theme.dp(ctx, ...)` would be handed a params object where it wants a Context.
-        lp.topMargin = Theme.dp(ctx, 10)
-        card.layoutParams = lp
-
-        val titleRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        titleRow.addView(Theme.text(ctx, name, 16f).apply {
-            setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(ctx)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        titleRow.gravity = android.view.Gravity.CENTER_VERTICAL
-        titleRow.addView(Theme.text(ctx, "SSH", 12f).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-        })
-        card.addView(titleRow)
-
-        card.addView(Theme.text(ctx, "One connection. POST /ssh/$name", 12f).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
-        })
-        return card
-    }
-
-    private fun row(
-        plugin: com.mido.phonebridge.core.Plugin,
-        store: PluginSettingsStore,
-        /** Draw as a bare row inside a shared card instead of standing on its own. */
-        bare: Boolean = false,
-    ): LinearLayout {
-        val on = store.isEnabled(plugin)
-        // `status()` is the plugin's own answer about whether it can serve. Only consulted when
-        // the plugin is ON: an off plugin may well report OK, and a page saying "OK" next to a
-        // switch that is off is the confusion this screen exists to remove.
-        val status = if (on) plugin.status() else null
-
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            // A bare row has no card of its own: the group draws ONE surface around the set, so
-            // four Google services read as one subject rather than four unrelated cards.
-            setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, if (bare) 8 else 12),
-            )
-            if (!bare) background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-            isClickable = true
-            contentDescription = "${plugin.displayName}: ${stateLabel(on, status)}"
-            setOnClickListener { openDetail(plugin.id) }
-        }
-        if (!bare) {
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = Theme.dp(ctx, 10)
-            card.layoutParams = lp
-        }
-
-        val titleRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            // CENTER_VERTICAL so the knob lines up with the name rather than the top of the word.
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        // **A 💡 badge at the START of the row**, before the name.
-        //
-        // Mido, 2026-11-10: *"change the ? in the plugins list into a leftside into a 💡 circle
-        // icon"*. It used to sit in the control cluster beside the knob, where a `?` reads as a
-        // diagnostic on the switch. On the left it reads as what it is: a marker on the thing to
-        // be explained, and the name sits beside the bulb it belongs to.
-        //
-        // Its own click listener means the row does NOT navigate when it is tapped — a clickable
-        // child wins the touch. That is the point: the row already opens the detail screen, and a
-        // help affordance that navigated somewhere would be the same door twice.
-        titleRow.addView(
-            Theme.bulbBadge(ctx, "What ${plugin.displayName} does") {
-                PluginHelp.show(ctx, plugin, on)
-            },
-        )
-
-        // Weight 1 on the name: it absorbs all the slack, which is what pushes the state word and
-        // then the knob to the right edge. Without it the knob sat wherever the text happened to
-        // end, so rows disagreed about where the switch lived.
-        titleRow.addView(Theme.text(ctx, plugin.displayName, 16f).apply {
-            setTextColor(Theme.ON_SURFACE)
-            typeface = Theme.handFont(ctx)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-
-        // The state chip. Colour carries the meaning and the WORD carries it too, because a
-        // colour alone is unreadable for a chunk of the population and invisible in a screenshot.
-        val stateText = stateLabel(on, status)
-        if (stateText.isNotEmpty()) {
-            titleRow.addView(Theme.text(ctx, stateText, 12f).apply {
-                setTextColor(stateColour(on, status))
-            }, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { marginEnd = Theme.dp(ctx, 10) })
-        }
-
-        // The switch. EVERY plugin, no exceptions (Mido, 2026-11-04).
-        run {
-            // **The knob shows OFF when the plugin cannot serve.**
-            //
-            // Mido, 2026-11-10: *"for plugins when action needed or disabled the toggles should
-            // be off"*. The knob used to render the STORED flag, so a plugin switched on but
-            // unable to work (no permission, not signed in, no secrets) showed a knob pointing
-            // right beside the word ACTION NEEDED — the control claiming one thing and the label
-            // saying another.
-            //
-            // Only `OK` counts as on. `OFF`, `NEEDS_ATTENTION` and `ERROR` all mean the plugin
-            // cannot currently serve, which is exactly when a knob pointing right is a lie.
-            // A null status (not registered yet) keeps the stored value: that is a settling
-            // state, not a defect, and flipping the knob while it settles would flicker.
-            //
-            // **Display only.** `store.setEnabled` is untouched, so the plugin's own preference
-            // survives: granting the permission makes the knob spring back without anybody
-            // re-enabling it. Writing `false` here would silently disable a plugin because of a
-            // temporary condition, and the human would have to find it and turn it on again.
-            //
-            // Tapping therefore means "turn it off" while it reads off — harmless: the write
-            // lands on the stored value the human actually wants, and a plugin that cannot serve
-            // does nothing either way.
-            val showsOn = on && (status == null || status.state == PluginStatus.State.OK)
-            val toggle = Theme.toggle(ctx, showsOn) { want ->
-                // Write, then repaint from what was written. The knob is NOT flipped optimistically:
-                // a failed write would leave it showing a state the store does not hold.
-                store.setEnabled(plugin, want)
-                Debug.log("plugin ${plugin.id}: enabled=$want")
-                render()
-            }
-            // **The knob must not become the row's click.**
-            //
-            // The card opens the detail screen on tap, and the knob sits inside it. A clickable
-            // child wins the touch in Android, so tapping the knob flips the switch and does NOT
-            // navigate -- which is what we want. This line makes that explicit rather than
-            // accidental: the knob refuses to let its parent intercept a drag that starts on it,
-            // so a slightly sloppy tap cannot be stolen mid-gesture by the row above.
-            toggle.setOnTouchListener { v, event ->
-                v.parent?.requestDisallowInterceptTouchEvent(true)
-                false
-            }
-            titleRow.addView(toggle)
-        }
-
-        card.addView(titleRow)
-
-        val detail = stateDetail(on, status)
-        if (detail.isNotEmpty()) {
-            card.addView(Theme.text(ctx, detail, 12f).apply {
-                setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(ctx, 4), 0, 0)
-            })
-        }
-        return card
-    }
-
-    /**
-     * The row's status word — or empty when the knob already says it.
-     *
-     * **"ON" and "OFF" are gone on purpose.** The switch sits right there and its position IS the
-     * answer; printing "ON" beside a knob pointing right is the same fact twice, and the label was
-     * the thing that used to go stale. What stays is everything the knob CANNOT say: a plugin that
-     * is switched on but cannot serve.
-     */
-    private fun stateLabel(on: Boolean, status: PluginStatus?): String = when {
-        !on -> ""
-        status == null -> ""
-        status.state == PluginStatus.State.OK -> ""
-        status.state == PluginStatus.State.NEEDS_ATTENTION -> "ACTION NEEDED"
-        status.state == PluginStatus.State.ERROR -> "ERROR"
-        // A plugin that is on but reports OFF internally is measurably misconfigured, not off by
-        // the human. Naming it "NOT SET UP" keeps the two states distinct in the one place they
-        // could collide.
-        else -> "NOT SET UP"
-    }
-
-    private fun stateColour(on: Boolean, status: PluginStatus?): Int = when {
-        !on -> Theme.ON_SURFACE_VARIANT
-        status == null -> Theme.SUCCESS
-        status.state == PluginStatus.State.OK -> Theme.SUCCESS
-        status.state == PluginStatus.State.NEEDS_ATTENTION -> Theme.WARNING
-        else -> Theme.DANGER
-    }
-
-    private fun stateDetail(on: Boolean, status: PluginStatus?): String = when {
-        !on -> "Switched off. Its routes still answer, refusing with an explanation."
-        status == null -> ""
-        status.state == PluginStatus.State.OK -> status.detail
-        else -> status.detail
-    }
-
     private fun openDetail(pluginId: String) {
-        // **Secrets opens its own screen.**
-        //
-        // `SecretsActivity` is the secret manager: one row per secret, each URL on its own line as
-        // a tappable link. It existed and was manifest-registered, but NOTHING launched it — every
-        // plugin row went to `PluginDetailActivity`, so the screen with the link rendering could
-        // never be reached. Mido asked twice: *"secrets need each url in a line, and they need to
-        // be clickable links"*, then *"i said secrets plugin should show each url in its own line
-        // and should be CLICKABLE links"*. The rendering was correct; the door was missing.
-        val target = if (pluginId == "secrets") {
-            SecretsActivity::class.java
-        } else {
-            PluginDetailActivity::class.java
+        // Secrets has its own screen: the secret manager with each link on its own line.
+        if (pluginId == "secrets") {
+            go(Intent(ctx, SecretsActivity::class.java))
+            return
         }
-        val intent = Intent(ctx, target)
-        if (target == PluginDetailActivity::class.java) {
-            intent.putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId)
-        }
-        go(intent)
+        go(Intent(ctx, PluginDetailActivity::class.java).putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, pluginId))
     }
 
     override fun onResume() {
         super.onResume()
-        // A toggle changed on the detail screen must be visible on the way back. This rebuilds
-        // ONLY the list — the bar and the header are outside `list` and never move, so a press in
-        // flight on them cannot be cancelled.
+        // A toggle changed on the detail screen must be visible on the way back. Only the list is
+        // rebuilt: the title and summary are outside it, so a press on them is never torn down.
         if (::list.isInitialized) render()
     }
 
-    /**
-     * The actions at the bottom of the Secrets group: add a secret, add an SSH connection.
-     *
-     * Mido, 2026-11-04: *"a clear way to add more should be there too"*. Adding secrets was only
-     * reachable by opening a plugin detail page and finding a button inside it — which is a
-     * two-step journey for the one thing this screen is FOR.
-     *
-     * Both are plain rows rather than buttons in a toolbar because this screen is a list of
-     * things; an action that adds to the list belongs at the end of it, where you look after
-     * scrolling past what you already have.
-     */
-    /** The Secrets group's own actions: its entries live on the Secrets screen. */
-    private fun addSecretsActions(members: List<com.mido.phonebridge.core.Plugin>) {
-        if (members.none { it.id == "secrets" }) return
-        // The SecretsActivity manages secret values and their links; it has its own add flow.
-        list.addView(
-            Theme.button(ctx, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
-                // Same destination as the Secrets row: one screen, one way to add.
-                go(Intent(ctx, SecretsActivity::class.java))
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 10) },
-        )
-    }
-
-    /**
-     * The SSH group's own actions.
-     *
-     * One row per connection FIRST, then the way to add another — the list is what you scan, and
-     * the add control belongs under it where you look after reading what you already have.
-     */
-    private fun addSshActions(members: List<com.mido.phonebridge.core.Plugin>) {
-        if (members.none { it.id == "ssh" }) return
-        for (name in sshConnectionNames()) list.addView(sshRow(name))
-        list.addView(
-            Theme.button(ctx, "+ ADD CONNECTION", Theme.ButtonStyle.SUCCESS) {
-                // The SSH screen owns the generate-and-install flow: a connection needs a key
-                // before it can do anything, so adding one is a screen, not a form here.
-                go(Intent(ctx, SshActivity::class.java))
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 10) },
-        )
+    private companion object {
+        const val DEVELOPER = "Developer"
+        const val UI_PREFS = "plugins_ui"
+        const val KEY_DEVELOPER_OPEN = "developer_open"
     }
 }
