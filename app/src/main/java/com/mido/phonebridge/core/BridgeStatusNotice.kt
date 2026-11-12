@@ -41,9 +41,9 @@ object BridgeStatusNotice {
     }
 
     fun title(kind: Kind): String = when (kind) {
-        Kind.RETRYING -> "PhoneBridge can't start yet"
-        Kind.WAITING_FOR_ADDRESS -> "PhoneBridge is waiting for a network"
-        Kind.STOPPED -> "PhoneBridge is not running"
+        Kind.RETRYING -> "STMP can't start yet"
+        Kind.WAITING_FOR_ADDRESS -> "STMP is waiting for a network"
+        Kind.STOPPED -> "STMP is not running"
     }
 
     /**
@@ -54,7 +54,8 @@ object BridgeStatusNotice {
         Kind.RETRYING -> "No network address yet — retrying ($attempt/$maxAttempts)."
         Kind.WAITING_FOR_ADDRESS ->
             "It will start by itself as soon as the phone is on a network."
-        Kind.STOPPED -> "No network address. Check Wi-Fi or Tailscale, then open the app."
+        Kind.STOPPED ->
+            "STMP couldn't start. Open it to see why. With no network address, check Wi-Fi or Tailscale."
     }
 
     /** Ongoing = the service is still working on it, so the human cannot dismiss it away. */

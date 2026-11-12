@@ -155,8 +155,11 @@ object CallerPrompt {
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Caller prompts", NotificationManager.IMPORTANCE_HIGH)
-                    .apply { lockscreenVisibility = Notification.VISIBILITY_PRIVATE }
+                NotificationChannel(CHANNEL_ID, "New devices", NotificationManager.IMPORTANCE_HIGH)
+                    .apply {
+                        description = "Asks you to name a computer the first time it reaches STMP."
+                        lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+                    }
             )
         }
         val intent = Intent(ctx, CallerActivity::class.java).apply {
@@ -167,17 +170,7 @@ object CallerPrompt {
             ctx, p.ip.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val n = Notification.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("Unknown caller")
-            .setContentText("${p.ip} wants to reach this phone")
-            .setCategory(Notification.CATEGORY_CALL)
-            // No `setPriority`: it is deprecated, and it would be redundant anyway — the channel
-            // above already carries IMPORTANCE_HIGH, which is the modern way to say the same
-            // thing. Two places to set one thing is how they end up disagreeing.
-            .setFullScreenIntent(pi, true)
-            .setAutoCancel(true)
-            .build()
+        val n = com.mido.phonebridge.core.StmpNotifications.callerPrompt(ctx, p.ip, pi)
         return try {
             nm.notify(p.ip.hashCode(), n)
             true

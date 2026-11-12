@@ -49,8 +49,15 @@
     <color name="stmp_focus">#151518</color>
     <color name="stmp_ripple">#1F151518</color>
     <color name="stmp_nav_bar">#FF000000</color>
-    <!-- Launcher, kept at today's values until the icon is redrawn. Not night-qualified. -->
-    <color name="stmp_launcher_bg">#FFF5EEDF</color>
-    <color name="stmp_launcher_fg">#FFB23A2F</color>
-    <color name="stmp_launcher_1">#00000000</color>
+    <!-- Launcher icon (WP11 3.7). Not night-qualified: the icon looks the same in either mode.
+         Each equals a light-palette role; LauncherColorsTest keeps them equal. -->
+    <color name="stmp_launcher_bg">#FFE4E2DD</color>
+    <color name="stmp_launcher_key">#FF151518</color>
+    <color name="stmp_launcher_key_lip">#FF000000</color>
+    <color name="stmp_launcher_key_hi">#33FFFFFF</color>
+    <color name="stmp_launcher_led">#FF20B26A</color>
+    <color name="stmp_launcher_led_ring">#FF146D41</color>
+    <color name="stmp_launcher_led_halo">#6620B26A</color>
+    <color name="stmp_launcher_glyph">#FFE7ECE4</color>
+    <color name="stmp_launcher_mono">#FFFFFFFF</color>
 </resources>

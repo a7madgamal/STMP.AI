@@ -5465,9 +5465,14 @@ devDependencies. `node_modules/` is gitignored.
 - The Secrets and SSH screens are redrawn with a back key, and a vault card at the top that says whether the vault is locked, not created or needs a reset, with a key that fixes it and the real reason when unlocking fails.
 - Secret and SSH cards, every dialog and the new-device screen use the new look; errors show on the screen instead of in a toast that disappears.
 
-## 0.49.14 (build 310) — 2026-11-12 — CURRENT
+## 0.49.14 (build 310) — 2026-11-12
 - The introduction is redrawn: the permission rows show their live state with a light and a word, the footer no longer covers the last line at large text, and the commands and the agent prompt are in a readout you can select and copy.
 - The introduction's wording is fixed: it points to the bulb on the Plugins tab and to Settings for permissions, and the agent prompt is no longer broken into short lines.
+
+## 0.49.15 (build 311) — 2026-11-12 — CURRENT
+- The running notification now shows the address, port and gate mode, and has Open and Stop bridge buttons; the lock screen shows only that STMP is running.
+- The problem and new-device notifications say STMP, use the new icon and tell you the next step.
+- New launcher icon with a themed (monochrome) version, a new notification icon, and a new in-app logo; notifications, prompts and copied labels now say STMP.
 
 ## Keeping this file honest
 

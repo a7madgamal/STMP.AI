@@ -33,6 +33,7 @@ import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.dp
 import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Wordmark
 import com.mido.phonebridge.ui.kit.KnobSelector
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.Panel
@@ -172,7 +173,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val mark = Type.text(ctx, "STMP", TypeRole.TITLE, p.ink).apply {
+        val mark = Wordmark.create(ctx, iconDp = 20, withText = true).apply {
             ViewCompat.setAccessibilityHeading(this, true)
         }
         row.addView(mark, weightParams())
@@ -741,6 +742,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // Carry EVERYTHING across: `Policy(after)` alone would silently delete every exception.
             val existing = store.get()
             store.set(existing.withGlobal(after))
+            BridgeService.refreshForegroundNotice(requireContext(), fromApp = true)
         } catch (e: Exception) {
             showProblemDialog("Couldn't save the gate mode", e.message ?: e.javaClass.simpleName)
             return
