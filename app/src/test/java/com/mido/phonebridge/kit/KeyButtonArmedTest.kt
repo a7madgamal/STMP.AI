@@ -1,6 +1,7 @@
 package com.mido.phonebridge.kit
 
 import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.tokens.Dimens
 import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -36,6 +37,9 @@ class KeyButtonArmedTest : KitTest() {
         val b = KeyButton.create(a, "Copy", KeyButton.Kind.PANEL, KeyButton.Size.SMALL, onClick = {})
         assertEquals(padH.toInt(), b.paddingLeft)
         assertEquals(padH.toInt(), b.paddingRight)
+        val inset = (a.resources.displayMetrics.density * ((Dimens.MIN_TARGET - Dimens.KEY_SMALL_VISUAL) / 2)).toInt()
+        assertEquals(inset, b.paddingTop)
+        assertEquals(inset, b.paddingBottom)
         val restTop = b.paddingTop
         val restBottom = b.paddingBottom
         b.dispatchTouchEvent(MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 5f, 5f, 0))

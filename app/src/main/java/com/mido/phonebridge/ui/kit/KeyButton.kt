@@ -129,13 +129,12 @@ object KeyButton {
             stateListAnimator = null
             elevation = 0f
             val face = Bevel.key(ctx, bevelKind)
-            background = if (size == Size.SMALL) {
-                val inset = ctx.dp((Dimens.MIN_TARGET - Dimens.KEY_SMALL_VISUAL) / 2)
-                InsetDrawable(face, 0, inset, 0, inset)
-            } else face
+            val inset = if (size == Size.SMALL) ctx.dp((Dimens.MIN_TARGET - Dimens.KEY_SMALL_VISUAL) / 2) else 0
+            background = if (size == Size.SMALL) InsetDrawable(face, 0, inset, 0, inset) else face
             // After the background: View.setBackground copies the drawable's padding, which for
-            // the InsetDrawable is (0, inset, 0, inset) and would wipe the side padding.
-            setPadding(ctx.dp(padH), 0, ctx.dp(padH), 0)
+            // the InsetDrawable is (0, inset, 0, inset). Keep the vertical inset so a two-line
+            // label stays inside the visible face, and restore the side padding.
+            setPadding(ctx.dp(padH), inset, ctx.dp(padH), inset)
             installFocusRing(this, Dimens.RADIUS_KEY)
             setOnTouchListener(::onKeyTouch)
         }

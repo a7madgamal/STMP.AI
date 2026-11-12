@@ -5420,9 +5420,12 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.49.4 (build 300) — 2026-11-12
 - The Don't-disturb card now refuses an approve tap if another app covered it at any point during the tap, not only when the finger lifted. A cover pulled away just before release could otherwise steer an approval.
 
-## 0.49.5 (build 301) — 2026-11-12 — CURRENT
+## 0.49.5 (build 301) — 2026-11-12
 - Small keys keep their side padding, so their labels no longer touch the outline.
 - An approval that arrives after a request expired no longer shows APPROVED.
+
+## 0.49.6 (build 302) — 2026-11-12 — CURRENT
+- Two-line labels on small keys stay inside the key face instead of touching the outline.
 
 ## Keeping this file honest
 
