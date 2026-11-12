@@ -5,22 +5,52 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import com.mido.phonebridge.CallerActivity
 import org.junit.Test
+import org.robolectric.shadows.ShadowLooper
 
-/** Caller registration screen. */
+/** The new-device screen (WP09 section 5.2). */
 class CallerScreenshotTest(variant: Variant) : ShotTest(variant) {
 
-    @Test fun caller_default() = caller("default")
+    private fun open(ip: String = "100.101.7.22"): CallerActivity =
+        launch(CallerActivity::class.java, Intent().putExtra(CallerActivity.EXTRA_IP, ip))
+
+    @Test fun caller_initial() = capture(open(), "caller", "initial")
 
     @Test fun caller_name_required() {
-        val a = launch(CallerActivity::class.java, Intent().putExtra(CallerActivity.EXTRA_IP, "100.64.0.9"))
-        // Confirming with an empty name is what raises the "name required" state.
-        findByText(a.window.decorView, "allow")?.performClick()
+        val a = open()
+        // Allowing with an empty name is what raises the "name required" state.
+        findByText(a.window.decorView, "ALLOW")?.performClick()
         capture(a, "caller", "name_required")
     }
 
+    @Test fun caller_cannot_confirm_not_enrolled() {
+        val a = open()
+        a.showStatusForTest(com.mido.phonebridge.ui.CallerCopy.cannotConfirm(11), isProblem = true)
+        capture(a, "caller", "cannot_confirm_not_enrolled")
+    }
+
+    @Test fun caller_cannot_confirm_unknown_code() {
+        val a = open()
+        a.showStatusForTest(com.mido.phonebridge.ui.CallerCopy.cannotConfirm(99), isProblem = true)
+        capture(a, "caller", "cannot_confirm_unknown_code")
+    }
+
+    @Test fun caller_not_confirmed() {
+        val a = open()
+        a.showStatusForTest("Not confirmed: Authentication canceled", isProblem = false)
+        capture(a, "caller", "not_confirmed")
+    }
+
+    @Test fun caller_save_failed() {
+        val a = open()
+        a.showStatusForTest("Could not save: disk full", isProblem = true)
+        capture(a, "caller", "save_failed")
+    }
+
+    @Test fun caller_long_ip_wrap() = capture(open("2001:db8:85a3::8a2e:370:7334"), "caller", "long_ip_wrap")
+
     /** A tap while another window fully covers the screen (D17): the banner shows, nothing decides. */
     @Test fun caller_obscured_banner() {
-        val a = launch(CallerActivity::class.java, Intent().putExtra(CallerActivity.EXTRA_IP, "100.64.0.9"))
+        val a = open("100.64.0.9")
         val t = SystemClock.uptimeMillis()
         for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
             val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
@@ -29,11 +59,7 @@ class CallerScreenshotTest(variant: Variant) : ShotTest(variant) {
             a.window.decorView.dispatchTouchEvent(ev)
             ev.recycle()
         }
+        ShadowLooper.idleMainLooper()
         capture(a, "caller", "obscured_banner")
-    }
-
-    private fun caller(state: String) {
-        val a = launch(CallerActivity::class.java, Intent().putExtra(CallerActivity.EXTRA_IP, "100.64.0.9"))
-        capture(a, "caller", state)
     }
 }

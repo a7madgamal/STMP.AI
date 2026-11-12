@@ -232,6 +232,64 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP09: Secrets, SSH and the new-device screen in the states that add controls.
+    private val vaultScreenStates: List<Pair<String, () -> android.app.Activity>> get() = listOf(
+        "secrets/unlocked_two" to {
+            Fixtures.vault(com.mido.phonebridge.core.VaultState.State.UNLOCKABLE, true, Fixtures.secretEntries(), Fixtures.secretValues())
+            Robolectric.buildActivity(SecretsActivity::class.java).setup().get()
+        },
+        "secrets/locked_two" to {
+            Fixtures.vault(com.mido.phonebridge.core.VaultState.State.UNLOCKABLE, false, Fixtures.secretEntries())
+            Robolectric.buildActivity(SecretsActivity::class.java).setup().get()
+        },
+        "secrets/absent" to {
+            Fixtures.vault(com.mido.phonebridge.core.VaultState.State.ABSENT, false, emptyMap())
+            Robolectric.buildActivity(SecretsActivity::class.java).setup().get()
+        },
+        "secrets/broken_orphaned" to {
+            Fixtures.vault(com.mido.phonebridge.core.VaultState.State.ORPHANED, false, Fixtures.secretEntries())
+            Robolectric.buildActivity(SecretsActivity::class.java).setup().get()
+        },
+        "ssh/unlocked_two" to {
+            Fixtures.sshVault(unlocked = true)
+            Robolectric.buildActivity(SshActivity::class.java).setup().get()
+        },
+        "ssh/locked_two" to {
+            Fixtures.sshVault(unlocked = false)
+            Robolectric.buildActivity(SshActivity::class.java).setup().get()
+        },
+        "caller/initial" to {
+            Robolectric.buildActivity(
+                CallerActivity::class.java,
+                android.content.Intent(Fixtures.app, CallerActivity::class.java).putExtra(CallerActivity.EXTRA_IP, "100.101.7.22"),
+            ).setup().get()
+        },
+        "caller/long_ip_wrap" to {
+            Robolectric.buildActivity(
+                CallerActivity::class.java,
+                android.content.Intent(Fixtures.app, CallerActivity::class.java).putExtra(CallerActivity.EXTRA_IP, "2001:db8:85a3::8a2e:370:7334"),
+            ).setup().get()
+        },
+    )
+
+    @Test
+    fun `every enrolled vault and caller screen meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, launch) in vaultScreenStates) {
+                Fixtures.dropSingletons()
+                val a = launch()
+                shadowOf(Looper.getMainLooper()).idle()
+                check(a.window.decorView as ViewGroup, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     // WP08: the request log, the request detail and Exceptions.
     private val logScreenStates: List<Pair<String, () -> android.app.Activity>> get() = listOf(
         "log/list" to {

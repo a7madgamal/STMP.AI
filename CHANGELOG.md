@@ -5456,10 +5456,14 @@ devDependencies. `node_modules/` is gitignored.
 - Plugin rows no longer break at large text sizes, the help bulb is a full-size tap target, and the technical route and error text under each plugin name is replaced with plain words.
 - In a build without Google sign-in, the Google, Gmail, Calendar and Drive rows say so instead of pretending to be set up.
 
-## 0.49.12 (build 308) — 2026-11-12 — CURRENT
+## 0.49.12 (build 308) — 2026-11-12
 - The plugin screen has a back arrow and a clear layout: switch, permissions, system access, settings and routes each sit in their own panel, with plain GRANTED, OPTIONAL and NEEDED labels.
 - System access rows now say why each one is needed, and editing a text setting shows an error in the dialog instead of silently not saving.
 - A plugin that is not registered now shows a message instead of closing the screen, and the Google sign-in screen has the same back arrow and readable error messages.
+
+## 0.49.13 (build 309) — 2026-11-12 — CURRENT
+- The Secrets and SSH screens are redrawn with a back key, and a vault card at the top that says whether the vault is locked, not created or needs a reset, with a key that fixes it and the real reason when unlocking fails.
+- Secret and SSH cards, every dialog and the new-device screen use the new look; errors show on the screen instead of in a toast that disappears.
 
 ## Keeping this file honest
 

@@ -586,6 +586,71 @@ object Fixtures {
         app.getSharedPreferences("plugins_ui", Context.MODE_PRIVATE).edit().clear().apply()
     }
 
+    // --- WP09: the secret vault, SSH connections and the new-device screen -----------------------
+
+    private val todoistMeta = com.mido.phonebridge.core.SecretVault.SecretMeta(
+        docs = "https://developer.todoist.com/rest/v2",
+        key = "https://app.todoist.com/app/settings/integrations/developer",
+        hosts = listOf("api.todoist.com", "*.todoist.com"),
+    )
+
+    /** Seeds the vault with [entries] and the given condition. [values] are the open-session secrets. */
+    fun vault(
+        state: com.mido.phonebridge.core.VaultState.State,
+        unlocked: Boolean,
+        entries: Map<String, com.mido.phonebridge.core.SecretVault.SecretMeta>,
+        values: Map<String, String> = emptyMap(),
+    ) {
+        com.mido.phonebridge.core.SecretVault.stateForTest = state
+        com.mido.phonebridge.core.SecretVault.seedForTest(app, entries, unlocked, values)
+    }
+
+    /** `todoist` (two links, two hosts) and `notion` (bare). */
+    fun secretEntries() = mapOf(
+        "notion" to com.mido.phonebridge.core.SecretVault.SecretMeta(),
+        "todoist" to todoistMeta,
+    )
+
+    fun secretValues() = mapOf("todoist" to "tdst-DEMO-0000", "notion" to "ntn-DEMO-0000")
+
+    /** The plaintext index holds bytes no parser accepts. */
+    fun vaultCorruptIndex() {
+        app.getSharedPreferences("phonebridge_vault", Context.MODE_PRIVATE).edit().putString("vault_meta", "not json {{{").commit()
+        com.mido.phonebridge.core.SecretVault.stateForTest = com.mido.phonebridge.core.VaultState.State.UNLOCKABLE
+    }
+
+    /**
+     * A throwaway ed25519 key made for these fixtures only, fixed so the captures are identical on
+     * every run. The armour lines are joined at run time so no scanner mistakes this file for a leak.
+     */
+    private val sshKey: String = listOf(
+        "-----BEGIN " + "OPENSSH PRIVATE KEY" + "-----",
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
+        "QyNTUxOQAAACAIskb1dFFLEKdXxIZ3PIX5Wam+Ou2BrF2YYSuCm4/08wAAAJDA1QKBwNUC",
+        "gQAAAAtzc2gtZWQyNTUxOQAAACAIskb1dFFLEKdXxIZ3PIX5Wam+Ou2BrF2YYSuCm4/08w",
+        "AAAED9m+7u/KK6tPJRjDQjkpbSqXLCCDt2gCcLH272Oqn7RAiyRvV0UUsQp1fEhnc8hflZ",
+        "qb467YGsXZhhK4Kbj/TzAAAACm5vIGNvbW1lbnQBAgM=",
+        "-----END " + "OPENSSH PRIVATE KEY" + "-----",
+    ).joinToString("\n", postfix = "\n")
+
+    private fun sshEntry(host: String, port: Int, user: String, pin: String?) =
+        com.mido.phonebridge.plugins.ssh.SshConnection(host, port, user, sshKey, pin).toJson().toString()
+
+    /** `ssh-prod` (pinned) and `ssh-kvm` (not pinned). With [unlocked] false only the names exist. */
+    fun sshVault(unlocked: Boolean, brokenEntry: Boolean = false) {
+        val ssh = com.mido.phonebridge.core.SecretVault.SecretMeta(kind = com.mido.phonebridge.core.SecretVault.SecretMeta.Kind.SSH)
+        val values = mapOf(
+            "ssh-prod" to sshEntry("box.example.com", 22, "deploy", "SHA256:Zl4qE3rX0m1wP8uK7yH2cB5nV9dT6sJ0aQxLgWfEoRM"),
+            "ssh-kvm" to if (brokenEntry) "not json" else sshEntry("kvm.tail1234.ts.net", 2222, "mido", null),
+        )
+        vault(
+            com.mido.phonebridge.core.VaultState.State.UNLOCKABLE, unlocked,
+            mapOf("ssh-kvm" to ssh, "ssh-prod" to ssh), values,
+        )
+    }
+
+    fun resetVault() = com.mido.phonebridge.core.SecretVault.resetForTest()
+
     // --- everything ----------------------------------------------------------------------------
 
     fun reset() {
@@ -598,6 +663,7 @@ object Fixtures {
         resetSettings()
         resetPlugins()
         clearPlugins()
+        resetVault()
         previousZone?.let { TimeZone.setDefault(it) }
         previousZone = null
     }

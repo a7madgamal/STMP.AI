@@ -1,12 +1,6 @@
 COLOR_LITERAL	ui/PaperGrain.kt	2
 COLOR_LITERAL	ui/StampOverlay.kt	1
-TEXT_SIZE	CallerActivity.kt	3
 TEXT_SIZE	OnboardingActivity.kt	14
-TEXT_SIZE	SecretsActivity.kt	4
-TEXT_SIZE	SshActivity.kt	11
 TEXT_SIZE	ui/Theme.kt	10
 TOAST	OnboardingActivity.kt	2
-TOAST	SecretsActivity.kt	1
-TOAST	SshActivity.kt	1
 TYPEFACE	OnboardingActivity.kt	1
-TYPEFACE	SshActivity.kt	3
