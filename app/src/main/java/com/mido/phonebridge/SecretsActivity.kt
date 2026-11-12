@@ -18,6 +18,7 @@ import com.mido.phonebridge.core.SecretTemplates
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.VaultModule
+import com.mido.phonebridge.ui.showSecure
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
