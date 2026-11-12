@@ -354,7 +354,7 @@ class SecretsActivity : FragmentActivity() {
             .setTitle(name)
             .setView(VaultModule.dialogBody(this, readout.root))
             .setPositiveButton("Hide", null)
-            .show()
+            .showSecure()
     }
 
     /** Opens a stored link. Never opens anything that is not https; the vault enforces that on write too. */
@@ -383,7 +383,7 @@ class SecretsActivity : FragmentActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showSecure()
     }
 
     /** Stacks [fields] with 8dp between them. */
@@ -427,7 +427,7 @@ class SecretsActivity : FragmentActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showSecure()
     }
 
     private fun addSecretDialog(existing: String? = null, template: SecretTemplate? = null) {
@@ -497,7 +497,7 @@ class SecretsActivity : FragmentActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -540,7 +540,7 @@ class SecretsActivity : FragmentActivity() {
                 requestFocus()
             }
         }
-        dialog.show()
+        dialog.showSecure()
     }
 
     private fun addHostDialog(secret: String) {
@@ -558,7 +558,7 @@ class SecretsActivity : FragmentActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showSecure()
     }
 
     /** An error stays on the screen until the next action; a toast would be gone before it was read. */

@@ -276,7 +276,7 @@ class SshActivity : FragmentActivity() {
                 Toasts.show(this, "Public key copied")
             }
             .setNegativeButton("Close", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -409,7 +409,7 @@ class SshActivity : FragmentActivity() {
                 }
             }
         }
-        dialog.show()
+        dialog.showSecure()
     }
 
     private fun confirmDelete(label: String, vaultName: String) {
@@ -446,7 +446,7 @@ class SshActivity : FragmentActivity() {
                 requestFocus()
             }
         }
-        dialog.show()
+        dialog.showSecure()
     }
 
     /** An error stays on the screen until the next action; a toast would be gone before it was read. */

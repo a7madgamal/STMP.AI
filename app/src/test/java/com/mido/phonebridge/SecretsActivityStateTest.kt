@@ -132,6 +132,15 @@ class SecretsActivityStateTest {
     }
 
     @Test
+    fun `the reveal dialog window keeps FLAG_SECURE`() {
+        Fixtures.vault(VaultState.State.UNLOCKABLE, unlocked = true, Fixtures.secretEntries(), Fixtures.secretValues())
+        val a = secrets()
+        keyByDescription(a, "Reveal todoist").performClick()
+        val flags = ShadowDialog.getLatestDialog().window!!.attributes.flags
+        assertTrue(flags and android.view.WindowManager.LayoutParams.FLAG_SECURE != 0)
+    }
+
+    @Test
     fun `delete takes initial focus on cancel`() {
         Fixtures.vault(VaultState.State.UNLOCKABLE, unlocked = true, Fixtures.secretEntries(), Fixtures.secretValues())
         val a = secrets()
