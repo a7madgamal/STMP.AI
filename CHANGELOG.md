@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.2 (build 304)**.
+Current build: **v0.51.3 (build 305)**.
 
 ---
 
@@ -5433,9 +5433,12 @@ devDependencies. `node_modules/` is gitignored.
 - The stamp is visible. It was painted on every frame and then covered: `PaperEntranceView` carries 4dp of elevation, and a ViewGroup draws children in ascending Z order once any child has elevation, so the sheet was painted over an overlay sitting at the default Z=0. The overlay and the denial tear now carry 32dp, above the sheet's 28dp entrance peak.
 - The same cause made the modal appear frozen: the sheet on top received the taps the stamp was waiting for. Both are fixed by the one elevation change.
 
-## 0.51.2 (build 304) — 2026-11-11 — CURRENT
+## 0.51.2 (build 304) — 2026-11-11
 - The stamp no longer leaves a doubled shadow: the ink bleed was held at full strength for as long as the stamp stayed on screen, and it draws the mark plus two offset copies. It is a 240ms transient at impact again.
 - The modal dismisses itself after the stamp is read; the previous "wait for a tap" turned every approval into a screen that never closed. A tap still dismisses early.
+
+## 0.51.3 (build 305) — 2026-11-12 — CURRENT
+- Getting started installs the Hermes plugin by its catalog name (`hermes plugins install stmp --yes-deps`) instead of the GitHub path, now that `stmp` is a curated entry. The bare name resolves to a reviewed, SHA-pinned commit and can be moved forward by `hermes plugins update`.
 
 ## Keeping this file honest
 

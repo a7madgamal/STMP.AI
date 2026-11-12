@@ -448,8 +448,17 @@ class OnboardingActivity : FragmentActivity() {
         )
 
         // The address is interpolated, so the second line cannot be pasted with a stale IP.
+        //
+        // **The catalog name, not `owner/repo`.** `stmp` is a curated entry in
+        // `NousResearch/hermes-agent`, so the bare name resolves to a reviewed, SHA-pinned
+        // commit and `hermes plugins update stmp` can move it forward later. The `owner/repo`
+        // form still installs, but it is a git checkout the catalog never touches — which is
+        // how a phone tells someone to install something nobody reviewed.
+        //
+        // `--yes-deps` answers the dependency prompt, so the two lines finish in one run over
+        // SSH or in CI instead of stopping at a question.
         val commands = """
-            hermes plugins install a7madgamal/hermes-stmp --enable
+            hermes plugins install stmp --enable --yes-deps
             hermes config set plugins.entries.stmp.settings.base_url $base
         """.trimIndent()
 
