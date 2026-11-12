@@ -5480,8 +5480,11 @@ devDependencies. `node_modules/` is gitignored.
 - The new-device screen opens with the name field focused, the Exceptions screen applies each change to the policy as stored now instead of an older copy, and the request log filters keep screen reader focus when you tap one.
 - Google sign-in keeps the "Already signed in" note on screen while the account picker opens, and the fingerprint-unavailable messages use the name of the setting, "Fingerprint for approvals".
 
-## 0.49.17 (build 313) — 2026-11-12 — CURRENT
+## 0.49.17 (build 313) — 2026-11-12
 - Stopping the bridge no longer leaves a "starting" notice behind, even when a network check was still running as it stopped.
+
+## 0.49.18 (build 314) — 2026-11-12 — CURRENT
+- On the Gmail, Calendar and Drive screens, tap the "Sign in" status to sign in with Google.
 
 ## Keeping this file honest
 

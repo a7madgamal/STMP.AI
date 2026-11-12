@@ -16,6 +16,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginRegistry
@@ -23,6 +24,7 @@ import com.mido.phonebridge.core.PluginSetting
 import com.mido.phonebridge.core.PluginSettingsException
 import com.mido.phonebridge.core.PluginSettingsStore
 import com.mido.phonebridge.core.SpecialAccess
+import com.mido.phonebridge.plugins.google.signInIntent
 import com.mido.phonebridge.ui.PluginDetailCopy
 import com.mido.phonebridge.ui.PluginRowModel
 import com.mido.phonebridge.ui.Theme
@@ -165,10 +167,28 @@ class PluginDetailActivity : BridgeScreen() {
         if (on) {
             panel.addView(StatusRow.create(
                 this, label = "Status", value = model.word, tone = toneOf(model.tone),
-                detail = model.detail, led = model.led,
+                detail = model.detail, led = model.led, action = signInAction(),
             ))
         }
         content.addView(panel)
+    }
+
+    /**
+     * The one way forward on a Gmail, Calendar or Drive screen that says "sign in first": the
+     * Google account plugin owns the sign-in, so this opens the same screen. Decided from the
+     * sign-in state itself, not from the status words. A build without a Google client has no
+     * sign-in to offer, so it gets no action.
+     */
+    private fun signInAction(): KeyButton.Spec? {
+        if (plugin.id !in GOOGLE_BACKED_IDS) return null
+        if (AuthManager.clientId.isBlank() || AuthManager.isLoggedIn(this)) return null
+        return KeyButton.Spec("Sign in", "Sign in with Google") {
+            try {
+                startActivity(signInIntent(this))
+            } catch (e: Exception) {
+                Debug.log("cannot open Google sign-in: ${e.message}")
+            }
+        }
     }
 
     // --- Permissions -------------------------------------------------------------------------
@@ -515,5 +535,6 @@ class PluginDetailActivity : BridgeScreen() {
          */
         const val EXTRA_SECRET_NAME = "secret_name"
         private const val REQ_PERMISSION = 3001
+        private val GOOGLE_BACKED_IDS = setOf("gmail", "calendar", "drive")
     }
 }
