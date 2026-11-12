@@ -384,7 +384,14 @@ class ApprovalActivity : FragmentActivity() {
 
     private fun finishWith(id: Long, approved: Boolean, by: String) {
         val resolved = ApprovalGate.resolve(id, approved)
-        if (!resolved) Log.w(TAG, "request $id already resolved/expired")
+        if (!resolved) {
+            Log.w(TAG, "request $id already resolved/expired")
+            // Nothing was decided by this tap, so there is nothing to stamp: an APPROVED punch for
+            // a request that timed out, was denied or was replaced would be a lie. Re-arm the hold
+            // key and let the tick close the Activity once it sees the request is gone.
+            views.holdKey?.reset()
+            return
+        }
         // The punch fires on the human's decision — approve AND deny — never on arrival.
         showStamp(approved, by)
     }

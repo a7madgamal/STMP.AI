@@ -35,6 +35,7 @@ object KeyButton {
         var baseDescription: String? = null
         var onClickAction: (() -> Unit)? = null
         var percent = -1
+        var dropped = false
     }
 
     fun create(
@@ -127,15 +128,28 @@ object KeyButton {
             rippleColor = ColorStateList.valueOf(Color.TRANSPARENT)
             stateListAnimator = null
             elevation = 0f
-            setPadding(ctx.dp(padH), 0, ctx.dp(padH), 0)
             val face = Bevel.key(ctx, bevelKind)
             background = if (size == Size.SMALL) {
                 val inset = ctx.dp((Dimens.MIN_TARGET - Dimens.KEY_SMALL_VISUAL) / 2)
                 InsetDrawable(face, 0, inset, 0, inset)
             } else face
+            // After the background: View.setBackground copies the drawable's padding, which for
+            // the InsetDrawable is (0, inset, 0, inset) and would wipe the side padding.
+            setPadding(ctx.dp(padH), 0, ctx.dp(padH), 0)
             installFocusRing(this, Dimens.RADIUS_KEY)
             setOnTouchListener(::onKeyTouch)
         }
+    }
+
+    private const val PRESS_DROP_DP = 2
+
+    /** Moves the label with the pressed face, relative to the resting padding (never absolute). */
+    private fun dropLabel(v: View, down: Boolean) {
+        val key = v as? KeyView ?: return
+        if (key.dropped == down) return
+        val d = v.context.dp(PRESS_DROP_DP) * if (down) 1 else -1
+        key.dropped = down
+        v.setPadding(v.paddingLeft, v.paddingTop + d, v.paddingRight, v.paddingBottom - d)
     }
 
     private fun onKeyTouch(v: View, ev: MotionEvent): Boolean {
@@ -143,16 +157,16 @@ object KeyButton {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 // The face drops 2dp (Bevel pressed layers); the label follows by padding.
-                v.setPadding(v.paddingLeft, v.context.dp(4), v.paddingRight, 0)
+                dropLabel(v, down = true)
                 Haptics.perform(v, HapticEvent.KEY_DOWN)
             }
             MotionEvent.ACTION_UP -> {
-                v.setPadding(v.paddingLeft, 0, v.paddingRight, 0)
+                dropLabel(v, down = false)
                 if (ev.x in 0f..v.width.toFloat() && ev.y in 0f..v.height.toFloat()) {
                     Haptics.perform(v, HapticEvent.KEY_UP)
                 }
             }
-            MotionEvent.ACTION_CANCEL -> v.setPadding(v.paddingLeft, 0, v.paddingRight, 0)
+            MotionEvent.ACTION_CANCEL -> dropLabel(v, down = false)
         }
         return false
     }

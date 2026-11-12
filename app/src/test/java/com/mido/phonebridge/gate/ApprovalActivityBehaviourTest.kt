@@ -81,6 +81,17 @@ class ApprovalActivityBehaviourTest {
     }
 
     @Test
+    fun `approving a request that already expired shows no APPROVED stamp`() {
+        val a = GateFixtures.launch(probe, "GET /probe")
+        // The request ends elsewhere (timeout / deny / replaced) before the tap lands.
+        ApprovalGate.setCurrentForTest(null)
+        a.text("APPROVE")!!.performClick()
+        idle()
+        assertEquals(0, a.views().count { it is PunchView })
+        assertNull(pending.approved)
+    }
+
+    @Test
     fun `deny resolves with one tap`() {
         val a = GateFixtures.launch(ssh, "POST /ssh/kvm-box")
         a.text("DENY")!!.performClick()

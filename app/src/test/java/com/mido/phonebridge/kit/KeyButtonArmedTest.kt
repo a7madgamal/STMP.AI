@@ -1,6 +1,7 @@
 package com.mido.phonebridge.kit
 
 import com.mido.phonebridge.ui.kit.KeyButton
+import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,5 +27,24 @@ class KeyButtonArmedTest : KitTest() {
         assertEquals(1f, b.alpha, 0f)
         b.performClick()
         assertEquals(1, clicks)
+    }
+
+    @Test
+    fun `small key keeps its side padding at rest and after a press`() {
+        val a = host()
+        val padH = a.resources.displayMetrics.density * 12
+        val b = KeyButton.create(a, "Copy", KeyButton.Kind.PANEL, KeyButton.Size.SMALL, onClick = {})
+        assertEquals(padH.toInt(), b.paddingLeft)
+        assertEquals(padH.toInt(), b.paddingRight)
+        val restTop = b.paddingTop
+        val restBottom = b.paddingBottom
+        b.dispatchTouchEvent(MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 5f, 5f, 0))
+        assertEquals(padH.toInt(), b.paddingLeft)
+        assertEquals(padH.toInt(), b.paddingRight)
+        b.dispatchTouchEvent(MotionEvent.obtain(0, 10, MotionEvent.ACTION_UP, 5f, 5f, 0))
+        assertEquals(padH.toInt(), b.paddingLeft)
+        assertEquals(padH.toInt(), b.paddingRight)
+        assertEquals(restTop, b.paddingTop)
+        assertEquals(restBottom, b.paddingBottom)
     }
 }
