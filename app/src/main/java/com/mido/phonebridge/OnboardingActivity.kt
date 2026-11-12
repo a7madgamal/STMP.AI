@@ -1,21 +1,42 @@
 package com.mido.phonebridge
 
 import android.content.ClipData
+import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.widget.EditText
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import androidx.core.view.AccessibilityDelegateCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.fragment.app.FragmentActivity
 import com.mido.phonebridge.core.OnboardingPrefs
 import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.blurb
 import com.mido.phonebridge.policy.title
+import com.mido.phonebridge.ui.OnboardingCopy
+import com.mido.phonebridge.ui.SystemAccess
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.RadioMark
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StatusRow
+import com.mido.phonebridge.ui.kit.Toasts
+import com.mido.phonebridge.ui.kit.TopBar
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Palette
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * The introduction: what STMP is, what it can do, what it needs, how the gate decides, then how
@@ -25,8 +46,8 @@ import com.mido.phonebridge.ui.Theme
  * wall: three of four steps were 3–4 sentence paragraphs at 13sp, and step 1 said the same thing
  * three times. Mido, 2026-11-10: *"the onboarding is very text heavy. more concise and larger
  * text"*. So: every step is a headline plus at most three short lines, body is 16sp, and the
- * prose is roughly a third of what it was. The detail lives where it is actionable — the `?` on
- * each plugin, `/help` for an agent, Settings → Permissions for state.
+ * prose is roughly a third of what it was. The detail lives where it is actionable — the bulb on
+ * each plugin, `/help` for an agent, the Settings tab for permission state.
  *
  * **Permissions are a step, not a footnote.** The app cannot work without four system accesses,
  * and previously the only place to find them was Settings → Permissions, three taps from an
@@ -37,7 +58,7 @@ import com.mido.phonebridge.ui.Theme
  * **Skip is always available, and Next never blocks.** A permission the human declines is a
  * degraded app, not a broken one, and an introduction that refuses to advance until four system
  * toggles are flipped is a hostage negotiation. The rows are here so the choice is informed, not
- * compulsory — and Settings → Permissions keeps the same rows for later.
+ * compulsory — and the Settings tab keeps the same rows for later.
  *
  * **Only the `seen` flag is written.** No gate mode, no toggle, no permission request is issued
  * by walking through this: the rows open Settings and the human decides there.
@@ -57,7 +78,9 @@ class OnboardingActivity : FragmentActivity() {
 
     private lateinit var scroll: ScrollView
 
-    private lateinit var nav: LinearLayout
+    private lateinit var footer: LinearLayout
+
+    private fun dp(v: Int) = Theme.dp(this, v)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,163 +89,162 @@ class OnboardingActivity : FragmentActivity() {
         // introduced, and the flag that means "completed a tour" is the one that nags.
         OnboardingPrefs.markSeen(this)
 
+        val p = Theme.palette(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 20),
-                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 16)
-            )
-            background = Theme.sheet(Theme.BG)
+            setBackgroundColor(p.body)
         }
+        root.addView(TopBar.create(this, "Getting started"))
 
-        root.addView(Theme.text(this, "STMP", 26f).apply {
-            typeface = Theme.handFont(this@OnboardingActivity)
-        })
+        body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            // Bottom padding is SPACE_XL so the last line scrolls fully clear of the footer.
+            setPadding(dp(Dimens.GUTTER), dp(Dimens.SPACE_S), dp(Dimens.GUTTER), dp(Dimens.SPACE_XL))
+        }
+        scroll = ScrollView(this).apply {
+            isFillViewport = false
+            clipToPadding = false
+            addView(body)
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(View(this).apply { setBackgroundColor(p.hairline) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
 
-        scroll = ScrollView(this).apply { addView(body) }
-        root.addView(scroll, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
-
-        // The nav rail is OUTSIDE the scroll: Next must never be the thing you have to scroll to
-        // find, which is exactly how a long introduction becomes one nobody finishes.
-        nav = LinearLayout(this).apply {
+        // The footer is a SIBLING of the scroll, not an overlay: Next must never be the thing you
+        // have to scroll to find, and it must never cover the last line of a step at large text.
+        footer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, Theme.dp(this@OnboardingActivity, 12), 0, 0)
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(p.body)
+            setPadding(dp(Dimens.GUTTER), dp(Dimens.SPACE_M), dp(Dimens.GUTTER), dp(Dimens.SPACE_M))
         }
-        root.addView(nav)
+        BottomInset.apply(footer)
+        root.addView(footer)
+
+        // Survive rotation / process death: without this a turn of the phone sends step 3 back to 1.
+        savedInstanceState?.let {
+            step = it.getInt(STATE_STEP, 0).coerceIn(0, STEP_COUNT - 1)
+            agent = Agent.entries.getOrElse(it.getInt(STATE_AGENT, agent.ordinal)) { Agent.GENERIC }
+        }
 
         render()
         setContentView(root)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(STATE_STEP, step)
+        outState.putInt(STATE_AGENT, agent.ordinal)
+    }
+
     /**
      * Coming back from a Settings screen must show the grant.
      *
-     * The permission rows read live state, and the human leaves this Activity to grant them — so
+     * The permission rows read live state, and the human leaves this Activity to grant them, so
      * without this the row they just satisfied would still say "turn on". Same failure, and the
      * same fix, as `OptionsFragment.onResume`.
      */
     override fun onResume() {
         super.onResume()
-        // Guarded: onResume runs before the first render() has built the rail.
-        if (::nav.isInitialized) render()
+        // Guarded: `footer` is lateinit and assigned in onCreate. In the normal lifecycle onCreate
+        // has already rendered once, so this repaints; the guard only covers an onResume that
+        // arrives with no onCreate having built the views.
+        if (::footer.isInitialized) render()
     }
 
     /**
-     * Paint the current step and the rail.
+     * Paint the current step and the footer.
      *
      * Everything is rebuilt, never patched: a step's content is not a superset of another's, so
      * mutating in place would mean reasoning about which views to remove. The set is small and
      * text-only, so rebuilding is cheaper than the bookkeeping.
      */
     private fun render() {
+        val p = Theme.palette(this)
         body.removeAllViews()
-        nav.removeAllViews()
+        footer.removeAllViews()
 
         body.addView(
-            Theme.text(
-                this,
-                "${step + 1} / $STEP_COUNT",
-                13f, Theme.ON_SURFACE_VARIANT
-            )
+            Etched.label(this, "STEP ${step + 1} OF $STEP_COUNT").apply {
+                ViewCompat.setAccessibilityHeading(this, false)
+            }
         )
 
-        when (step) {
-            0 -> stepWhatThisIs()
-            1 -> stepWhatItCanDo()
-            2 -> stepWhatItNeeds()
-            3 -> stepHowTheGateDecides()
-            else -> stepConnectYourAgent()
+        val heading = when (step) {
+            0 -> stepWhatThisIs(p)
+            1 -> stepWhatItCanDo(p)
+            2 -> stepWhatItNeeds(p)
+            3 -> stepHowTheGateDecides(p)
+            else -> stepConnectYourAgent(p)
         }
+        ViewCompat.setAccessibilityPaneTitle(scroll, "Step ${step + 1} of $STEP_COUNT. $heading")
 
-        renderNav()
+        renderFooter()
 
         // Always show the TOP of the new step. Carrying the scroll offset across would land the
         // reader mid-paragraph in a section they have not seen the heading of.
         scroll.post { scroll.scrollTo(0, 0) }
     }
 
-    private fun renderNav() {
+    private fun keyParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+    )
+
+    private fun renderFooter() {
         val last = step == STEP_COUNT - 1
 
-        // Skip is always present. A flow with no exit is a wall, and the app is fully usable
-        // without reading any of this.
-        nav.addView(
-            Theme.button(this, if (last) "CLOSE" else "SKIP", Theme.ButtonStyle.GHOST, small = true) {
-                finish()
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        )
-
-        // Spacer: pushes the primary action to the right edge so Next sits where a thumb expects
-        // it and does not move between steps of different text length.
-        nav.addView(android.view.View(this), LinearLayout.LayoutParams(0, 1, 1f))
-
-        if (step > 0) {
-            nav.addView(
-                Theme.button(this, "BACK", Theme.ButtonStyle.NEUTRAL, small = true) {
-                    step--
-                    render()
-                },
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = Theme.dp(this@OnboardingActivity, 8) }
+        // Skip is present on every step that has something left to skip. A flow with no exit is
+        // a wall, and the app is fully usable without reading any of this.
+        if (!last) {
+            footer.addView(
+                KeyButton.create(
+                    this, "SKIP", KeyButton.Kind.OUTLINE, KeyButton.Size.REGULAR,
+                    describe = "Skip the introduction",
+                ) { finish() },
+                keyParams(),
             )
         }
 
-        nav.addView(
-            Theme.button(
-                this,
-                if (last) "DONE" else "NEXT",
-                Theme.ButtonStyle.PRIMARY,
-                small = true,
-            ) {
-                if (last) finish() else { step++; render() }
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+        // Spacer: pushes the primary action to the right edge so Next sits where a thumb expects
+        // it and does not move between steps of different text length.
+        footer.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+
+        if (step > 0) {
+            footer.addView(
+                KeyButton.create(
+                    this, "BACK", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR,
+                    describe = "Previous step",
+                ) { step--; render() },
+                keyParams().apply { marginEnd = dp(Dimens.SPACE_S) },
             )
+        }
+
+        footer.addView(
+            KeyButton.create(
+                this, if (last) "DONE" else "NEXT", KeyButton.Kind.INK, KeyButton.Size.REGULAR,
+                describe = if (last) "Finish the introduction" else "Next step",
+            ) { if (last) finish() else { step++; render() } },
+            keyParams(),
         )
     }
 
     // --- 1. what this is ---------------------------------------------------
 
-    private fun stepWhatThisIs() {
-        body.addView(heading("Your phone is the server"))
-        body.addView(line("Your agent asks. You approve on the phone."))
+    private fun stepWhatThisIs(p: Palette): String {
+        val title = "Your phone is the server"
+        body.addView(heading(p, title))
+        body.addView(line(p, "Your agent asks. You approve on the phone."))
 
         body.addView(
-            card {
-                addView(
-                    Theme.text(this@OnboardingActivity, "Your keys never leave here", 18f, Theme.ON_SURFACE).apply {
-                        typeface = Theme.handFont(this@OnboardingActivity)
-                    }
-                )
-                addView(
-                    Theme.text(
-                        this@OnboardingActivity,
-                        "Google tokens, API keys, SSH keys — they live in a vault on this device. Nothing is sent to the machine running your agent.",
-                        16f, Theme.ON_SURFACE_VARIANT,
-                    ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 6), 0, 0) }
-                )
-                addView(
-                    Theme.text(
-                        this@OnboardingActivity,
-                        "So a stolen laptop, or an agent tricked into obeying something else, has nothing to take and still has to ask you.",
-                        16f, Theme.ON_SURFACE_VARIANT,
-                    ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 8), 0, 0) }
-                )
+            Panel.create(this, Panel.Tone.PLAIN).apply {
+                (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M)
+                addView(Type.text(this@OnboardingActivity, "Your keys never leave here", TypeRole.ROW_LABEL, p.ink))
+                addView(etchedBody(p, "Google tokens, API keys, SSH keys — they live in a vault on this device. Nothing is sent to the machine running your agent.", Dimens.SPACE_S))
+                addView(etchedBody(p, "So a stolen laptop, or an agent tricked into obeying something else, has nothing to take and still has to ask you.", Dimens.SPACE_S))
             }
         )
+        return title
     }
 
     // --- 2. what it can do -------------------------------------------------
@@ -233,26 +255,27 @@ class OnboardingActivity : FragmentActivity() {
      * Curated rather than generated: thirteen rows would be a wall on a screen meant to answer
      * "should I keep this app". The Plugins tab is the live truth and names every one.
      */
-    private fun stepWhatItCanDo() {
-        body.addView(heading("What it can do"))
+    private fun stepWhatItCanDo(p: Palette): String {
+        val title = "What it can do"
+        body.addView(heading(p, title))
 
-        for ((group, items) in GROUPS) {
-            body.addView(
-                Theme.text(this, group, 17f, Theme.ACCENT).apply {
-                    typeface = Theme.handFont(this@OnboardingActivity)
-                    setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, Theme.dp(this@OnboardingActivity, 2))
-                }
-            )
-            body.addView(line(items))
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+        OnboardingCopy.GROUPS.forEachIndexed { i, (group, items) ->
+            panel.addView(Etched.label(this, group).apply {
+                (layoutParams as LinearLayout.LayoutParams).topMargin = if (i == 0) 0 else dp(Dimens.SPACE_M)
+            })
+            panel.addView(Type.text(this, items, TypeRole.BODY, p.ink))
         }
+        body.addView(panel)
 
         body.addView(
-            Theme.text(
+            Type.text(
                 this,
-                "Each one can be switched off, and its ? explains what it does.",
-                14f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, 0) }
+                "Each one can be switched off. Tap its bulb on the Plugins tab to see what it does.",
+                TypeRole.DETAIL, p.etched,
+            ).apply { setPadding(0, dp(Dimens.SPACE_M), 0, 0) }
         )
+        return title
     }
 
     // --- 3. what it needs --------------------------------------------------
@@ -261,49 +284,51 @@ class OnboardingActivity : FragmentActivity() {
      * The four system accesses, each a row that opens the screen which grants it.
      *
      * Order is by consequence, not by Android's own listing: without notification access the
-     * agent is blind, so it goes first. Each row states what breaks if it stays off — a toggle
-     * with no consequence attached is a toggle people skip.
+     * agent is blind, so it goes first. Each row states what breaks if it stays off, because a
+     * toggle with no consequence attached is a toggle people skip. Labels equal Settings' labels.
      */
-    private fun stepWhatItNeeds() {
-        body.addView(heading("What it needs to work"))
+    private fun stepWhatItNeeds(p: Palette): String {
+        val title = "What it needs to work"
+        body.addView(heading(p, title))
+        body.addView(line(p, "Four things Android decides, not this app. Tap any one to grant it."))
 
-        body.addView(line("Four things Android decides, not this app. Tap any one to grant it."))
-
-        permissionRow(
+        val panel = Panel.create(this, Panel.Tone.PLAIN).apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M)
+        }
+        panel.addView(permissionRow(
             "Notification access",
             "Without it your agent cannot see anything on your phone.",
             granted = BridgeService.listenerRef != null,
             optional = false,
-        ) { openNotifAccessSettings() }
-
-        permissionRow(
-            "Draw over other apps",
+        ) { openNotifAccessSettings() })
+        panel.addView(permissionRow(
+            "Draw over apps",
             "Without it the approval card cannot appear over another app.",
-            granted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(this),
+            granted = SystemAccess.overlayGranted(this),
             optional = false,
-        ) { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(this) }
-
-        permissionRow(
+        ) { SystemAccess.openOverlaySettings(this) })
+        panel.addView(permissionRow(
             "Lock-screen popup",
             "Without it approvals miss you while the screen is locked.",
             granted = ApprovalGate.canUseFullScreenIntent(this),
             optional = true,
-        ) { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(this) }
-
-        permissionRow(
+        ) { SystemAccess.openFullScreenIntentSettings(this) })
+        panel.addView(permissionRow(
             "Battery optimization",
             "Without it Android may freeze the server while the screen sleeps.",
-            granted = com.mido.phonebridge.ui.SystemAccess.batteryExempt(this),
+            granted = SystemAccess.batteryExempt(this),
             optional = false,
-        ) { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(this) }
+        ) { SystemAccess.requestBatteryExemption(this) })
+        body.addView(panel)
 
         body.addView(
-            Theme.text(
+            Type.text(
                 this,
-                "You can change these later in Settings → Permissions.",
-                14f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 16), 0, 0) }
+                "You can change these later in the Settings tab, under Permissions.",
+                TypeRole.DETAIL, p.etched,
+            ).apply { setPadding(0, dp(Dimens.SPACE_M), 0, 0) }
         )
+        return title
     }
 
     /**
@@ -314,65 +339,18 @@ class OnboardingActivity : FragmentActivity() {
      * is a row that looks broken.
      */
     private fun permissionRow(
-        title: String,
+        label: String,
         why: String,
         granted: Boolean,
         optional: Boolean,
         onClick: () -> Unit,
-    ) {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-            )
-            background = Theme.outlined(
-                this@OnboardingActivity,
-                Theme.SURFACE,
-                Theme.RADIUS_CONTROL,
-                strokeColor = if (granted) Theme.SUCCESS else Theme.BORDER,
-                strokeDp = if (granted) 2 else 1,
-            )
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onClick() }
+    ): View {
+        val (led, tone, value) = when {
+            granted -> Triple(Led.State.OK, StatusRow.Tone.OK, "ON")
+            optional -> Triple(Led.State.OFF, StatusRow.Tone.NEUTRAL, "OPTIONAL")
+            else -> Triple(Led.State.CAUTION, StatusRow.Tone.CAUTION, "TURN ON")
         }
-        card.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(this@OnboardingActivity, 10) }
-
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-
-        row.addView(
-            Theme.text(this, title, 17f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OnboardingActivity)
-            },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        row.addView(
-            Theme.text(
-                this,
-                when {
-                    granted -> "on"
-                    optional -> "optional"
-                    else -> "turn on"
-                },
-                14f,
-                if (granted) Theme.SUCCESS else Theme.WARNING,
-            )
-        )
-        card.addView(row)
-
-        card.addView(
-            Theme.text(this, why, 14f, Theme.ON_SURFACE_VARIANT).apply {
-                setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, 0)
-            }
-        )
-        body.addView(card)
+        return StatusRow.create(this, label, value, tone, detail = why, led = led, onClick = onClick)
     }
 
     // --- 4. how the gate decides -------------------------------------------
@@ -380,356 +358,222 @@ class OnboardingActivity : FragmentActivity() {
     /**
      * The three modes and what each one COSTS.
      *
-     * The descriptions come from `GlobalMode.title`/`blurb` — the same properties the Home gate
+     * The descriptions come from `GlobalMode.title`/`blurb`, the same properties the Home gate
      * card renders. Copying them here would drift silently: nobody re-reads an onboarding
      * paragraph when they tweak a card label.
      */
-    private fun stepHowTheGateDecides() {
-        body.addView(heading("How it asks you"))
-        body.addView(line("One switch for everything. It can only make the app ask more, never less."))
+    private fun stepHowTheGateDecides(p: Palette): String {
+        val title = "How it asks you"
+        body.addView(heading(p, title))
+        body.addView(line(p, "One setting decides how it asks: the gate mode on Home. It can only make STMP ask more, never less."))
 
-        for (mode in GlobalMode.entries) {
-            body.addView(
-                Theme.text(this, mode.title, 17f, Theme.ON_SURFACE).apply {
-                    typeface = Theme.handFont(this@OnboardingActivity)
-                    setPadding(0, Theme.dp(this@OnboardingActivity, 14), 0, 0)
-                }
-            )
-            body.addView(
-                Theme.text(this, mode.blurb, 15f, Theme.ON_SURFACE_VARIANT).apply {
-                    setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0)
-                }
-            )
+        val panel = Panel.create(this, Panel.Tone.PLAIN).apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M)
         }
+        GlobalMode.entries.forEachIndexed { i, mode ->
+            panel.addView(Type.text(this, mode.title, TypeRole.ROW_LABEL, p.ink).apply {
+                if (i > 0) setPadding(0, dp(Dimens.SPACE_M), 0, 0)
+            })
+            panel.addView(Type.text(this, mode.blurb, TypeRole.DETAIL, p.etched).apply {
+                setPadding(0, dp(Dimens.SPACE_2XS), 0, 0)
+            })
+        }
+        body.addView(panel)
+        return title
     }
 
     // --- 5. connect your agent ---------------------------------------------
 
-    private fun stepConnectYourAgent() {
-        body.addView(heading("Connect your agent"))
-        body.addView(line("Pick what you use, then copy the block into it."))
+    private fun stepConnectYourAgent(p: Palette): String {
+        val title = "Connect your agent"
+        body.addView(heading(p, title))
+        body.addView(line(p, "Pick what you use, then copy the block into it."))
 
         body.addView(
             agentCard(
-                Agent.HERMES,
-                "Hermes",
+                p, Agent.HERMES, "Hermes",
                 "Installs the plugin and points it at this phone. Thirteen tools.",
             )
         )
         body.addView(
             agentCard(
-                Agent.GENERIC,
-                "Another agent",
+                p, Agent.GENERIC, "Another agent",
                 "Anything that can make an HTTP request. Nothing to install.",
             )
         )
 
-        when (agent) {
-            Agent.HERMES -> renderHermes()
-            Agent.GENERIC -> renderGeneric()
-        }
-
-        body.addView(Theme.sectionHeader(this, "Before it will work"))
-        body.addView(line("Both machines must reach each other. Same network is enough; otherwise install Tailscale on both."))
-        body.addView(line("The first request from a new machine asks you to name it. Once per machine."))
-    }
-
-    /** The Hermes path: install, point at this phone, expect the naming refusal. */
-    private fun renderHermes() {
-        val base = baseUrl()
-
-        body.addView(Theme.sectionHeader(this, "Run these where Hermes runs"))
-        body.addView(
-            Theme.text(
-                this,
-                "On the machine hosting Hermes — not in Hermes.",
-                14f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8)) }
-        )
-
-        // The address is interpolated, so the second line cannot be pasted with a stale IP.
-        val commands = """
-            hermes plugins install a7madgamal/hermes-stmp --enable
-            hermes config set plugins.entries.stmp.settings.base_url $base
-        """.trimIndent()
-
-        body.addView(monoField(commands))
-        body.addView(
-            copyButton("COPY COMMANDS", commands),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OnboardingActivity, 12) }
-        )
-
-        body.addView(Theme.sectionHeader(this, "Then"))
-
-        for (line in hermesSteps()) {
+        val serverOff = BridgeService.bindAddress.isBlank()
+        if (serverOff) {
             body.addView(
-                Theme.text(this, line, 16f, Theme.ON_SURFACE).apply {
-                    setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8))
+                Type.text(this, OnboardingCopy.SERVER_OFF_NOTE, TypeRole.DETAIL, p.cautionText).apply {
+                    setPadding(0, dp(Dimens.SPACE_M), 0, 0)
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
                 }
             )
         }
 
+        when (agent) {
+            Agent.HERMES -> renderHermes(p)
+            Agent.GENERIC -> renderGeneric(p)
+        }
+
+        body.addView(SectionHeader.create(this, "Before it will work"))
+        body.addView(line(p, "Both machines must reach each other. Same network is enough; otherwise install Tailscale on both."))
+        body.addView(line(p, "The first request from a new machine asks you to name it. Once per machine."))
+        return title
+    }
+
+    /** The Hermes path: install, point at this phone, expect the naming refusal. */
+    private fun renderHermes(p: Palette) {
+        val base = baseUrl()
+
+        body.addView(SectionHeader.create(this, "Run these where Hermes runs"))
         body.addView(
-            Theme.text(
-                this,
-                "Read the plugin first: https://github.com/a7madgamal/hermes-stmp",
-                14f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, 0) }
+            Type.text(this, "On the machine hosting Hermes, not inside Hermes.", TypeRole.DETAIL, p.etched)
+                .apply { setPadding(0, 0, 0, dp(Dimens.SPACE_S)) }
+        )
+
+        // The address is interpolated, so the second line cannot be pasted with a stale IP.
+        val commands = OnboardingCopy.hermesCommands(base)
+        body.addView(Readout.create(this, commands, Readout.Kind.COMMAND).root)
+        body.addView(copyKey("COPY COMMANDS", "Copy the commands", commands), copyKeyParams())
+
+        body.addView(SectionHeader.create(this, "Then"))
+        for (line in OnboardingCopy.hermesSteps()) body.addView(stepLine(p, line))
+
+        body.addView(
+            Type.text(this, "Read the plugin first: https://github.com/a7madgamal/hermes-stmp", TypeRole.DETAIL, p.etched)
+                .apply {
+                    setTextIsSelectable(true)
+                    setPadding(0, dp(Dimens.SPACE_XS), 0, 0)
+                }
         )
     }
 
     /** The generic path. */
-    private fun renderGeneric() {
-        body.addView(Theme.sectionHeader(this, "Paste this into your agent"))
+    private fun renderGeneric(p: Palette) {
+        body.addView(SectionHeader.create(this, "Paste this into your agent"))
 
-        val prompt = buildPrompt()
-        body.addView(monoField(prompt))
-        body.addView(
-            copyButton("COPY PROMPT", prompt),
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@OnboardingActivity, 12) }
-        )
+        // A bounded readout: it scrolls inside itself, so the prompt never pushes the page.
+        val prompt = OnboardingCopy.buildPrompt(baseUrl())
+        body.addView(Readout.create(this, prompt, Readout.Kind.BODY).root)
+        body.addView(copyKey("COPY PROMPT", "Copy the prompt", prompt), copyKeyParams())
 
-        body.addView(Theme.sectionHeader(this, "Then"))
-
-        for (line in steps()) {
-            body.addView(
-                Theme.text(this, line, 16f, Theme.ON_SURFACE).apply {
-                    setPadding(0, 0, 0, Theme.dp(this@OnboardingActivity, 8))
-                }
-            )
-        }
+        body.addView(SectionHeader.create(this, "Then"))
+        for (line in OnboardingCopy.steps()) body.addView(stepLine(p, line))
     }
 
     // --- shared building blocks --------------------------------------------
 
+    private fun baseUrl() = OnboardingCopy.baseUrl(BridgeService.bindAddress, BridgeService.PORT)
+
     /** A step heading, large enough to be the thing you read first. */
-    private fun heading(text: String): TextView =
-        Theme.text(this, text, 24f, Theme.ON_SURFACE).apply {
-            typeface = Theme.handFont(this@OnboardingActivity)
-            setPadding(0, Theme.dp(this@OnboardingActivity, 10), 0, Theme.dp(this@OnboardingActivity, 6))
+    private fun heading(p: Palette, text: String): TextView =
+        Type.text(this, text, TypeRole.TITLE, p.ink).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
+            setPadding(0, dp(Dimens.SPACE_S), 0, dp(Dimens.SPACE_S))
         }
 
-    /** One line of body copy at reading size. */
-    private fun line(text: String): TextView =
-        Theme.text(this, text, 16f, Theme.ON_SURFACE_VARIANT).apply {
-            setPadding(0, Theme.dp(this@OnboardingActivity, 4), 0, Theme.dp(this@OnboardingActivity, 4))
+    /** One line of body copy. `ink`, not `etched`: grey body text was the hardest to read. */
+    private fun line(p: Palette, text: String): TextView =
+        Type.text(this, text, TypeRole.BODY, p.ink).apply {
+            setPadding(0, dp(Dimens.SPACE_XS), 0, dp(Dimens.SPACE_XS))
         }
 
-    /** A paper card holding a few related lines. */
-    private fun card(content: LinearLayout.() -> Unit): LinearLayout {
-        val c = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-            )
-            background = Theme.outlined(
-                this@OnboardingActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CARD,
-            )
-            content()
-        }
-        c.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(this@OnboardingActivity, 10) }
-        return c
-    }
+    private fun stepLine(p: Palette, text: String): TextView =
+        Type.text(this, text, TypeRole.BODY, p.ink).apply { setPadding(0, 0, 0, dp(Dimens.SPACE_S)) }
+
+    private fun etchedBody(p: Palette, text: String, top: Int): TextView =
+        Type.text(this, text, TypeRole.BODY, p.etched).apply { setPadding(0, dp(top), 0, 0) }
+
+    private fun copyKeyParams() = keyParams().apply { topMargin = dp(Dimens.SPACE_M) }
 
     private fun openNotifAccessSettings() {
         try {
             startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-        } catch (e: Exception) {
-            Toast.makeText(this, "could not open notification settings", Toast.LENGTH_SHORT).show()
+        } catch (e: ActivityNotFoundException) {
+            Toasts.show(this, "Couldn't open notification settings")
+        } catch (e: SecurityException) {
+            Toasts.show(this, "Couldn't open notification settings")
         }
     }
 
     /**
-     * One selectable agent, drawn as the same radio card the gate picker uses.
+     * One selectable agent, drawn as a panel with a radio mark.
      *
-     * Reusing `Theme.radioDot` rather than a `RadioGroup` is not laziness: this app draws every
-     * control by hand, and a stock radio would be the one Material artefact on a paper screen.
+     * A hand-drawn mark rather than a stock `RadioGroup`: this app draws every control from the
+     * kit, and a stock radio would be the one Material artefact on an Instrument screen.
      */
-    private fun agentCard(choice: Agent, title: String, blurb: String): LinearLayout {
+    private fun agentCard(p: Palette, choice: Agent, title: String, blurb: String): View {
         val selected = agent == choice
-        val cardLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 10),
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 10),
-            )
-            background = Theme.outlined(
-                this@OnboardingActivity,
-                if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
-                Theme.RADIUS_CONTROL,
-                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
-                strokeDp = if (selected) 2 else 1,
-            )
-            isClickable = true
-            isFocusable = true
-            if (!selected) setOnClickListener {
+        val card = Panel.create(
+            this, Panel.Tone.PLAIN,
+            onClick = if (selected) null else ({
                 agent = choice
                 // Rebuild AFTER this click finishes. The card is destroyed by `render()`, and
                 // tearing down a view mid-dispatch is how a tap lands and nothing happens.
-                nav.post { render() }
-            }
+                footer.post { render() }
+            }),
+        )
+        card.minimumHeight = dp(Dimens.MIN_TARGET)
+        // Panel leaves a MODULE_GAP below; zero it so the gap between cards is the 8dp top margin.
+        (card.layoutParams as LinearLayout.LayoutParams).apply {
+            topMargin = dp(Dimens.SPACE_S)
+            bottomMargin = 0
         }
-        cardLayout.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(this@OnboardingActivity, 8) }
+        // Panel only focuses a card that has an onClick, and the selected card has none. Without
+        // this TalkBack skips it and never says "selected".
+        card.isFocusable = true
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.TOP
+            gravity = Gravity.TOP
         }
-        row.addView(Theme.radioDot(this, selected))
-
+        row.addView(RadioMark.create(this, selected).apply {
+            (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(Dimens.SPACE_M)
+        })
         val text = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(Theme.text(this@OnboardingActivity, title, 17f, Theme.ON_SURFACE).apply {
-                typeface = Theme.handFont(this@OnboardingActivity)
+            // The card's contentDescription already carries both lines; don't read them twice.
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            addView(Type.text(this@OnboardingActivity, title, TypeRole.ROW_LABEL, p.ink))
+            addView(Type.text(this@OnboardingActivity, blurb, TypeRole.DETAIL, p.etched).apply {
+                setPadding(0, dp(Dimens.SPACE_2XS), 0, 0)
             })
-            addView(
-                Theme.text(this@OnboardingActivity, blurb, 14f, Theme.ON_SURFACE_VARIANT)
-                    .apply { setPadding(0, Theme.dp(this@OnboardingActivity, 2), 0, 0) }
-            )
         }
-        row.addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        cardLayout.addView(row)
-        return cardLayout
-    }
+        row.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(row)
 
-    /**
-     * A selectable, monospace, read-only block.
-     *
-     * An `EditText` rather than a `TextView` because the value must be selectable: the human may
-     * want to fix the address by hand (a proxy, a different interface), and a value you cannot
-     * select is a value you retype from a screenshot.
-     */
-    private fun monoField(value: String): EditText = EditText(this).apply {
-        setText(value)
-        isSingleLine = false
-        isFocusable = true
-        isClickable = true
-        setTextColor(Theme.ON_SURFACE)
-        setHintTextColor(Theme.ON_SURFACE_VARIANT)
-        highlightColor = Theme.ACCENT
-        typeface = android.graphics.Typeface.MONOSPACE
-        textSize = 14f
-        background = Theme.outlined(this@OnboardingActivity, Theme.SURFACE, Theme.RADIUS_CARD)
-        setPadding(
-            Theme.dp(this@OnboardingActivity, 12), Theme.dp(this@OnboardingActivity, 12),
-            Theme.dp(this@OnboardingActivity, 12), Theme.dp(this@OnboardingActivity, 12)
-        )
-        setEnabled(true)
+        // TalkBack reads "Hermes, <blurb>, radio button, selected".
+        ViewCompat.setAccessibilityDelegate(card, object : AccessibilityDelegateCompat() {
+            override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfoCompat) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = "android.widget.RadioButton"
+                info.isCheckable = true
+                info.isChecked = selected
+                info.contentDescription = "$title, $blurb"
+            }
+        })
+        return card
     }
 
     /**
      * Copy [value] to the clipboard.
      *
-     * Takes the string rather than reading the field back: the field is rebuilt on every pick,
-     * so a closure over it would copy whatever happened to be in the PREVIOUS field after the
-     * agent changed.
+     * Takes the string rather than reading the readout back: the readout is rebuilt on every
+     * pick, so a closure over it would copy whatever was in the PREVIOUS one after the agent
+     * changed.
      */
-    private fun copyButton(label: String, value: String) =
-        Theme.button(this, label, Theme.ButtonStyle.PRIMARY) {
+    private fun copyKey(label: String, describe: String, value: String): View =
+        KeyButton.create(this, label, KeyButton.Kind.INK, KeyButton.Size.REGULAR, describe = describe) {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("STMP", value))
-            Toast.makeText(this, "copied", Toast.LENGTH_SHORT).show()
+            Toasts.show(this, "Copied")
         }
-
-    /**
-     * The generic prompt.
-     *
-     * Only judgment and a pointer: where to look (`/help`), what a refusal means (never retry a
-     * decline), and how to check the gate works (`/probe`, where a denial is a pass). Every route
-     * and error is described by the endpoint, so naming them here would be the second copy that
-     * drifts.
-     */
-    private fun buildPrompt(): String {
-        val base = baseUrl()
-        return """
-            You can control my Android phone through STMP, an HTTP bridge at $base
-
-            First call:
-              GET $base/help
-
-            It returns the whole API as JSON, plus a "markdown" field describing it in
-            prose. Read the markdown. Note the contractVersion — if you ever see a higher
-            one, re-read /help and treat it as current.
-
-            Then work from that. Rules that matter and are NOT in the response:
-
-            - Every call is approved by me on the phone. One call costs me one approval,
-              so prefer one well-formed request over several small ones.
-            - A 403 with error "denied" means I declined. Do not retry it, do not rephrase
-              it, and do not route around it. Tell me what you were trying to do and stop.
-            - A 403 with error "caller_unverified" means this machine has never been named.
-              Tell me to check the phone; I will name it and you can retry once.
-            - A 403 with error "caller_denied" means I blocked this machine. Stop.
-            - 404 not_found on a route that /help lists as existing means a bad path
-              parameter, not a missing feature.
-            - Never send a credential. Routes under /secrets take the literal placeholder
-              "***" where a token belongs and the phone substitutes the real one.
-
-            Finally, confirm the gate reaches me:
-              GET $base/probe
-
-            A 200 means a request went through the approval gate and reached the handler.
-            A 403 "denied" ALSO means it works — I declined and the gate honoured it.
-            Either way the gate is alive; only a timeout or a 5xx is a real failure.
-        """.trimIndent()
-    }
-
-    /** The real address, or a clearly-marked fallback when the server is not up yet. */
-    private fun baseUrl(): String {
-        val host = BridgeService.bindAddress
-        return if (host.isBlank()) {
-            // Not started yet. Saying "http://:8787" would look like a typo; saying so is
-            // actionable — the human just has to start the server.
-            "http://<start the server first>:${BridgeService.PORT}"
-        } else {
-            "http://$host:${BridgeService.PORT}"
-        }
-    }
-
-    private fun steps(): List<String> = listOf(
-        "1. Start the server on the home screen.",
-        "2. Paste the prompt into your agent and send it.",
-        "3. Approve the first request. Name this machine if asked.",
-        "4. From then on, every call asks you first.",
-    )
-
-    /**
-     * The Hermes steps, which are a different shape from the generic ones.
-     *
-     * Step 2 is the important line: `caller_unverified` looks like a failure and is not. Left
-     * unexplained, it is the point where people conclude the plugin is broken.
-     */
-    private fun hermesSteps(): List<String> = listOf(
-        "1. Start the server on the home screen.",
-        "2. Run the two commands above.",
-        "3. Call stmp_help. It is refused with caller_unverified — that is the phone asking who this machine is, not a fault.",
-        "4. Approve it on the phone and retry. Named once.",
-        "5. From then on, every call asks you first.",
-    )
 
     private companion object {
         const val STEP_COUNT = 5
-
-        /** Curated, not exhaustive — see [stepWhatItCanDo]. */
-        val GROUPS: List<Pair<String, String>> = listOf(
-            "Google" to "Gmail, Calendar and Drive. Read, send, schedule, upload.",
-            "Phone" to "Notifications and contacts.",
-            "Machine" to "Shell commands over SSH, key made on the phone.",
-            "Voice" to "Speak text aloud, play a cue to reach you.",
-            "Plumbing" to "Logs, audit trail, self-report — so it can diagnose itself.",
-        )
+        const val STATE_STEP = "step"
+        const val STATE_AGENT = "agent"
     }
 }

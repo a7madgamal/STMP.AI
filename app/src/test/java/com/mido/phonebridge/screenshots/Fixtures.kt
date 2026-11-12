@@ -733,3 +733,21 @@ object PluginFixtures {
         }
     }
 }
+
+// --- WP10: Onboarding fixtures (appended) ---
+/** The three system accesses the introduction's step 3 reads, and the address its step 5 prints. */
+object OnboardingFixtures {
+    /** Sets `BridgeService.bindAddress`; `Fixtures.reset()` restores it. */
+    fun bridgeAddress(address: String) {
+        BridgeService.bindAddress = address
+    }
+
+    /** Notification access (the listener), draw-over-apps, and the battery exemption. */
+    fun permissions(listener: Boolean, overlay: Boolean, battery: Boolean) {
+        BridgeService.listenerRef =
+            if (listener) Robolectric.setupService(NotifListenerService::class.java) else null
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(overlay)
+        val pm = Fixtures.app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        shadowOf(pm).setIgnoringBatteryOptimizations(Fixtures.app.packageName, battery)
+    }
+}

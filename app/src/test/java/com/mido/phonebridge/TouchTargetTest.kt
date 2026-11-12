@@ -14,6 +14,7 @@ import com.mido.phonebridge.kit.allViews
 import com.mido.phonebridge.screenshots.Fixtures
 import com.mido.phonebridge.screenshots.GateFixtures
 import com.mido.phonebridge.screenshots.KitFixtures
+import com.mido.phonebridge.screenshots.OnboardingFixtures
 import com.mido.phonebridge.ui.kit.HoldKey
 import com.mido.phonebridge.ui.kit.KnobSelector
 import com.mido.phonebridge.ui.kit.RuleLinearLayout
@@ -453,6 +454,46 @@ class TouchTargetTest(private val fontScale: Float) {
         // its size is the text's, not a button's.
         if (v is TextView && v.isTextSelectable) return false
         return v is HoldKey || v.isClickable || v.isLongClickable || v.hasOnClickListeners()
+    }
+
+    // WP10: the introduction, every step and the step 3 / step 5 variants.
+    private val onboardingStates: List<Pair<String, () -> Unit>> get() = listOf(
+        "onboarding/step1" to { },
+        "onboarding/step2" to { },
+        "onboarding/step3_mixed" to { OnboardingFixtures.permissions(true, false, true) },
+        "onboarding/step3_none" to { OnboardingFixtures.permissions(false, false, false) },
+        "onboarding/step3_all" to { OnboardingFixtures.permissions(true, true, true) },
+        "onboarding/step4" to { },
+        "onboarding/step5_generic_server_on" to { OnboardingFixtures.bridgeAddress("100.101.7.22") },
+        "onboarding/step5_generic_server_off" to { OnboardingFixtures.bridgeAddress("") },
+        "onboarding/step5_hermes_server_on" to { OnboardingFixtures.bridgeAddress("100.101.7.22") },
+    )
+
+    @Test
+    fun `every enrolled onboarding state meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, setup) in onboardingStates) {
+                Fixtures.dropSingletons()
+                setup()
+                val a = Robolectric.buildActivity(OnboardingActivity::class.java).setup().get()
+                val steps = name.substringAfter("step").substringBefore("_").toInt() - 1
+                repeat(steps) {
+                    checkNotNull(com.mido.phonebridge.screenshots.findByText(a.window.decorView, "NEXT")) { "$name: no NEXT key" }.performClick()
+                }
+                if (name.contains("hermes")) {
+                    val title = com.mido.phonebridge.screenshots.findByText(a.window.decorView, "Hermes")
+                    generateSequence(title) { it.parent as? View }.first { it.isClickable }.performClick()
+                }
+                shadowOf(Looper.getMainLooper()).idle()
+                check(a.window.decorView as ViewGroup, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
     private fun check(root: ViewGroup, name: String, failures: MutableList<String>) {

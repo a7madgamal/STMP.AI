@@ -5461,9 +5461,13 @@ devDependencies. `node_modules/` is gitignored.
 - System access rows now say why each one is needed, and editing a text setting shows an error in the dialog instead of silently not saving.
 - A plugin that is not registered now shows a message instead of closing the screen, and the Google sign-in screen has the same back arrow and readable error messages.
 
-## 0.49.13 (build 309) — 2026-11-12 — CURRENT
+## 0.49.13 (build 309) — 2026-11-12
 - The Secrets and SSH screens are redrawn with a back key, and a vault card at the top that says whether the vault is locked, not created or needs a reset, with a key that fixes it and the real reason when unlocking fails.
 - Secret and SSH cards, every dialog and the new-device screen use the new look; errors show on the screen instead of in a toast that disappears.
+
+## 0.49.14 (build 310) — 2026-11-12 — CURRENT
+- The introduction is redrawn: the permission rows show their live state with a light and a word, the footer no longer covers the last line at large text, and the commands and the agent prompt are in a readout you can select and copy.
+- The introduction's wording is fixed: it points to the bulb on the Plugins tab and to Settings for permissions, and the agent prompt is no longer broken into short lines.
 
 ## Keeping this file honest
 
