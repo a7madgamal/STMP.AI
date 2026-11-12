@@ -5433,6 +5433,7 @@ devDependencies. `node_modules/` is gitignored.
 - The AI section shows what is wrong in words for every model state, and the re-download dialog quotes the real model size.
 - Fingerprint for approvals is now on by default for new installs, and it can be changed in Settings → Approvals as well as on Home. A phone without a fingerprint keeps it off.
 - The debug log is a mono readout with a copy button, and forgetting a caller asks first and sits clear of the caller's name.
+- In the remote model server form, Save and Refresh models now use the address and token you typed, not the ones from before you started typing.
 
 ## Keeping this file honest
 

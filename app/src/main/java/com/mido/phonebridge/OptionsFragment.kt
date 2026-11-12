@@ -812,16 +812,21 @@ class OptionsFragment : BridgeFragment() {
         val refresh = KeyButton.create(
             ctx, if (refreshing) "Refreshing" else "Refresh models", KeyButton.Kind.PANEL,
             describe = "Ask the server which models it offers",
-        ) { refreshModels(url.trim(), token.trim()) }
+        ) { refreshModels(liveUrl(policy), liveToken(policy)) }
         if (refreshing) {
             refresh.isEnabled = false
             refresh.alpha = DISABLED_ALPHA
         }
         val saveKey = KeyButton.create(ctx, "Save", KeyButton.Kind.INK) {
-            saveRemote(store, policy, url.trim(), token.trim(), chosen)
+            saveRemote(store, policy, liveUrl(policy), liveToken(policy), chosen)
         }
         panel.addView(spaced(keyLine(listOf(refresh, saveKey))))
     }
+
+    // The form is not redrawn on each keystroke, so the keys read what was typed, not what was drawn.
+    private fun liveUrl(policy: Policy): String = (draft.url ?: policy.aiExternalUrl).trim()
+
+    private fun liveToken(policy: Policy): String = (draft.token ?: policy.aiExternalToken).trim()
 
     private fun spaced(v: View): View = v.apply {
         val lp = (layoutParams as? LinearLayout.LayoutParams)

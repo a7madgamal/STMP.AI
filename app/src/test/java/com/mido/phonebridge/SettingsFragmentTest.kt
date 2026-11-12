@@ -122,4 +122,19 @@ class SettingsFragmentTest {
         assertTrue(small.joinToString("\n"), small.isEmpty())
         assertNotNull(a)
     }
+
+    @Test
+    fun `Save checks the address that was typed, not the one drawn`() {
+        Fixtures.aiBackend(AiBackend.EXTERNAL, "")
+        val a = open()
+        val url = a.window.decorView.all().filterIsInstance<android.widget.EditText>()
+            .first { it.hint?.toString() == "http://host:port" }
+        url.setText("http://host:80/")
+        ShadowLooper.idleMainLooper()
+        a.window.decorView.all().first { it is TextView && it.text.toString().equals("Save", ignoreCase = true) }
+            .let { v -> generateSequence(v) { it.parent as? View }.first { it.isClickable } }.performClick()
+        ShadowLooper.idleMainLooper()
+        assertTrue(texts(a).any { it == "Drop the trailing slash." })
+        assertEquals("", PolicyStore.from(Fixtures.app).get().aiExternalUrl)
+    }
 }
