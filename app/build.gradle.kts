@@ -73,8 +73,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 306
-        versionName = "0.51.4"
+        versionCode = 307
+        versionName = "0.51.5"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -99,9 +99,23 @@ android {
          * deliberately — do NOT "fix" a future x86_64 install by deleting this filter and
          * shipping the dead weight to the phone again.
          */
+        /*
+         * Opt-in emulator ABI. The filter above stays arm64-only unless the build is
+         * explicitly asked for x86_64:
+         *
+         *     ./gradlew assembleDebug -PemuAbi=true
+         *
+         * Nothing else changes, so a normal build and the APK that reaches the phone are
+         * byte-for-byte what they were. This exists because an x86_64 emulator cannot load
+         * `liblitertlm_jni.so` from an arm64-only APK, and the alternative — deleting the
+         * filter permanently — is exactly what the comment above forbids.
+         */
         ndk {
             abiFilters.clear()
             abiFilters.add("arm64-v8a")
+            if (project.findProperty("emuAbi") == "true") {
+                abiFilters.add("x86_64")
+            }
         }
     }
 

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.4 (build 306)**.
+Current build: **v0.51.5 (build 307)**.
 
 ---
 
@@ -5440,10 +5440,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.3 (build 305) — 2026-11-12
 - Getting started installs the Hermes plugin by its catalog name (`hermes plugins install stmp --yes-deps`) instead of the GitHub path, now that `stmp` is a curated entry. The bare name resolves to a reviewed, SHA-pinned commit and can be moved forward by `hermes plugins update`.
 
-## 0.51.4 (build 306) — 2026-11-12 — CURRENT
+## 0.51.4 (build 306) — 2026-11-12
 - A locked vault now asks for a fingerprint instead of refusing the request. Routes that read a stored credential (`needsVault`) unlock before their approval card is built, so the request survives instead of dying in milliseconds with `secret_locked` and no prompt.
 - Unlocking is not approving: the fingerprint only releases the key, and the real host and command are then shown for a separate APPROVE.
 - Dead-end vault states (never created, unrecoverable, orphaned) and gate modes with no fingerprint surface refuse with the specific remedy instead of showing a prompt that cannot succeed.
+
+## 0.51.5 (build 307) — 2026-11-12 — CURRENT
+- Added an opt-in `-PemuAbi=true` build flag that adds `x86_64` alongside `arm64-v8a`, so an x86_64 emulator can load the native model library. A normal build is unchanged and still arm64 only.
 
 ## Keeping this file honest
 
