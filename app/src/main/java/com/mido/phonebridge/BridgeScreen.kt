@@ -8,6 +8,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.TabBar
+import com.mido.phonebridge.ui.kit.TopBar
+import com.mido.phonebridge.ui.tokens.Dimens
 
 /**
  * Every top-level screen: a scrolling body with the bottom bar pinned under it.
@@ -56,13 +59,23 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
     protected lateinit var body: LinearLayout
         private set
 
+    /** Title shown in the top bar and as the Activity title. */
+    protected open fun topBarTitle(): String = "STMP"
+
+    /** Optional trailing action for the top bar (a SMALL OUTLINE key or a 48dp icon key), or null. */
+    protected open fun topBarAction(): View? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val p = Theme.palette(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Theme.sheet(Theme.BG)
+            setBackgroundColor(p.body)
         }
+
+        // The top bar pads itself by the status-bar inset, so nothing here pads the root.
+        root.addView(TopBar.create(this, topBarTitle(), topBarAction()))
 
         val center: View
         if (ownsScrolling) {
@@ -75,10 +88,10 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
             body = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(
-                    Theme.dp(this@BridgeScreen, 20),
-                    Theme.dp(this@BridgeScreen, 20),
-                    Theme.dp(this@BridgeScreen, 20),
-                    Theme.dp(this@BridgeScreen, 24),
+                    Theme.dp(this@BridgeScreen, Dimens.GUTTER),
+                    Theme.dp(this@BridgeScreen, Dimens.SPACE_L),
+                    Theme.dp(this@BridgeScreen, Dimens.GUTTER),
+                    Theme.dp(this@BridgeScreen, Dimens.SPACE_XL),
                 )
             }
             scroll.addView(body)
@@ -92,23 +105,11 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
         ))
         // A non-tab screen (the plugin detail) still draws the bar, and tapping an unselected
         // tab must leave it for that tab's screen. It does so by asking the SHELL, not by
-        // starting an Activity directly -- once the tabs are fragments there is no Activity per
-        // tab to start.
-        val bar = Theme.bottomNav(this, tab) { selected -> openTab(selected) }
-        root.addView(bar, LinearLayout.LayoutParams(
+        // starting an Activity directly. The bar applies the bottom inset itself.
+        root.addView(TabBar(this, tab) { selected -> openTab(selected) }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ))
-
-        // Insets split by owner, which is the whole reason this is not `Theme.inset`:
-        //
-        //   TOP on the root   — the first row must clear the status bar.
-        //   BOTTOM on the BAR — the bar must clear the gesture bar, and its background should
-        //                       extend behind it so there is no unpainted strip.
-        //
-        // Putting both on one view is what `Theme.inset` does, and on this layout it would pad
-        // the body's bottom for a bar that is already below it, leaving a dead gap.
-        TopInset.apply(root)
 
         setContentView(root)
 
@@ -171,7 +172,7 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
  *
  * Split from [BottomInset] because the two are applied to DIFFERENT views on a screen that has a
  * bottom bar: the top padding belongs on the root, the bottom clearances on the scrolling body.
- * One combined helper (Theme.inset) can only pad one view with both, which double-pads exactly
+ * One combined helper can only pad one view with both, which double-pads exactly
  * where the bar is.
  */
 object TopInset {

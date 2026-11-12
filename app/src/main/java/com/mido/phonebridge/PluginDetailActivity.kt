@@ -1,51 +1,91 @@
 package com.mido.phonebridge
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.mido.phonebridge.ui.kit.StmpDialog
+import androidx.appcompat.app.AlertDialog
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSetting
+import com.mido.phonebridge.core.PluginSettingsException
 import com.mido.phonebridge.core.PluginSettingsStore
+import com.mido.phonebridge.core.SpecialAccess
+import com.mido.phonebridge.ui.PluginDetailCopy
+import com.mido.phonebridge.ui.PluginRowModel
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.Chips
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.KnobSelector
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StateBlock
+import com.mido.phonebridge.ui.kit.StatusRow
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.tokens.Bevel
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * One plugin: whether it is on, what it needs, and what it can be told.
  *
- * **The order on the page is deliberate** — toggle, then permissions, then settings:
+ * **The order on the page is deliberate**: status, permissions, system access, settings, routes.
  *
  *  1. **The switch**, because "why is this not working" is answered by the first row.
- *  2. **Permissions**, because a plugin that is on but unauthorised is still not working, and the
- *     remedy is a system dialog rather than a setting.
- *  3. **Settings**, because they are the least urgent and the most numerous.
+ *  2. **Permissions** and **system access**, because a plugin that is on but unauthorised is still
+ *     not working, and the remedy is a system dialog or a Settings screen rather than a setting.
+ *  3. **Settings**, then **routes**: the least urgent and the most numerous.
  *
- * A disabled plugin still shows all three. Hiding them would mean the human has to enable a
- * plugin to find out what enabling it would cost — which is the opposite of informed.
+ * A disabled plugin still shows all of them. Hiding them would mean the human has to enable a
+ * plugin to find out what enabling it would cost, which is the opposite of informed.
+ *
+ * `render()` empties and refills the column, so a click handler never calls it inline (it would
+ * remove the view being clicked): it posts.
  */
 class PluginDetailActivity : BridgeScreen() {
 
     override val tab = Theme.Tab.PLUGINS
 
+    private val targetId: String? by lazy { intent.getStringExtra(EXTRA_PLUGIN_ID) }
+    private val secretName: String? by lazy { intent.getStringExtra(EXTRA_SECRET_NAME) }
+    private val resolved: Plugin? by lazy { targetId?.let { PluginRegistry.get(it) } }
+
     private lateinit var plugin: Plugin
     private lateinit var store: PluginSettingsStore
     private lateinit var content: LinearLayout
 
+    /** The display name, never the id (D21); one SSH connection shows the name the user typed. */
+    override fun topBarTitle(): String {
+        val connection = secretName
+        val found = resolved ?: return "Plugin"
+        return connection ?: PluginRowModel.title(found)
+    }
+
     override fun buildContent(container: LinearLayout) {
-        val id = intent.getStringExtra(EXTRA_PLUGIN_ID)
-        val found = id?.let { PluginRegistry.get(it) }
+        val found = resolved
         if (found == null) {
-            // A detail screen for a plugin that is not registered. Refuse visibly rather than
-            // rendering an empty page: an empty page reads as "this plugin has nothing".
-            container.addView(Theme.text(this, "That plugin is not registered.", 14f).apply {
-                setTextColor(Theme.DANGER)
-            })
-            finish()
+            // Refuse visibly and stay open: finishing here removed the message before it could be read.
+            container.addView(StateBlock.create(
+                this, StateBlock.Kind.ERROR,
+                title = "Plugin not found",
+                body = "This plugin isn't registered. The bridge may not have started yet, or the " +
+                    "plugin was removed. Go back and pick it from the Plugins tab.",
+            ))
             return
         }
         plugin = found
@@ -61,225 +101,335 @@ class PluginDetailActivity : BridgeScreen() {
         if (::content.isInitialized) render()
     }
 
+    private fun dp(v: Int) = Theme.dp(this, v)
+
+    private fun full() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+    )
+
     private fun render() {
         content.removeAllViews()
         val on = store.isEnabled(plugin)
-        val secret = intent.getStringExtra(EXTRA_SECRET_NAME)
+        val model = PluginRowModel.of(plugin, on)
+        val connection = secretName
 
-        content.addView(Theme.text(
+        if (connection != null) addConnection(connection)
+        addStatus(model, on, connection != null)
+        addPermissions()
+        addAccess()
+        addSettings()
+        addRoutes()
+    }
+
+    // --- Connection (one SSH connection) -----------------------------------------------------
+
+    private fun addConnection(name: String) {
+        val p = Theme.palette(this)
+        content.addView(SectionHeader.create(this, "Connection").also { zeroTop(it) })
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+        panel.addView(Type.text(this, "One connection handled by the SSH plugin.", TypeRole.DETAIL, p.etched), full())
+        panel.addView(Etched.label(this, "Route").apply { topMargin(dp(Dimens.SPACE_M)) })
+        panel.addView(Readout.create(this, "POST /ssh/$name", Readout.Kind.BODY).root)
+        panel.addView(Etched.label(this, "Key"))
+        panel.addView(Type.text(
             this,
-            if (secret != null) secret.uppercase() else plugin.displayName.uppercase(),
-            20f,
-        ).apply {
-            typeface = Theme.handFont(this@PluginDetailActivity)
-            setTextColor(Theme.ON_SURFACE)
-        })
+            "The private key is stored in the vault as ssh-$name. It is never shown here and " +
+                "never leaves the phone except as a signature.",
+            TypeRole.DETAIL, p.ink,
+        ), full())
+        content.addView(panel)
+    }
 
-        // Scoped to ONE connection. Its routes and settings belong to the SSH plugin as a whole,
-        // so repeating them per connection would say the same thing N times; what is specific to
-        // this name is the route it serves and the key it authenticates with.
-        if (secret != null) {
-            content.addView(Theme.text(this, "One connection handled by the SSH plugin.", 13f).apply {
-                setTextColor(Theme.ON_SURFACE_VARIANT)
-                setPadding(0, Theme.dp(this@PluginDetailActivity, 4), 0, 0)
-            })
-            content.addView(Theme.sectionHeader(this, "Route"))
-            content.addView(Theme.text(this, "POST /ssh/$secret", 12f, mono = true).apply {
-                setTextColor(Theme.ON_SURFACE_VARIANT)
-            })
-            content.addView(Theme.sectionHeader(this, "Key"))
-            content.addView(Theme.text(
-                this,
-                "The private key is stored in the vault as `ssh-$secret`. It is never shown here " +
-                    "and never leaves the phone except as a signature.",
-                12f,
-            ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
-            // The plugin's switch is the SSH plugin's, not this connection's: offering it per
-            // connection would imply each one can be turned off independently, which it cannot.
-            content.addView(Theme.sectionHeader(this, "Plugin"))
+    // --- Status ------------------------------------------------------------------------------
+
+    private fun addStatus(model: PluginRowModel.Model, on: Boolean, connection: Boolean) {
+        val p = Theme.palette(this)
+        val header = SectionHeader.create(this, if (connection) "SSH plugin" else "Status")
+        content.addView(if (connection) header else zeroTop(header))
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+
+        val showsOn = model.showsOn
+        val sentence = PluginDetailCopy.switchSentence(on, showsOn)
+        val rocker = Theme.rocker(this, on = showsOn, label = "Enabled") { want ->
+            store.setEnabled(plugin, want)
+            Debug.log("plugin ${plugin.id}: enabled=$want")
+            content.post { render() }
         }
+        val switchRow = StatusRow.create(
+            this, label = if (showsOn) "Enabled" else "Disabled", value = "",
+            detail = sentence, led = model.led, trailing = rocker,
+        )
+        if (PluginDetailCopy.isCaution(on, showsOn)) tint(switchRow, sentence, p.cautionText)
+        panel.addView(switchRow)
 
-        // --- 1. THE SWITCH ---
-        content.addView(Theme.sectionHeader(this, "Status"))
-
-        run {
-            // **OFF while the plugin cannot serve**, same rule as the list row.
-            //
-            // Mido, 2026-11-10: *"for plugins when action needed or disabled the toggles should
-            // be off"*. Showing a knob pointing right above a line that says the plugin cannot
-            // work is the control contradicting its own label.
-            //
-            // Display only: `store.isEnabled` is untouched, so the stored preference survives and
-            // the knob springs back once the permission or the sign-in is sorted. `status()` is
-            // only consulted when the plugin is stored as on — an off plugin reports nothing and
-            // this must not turn "off" into "attention".
-            val healthy = !on || plugin.status().state ==
-                com.mido.phonebridge.core.PluginStatus.State.OK
-            val showsOn = on && healthy
-            // A row with the knob at the RIGHT edge.
-            //
-            // Mido asked for this twice: *"plugin page has toggle in the middle, make it right
-            // aligned"*, then *"plugin details screen still have the toggle in the middle not
-            // right aligned like I asked before"*. The first pass fixed the LIST row and left
-            // this screen adding the knob as a bare full-width child, so it rendered wherever
-            // the layout put it.
-            //
-            // The label takes weight 1 and absorbs all the slack; the knob follows at its own
-            // width, which pins it to the right edge of the card regardless of label length.
-            val switchRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-            switchRow.addView(
-                Theme.text(
-                    this,
-                    if (showsOn) "Enabled" else "Disabled",
-                    15f,
-                    if (showsOn) Theme.ON_SURFACE else Theme.ON_SURFACE_VARIANT,
-                ).apply { typeface = Theme.handFont(this@PluginDetailActivity) },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
-            )
-            switchRow.addView(Theme.toggle(this, showsOn) { want ->
-                store.setEnabled(plugin, want)
-                Debug.log("plugin ${plugin.id}: enabled=$want")
-                render()
-            })
-            content.addView(switchRow, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            ))
-
-            if (showsOn) {
-                content.addView(Theme.text(
-                    this,
-                    "On. Its routes are served and gated like any other.",
-                    12f,
-                ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
-            } else if (on) {
-                // Stored ON but cannot serve. The knob above reads off, so this line has to say
-                // WHY the two agree — otherwise "off" beside an unchanged preference looks like
-                // the app turned it off behind the human's back.
-                content.addView(Theme.text(
-                    this,
-                    "Switched on, but it cannot serve until the problem above is fixed. " +
-                        "Its routes stay registered.",
-                    12f,
-                ).apply { setTextColor(Theme.WARNING) })
-            } else {
-                content.addView(Theme.text(
-                    this,
-                    "Off. Its routes still exist, and answer `plugin_disabled` — they are not " +
-                        "removed, so nothing starts 404-ing because of a switch.",
-                    12f,
-                ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
-            }
-        }
-
-        // The plugin's own view of itself, shown only when it is on: an off plugin has nothing
-        // to report, and printing its stale status next to "Off" is the confusion to avoid.
         if (on) {
-            val st = plugin.status()
-            content.addView(Theme.text(this, st.detail.ifEmpty { st.title }, 13f).apply {
-                setTextColor(
-                    when (st.state) {
-                        com.mido.phonebridge.core.PluginStatus.State.OK -> Theme.SUCCESS
-                        com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION -> Theme.WARNING
-                        com.mido.phonebridge.core.PluginStatus.State.ERROR -> Theme.DANGER
-                        com.mido.phonebridge.core.PluginStatus.State.OFF -> Theme.ON_SURFACE_VARIANT
-                    }
-                )
-                setPadding(0, Theme.dp(this@PluginDetailActivity, 6), 0, 0)
-            })
+            panel.addView(StatusRow.create(
+                this, label = "Status", value = model.word, tone = toneOf(model.tone),
+                detail = model.detail, led = model.led,
+            ))
         }
+        content.addView(panel)
+    }
 
-        // --- 2. PERMISSIONS ---
+    // --- Permissions -------------------------------------------------------------------------
+
+    private fun addPermissions() {
         val perms = plugin.permissions()
-        if (perms.isNotEmpty()) {
-            content.addView(Theme.sectionHeader(this, "Permissions"))
-            for (p in perms) content.addView(permissionRow(p))
-        }
+        if (perms.isEmpty()) return
+        content.addView(SectionHeader.create(this, "Permissions"))
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+        for (perm in perms) panel.addView(permissionRow(perm))
+        content.addView(panel)
+    }
 
-        // --- 2b. SPECIAL ACCESS ---
-        //
-        // Separate from permissions because the REMEDY is different: these are Settings screens,
-        // not dialogs. A permission button that called `requestPermissions` for one of these
-        // would close silently and do nothing, which is the exact failure this distinction
-        // exists to prevent.
+    /** One permission: its state as a word and a light, why it is needed, and the one action that fixes it. */
+    private fun permissionRow(perm: PluginPermission): View {
+        val granted = checkSelfPermission(perm.permission) == PackageManager.PERMISSION_GRANTED
+        val state = PluginDetailCopy.permissionState(granted, perm.optional)
+        var action: KeyButton.Spec? = null
+        if (!granted) {
+            // The two reasons a request can do nothing are different and need different words:
+            // never asked (a dialog works) vs permanently denied (only Settings works).
+            val dialogWorks = shouldShowRequestPermissionRationale(perm.permission) ||
+                !isPermanentlyDenied(perm.permission)
+            action = if (dialogWorks) {
+                KeyButton.Spec("Allow", "Allow ${perm.label}") {
+                    requestPermissions(arrayOf(perm.permission), REQ_PERMISSION)
+                }
+            } else {
+                KeyButton.Spec("Open settings", "Open settings for ${perm.label}") { openAppSettings() }
+            }
+        }
+        return StatusRow.create(
+            this, label = perm.label, value = state.word, tone = toneOf(state.tone),
+            detail = perm.why, led = state.led, action = action,
+        )
+    }
+
+    // --- System access -----------------------------------------------------------------------
+
+    private fun addAccess() {
         val access = plugin.specialAccess()
-        if (access.isNotEmpty()) {
-            content.addView(Theme.sectionHeader(this, "System access"))
-            for (a in access) content.addView(accessRow(a))
-        }
+        if (access.isEmpty()) return
+        content.addView(SectionHeader.create(this, "System access"))
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+        for (a in access) panel.addView(accessRow(a))
+        content.addView(panel)
+    }
 
-        // --- 3. SETTINGS ---
+    /**
+     * One special access: state, why it is needed, and the only thing that can grant it.
+     *
+     * Every action opens an Android Settings screen. There is deliberately no "request" path
+     * because none exists: the system shows no dialog for any of these.
+     */
+    private fun accessRow(access: SpecialAccess): View {
+        val granted = when (access) {
+            SpecialAccess.NOTIFICATION_LISTENER -> BridgeService.listenerRef != null
+            SpecialAccess.OVERLAY -> com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)
+            SpecialAccess.BATTERY_EXEMPT -> com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)
+            SpecialAccess.FULL_SCREEN_INTENT -> ApprovalGate.canUseFullScreenIntent(this)
+        }
+        val state = PluginDetailCopy.accessState(granted)
+        val action = if (granted) null else KeyButton.Spec("Open settings", "Open settings for ${access.label}") {
+            openAccessSettings(access)
+        }
+        return StatusRow.create(
+            this, label = access.label, value = state.word, tone = toneOf(state.tone),
+            detail = PluginDetailCopy.accessReason(access), led = state.led, action = action,
+        )
+    }
+
+    // --- Settings ----------------------------------------------------------------------------
+
+    private fun addSettings() {
         val settings = plugin.settings()
-        if (settings.isNotEmpty()) {
-            content.addView(Theme.sectionHeader(this, "Settings"))
-            for (setting in settings) content.addView(settingRow(setting))
+        if (settings.isEmpty()) return
+        content.addView(SectionHeader.create(this, "Settings"))
+        val panel = Panel.create(this, Panel.Tone.PLAIN)
+        settings.forEachIndexed { i, setting ->
+            if (i > 0) panel.addView(hairline())
+            panel.addView(settingRow(setting))
         }
+        content.addView(panel)
+    }
 
-        // --- 4. ROUTES (read-only) ---
-        val routes = plugin.routes()
-        if (routes.isNotEmpty()) {
-            content.addView(Theme.sectionHeader(this, "Routes"))
-            content.addView(Theme.text(
-                this,
-                routes.joinToString("\n") { "${it.method} ${it.path}  ·  ${it.describe}" },
-                11f,
-                mono = true,
-            ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
+    private fun hairline(): View = View(this).apply {
+        setBackgroundColor(Theme.palette(this@PluginDetailActivity).hairline)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+            topMargin = dp(Dimens.SPACE_M)
+            bottomMargin = dp(Dimens.SPACE_M)
         }
     }
 
-    /** One permission: its state, why it is needed, and the one action that can fix it. */
-    private fun permissionRow(p: PluginPermission): LinearLayout {
-        val granted = checkSelfPermission(p.permission) == PackageManager.PERMISSION_GRANTED
+    private fun changed(block: () -> Unit) {
+        block()
+        content.post { render() }
+    }
+
+    /** One declared setting, rendered by its type. */
+    private fun settingRow(setting: PluginSetting): View {
+        val p = Theme.palette(this)
         val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun describe(text: String) {
+            if (text.isEmpty()) return
+            block.addView(Type.text(this, text, TypeRole.DETAIL, p.etched), full().apply { topMargin = dp(Dimens.SPACE_XS) })
+        }
+        when (setting) {
+            is PluginSetting.Toggle -> block.addView(StatusRow.create(
+                this, label = setting.label, value = "",
+                detail = setting.description.ifEmpty { null },
+                trailing = Theme.rocker(
+                    this, on = store.booleanValue(plugin.id, setting.id, setting.default), label = setting.label,
+                ) { want -> changed { store.putBoolean(plugin.id, setting.id, want) } },
+            ))
 
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(Theme.text(this, p.label, 14f).apply {
-            setTextColor(Theme.ON_SURFACE)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(Theme.text(
-            this,
-            if (granted) "GRANTED" else if (p.optional) "OPTIONAL" else "NEEDED",
-            12f,
-        ).apply {
-            setTextColor(if (granted) Theme.SUCCESS else Theme.WARNING)
-        })
-        block.addView(row)
-
-        block.addView(Theme.text(this, p.why, 12f).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(this@PluginDetailActivity, 4), 0, 0)
-        })
-
-        if (!granted) {
-            // The two reasons a request can do nothing are different and need different words:
-            // never asked (a dialog works) vs permanently denied (only Settings works). Asking
-            // again in the second case is a silent no-op, which is the bug this avoids.
-            val canAsk = shouldShowRequestPermissionRationale(p.permission)
-            val btn = Theme.button(
-                this,
-                if (canAsk || !isPermanentlyDenied(p.permission)) "ALLOW" else "OPEN SETTINGS",
-                Theme.ButtonStyle.PRIMARY,
-                small = true,
-            ) {
-                if (canAsk || !isPermanentlyDenied(p.permission)) {
-                    requestPermissions(arrayOf(p.permission), REQ_PERMISSION)
+            is PluginSetting.Choice -> {
+                val current = store.value(plugin.id, setting.id, setting.default)
+                block.addView(Type.text(this, setting.label, TypeRole.ROW_LABEL, p.ink), full())
+                describe(setting.description)
+                val pick = { option: String -> changed { store.put(plugin.id, setting, option) } }
+                if (setting.options.size in 2..4) {
+                    val knob = KnobSelector(this, setting.label, setting.options)
+                    knob.select(setting.options.indexOf(current).coerceAtLeast(0), animate = false)
+                    knob.onSelect = { i -> pick(setting.options[i]) }
+                    block.addView(knob, full().apply { topMargin = dp(Dimens.SPACE_S) })
                 } else {
-                    openAppSettings()
+                    val group = Chips.group(this, setting.label)
+                    for (option in setting.options) {
+                        group.addView(Chips.filter(this, option, checked = option == current) { pick(option) })
+                    }
+                    block.addView(group, full().apply { topMargin = dp(Dimens.SPACE_S) })
                 }
             }
-            block.addView(btn)
-        }
 
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = Theme.dp(this, 10)
-        block.layoutParams = lp
+            is PluginSetting.Text -> {
+                val current = store.value(plugin.id, setting.id, setting.default)
+                block.addView(Type.text(this, setting.label, TypeRole.ROW_LABEL, p.ink), full())
+                describe(setting.description)
+                // A read-back readout plus an Edit key, stacked, rather than a live EditText: a text
+                // field in a scrolling list steals focus and pops the keyboard on scroll.
+                val shown: CharSequence = if (current.isEmpty()) {
+                    SpannableString(PluginDetailCopy.textValue(current)).apply {
+                        setSpan(ForegroundColorSpan(p.readoutMuted), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                } else current
+                block.addView(
+                    Readout.create(this, shown, Readout.Kind.BODY).root,
+                    full().apply { topMargin = dp(Dimens.SPACE_S) },
+                )
+                block.addView(
+                    KeyButton.create(
+                        this, "Edit", KeyButton.Kind.PANEL, KeyButton.Size.SMALL, describe = "Edit ${setting.label}",
+                    ) { promptText(setting, current) },
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(Dimens.SPACE_S) },
+                )
+            }
+
+            is PluginSetting.Action -> {
+                block.addView(
+                    KeyButton.create(this, setting.label, KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) {
+                        changed { setting.run(this) }
+                    },
+                    full(),
+                )
+                describe(setting.description)
+            }
+        }
         return block
+    }
+
+    /**
+     * Edits a text setting in a dialog. A value the store refuses keeps the dialog open and says
+     * why, instead of closing as if it had saved.
+     */
+    @Suppress("DEPRECATION")
+    private fun promptText(setting: PluginSetting.Text, current: String) {
+        val p = Theme.palette(this)
+        val input = EditText(this).apply {
+            setText(current)
+            hint = setting.placeholder
+            inputType = if (setting.numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            Type.apply(this, TypeRole.BODY)
+            setTextColor(p.ink)
+            setHintTextColor(p.etched)
+            background = Bevel.sunkenTrack(this@PluginDetailActivity, fill = p.sunken, r = Dimens.RADIUS_READOUT)
+            setPadding(dp(Dimens.SPACE_M), dp(Dimens.SPACE_M), dp(Dimens.SPACE_M), dp(Dimens.SPACE_M))
+            minimumHeight = dp(Dimens.MIN_TARGET)
+            setSelectAllOnFocus(true)
+            setSingleLine()
+        }
+        val error = Type.text(this, "", TypeRole.DETAIL, p.cautionText).apply {
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(Dimens.SPACE_XL), dp(Dimens.SPACE_S), dp(Dimens.SPACE_XL), 0)
+            addView(input, full())
+            addView(error, full().apply { topMargin = dp(Dimens.SPACE_S) })
+        }
+        val dialog = StmpDialog.builder(this)
+            .setTitle(setting.label)
+            .setView(body)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
+        dialog.show()
+        input.requestFocus()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            try {
+                store.put(plugin.id, setting, input.text.toString().trim())
+                dialog.dismiss()
+                content.post { render() }
+            } catch (e: PluginSettingsException) {
+                error.text = PluginDetailCopy.refusal(e.message)
+                error.visibility = View.VISIBLE
+                Debug.log("setting refused: ${e.message}")
+            }
+        }
+    }
+
+    // --- Routes ------------------------------------------------------------------------------
+
+    private fun addRoutes() {
+        val routes = plugin.routes()
+        if (routes.isEmpty()) return
+        content.addView(SectionHeader.create(this, "Routes"))
+        content.addView(Readout.create(
+            this,
+            routes.joinToString("\n") { "${it.method} ${it.path}  \u00b7  ${it.describe}" },
+            Readout.Kind.LOG,
+        ).root)
+    }
+
+    // --- helpers -----------------------------------------------------------------------------
+
+    private fun toneOf(tone: PluginRowModel.Tone): StatusRow.Tone = when (tone) {
+        PluginRowModel.Tone.OK -> StatusRow.Tone.OK
+        PluginRowModel.Tone.CAUTION -> StatusRow.Tone.CAUTION
+        PluginRowModel.Tone.NEUTRAL -> StatusRow.Tone.NEUTRAL
+    }
+
+    /** The first header of the screen sits right under the top bar: no extra section gap. */
+    private fun zeroTop(header: TextView): TextView = header.apply {
+        setPadding(paddingLeft, 0, paddingRight, paddingBottom)
+    }
+
+    private fun View.topMargin(px: Int) {
+        layoutParams = (layoutParams as? LinearLayout.LayoutParams ?: full()).apply { topMargin = px }
+    }
+
+    /** Recolours the first text view showing [text] inside [root] (the kit row's detail is `etched`). */
+    private fun tint(root: View, text: String, color: Int) {
+        if (root is TextView && root.text.toString() == text) { root.setTextColor(color); return }
+        if (root is ViewGroup) for (i in 0 until root.childCount) tint(root.getChildAt(i), text, color)
     }
 
     /**
@@ -291,7 +441,6 @@ class PluginDetailActivity : BridgeScreen() {
      */
     private fun isPermanentlyDenied(permission: String): Boolean {
         val prefs = getSharedPreferences("permission_asks", MODE_PRIVATE)
-        val askedKey = "asked:$permission"
         val deniedKey = "denied:$permission"
         return prefs.getBoolean(deniedKey, false) && !shouldShowRequestPermissionRationale(permission)
     }
@@ -311,7 +460,7 @@ class PluginDetailActivity : BridgeScreen() {
             prefs.putBoolean("denied:$perm", !granted)
         }
         prefs.apply()
-        render()
+        if (::content.isInitialized) content.post { render() }
     }
 
     private fun openAppSettings() {
@@ -319,48 +468,6 @@ class PluginDetailActivity : BridgeScreen() {
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.fromParts("package", packageName, null),
         ))
-    }
-
-    /**
-     * One special access: state, what it is, and the only thing that can grant it.
-     *
-     * Every branch opens an Android Settings screen. There is deliberately no "request" path
-     * here because none exists — the system shows no dialog for any of these.
-     */
-    private fun accessRow(access: com.mido.phonebridge.core.SpecialAccess): LinearLayout {
-        val granted = when (access) {
-            com.mido.phonebridge.core.SpecialAccess.NOTIFICATION_LISTENER ->
-                BridgeService.listenerRef != null
-            com.mido.phonebridge.core.SpecialAccess.OVERLAY ->
-                com.mido.phonebridge.ui.SystemAccess.overlayGranted(this)
-            com.mido.phonebridge.core.SpecialAccess.BATTERY_EXEMPT ->
-                com.mido.phonebridge.ui.SystemAccess.batteryExempt(this)
-            com.mido.phonebridge.core.SpecialAccess.FULL_SCREEN_INTENT ->
-                ApprovalGate.canUseFullScreenIntent(this)
-        }
-
-        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(Theme.text(this, access.label, 14f).apply {
-            setTextColor(Theme.ON_SURFACE)
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(Theme.text(this, if (granted) "GRANTED" else "NEEDED", 12f).apply {
-            setTextColor(if (granted) Theme.SUCCESS else Theme.WARNING)
-        })
-        block.addView(row)
-
-        if (!granted) {
-            block.addView(Theme.button(this, "OPEN SETTINGS", Theme.ButtonStyle.PRIMARY, small = true) {
-                openAccessSettings(access)
-            })
-        }
-
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = Theme.dp(this, 10)
-        block.layoutParams = lp
-        return block
     }
 
     /**
@@ -397,136 +504,14 @@ class PluginDetailActivity : BridgeScreen() {
         }
     }
 
-    /** One declared setting, rendered by its type. */
-    private fun settingRow(setting: PluginSetting): LinearLayout {
-        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.topMargin = Theme.dp(this, 12)
-        block.layoutParams = lp
-
-        when (setting) {
-            is PluginSetting.Toggle -> {
-                val on = store.booleanValue(plugin.id, setting.id, setting.default)
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    // CENTER_VERTICAL so the knob lines up with its label, not the row's top.
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                }
-                row.addView(Theme.text(this, setting.label, 14f).apply {
-                    setTextColor(Theme.ON_SURFACE)
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(Theme.toggle(this, on) { want ->
-                    store.putBoolean(plugin.id, setting.id, want)
-                    render()
-                })
-                block.addView(row)
-                block.addView(description(setting.description))
-            }
-
-            is PluginSetting.Choice -> {
-                val current = store.value(plugin.id, setting.id, setting.default)
-                block.addView(Theme.text(this, setting.label, 14f).apply {
-                    setTextColor(Theme.ON_SURFACE)
-                })
-                block.addView(description(setting.description))
-                // One small button per option rather than a dropdown: this app has no spinner
-                // anywhere, and a three-option choice is clearer as a visible set than a picker.
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                for (option in setting.options) {
-                    val selected = option == current
-                    val b = Theme.button(
-                        this, option,
-                        if (selected) Theme.ButtonStyle.PRIMARY else Theme.ButtonStyle.NEUTRAL,
-                        small = true,
-                    ) {
-                        store.put(plugin.id, setting, option)
-                        render()
-                    }
-                    val p = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    p.rightMargin = Theme.dp(this, 8)
-                    row.addView(b, p)
-                }
-                block.addView(row)
-            }
-
-            is PluginSetting.Text -> {
-                val current = store.value(plugin.id, setting.id, setting.default)
-                block.addView(Theme.text(this, setting.label, 14f).apply {
-                    setTextColor(Theme.ON_SURFACE)
-                })
-                block.addView(description(setting.description))
-                // A read-back row plus an ACTION-style edit, rather than a live EditText: a text
-                // field in a scrolling list steals focus and pops the keyboard on scroll, which
-                // is the classic form-in-a-list defect. Editing happens in a dialog.
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                row.addView(Theme.text(this, current.ifEmpty { "—" }, 13f, mono = true).apply {
-                    setTextColor(Theme.ON_SURFACE_VARIANT)
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(Theme.button(this, "EDIT", Theme.ButtonStyle.NEUTRAL, small = true) {
-                    promptText(setting, current)
-                })
-                block.addView(row)
-            }
-
-            is PluginSetting.Action -> {
-                block.addView(Theme.button(this, setting.label, Theme.ButtonStyle.NEUTRAL, small = true) {
-                    setting.run(this)
-                    render()
-                })
-                block.addView(description(setting.description))
-            }
-        }
-        return block
-    }
-
-    private fun description(text: String): TextView? =
-        if (text.isEmpty()) null else Theme.text(this, text, 12f).apply {
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(this@PluginDetailActivity, 4), 0, 0)
-        }
-
-    private fun promptText(setting: PluginSetting.Text, current: String) {
-        val input = android.widget.EditText(this).apply {
-            setText(current)
-            hint = setting.placeholder
-            inputType = if (setting.numeric) {
-                android.text.InputType.TYPE_CLASS_NUMBER
-            } else {
-                android.text.InputType.TYPE_CLASS_TEXT
-            }
-        }
-        StmpDialog.builder(this)
-            .setTitle(setting.label)
-            .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                // The store validates against the descriptor; a refusal here is a defect in the
-                // descriptor rather than something the human did, so it surfaces rather than
-                // being swallowed into a "saved" that did not save.
-                try {
-                    store.put(plugin.id, setting, input.text.toString().trim())
-                } catch (e: com.mido.phonebridge.core.PluginSettingsException) {
-                    com.mido.phonebridge.Debug.log("setting refused: ${e.message}")
-                }
-                render()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
     companion object {
         const val EXTRA_PLUGIN_ID = "plugin_id"
 
         /**
          * The SSH connection this detail screen is scoped to, or absent for a whole plugin.
          *
-         * One connection is a vault secret named `ssh-<host>`, not a plugin of its own — there is
-         * no per-connection object to register. So the screen takes the plugin AND a name, and
-         * narrows itself to that one connection when the name is present.
+         * One connection is a vault secret named `ssh-<host>`, not a plugin of its own, so the
+         * screen takes the plugin AND a name, and narrows itself to that connection when present.
          */
         const val EXTRA_SECRET_NAME = "secret_name"
         private const val REQ_PERMISSION = 3001

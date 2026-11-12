@@ -5450,11 +5450,16 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.49.10 (build 306) — 2026-11-12
 - Exceptions keeps its top bar when you tap Remove, Set, Save or Try again, so the back arrow stays clear of the status bar and the list keeps its gesture-bar padding.
 
-## 0.49.11 (build 307) — 2026-11-12 — CURRENT
+## 0.49.11 (build 307) — 2026-11-12
 - Plugins that need action now sort to the top of their group, and Debug, Help, Logs and Probe are tucked into a collapsed Developer group.
 - The plugin help dialog now tells you the real state of the plugin; it used to say "On, and ready" even when the plugin was not set up or needed a permission.
 - Plugin rows no longer break at large text sizes, the help bulb is a full-size tap target, and the technical route and error text under each plugin name is replaced with plain words.
 - In a build without Google sign-in, the Google, Gmail, Calendar and Drive rows say so instead of pretending to be set up.
+
+## 0.49.12 (build 308) — 2026-11-12 — CURRENT
+- The plugin screen has a back arrow and a clear layout: switch, permissions, system access, settings and routes each sit in their own panel, with plain GRANTED, OPTIONAL and NEEDED labels.
+- System access rows now say why each one is needed, and editing a text setting shows an error in the dialog instead of silently not saving.
+- A plugin that is not registered now shows a message instead of closing the screen, and the Google sign-in screen has the same back arrow and readable error messages.
 
 ## Keeping this file honest
 

@@ -337,6 +337,57 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP06: the plugin detail screen in the states that add controls (4 touch-target rules, whole screen).
+    private val detailStates: List<Pair<String, () -> Pair<String, String?>>> get() {
+        fun fake(p: com.mido.phonebridge.core.Plugin): () -> Pair<String, String?> = {
+            Fixtures.clearPlugins(); com.mido.phonebridge.core.PluginRegistry.register(p); p.id to null
+        }
+        val text = com.mido.phonebridge.core.PluginSetting.Text("limit", "Character cap", "Longest text.", numeric = true)
+        val choice = { n: Int ->
+            com.mido.phonebridge.core.PluginSetting.Choice("mode", "Voice style", "How it sounds.", (1..n).map { "Option $it" }, "Option 1")
+        }
+        return listOf(
+            "plugin_detail/tts" to { Fixtures.registerPlugins(); "tts" to null },
+            "plugin_detail/contacts_needed" to { Fixtures.contactsPermission(false); Fixtures.registerPlugins(); "contacts" to null },
+            "plugin_detail/permission_optional" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin(
+                "camera", "Camera",
+                perms = listOf(com.mido.phonebridge.core.PluginPermission("android.permission.CAMERA", "Camera", "Takes a photo.", true)),
+            )),
+            "plugin_detail/access_all_four" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin(
+                "everything", "Everything", access = com.mido.phonebridge.core.SpecialAccess.entries,
+            )),
+            "plugin_detail/choice_knob" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin("styled", "Styled", declared = listOf(choice(3)))),
+            "plugin_detail/choice_chips" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin("styled", "Styled", declared = listOf(choice(6)))),
+            "plugin_detail/text_unset" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin("texty", "Texty", declared = listOf(text))),
+            "plugin_detail/routes_long" to fake(com.mido.phonebridge.screenshots.DetailFakePlugin("long", "Long", routeCount = 14)),
+            "plugin_detail/ssh_connection" to { Fixtures.registerPlugins(); "ssh" to "kvm-box" },
+            "plugin_detail/unregistered" to { Fixtures.clearPlugins(); "nonexistent" to null },
+        )
+    }
+
+    @Test
+    fun `every enrolled plugin detail state meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, setup) in detailStates) {
+                Fixtures.dropSingletons()
+                val (id, secret) = setup()
+                val intent = android.content.Intent(Fixtures.app, PluginDetailActivity::class.java)
+                    .putExtra(PluginDetailActivity.EXTRA_PLUGIN_ID, id)
+                secret?.let { intent.putExtra(PluginDetailActivity.EXTRA_SECRET_NAME, it) }
+                val a = Robolectric.buildActivity(PluginDetailActivity::class.java, intent).setup().get()
+                shadowOf(Looper.getMainLooper()).idle()
+                // The screen's own column and top bar; the tab bar is the kit's and is covered there.
+                check(a.window.decorView as ViewGroup, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     private fun isTarget(v: View): Boolean {
         if (!v.isShown) return false
         if (v is ScrollView || v is NestedScrollView) return false
