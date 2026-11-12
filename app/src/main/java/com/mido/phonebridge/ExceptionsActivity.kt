@@ -66,6 +66,12 @@ class ExceptionsActivity : AppCompatActivity() {
         render()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The banner and rows show what is stored now, not what was stored when the screen last drew.
+        render()
+    }
+
     private fun dp(v: Int) = Theme.dp(this, v)
 
     private fun full() = LinearLayout.LayoutParams(
@@ -187,10 +193,10 @@ class ExceptionsActivity : AppCompatActivity() {
         val change = KeyButton.Spec(
             if (next == Mode.PARANOID) "Set Paranoid" else "Set Don't disturb",
             "Change $title to $nextName",
-        ) { setRule(policy, Rule(rule.plugin, rule.verb, next), "settings") }
+        ) { setRule(Rule(rule.plugin, rule.verb, next), "settings") }
         // Removing an exception can only make the pair ask again, the safe direction: no confirm (D62).
         val remove = KeyButton.Spec("Remove", "Remove the exception for $title") {
-            clearRule(policy, rule.plugin, rule.verb, "settings")
+            clearRule(rule.plugin, rule.verb, "settings")
         }
         return ActionRow(this, title, detail, listOf(change), remove)
     }
@@ -261,9 +267,9 @@ class ExceptionsActivity : AppCompatActivity() {
             .setTitle("${PluginLabel.of(plugin)} · ${AuditCopy.verbWords(verb)}")
             .setItems(labels) { _, which ->
                 when (which) {
-                    0 -> clearRule(policy, plugin, verb, "settings")
-                    1 -> setRule(policy, Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
-                    else -> setRule(policy, Rule(plugin, verb, Mode.PARANOID), "settings")
+                    0 -> clearRule(plugin, verb, "settings")
+                    1 -> setRule(Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
+                    else -> setRule(Rule(plugin, verb, Mode.PARANOID), "settings")
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -274,14 +280,29 @@ class ExceptionsActivity : AppCompatActivity() {
      * Write one exception. The change is audited separately from a gate-mode change: "switch
      * Paranoid to Paranoid" would say nothing happened at the one moment something did.
      */
-    private fun setRule(policy: Policy, rule: Rule, source: String) {
+    private fun setRule(rule: Rule, source: String) {
+        val policy = freshPolicy() ?: return
         val before = policy.rules.firstOrNull { it.key == rule.key }
         save(policy.withRule(rule), PolicyAudit.recordRule(before, rule, policy.global, source))
     }
 
-    private fun clearRule(policy: Policy, plugin: String, verb: Verb?, source: String) {
+    private fun clearRule(plugin: String, verb: Verb?, source: String) {
+        val policy = freshPolicy() ?: return
         val before = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }
         save(policy.withoutRule(plugin, verb), PolicyAudit.recordRule(before, null, policy.global, source))
+    }
+
+    /**
+     * The policy as stored NOW, not the copy this screen last drew: the approval modal and Home
+     * write the same file, and applying a change to a stale copy would silently undo theirs
+     * (including the gate mode) and audit the wrong global mode. Null after showing the fault.
+     */
+    private fun freshPolicy(): Policy? = try {
+        PolicyStore.from(applicationContext).get()
+    } catch (e: PolicyException) {
+        saveError = e.message ?: e.javaClass.simpleName
+        render()
+        null
     }
 
     private fun save(next: Policy, record: com.mido.phonebridge.audit.AuditRecord) {

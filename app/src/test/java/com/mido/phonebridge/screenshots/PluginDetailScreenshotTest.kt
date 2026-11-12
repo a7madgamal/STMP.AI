@@ -14,7 +14,10 @@ import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.SpecialAccess
 import com.mido.phonebridge.core.Verb
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.robolectric.shadows.ShadowDialog
 import org.robolectric.shadows.ShadowSettings
@@ -136,12 +139,30 @@ class PluginDetailScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun plugin_detail_text_prompt_error() {
         editDialog()
         val dialog = ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
-        dialog.findViewById<EditText>(android.R.id.custom)?.let { }
         val input = firstEditText(dialog.window!!.decorView)!!
         input.setText("lots")
         dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
-        assertFalse("a refusal keeps the dialog open", !dialog.isShowing)
+        assertTrue("a refusal keeps the dialog open", dialog.isShowing)
+        val error = firstTextStartingWith(dialog.window!!.decorView, "Couldn't save:")
+        assertNotNull("a refusal shows \"Couldn't save: ...\"", error)
+        assertEquals("the refusal line is visible", View.VISIBLE, error!!.visibility)
         Shots.screen("plugin_detail", "text_prompt_error")
+    }
+
+    @Test fun plugin_detail_text_prompt_accepts_a_valid_value() {
+        val activity = editDialog()
+        val dialog = ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
+        firstEditText(dialog.window!!.decorView)!!.setText("500")
+        dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        assertFalse("an accepted value closes the dialog", dialog.isShowing)
+        assertNotNull("the readout shows 500", findByText(activity.window.decorView, "500"))
+    }
+
+    private fun firstTextStartingWith(v: View, prefix: String): android.widget.TextView? {
+        if (v is android.widget.TextView && v.text.startsWith(prefix)) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) firstTextStartingWith(v.getChildAt(i), prefix)?.let { return it }
+        return null
     }
 
     private fun firstEditText(v: View): EditText? {

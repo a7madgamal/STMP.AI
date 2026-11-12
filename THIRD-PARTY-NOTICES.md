@@ -84,11 +84,6 @@ STMP's own.
 
 ## Fonts
 
-**Handlee** — Copyright (c) 2011, Joe Prince, Vissol Ltd.
-(http://www.vissol.co.uk/mavenpro/), with Reserved Font Name "Handlee".
-Licensed under the SIL Open Font License, Version 1.1. The full text is in
-`OFL-Handlee.txt`.
-
 **Geist** and **Geist Mono** (v1.9.2) — Copyright 2026 The Geist Project Authors
 (https://github.com/vercel/geist-font). Licensed under the SIL Open Font License, Version 1.1.
 The full text is in `OFL-Geist.txt`. Bundled as static TTF files in `app/src/main/res/font/`.

@@ -26,7 +26,7 @@ object Chips {
         contentDescription = label
     }
 
-    fun filter(ctx: Context, label: String, checked: Boolean, onToggle: (Boolean) -> Unit): FrameLayout {
+    fun filter(ctx: Context, label: String, checked: Boolean, onToggle: (Boolean) -> Unit): FilterChip {
         val p = Theme.palette(ctx)
         var on = checked
         val pill = Type.text(ctx, label, TypeRole.CHIP, p.ink).apply {
@@ -48,7 +48,9 @@ object Chips {
             pill.background = RippleDrawable(rippleColor(ctx), shape, mask)
         }
         paint()
-        return FrameLayout(ctx).apply {
+        return FilterChip(ctx).apply {
+            setCheckedState = { want -> if (want != on) { on = want; paint() } }
+            readCheckedState = { on }
             minimumHeight = ctx.dp(Dimens.MIN_TARGET)
             minimumWidth = ctx.dp(Dimens.MIN_TARGET)
             addView(pill, FrameLayout.LayoutParams(
@@ -73,5 +75,19 @@ object Chips {
                 onToggle(on)
             }
         }
+    }
+
+    /**
+     * A filter pill whose checked state can be set from code. A screen that repaints its filters
+     * after a tap sets [checked] on the SAME views instead of rebuilding them, so a screen reader
+     * keeps its focus on the chip that was just tapped.
+     */
+    class FilterChip(ctx: Context) : FrameLayout(ctx) {
+        internal var setCheckedState: (Boolean) -> Unit = {}
+        internal var readCheckedState: () -> Boolean = { false }
+
+        var checked: Boolean
+            get() = readCheckedState()
+            set(value) = setCheckedState(value)
     }
 }

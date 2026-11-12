@@ -66,7 +66,8 @@ class GoogleLoginActivity : AppCompatActivity() {
             return
         }
         if (AuthManager.isLoggedIn(applicationContext)) {
-            setStatus(Led.State.OK, "Already signed in. Signing in again replaces the stored token.")
+            alreadySignedIn = true
+            setStatus(Led.State.OK, ALREADY_SIGNED_IN)
         }
         beginFlow()
     }
@@ -85,6 +86,9 @@ class GoogleLoginActivity : AppCompatActivity() {
     }
 
     /** One status panel: a light and a sentence, replacing whatever was there. */
+    /** True when a token is already stored; the note then stays on screen while the picker opens (spec 6.4). */
+    private var alreadySignedIn = false
+
     private fun setStatus(led: Led.State, text: String) {
         val p = Theme.palette(this)
         panel.removeAllViews()
@@ -100,6 +104,13 @@ class GoogleLoginActivity : AppCompatActivity() {
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f,
         ))
         box.addView(row)
+        // The "Already signed in" state is replaced within milliseconds by "Opening the picker"; keep
+        // its sentence as a second line so it can actually be read.
+        if (alreadySignedIn && led == Led.State.PENDING) {
+            box.addView(Type.text(this, ALREADY_SIGNED_IN, TypeRole.DETAIL, p.etched), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(this@GoogleLoginActivity, Dimens.SPACE_S) })
+        }
         panel.addView(box)
     }
 
@@ -188,5 +199,9 @@ class GoogleLoginActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private companion object {
+        const val ALREADY_SIGNED_IN = "Already signed in. Signing in again replaces the stored token."
     }
 }

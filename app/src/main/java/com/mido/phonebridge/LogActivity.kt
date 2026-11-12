@@ -104,6 +104,10 @@ class LogActivity : AppCompatActivity() {
     private lateinit var chipHost: LinearLayout
     private lateinit var listContainer: LinearLayout
 
+    private lateinit var allChip: Chips.FilterChip
+    private lateinit var noiseChip: Chips.FilterChip
+    private var outcomeChips: List<Pair<AuditOutcome, Chips.FilterChip>> = emptyList()
+
     private var hideNoise = true
     private var outcomeFilter: AuditOutcome? = null
 
@@ -118,6 +122,7 @@ class LogActivity : AppCompatActivity() {
         }
         content.addView(summaryLine, wrap())
         chipHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        chipHost.addView(buildChips(), wrap())
         content.addView(chipHost, wrap().apply { topMargin = Theme.dp(this@LogActivity, Dimens.SPACE_S) })
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(listContainer, wrap())
@@ -128,26 +133,27 @@ class LogActivity : AppCompatActivity() {
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     )
 
+    /** Built once; [syncChips] only repaints their checked state, so the tapped chip keeps focus. */
     private fun buildChips(): ChipGroup {
         val group = Chips.group(this, "Filter the request log")
-        fun filter(label: String, outcome: AuditOutcome) {
-            group.addView(Chips.filter(this, label, outcomeFilter == outcome) { on ->
-                outcomeFilter = if (on) outcome else null
-                render()
-            })
+        fun add(label: String, onToggle: (Boolean) -> Unit): Chips.FilterChip =
+            Chips.filter(this, label, false, onToggle).also { group.addView(it) }
+        allChip = add("All") { outcomeFilter = null; render() }
+        outcomeChips = listOf(
+            "Denied" to AuditOutcome.DENIED,
+            "Timed out" to AuditOutcome.TIMEOUT,
+            "Failed" to AuditOutcome.HANDLER_FAILED,
+        ).map { (label, outcome) ->
+            outcome to add(label) { on -> outcomeFilter = if (on) outcome else null; render() }
         }
-        group.addView(Chips.filter(this, "All", outcomeFilter == null) {
-            outcomeFilter = null
-            render()
-        })
-        filter("Denied", AuditOutcome.DENIED)
-        filter("Timed out", AuditOutcome.TIMEOUT)
-        filter("Failed", AuditOutcome.HANDLER_FAILED)
-        group.addView(Chips.filter(this, "Show noise", !hideNoise) {
-            hideNoise = !hideNoise
-            render()
-        })
+        noiseChip = add("Show noise") { hideNoise = !hideNoise; render() }
         return group
+    }
+
+    private fun syncChips() {
+        allChip.checked = outcomeFilter == null
+        for ((outcome, chip) in outcomeChips) chip.checked = outcomeFilter == outcome
+        noiseChip.checked = !hideNoise
     }
 
     private fun render() {
@@ -171,8 +177,7 @@ class LogActivity : AppCompatActivity() {
             }
         }
 
-        chipHost.removeAllViews()
-        chipHost.addView(buildChips(), wrap())
+        syncChips()
 
         listContainer.removeAllViews()
         when {

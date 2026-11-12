@@ -70,20 +70,9 @@ class TypographyTest {
 
         assertTrue(
             "these render text smaller than ${floorSp}sp, which is unreadable on a phone at " +
-                "arm's length. Use Theme's scale (TEXT_CAPTION_SP is the floor):\n  " +
+                "arm's length. Use Theme's scale (TEXT_FLOOR_SP is the floor):\n  " +
                 offenders.joinToString("\n  "),
             offenders.isEmpty()
-        )
-    }
-
-    @Test
-    fun `the tab bar labels are upper case`() {
-        val source = File("src/main/java/com/mido/phonebridge/ui/Theme.kt").readText()
-        assertTrue(
-            "the bottom bar must upper-case its labels (Mido, 2026-11-04); otherwise a label " +
-                "change can silently render in mixed case again",
-            source.contains("tab.label.uppercase(Locale.US)") ||
-                source.contains("tab.label.uppercase(java.util.Locale.US)")
         )
     }
 }

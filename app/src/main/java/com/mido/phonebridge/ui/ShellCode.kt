@@ -30,59 +30,59 @@ object ShellCode {
      * The default ink palette, mapping zsh style keys to this app's colours.
      *
      * Keys are zsh-syntax-highlighting's names verbatim, so an upstream theme file maps onto
-     * this one entry for entry. Unlisted keys fall back to [Theme.ON_SURFACE] — an unknown
+     * this one entry for entry. Unlisted keys fall back to [Palette.ink] — an unknown
      * key must still render legibly rather than disappear.
      */
     fun palette(): Map<String, Int> = mapOf(
         // Command position: the thing being run.
-        StyleKey.COMMAND to Theme.SUCCESS,
-        StyleKey.BUILTIN to Theme.SUCCESS,
-        StyleKey.FUNCTION to Theme.SUCCESS,
-        StyleKey.ALIAS to Theme.SUCCESS,
+        StyleKey.COMMAND to Theme.current().okText,
+        StyleKey.BUILTIN to Theme.current().okText,
+        StyleKey.FUNCTION to Theme.current().okText,
+        StyleKey.ALIAS to Theme.current().okText,
         // `sudo` is a command in the slot, but not the command. Accent, because "this runs
         // elevated" is the fact most worth noticing before a tap.
-        StyleKey.PRECOMMAND to Theme.ACCENT,
+        StyleKey.PRECOMMAND to Theme.current().ink,
 
         // Arguments and options: quiet. Options slightly stronger than plain arguments.
-        StyleKey.DEFAULT to Theme.ON_SURFACE,
-        StyleKey.SINGLE_HYPHEN_OPTION to Theme.ON_SURFACE,
-        StyleKey.DOUBLE_HYPHEN_OPTION to Theme.ON_SURFACE,
+        StyleKey.DEFAULT to Theme.current().ink,
+        StyleKey.SINGLE_HYPHEN_OPTION to Theme.current().ink,
+        StyleKey.DOUBLE_HYPHEN_OPTION to Theme.current().ink,
 
         // Quoting: a different material from bare text.
-        StyleKey.SINGLE_QUOTED to Theme.WARNING,
-        StyleKey.DOUBLE_QUOTED to Theme.WARNING,
-        StyleKey.DOLLAR_QUOTED to Theme.WARNING,
-        StyleKey.BACKQUOTED to Theme.WARNING,
+        StyleKey.SINGLE_QUOTED to Theme.current().cautionText,
+        StyleKey.DOUBLE_QUOTED to Theme.current().cautionText,
+        StyleKey.DOLLAR_QUOTED to Theme.current().cautionText,
+        StyleKey.BACKQUOTED to Theme.current().cautionText,
         // An unclosed quote is the one syntax error worth seeing on a half-typed command.
-        StyleKey.SINGLE_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.DOUBLE_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.DOLLAR_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.BACKQUOTED_UNCLOSED to Theme.DANGER,
+        StyleKey.SINGLE_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.DOUBLE_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.DOLLAR_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.BACKQUOTED_UNCLOSED to Theme.current().cautionText,
 
         // Structure: separators and redirects are where one operation becomes two.
-        StyleKey.COMMANDSEPARATOR to Theme.ACCENT,
-        StyleKey.REDIRECTION to Theme.ACCENT,
+        StyleKey.COMMANDSEPARATOR to Theme.current().ink,
+        StyleKey.REDIRECTION to Theme.current().ink,
 
         // Expansions. A `$(…)` is a command nested inside this one — worth seeing as its
         // own thing, because "this line also runs something else" is exactly the fact a
         // human must not miss before approving.
-        StyleKey.CMD_SUBST_UNQUOTED to Theme.WARNING,
-        StyleKey.CMD_SUBST_QUOTED to Theme.WARNING,
-        StyleKey.CMD_SUBST_DELIM_UNQUOTED to Theme.ON_SURFACE_VARIANT,
-        StyleKey.CMD_SUBST_DELIM_QUOTED to Theme.ON_SURFACE_VARIANT,
-        StyleKey.ARITHMETIC_EXPANSION to Theme.ON_SURFACE_VARIANT,
-        StyleKey.PROCESS_SUBSTITUTION to Theme.WARNING,
-        StyleKey.PROCESS_SUBSTITUTION_DELIM to Theme.ON_SURFACE_VARIANT,
+        StyleKey.CMD_SUBST_UNQUOTED to Theme.current().cautionText,
+        StyleKey.CMD_SUBST_QUOTED to Theme.current().cautionText,
+        StyleKey.CMD_SUBST_DELIM_UNQUOTED to Theme.current().etched,
+        StyleKey.CMD_SUBST_DELIM_QUOTED to Theme.current().etched,
+        StyleKey.ARITHMETIC_EXPANSION to Theme.current().etched,
+        StyleKey.PROCESS_SUBSTITUTION to Theme.current().cautionText,
+        StyleKey.PROCESS_SUBSTITUTION_DELIM to Theme.current().etched,
 
         // Facts about the call.
-        StyleKey.ASSIGN to Theme.ON_SURFACE_VARIANT,
-        StyleKey.NUMERIC_FD to Theme.ON_SURFACE_VARIANT,
-        StyleKey.GLOBBING to Theme.ON_SURFACE_VARIANT,
-        StyleKey.COMMENT to Theme.ON_SURFACE_VARIANT,
-        StyleKey.RESERVED_WORD to Theme.ACCENT,
+        StyleKey.ASSIGN to Theme.current().etched,
+        StyleKey.NUMERIC_FD to Theme.current().etched,
+        StyleKey.GLOBBING to Theme.current().etched,
+        StyleKey.COMMENT to Theme.current().etched,
+        StyleKey.RESERVED_WORD to Theme.current().ink,
 
         // A command the resolver positively said does not exist.
-        StyleKey.UNKNOWN_TOKEN to Theme.DANGER,
+        StyleKey.UNKNOWN_TOKEN to Theme.current().cautionText,
     )
 
     /**
@@ -121,7 +121,7 @@ object ShellCode {
             val start = displayOffset(region.start - 1, cuts)
             val end = displayOffset(region.end, cuts)
             if (end <= start) continue
-            val colour = palette[region.styleKey] ?: fallback ?: Theme.ON_SURFACE
+            val colour = palette[region.styleKey] ?: fallback ?: Theme.current().ink
             text.setSpan(
                 ForegroundColorSpan(colour),
                 start,

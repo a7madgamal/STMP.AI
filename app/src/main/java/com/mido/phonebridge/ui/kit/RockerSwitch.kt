@@ -22,7 +22,7 @@ import com.mido.phonebridge.ui.tokens.Type
 import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
- * The rocker switch (COMPONENTS 4). Same public contract as the retired RuggedToggle:
+ * The rocker switch (COMPONENTS 4). Same public contract as the old paper toggle:
  * `checked` is read-only state, painted by the caller from stored truth.
  */
 class RockerSwitch(ctx: Context) : View(ctx) {

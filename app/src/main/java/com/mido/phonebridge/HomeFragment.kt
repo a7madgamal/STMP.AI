@@ -29,6 +29,7 @@ import com.mido.phonebridge.policy.blurb
 import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.ui.HomeCopy
 import com.mido.phonebridge.ui.ServerStatus
+import com.mido.phonebridge.ui.FingerprintSetting
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.dp
@@ -617,7 +618,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             is Fingerprint.Status.Unusable -> {
                 // Forced OFF, not merely greyed: with the policy ON and no usable biometric,
                 // APPROVE never enables, so every Paranoid request would become unapprovable.
-                forceFingerprintOff(status.reason)
+                FingerprintSetting.forceOff(requireContext(), status.reason, source = "home")
                 fingerprintRocker.setCheckedImmediately(false)
                 fingerprintRocker.isEnabled = false
                 fingerprintWhy.text = status.reason
@@ -632,75 +633,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    /**
-     * Ask for the fingerprint, and only then change the setting. The rocker does NOT move on the
-     * tap: the next `render()` drives it from what was written, so a cancelled prompt leaves it
-     * exactly where it was.
-     */
+    /** The fingerprint flow lives in [FingerprintSetting] (D66); Home only repaints afterwards. */
     private fun requestFingerprintChange(want: Boolean) {
-        when (val status = Fingerprint.status(hostActivity)) {
-            is Fingerprint.Status.Unusable -> {
-                // Unreachable through the UI while the rocker is disabled, but a stray call must
-                // never write a setting this phone cannot honour.
-                showProblemDialog("Fingerprint isn't available", status.reason)
-                render()
-            }
-            Fingerprint.Status.Usable -> Fingerprint.confirm(
-                activity = hostActivity,
-                title = if (want) "Require fingerprint for approvals" else "Stop requiring fingerprint",
-                subtitle = "Confirm it's you",
-                onConfirmed = { toggleFingerprintForModals(want) },
-                onFailed = { why ->
-                    Debug.log("fingerprint toggle unchanged: $why")
-                    render()
-                },
-            )
-        }
-    }
-
-    /** Turn the setting off because this phone cannot honour it (see [renderFingerprint]). */
-    private fun forceFingerprintOff(reason: String) {
-        val store = PolicyStore.from(requireContext())
-        val current = try {
-            store.get()
-        } catch (e: PolicyException) {
-            Debug.log("cannot force fingerprint off: policy unreadable (${e.message})")
-            return
-        }
-        if (!current.fingerprintForModals) return
-        val next = current.withFingerprintForModals(false)
-        try {
-            store.set(next)
-            Debug.log("fingerprint for modals forced OFF: $reason")
-            AuditLog.from(requireContext()).append(PolicyAudit.record(next.global, next.global, "home"))
-        } catch (e: Exception) {
-            Debug.log("could not force fingerprint off: ${e.message}")
-        }
-    }
-
-    private fun toggleFingerprintForModals(want: Boolean) {
-        val store = PolicyStore.from(requireContext())
-        val current = try {
-            store.get()
-        } catch (e: PolicyException) {
-            showProblemDialog("Policy can't be read", e.message ?: "The policy file could not be read.")
-            return
-        }
-        // The value the human confirmed, not a flip: a flip would fight the render that is
-        // trying to put the rocker back after a cancelled prompt.
-        val next = current.withFingerprintForModals(want)
-        try {
-            store.set(next)
-        } catch (e: Exception) {
-            showProblemDialog("Couldn't save the setting", e.message ?: e.javaClass.simpleName)
-            return
-        }
-        try {
-            AuditLog.from(requireContext()).append(PolicyAudit.record(next.global, next.global, "home"))
-        } catch (e: Exception) {
-            Debug.log("audit record failed for fingerprint toggle: ${e.message}")
-        }
-        render()
+        FingerprintSetting.request(
+            this, want, source = "home",
+            onError = { showProblemDialog("Couldn't change the setting", it) },
+        ) { render() }
     }
 
     /**

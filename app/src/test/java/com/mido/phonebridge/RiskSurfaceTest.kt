@@ -27,20 +27,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class RiskSurfaceTest {
 
+    private val p get() = Theme.current()
+
     @Test
     fun `an absent assessment leaves the sheet untouched`() {
         assertEquals(
             "no assessment is not 'safe' — it must not wear the success tint",
-            Theme.BG,
-            Theme.riskSurface(null)
+            p.body,
+            Theme.riskSurface(p, null)
         )
     }
 
     @Test
     fun `low differs from medium and medium shares caution with high`() {
-        val low = Theme.riskSurface(Risk.LOW)
-        val medium = Theme.riskSurface(Risk.MEDIUM)
-        val high = Theme.riskSurface(Risk.HIGH)
+        val low = Theme.riskSurface(p, Risk.LOW)
+        val medium = Theme.riskSurface(p, Risk.MEDIUM)
+        val high = Theme.riskSurface(p, Risk.HIGH)
 
         assertNotEquals("LOW and MEDIUM must differ", low, medium)
         assertEquals("MEDIUM and HIGH share the caution wash; the word tells them apart", medium, high)
@@ -51,28 +53,28 @@ class RiskSurfaceTest {
         for (risk in Risk.entries) {
             assertNotEquals(
                 "$risk must be visually distinguishable from no-assessment",
-                Theme.BG,
-                Theme.riskSurface(risk)
+                p.body,
+                Theme.riskSurface(p, risk)
             )
         }
     }
 
     @Test
     fun `no bucket uses the signal wash`() {
-        val signal = Theme.current().signalSurface
+        val signal = p.signalSurface
         for (risk in Risk.entries) {
-            assertNotEquals("$risk must never wear the EXECUTE/DELETE colour", signal, Theme.riskSurface(risk))
+            assertNotEquals("$risk must never wear the EXECUTE/DELETE colour", signal, Theme.riskSurface(p, risk))
         }
     }
 
     @Test
     fun `the tint agrees with the ink colour for the same bucket`() {
-        assertEquals(Theme.SUCCESS_SURFACE, Theme.riskSurface(Risk.LOW))
-        assertEquals(Theme.WARNING_SURFACE, Theme.riskSurface(Risk.MEDIUM))
-        assertEquals(Theme.WARNING_SURFACE, Theme.riskSurface(Risk.HIGH))
+        assertEquals(p.okSurface, Theme.riskSurface(p, Risk.LOW))
+        assertEquals(p.cautionSurface, Theme.riskSurface(p, Risk.MEDIUM))
+        assertEquals(p.cautionSurface, Theme.riskSurface(p, Risk.HIGH))
 
-        assertEquals(Theme.SUCCESS, Theme.riskColor(Risk.LOW))
-        assertEquals(Theme.WARNING, Theme.riskColor(Risk.MEDIUM))
-        assertEquals(Theme.WARNING, Theme.riskColor(Risk.HIGH))
+        assertEquals(p.okText, Theme.riskColor(p, Risk.LOW))
+        assertEquals(p.cautionText, Theme.riskColor(p, Risk.MEDIUM))
+        assertEquals(p.cautionText, Theme.riskColor(p, Risk.HIGH))
     }
 }

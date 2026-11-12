@@ -50,8 +50,8 @@ object Fingerprint {
             // A missing biometric provider throws on some OEM builds rather than returning a code.
             Log.w(TAG, "canAuthenticate threw: ${e.message}")
             return Status.Unusable(
-                "Fingerprint is unavailable on this phone, so modals cannot require one. " +
-                    "They approve on a plain tap."
+                "Fingerprint is unavailable on this phone, so \"Fingerprint for approvals\" cannot be turned on. " +
+                    "Approvals use a plain tap."
             )
         }
 
@@ -60,28 +60,28 @@ object Fingerprint {
 
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> Status.Unusable(
                 "No fingerprint is set up on this phone. Add one in Android settings, then " +
-                    "this switch becomes usable — until then modals approve on a plain tap."
+                    "this switch becomes usable. Until then approvals use a plain tap."
             )
 
             BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> Status.Unusable(
-                "This phone has no fingerprint sensor, so modals cannot require one. " +
-                    "They approve on a plain tap."
+                "This phone has no fingerprint sensor, so \"Fingerprint for approvals\" cannot be turned on. " +
+                    "Approvals use a plain tap."
             )
 
             BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> Status.Unusable(
                 "The fingerprint sensor is unavailable right now — usually a hardware fault or " +
-                    "a temporary sensor error. Modals approve on a plain tap until it returns."
+                    "a temporary sensor error. Approvals use a plain tap until it returns."
             )
 
             // 7 == BIOMETRIC_ERROR_LOCKOUT: too many attempts. It clears by itself.
             7 -> Status.Unusable(
                 "Too many failed fingerprint attempts, so the sensor is locked for a moment. " +
-                    "It clears by itself; modals approve on a plain tap meanwhile."
+                    "It clears by itself. Approvals use a plain tap meanwhile."
             )
 
             else -> Status.Unusable(
-                "Fingerprint cannot be used on this phone right now (code $can), so modals " +
-                    "approve on a plain tap."
+                "Fingerprint cannot be used on this phone right now (code $can), so " +
+                    "approvals use a plain tap."
             )
         }
     }

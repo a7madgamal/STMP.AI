@@ -5,12 +5,8 @@ import org.junit.Test
 import java.io.File
 
 /**
- * No colour literal, raw `textSize` or inline `Typeface` outside the token files.
- *
- * Violations that existed when a rule was introduced are listed in `token-baseline.tsv` as
- * `RULE<TAB>path<TAB>count`. The count may only go down: a higher count is a new violation, a
- * lower one means the baseline must be lowered. Regenerate with `STMP_WRITE_TOKEN_BASELINE=1`
- * (and `--no-daemon`).
+ * No colour literal, raw `textSize`, inline `Typeface`, direct dialog or direct toast outside the
+ * token and kit files. Zero tolerance: there is no baseline file (WP12 deleted it).
  */
 class TokenCoverageTest {
 
@@ -31,12 +27,12 @@ class TokenCoverageTest {
             "TYPEFACE",
             Regex("""Typeface\.(MONOSPACE|DEFAULT|DEFAULT_BOLD|SANS_SERIF|SERIF|create|createFromAsset|createFromFile|BOLD|ITALIC|BOLD_ITALIC|NORMAL)\b|ResourcesCompat\.getFont|R\.font\."""),
         ) { it.startsWith("ui/tokens/") },
-        // Every dialog goes through StmpDialog (WP02); no baseline, the count is zero.
+        // Every dialog goes through StmpDialog (WP02).
         Rule(
             "DIALOG",
             Regex("""android\.app\.AlertDialog|AlertDialog\.Builder\("""),
         ) { it == "ui/kit/StmpDialog.kt" },
-        // Every toast goes through Toasts.show (WP02); the remaining direct sites are baselined.
+        // Every toast goes through Toasts.show (WP02).
         Rule(
             "TOAST",
             Regex("""Toast\.makeText"""),
@@ -74,41 +70,11 @@ class TokenCoverageTest {
         return out
     }
 
-    private fun format(v: Map<Pair<String, String>, Int>) =
-        v.entries.joinToString("\n") { "${it.key.first}\t${it.key.second}\t${it.value}" } + "\n"
-
     @Test
-    fun `violations never exceed the baseline`() {
+    fun `no rule has a single violation outside its exempt files`() {
         val current = violations()
-        val baselineFile = File("src/test/resources/token-baseline.tsv")
-        if (System.getenv("STMP_WRITE_TOKEN_BASELINE") == "1") {
-            baselineFile.writeText(format(current))
-            return
-        }
-        val baseline = baselineFile.readLines().filter { it.isNotBlank() }.associate {
-            val (r, f, n) = it.split("\t")
-            (r to f) to n.toInt()
-        }
-        val problems = mutableListOf<String>()
-        for ((key, n) in current) {
-            val allowed = baseline[key]
-            when {
-                allowed == null -> problems += "new violation: ${key.first} ${key.second} x$n"
-                n > allowed -> problems += "new violation: ${key.first} ${key.second} $allowed -> $n"
-                n < allowed -> problems += "you fixed something, lower the baseline: ${key.first} ${key.second} $allowed -> $n"
-            }
-        }
-        for ((key, _) in baseline) {
-            if (key !in current && scanned().none { it.first == key.second }) {
-                problems += "baseline names a missing file: ${key.first} ${key.second}"
-            } else if (key !in current) {
-                problems += "you fixed something, lower the baseline: ${key.first} ${key.second} -> 0"
-            }
-        }
-        assertTrue(
-            problems.joinToString("\n") + "\n\nCurrent table:\n" + format(current),
-            problems.isEmpty(),
-        )
+        val table = current.entries.joinToString("\n") { "${it.key.first}\t${it.key.second}\t${it.value}" }
+        assertTrue("token rule violations (zero tolerance, no baseline):\n$table", current.isEmpty())
     }
 
     @Test

@@ -17,7 +17,7 @@ import com.mido.phonebridge.ui.tokens.Type
 import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
- * The verdict punch (COMPONENTS 21), replacing StampOverlay's drawing. Everything is a function of
+ * The verdict punch (COMPONENTS 21), replacing the old stamp drawing. Everything is a function of
  * the clock since [stamp], drawn in `onDraw`, so it also works in an overlay window (TOKENS 9.2).
  */
 class PunchView(context: Context, private val scrimAlpha: Int = 0x66) : View(context) {

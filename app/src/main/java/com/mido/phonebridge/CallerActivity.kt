@@ -185,6 +185,9 @@ class CallerActivity : FragmentActivity() {
         }
         guard.addView(scroll)
         setContentView(guard)
+        // Spec 3.4.2: the name field has the first focus. Since API 28 a view gets no initial focus in
+        // touch mode, so it is asked for here; ALLOW, NOT NOW and BLOCK are never the default.
+        nameField.requestFocus()
     }
 
     private fun fullWidth() = LinearLayout.LayoutParams(

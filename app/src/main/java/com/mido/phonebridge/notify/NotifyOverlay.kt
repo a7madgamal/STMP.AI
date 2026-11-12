@@ -918,7 +918,7 @@ object NotifyOverlay {
         // GradientDrawable already in the card's LayerDrawable, so recolouring it repaints
         // without touching geometry — the same property that made the old band safe, kept.
         // LOW gives okSurface, MEDIUM and HIGH cautionSurface; never signal (D6, D36).
-        entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(result.risk))
+        entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(Theme.palette(entry.ctx), result.risk))
     }
 
     /**

@@ -85,13 +85,6 @@ object KeyButton {
             "$base, available in $secondsUntilArmed ${if (secondsUntilArmed == 1) "second" else "seconds"}"
     }
 
-    /** Mapping used by owning WPs when they migrate a Theme.button call. */
-    fun kindFor(old: Theme.ButtonStyle): Kind = when (old) {
-        Theme.ButtonStyle.PRIMARY, Theme.ButtonStyle.SUCCESS -> Kind.INK
-        Theme.ButtonStyle.NEUTRAL -> Kind.PANEL
-        Theme.ButtonStyle.DANGER, Theme.ButtonStyle.GHOST -> Kind.OUTLINE
-    }
-
     private fun build(ctx: Context, label: String, kind: Kind, size: Size): KeyView {
         val p = Theme.palette(ctx)
         val bevelKind = when (kind) {

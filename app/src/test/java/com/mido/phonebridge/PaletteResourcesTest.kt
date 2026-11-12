@@ -65,7 +65,7 @@ class PaletteResourcesTest {
         for (night in listOf(false, true)) {
             RuntimeEnvironment.setQualifiers(if (night) "+night" else "+notnight")
             Palettes.clearCacheForTest()
-            assertNotEquals("ACCENT == DANGER (night=$night)", Theme.ACCENT, Theme.DANGER)
+            assertNotEquals("ink == cautionText (night=$night)", Palettes.of(ctx()).ink, Palettes.of(ctx()).cautionText)
         }
     }
 }
