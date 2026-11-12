@@ -76,7 +76,12 @@ class SshPlugin(private val ctx: Context) : Plugin {
             // Only a sudo command needs a password. Decided from the payload, pre-gate,
             // because the same route runs both kinds and the dispatcher has to force the
             // mode floor BEFORE the modal opens.
-            needsPassword = { r -> SudoCommand.invokes(r.body.optString("command")) }
+            needsPassword = { r -> SudoCommand.invokes(r.body.optString("command")) },
+            // This route cannot even build its approval card without the private key, which
+            // lives in the vault. Declaring it lets dispatch unlock BEFORE reading rows, so a
+            // locked vault becomes a fingerprint prompt instead of an instant `secret_locked`
+            // refusal (2026-11-11).
+            needsVault = true
         ) { run(it) },
         Route(
             "POST", "/ssh/{name}/detach", "START A DETACHED COMMAND OVER SSH", Verb.EXECUTE,
@@ -98,7 +103,10 @@ class SshPlugin(private val ctx: Context) : Plugin {
                 }
             },
             // No password field: see the refusal above. Decided from the payload, pre-gate.
-            needsPassword = { false }
+            needsPassword = { false },
+            // Same reason as the foreground route: rows name the host, and the host comes from a
+            // vault-held key.
+            needsVault = true
         ) { runDetach(it) },
         Route(
             // Distinct 3-segment shape from `/ssh/{name}/detach` so the two can never be confused

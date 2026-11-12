@@ -56,7 +56,11 @@ class SecretPlugin(private val ctx: Context, private val secretName: String) : P
             // host that is not on the allowlist can never succeed, so it must not cost
             // a tap. Only the shape and the host are checked here; the secret itself
             // is not touched until after approval.
-            validate = { req -> validate(req) }
+            validate = { req -> validate(req) },
+            // The broker spends a stored credential, and its card names the target from plaintext
+            // metadata — but the VALUE it will send is in the vault. Declared so a locked vault
+            // prompts instead of failing after the human has already approved.
+            needsVault = true
         ) { req -> call(req) }
     )
 

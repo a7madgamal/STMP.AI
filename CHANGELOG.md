@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.3 (build 305)**.
+Current build: **v0.51.4 (build 306)**.
 
 ---
 
@@ -5437,8 +5437,13 @@ devDependencies. `node_modules/` is gitignored.
 - The stamp no longer leaves a doubled shadow: the ink bleed was held at full strength for as long as the stamp stayed on screen, and it draws the mark plus two offset copies. It is a 240ms transient at impact again.
 - The modal dismisses itself after the stamp is read; the previous "wait for a tap" turned every approval into a screen that never closed. A tap still dismisses early.
 
-## 0.51.3 (build 305) — 2026-11-12 — CURRENT
+## 0.51.3 (build 305) — 2026-11-12
 - Getting started installs the Hermes plugin by its catalog name (`hermes plugins install stmp --yes-deps`) instead of the GitHub path, now that `stmp` is a curated entry. The bare name resolves to a reviewed, SHA-pinned commit and can be moved forward by `hermes plugins update`.
+
+## 0.51.4 (build 306) — 2026-11-12 — CURRENT
+- A locked vault now asks for a fingerprint instead of refusing the request. Routes that read a stored credential (`needsVault`) unlock before their approval card is built, so the request survives instead of dying in milliseconds with `secret_locked` and no prompt.
+- Unlocking is not approving: the fingerprint only releases the key, and the real host and command are then shown for a separate APPROVE.
+- Dead-end vault states (never created, unrecoverable, orphaned) and gate modes with no fingerprint surface refuse with the specific remedy instead of showing a prompt that cannot succeed.
 
 ## Keeping this file honest
 
