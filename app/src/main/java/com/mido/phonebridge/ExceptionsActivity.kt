@@ -47,10 +47,22 @@ import com.mido.phonebridge.ui.tokens.TypeRole
 class ExceptionsActivity : AppCompatActivity() {
 
     private var scroll: ScrollView? = null
+    private var content: LinearLayout? = null
+    private var addKey: View? = null
+    private var currentPolicy: Policy? = null
     private var saveError: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The frame (top bar, scroll, insets) is built once; render() only refills `content`.
+        // Rebuilding it would attach new views after the window already sent its insets.
+        val key = KeyButton.create(
+            this, "Add exception", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL, describe = "Add an exception",
+        ) { currentPolicy?.let { pickPlugin(it) } }
+        val screen = subScreen("Exceptions", key)
+        addKey = key
+        scroll = screen.scroll
+        content = screen.content
         render()
     }
 
@@ -60,21 +72,22 @@ class ExceptionsActivity : AppCompatActivity() {
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
     )
 
-    /** Rebuilds the whole screen: the top bar's Add key depends on whether the policy reads. */
+    /** Refills the content column; the top bar's Add key is shown only while the policy reads. */
     private fun render() {
+        val content = content ?: return
         val keepY = scroll?.scrollY ?: 0
+        content.removeAllViews()
         val policy = try {
             PolicyStore.from(applicationContext).get()
         } catch (e: PolicyException) {
-            renderUnreadable(e)
+            currentPolicy = null
+            addKey?.visibility = View.GONE
+            renderUnreadable(content, e)
             return
         }
-        val addKey = KeyButton.create(
-            this, "Add exception", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL, describe = "Add an exception",
-        ) { pickPlugin(policy) }
-        val screen = subScreen("Exceptions", addKey)
-        scroll = screen.scroll
-        val content = screen.content
+        currentPolicy = policy
+        addKey?.visibility = View.VISIBLE
+        val screenScroll = scroll
 
         content.addView(banner(policy), full().apply { bottomMargin = dp(Dimens.MODULE_GAP) })
         saveError?.let { content.addView(saveFailed(it), full().apply { bottomMargin = dp(Dimens.MODULE_GAP) }) }
@@ -95,13 +108,11 @@ class ExceptionsActivity : AppCompatActivity() {
             content.addView(panel, full().apply { bottomMargin = dp(Dimens.MODULE_GAP) })
         }
         explainer(content)
-        screen.scroll.post { screen.scroll.scrollTo(0, keepY) }
+        screenScroll?.post { screenScroll.scrollTo(0, keepY) }
     }
 
-    private fun renderUnreadable(e: PolicyException) {
-        val screen = subScreen("Exceptions")
-        scroll = screen.scroll
-        screen.content.addView(
+    private fun renderUnreadable(content: LinearLayout, e: PolicyException) {
+        content.addView(
             StateBlock.create(
                 this, StateBlock.Kind.ERROR, "Exceptions can't be read",
                 "The policy file is unreadable, so the server will not start until it is fixed or removed.",
@@ -109,7 +120,7 @@ class ExceptionsActivity : AppCompatActivity() {
             ),
             full().apply { bottomMargin = dp(Dimens.MODULE_GAP) },
         )
-        screen.content.addView(Readout.create(this, e.message ?: "unknown error", Readout.Kind.BODY).root)
+        content.addView(Readout.create(this, e.message ?: "unknown error", Readout.Kind.BODY).root)
     }
 
     private fun sorted(rules: List<Rule>): List<Rule> =
