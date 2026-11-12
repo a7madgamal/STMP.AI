@@ -1,10 +1,7 @@
 COLOR_LITERAL	ui/PaperGrain.kt	2
 COLOR_LITERAL	ui/StampOverlay.kt	1
 TEXT_SIZE	CallerActivity.kt	3
-TEXT_SIZE	ExceptionsActivity.kt	2
 TEXT_SIZE	GoogleLoginActivity.kt	4
-TEXT_SIZE	LogActivity.kt	2
-TEXT_SIZE	LogDetailActivity.kt	5
 TEXT_SIZE	OnboardingActivity.kt	14
 TEXT_SIZE	PluginDetailActivity.kt	13
 TEXT_SIZE	PluginsFragment.kt	8
@@ -12,12 +9,8 @@ TEXT_SIZE	SecretsActivity.kt	4
 TEXT_SIZE	SshActivity.kt	11
 TEXT_SIZE	ui/PluginHelp.kt	1
 TEXT_SIZE	ui/Theme.kt	10
-TOAST	ExceptionsActivity.kt	1
-TOAST	LogActivity.kt	1
-TOAST	LogDetailActivity.kt	1
 TOAST	OnboardingActivity.kt	2
 TOAST	SecretsActivity.kt	1
 TOAST	SshActivity.kt	1
-TYPEFACE	LogDetailActivity.kt	1
 TYPEFACE	OnboardingActivity.kt	1
 TYPEFACE	SshActivity.kt	3

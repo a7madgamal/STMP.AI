@@ -372,9 +372,191 @@ object Fixtures {
         Updater.installCancelled = false
     }
 
+    // --- WP08: request log, request detail, Exceptions -------------------------------------------
+
+    /** First record of the log fixtures: 2026-11-10 21:41:22 UTC. */
+    const val LOG_BASE_MS = 1_794_346_882_505L
+
+    private var previousZoneProperty: String? = null
+    private var zonePinned = false
+
+    /** Pins the phone's zone to UTC through the property `TimeZone.setDefault(null)` re-reads, and the log's "now". */
+    fun pinLogClock() {
+        if (!zonePinned) {
+            previousZoneProperty = System.getProperty("user.timezone")
+            zonePinned = true
+        }
+        System.setProperty("user.timezone", "UTC")
+        TimeZone.setDefault(null)
+        com.mido.phonebridge.LogActivity.nowMs = { NOW_MS }
+    }
+
+    private fun unpinLogClock() {
+        com.mido.phonebridge.LogActivity.nowMs = { System.currentTimeMillis() }
+        if (!zonePinned) return
+        val prev = previousZoneProperty
+        if (prev == null) System.clearProperty("user.timezone") else System.setProperty("user.timezone", prev)
+        zonePinned = false
+    }
+
+    private fun auditDir() = File(app.filesDir, "audit")
+
+    /** A fresh request log over this test's sandbox, with no age limit so the fixed 2026 dates stay. */
+    fun auditStore(): com.mido.phonebridge.audit.AuditStore {
+        val store = com.mido.phonebridge.audit.AuditLog(
+            auditDir(), com.mido.phonebridge.audit.AuditRetention(maxAgeDays = 36_500), "0.49.8", 304,
+        )
+        val field = com.mido.phonebridge.audit.AuditLog::class.java.getDeclaredField("singleton")
+        field.isAccessible = true
+        field.set(null, store)
+        return store
+    }
+
+    @Suppress("LongParameterList")
+    fun logRecord(
+        id: String,
+        ts: Long,
+        outcome: com.mido.phonebridge.audit.AuditOutcome,
+        plugin: String,
+        verb: String,
+        summary: String,
+        durationMs: Long = 2_811L,
+        error: String? = null,
+        noise: Boolean = false,
+        responseStatus: Int = 200,
+        requestBody: String = "",
+        responseBody: String = "",
+        decision: com.mido.phonebridge.audit.Decision = com.mido.phonebridge.audit.Decision(
+            mode = "PARANOID", source = com.mido.phonebridge.audit.DecisionSource.GLOBAL, globalMode = "PARANOID",
+            enqueuedAt = ts, shownAt = ts + 100, decidedAt = ts + 2_500,
+        ),
+        truncated: com.mido.phonebridge.audit.Truncation = com.mido.phonebridge.audit.Truncation(0, 0),
+    ) = com.mido.phonebridge.audit.AuditRecord(
+        id = id, ts = ts, outcome = outcome,
+        label = if (plugin.isEmpty()) "" else "$plugin.${verb.lowercase()}", plugin = plugin, verb = verb,
+        origin = "TAILNET", remote = "100.64.0.7", requester = "Work laptop",
+        route = if (plugin.isEmpty()) "" else "GET /$plugin/items", method = "GET",
+        path = "/$plugin/items".takeIf { plugin.isNotEmpty() } ?: "/no-such-path",
+        query = if (plugin.isEmpty()) emptyMap() else mapOf("q" to "sara"), summary = summary,
+        requestHeaders = mapOf("Host" to "192.168.1.100:8787", "User-Agent" to "curl/8.5.0"),
+        requestBody = requestBody, responseStatus = responseStatus, responseBody = responseBody,
+        error = error, decision = decision, durationMs = durationMs, truncated = truncated, noise = noise,
+        appVersionName = "0.49.8", appVersionCode = 304,
+    )
+
+    private fun policyRecord(id: String, ts: Long) = com.mido.phonebridge.audit.PolicyAudit
+        .record(GlobalMode.WHITELIST, GlobalMode.PARANOID, "settings")
+        .let { it.copy(id = id, ts = ts, decision = it.decision.copy(decidedAt = ts)) }
+
+    /** Eight records over two local days (4 yesterday, 4 today); [withFailure] false drops HANDLER_FAILED. */
+    fun logList(withFailure: Boolean = true) {
+        pinLogClock()
+        val store = auditStore()
+        val o = com.mido.phonebridge.audit.AuditOutcome.values().associateBy { it.name }
+        fun at(i: Int) = if (i < 4) LOG_BASE_MS + i * 60_000L else NOW_MS - 3_600_000L + (i - 4) * 60_000L
+        val rows = listOf(
+            logRecord("wp08-0", at(0), o.getValue("APPROVED"), "probe", "READ", "Probe the bridge"),
+            logRecord("wp08-1", at(1), o.getValue("NOTIFY_APPROVED"), "help", "READ", "Read the plugin help", 340L),
+            logRecord("wp08-2", at(2), o.getValue("DENIED"), "gmail", "EDIT", "Archive 3 messages from Alex", 4_120L, responseStatus = 403),
+            logRecord("wp08-3", at(3), o.getValue("TIMEOUT"), "calendar", "DELETE", "Delete event: Dentist", 30_000L, responseStatus = 408),
+            logRecord("wp08-4", at(4), o.getValue("DENIED_UNATTENDED"), "contacts", "READ", "Search contacts for sara", 90L, responseStatus = 403),
+            policyRecord("wp08-5", at(5)),
+            logRecord("wp08-6", at(6), o.getValue("HANDLER_FAILED"), "drive", "WRITE", "Upload report.pdf to Drive", 1_900L, error = "upstream_timeout", responseStatus = 502),
+            logRecord("wp08-7", at(7), o.getValue("APPROVED"), "ssh", "EXECUTE", "Run uptime on kvm-box", 61_000L),
+        )
+        rows.filterIndexed { i, _ -> withFailure || i != 6 }.forEach { store.append(it) }
+    }
+
+    /** UNROUTED and REJECTED_INVALID records, hidden by default as noise. */
+    fun logNoise() {
+        pinLogClock()
+        val store = com.mido.phonebridge.audit.AuditLog.from(app)
+        val o = com.mido.phonebridge.audit.AuditOutcome.values().associateBy { it.name }
+        store.append(logRecord("wp08-n1", NOW_MS - 1_800_000L, o.getValue("UNROUTED"), "", "", "", 5L, noise = true, responseStatus = 404))
+        store.append(logRecord("wp08-n2", NOW_MS - 1_700_000L, o.getValue("REJECTED_INVALID"), "", "", "Bad JSON body", 4L, noise = true, responseStatus = 400))
+    }
+
+    /** [count] lines in today's day file that no parser accepts, then the log is loaded again. */
+    fun logCorruptLines(count: Int) {
+        pinLogClock()
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(NOW_MS))
+        val file = File(auditDir().apply { mkdirs() }, "$day.jsonl")
+        repeat(count) { file.appendText("this line is not json $it\n") }
+        auditStore()
+    }
+
+    /** One stored line that is not JSON but carries an id, so the detail screen can find it. */
+    fun logUnreadableLine(id: String) {
+        pinLogClock()
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(NOW_MS))
+        File(auditDir().apply { mkdirs() }, "$day.jsonl").appendText("garbage {\"id\":\"$id\" without a closing brace\n")
+        auditStore()
+    }
+
+    /** The WP08 detail records: one id per state. */
+    fun detailRecord(kind: String): String {
+        pinLogClock()
+        val store = auditStore()
+        val o = com.mido.phonebridge.audit.AuditOutcome.values().associateBy { it.name }
+        val ts = LOG_BASE_MS
+        val id = "wp08-d-$kind"
+        val record = when (kind) {
+            "approved" -> logRecord(
+                id, ts, o.getValue("APPROVED"), "gmail", "EDIT", "Archive 3 messages from Alex", 2_811L,
+                requestBody = "{\"ids\":[\"a1\",\"b2\",\"c3\"],\"action\":\"archive\"}",
+                responseBody = "{\"modified\":3,\"ok\":true}",
+                decision = com.mido.phonebridge.audit.Decision(
+                    mode = "DONT_DISTURB", source = com.mido.phonebridge.audit.DecisionSource.RULE,
+                    globalMode = "WHITELIST", rule = "gmail/EDIT", enqueuedAt = ts, shownAt = ts + 120,
+                    decidedAt = ts + 2_700, queueDepth = 1,
+                ),
+            )
+            "policy_changed" -> policyRecord(id, ts)
+            "unrouted" -> logRecord(id, ts, o.getValue("UNROUTED"), "", "", "", 5L, noise = true, responseStatus = 404)
+            "failed_with_error" -> logRecord(
+                id, ts, o.getValue("HANDLER_FAILED"), "drive", "WRITE", "Upload report.pdf to Drive", 1_900L,
+                error = "upstream_timeout", responseStatus = 502, responseBody = "{\"error\":\"upstream_timeout\"}",
+            )
+            "truncated" -> logRecord(
+                id, ts, o.getValue("APPROVED"), "drive", "WRITE", "Upload report.pdf to Drive", 1_900L,
+                requestBody = "{\"name\":\"report.pdf\",\"data\":\"AAAA\"}", responseBody = "{\"ok\":true}",
+                truncated = com.mido.phonebridge.audit.Truncation(40_112, 51_200),
+            )
+            "bodies_absent" -> logRecord(
+                id, ts, o.getValue("APPROVED"), "debug", "READ", "Read the debug report", 120L,
+                truncated = com.mido.phonebridge.audit.Truncation(0, 0, responseBodyAbsent = true, requestBodyAbsent = true),
+            )
+            "unattended" -> logRecord(
+                id, ts, o.getValue("DENIED_UNATTENDED"), "contacts", "READ", "Search contacts for sara", 90L, responseStatus = 403,
+                decision = com.mido.phonebridge.audit.Decision(
+                    mode = "PARANOID", source = com.mido.phonebridge.audit.DecisionSource.GLOBAL,
+                    globalMode = "PARANOID", enqueuedAt = ts, shownAt = null, decidedAt = ts + 60,
+                ),
+            )
+            else -> error("unknown detail fixture $kind")
+        }
+        store.append(record)
+        return id
+    }
+
+    /** Exactly these exceptions: the default policy ships a Help exception, which is removed first. */
+    fun exceptionsOnly(vararg rules: com.mido.phonebridge.policy.Rule) {
+        val store = PolicyStore.from(app)
+        val bare = store.get().rules.fold(store.get()) { p, r -> p.withoutRule(r.plugin, r.verb) }
+        store.set(rules.fold(bare) { p, r -> p.withRule(r) })
+    }
+
+    /** Registers fake plugins with fixed display names, for the dialogs and rows that print them. */
+    fun registerNamedPlugins() {
+        clearPlugins()
+        listOf("gmail" to "Gmail", "calendar" to "Calendar", "contacts" to "Contacts", "tts" to "Speak", "ssh" to "SSH")
+            .forEach { (id, name) -> com.mido.phonebridge.core.PluginRegistry.register(com.mido.phonebridge.WpFakePlugin(id, name)) }
+    }
+
     // --- everything ----------------------------------------------------------------------------
 
     fun reset() {
+        unpinLogClock()
         resetServer()
         resetAudit()
         resetUpdates()

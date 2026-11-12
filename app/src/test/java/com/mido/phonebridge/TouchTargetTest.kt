@@ -232,6 +232,48 @@ class TouchTargetTest(private val fontScale: Float) {
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
+    // WP08: the request log, the request detail and Exceptions.
+    private val logScreenStates: List<Pair<String, () -> android.app.Activity>> get() = listOf(
+        "log/list" to {
+            Fixtures.logList()
+            Fixtures.logNoise()
+            Robolectric.buildActivity(LogActivity::class.java).setup().get()
+        },
+        "log_detail/approved" to {
+            val id = Fixtures.detailRecord("approved")
+            Robolectric.buildActivity(
+                LogDetailActivity::class.java,
+                android.content.Intent(Fixtures.app, LogDetailActivity::class.java).putExtra(LogDetailActivity.EXTRA_ID, id),
+            ).setup().get()
+        },
+        "exceptions/rules" to {
+            Fixtures.registerNamedPlugins()
+            Fixtures.exceptionsOnly(
+                com.mido.phonebridge.policy.Rule("gmail", com.mido.phonebridge.core.Verb.EDIT, com.mido.phonebridge.policy.Mode.PARANOID),
+                com.mido.phonebridge.policy.Rule("calendar", null, com.mido.phonebridge.policy.Mode.DONT_DISTURB),
+            )
+            Robolectric.buildActivity(ExceptionsActivity::class.java).setup().get()
+        },
+    )
+
+    @Test
+    fun `every enrolled log and exceptions screen meets the touch target rules`() {
+        RuntimeEnvironment.setFontScale(fontScale)
+        val failures = ArrayList<String>()
+        try {
+            for ((name, launch) in logScreenStates) {
+                Fixtures.dropSingletons()
+                val a = launch()
+                shadowOf(Looper.getMainLooper()).idle()
+                check(a.window.decorView as ViewGroup, name, failures)
+                Fixtures.reset()
+            }
+        } finally {
+            Fixtures.reset()
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
     private fun isTarget(v: View): Boolean {
         if (!v.isShown) return false
         if (v is ScrollView || v is NestedScrollView) return false

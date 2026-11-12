@@ -5436,11 +5436,16 @@ devDependencies. `node_modules/` is gitignored.
 - In the remote model server form, Save and Refresh models now use the address and token you typed, not the ones from before you started typing.
 - Switching the AI knob away from "On this phone" while the model downloads no longer repaints the page four times a second, so the remote server form keeps its focus and keyboard.
 
-## 0.49.8 (build 304) — 2026-11-12 — CURRENT
+## 0.49.8 (build 304) — 2026-11-12
 - Home is rebuilt as a control panel: the bridge switch with its address on a dark display, the gate mode as a three-position knob, and the latest requests listed underneath.
 - When the bridge says "needs attention" it now names the reason and links straight to the setting that fixes it.
 - The bottom tab bar is taller, has icons, and no longer shrinks its labels at large text sizes; switching tabs slides and plays the tab sound again.
 - Update problems appear in a dialog you can read instead of a toast that vanishes.
+
+## 0.49.9 (build 305) — 2026-11-12 — CURRENT
+- The request log, request detail and Exceptions screens are redrawn with a back arrow, wrapping filter chips and no emoji; a gate change no longer looks like an error.
+- Request detail shows times in your time zone with the zone named, and no longer prints "null", raw millisecond counts or a trailing dash.
+- Exceptions names plugins and modes the way the rest of the app does (Whitelist, Paranoid, Don't disturb), keeps Remove clear of the mode button, and its add-exception dialogs match the app.
 
 ## Keeping this file honest
 
