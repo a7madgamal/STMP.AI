@@ -102,15 +102,20 @@ class OptionsFragment : BridgeFragment() {
     // Download progress bookkeeping: repaint only when something visible changed.
     private var shownRunning = false
     private var shownPercent = -1
+    // True only while the page draws the "On this phone" body; elsewhere percent changes are invisible.
+    private var isLocalBodyShown = false
     private val announced = HashSet<Int>()
     private val progressTick = object : Runnable {
         override fun run() {
             if (!isAdded || view == null) return
             val running = ModelProvisioner.running
-            if (running != shownRunning || (ModelProvisioner.progress?.percent ?: 0) != shownPercent) render()
+            if (running != shownRunning || percentChangedOnScreen()) render()
             if (ModelProvisioner.running) container.postDelayed(this, PROGRESS_TICK_MS)
         }
     }
+
+    private fun percentChangedOnScreen() =
+        isLocalBodyShown && (ModelProvisioner.progress?.percent ?: 0) != shownPercent
 
     override fun buildContent(container: LinearLayout) {
         this.container = container
@@ -601,6 +606,7 @@ class OptionsFragment : BridgeFragment() {
         ))
         panel.addView(Theme.spacer(ctx, Dimens.SPACE_M))
 
+        isLocalBodyShown = policy.aiBackend == AiBackend.LOCAL
         when (policy.aiBackend) {
             AiBackend.OFF -> panel.addView(StatusRow.create(
                 ctx, "AI summaries are off", "OFF", StatusRow.Tone.NEUTRAL,
@@ -729,7 +735,7 @@ class OptionsFragment : BridgeFragment() {
         Thread({
             val result = ModelProvisioner.provision(
                 app, force = force,
-                onProgress = { uiSafe { if ((ModelProvisioner.progress?.percent ?: 0) != shownPercent) render() } },
+                onProgress = { uiSafe { if (percentChangedOnScreen()) render() } },
             )
             uiSafe {
                 Debug.log("model provision: ${result.detail}")
