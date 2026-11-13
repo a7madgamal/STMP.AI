@@ -409,35 +409,41 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      */
     private fun renderCrash() {
         crashHost.removeAllViews()
-        val crash = Crash.last(ctx)
-        val stall = Stall.last(ctx)
-        if (crash == null && stall == null) return
-        val isStall = crash == null
-        val detail: String = stall ?: crash ?: return
-        val headline = detail.lineSequence()
-            .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
-            ?.trim() ?: "no detail recorded"
+        val model = CrashPanelModel.of(Crash.last(ctx), Stall.last(ctx)) ?: return
         val panel = Panel.create(ctx, Panel.Tone.CAUTION)
         panel.addView(
             StatusRow.create(
                 ctx,
-                label = if (isStall) "The screen froze" else "The app crashed",
+                label = model.label,
                 value = "Copy trace",
                 tone = StatusRow.Tone.CAUTION,
-                detail = headline,
+                detail = model.headline,
                 led = Led.State.CAUTION,
                 onClick = {
                     val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
                         as android.content.ClipboardManager
                     clipboard.setPrimaryClip(
-                        android.content.ClipData.newPlainText(
-                            "STMP ${if (isStall) "stall" else "crash"}", detail,
-                        ),
+                        android.content.ClipData.newPlainText(model.clipName, model.detail),
                     )
                     toast("copied — paste it to whoever is fixing this")
                 },
             ),
         )
+        if (model.isStall) {
+            // A freeze record never clears by itself within a build; the reader dismisses it.
+            panel.addView(
+                StatusRow.create(
+                    ctx,
+                    label = "Dismiss",
+                    value = "",
+                    detail = "Hide this freeze report once the trace is copied.",
+                    onClick = {
+                        Stall.clear(ctx)
+                        render()
+                    },
+                ),
+            )
+        }
         crashHost.addView(panel, matchWrapParams())
     }
 

@@ -32,7 +32,7 @@ object ToggleRow {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = ctx.dp(56)
-            setPadding(0, ctx.dp(10), 0, ctx.dp(10))
+            setPadding(ctx.dp(FOCUS_ROW_INSET_DP), ctx.dp(10), ctx.dp(FOCUS_ROW_INSET_DP), ctx.dp(10))
             layoutParams = matchWrap()
         }
         val body = LinearLayout(ctx).apply {

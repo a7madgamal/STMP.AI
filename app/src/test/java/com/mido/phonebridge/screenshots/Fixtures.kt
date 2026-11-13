@@ -259,7 +259,11 @@ object Fixtures {
         val f = com.mido.phonebridge.ai.ModelRegistry.modelFile(app)
         f.parentFile?.mkdirs()
         f.delete()
-        if (length != null) java.io.RandomAccessFile(f, "rw").use { it.setLength(length) }
+        // Seek and write the last byte: the file stays sparse. `setLength` can allocate the whole
+        // length on some JDKs, which fills a nearly full disk with fixture bytes.
+        if (length != null && length > 0) {
+            java.io.RandomAccessFile(f, "rw").use { it.seek(length - 1); it.write(0) }
+        }
     }
 
     fun provisioner(running: Boolean, progress: com.mido.phonebridge.ai.ModelProvisioner.Progress?, lastError: String) =

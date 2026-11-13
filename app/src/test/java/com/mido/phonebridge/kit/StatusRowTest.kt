@@ -96,7 +96,7 @@ class StatusRowTest : KitTest() {
             val key = row.allViews().filterIsInstance<MaterialButton>().firstOrNull()
             assertNotNull(key)
             val keyRight = key!!.right
-            assertEquals("$value at $scale", row.width, keyRight)
+            assertEquals("$value at $scale", row.width - row.paddingRight, keyRight)
         }
     }
 
@@ -106,5 +106,35 @@ class StatusRowTest : KitTest() {
         val row = StatusRow.create(a, "AI model", "None", detail = "none")
         val texts = row.allViews().filterIsInstance<TextView>().map { it.text.toString() }
         assertEquals(listOf("AI model", "None"), texts)
+    }
+
+    @Test
+    fun `the light is centred on the title of a single line row at both font scales`() {
+        for (scale in listOf(1f, 1.35f)) {
+            RuntimeEnvironment.setFontScale(scale)
+            val a = host()
+            val panel = a.place(Panel.create(a))
+            val row = StatusRow.create(a, "Bridge", "On", StatusRow.Tone.OK, led = Led.State.OK)
+            panel.addView(row)
+            idle()
+            val led = row.allViews().filterIsInstance<Led>().first()
+            val label = row.allViews().filterIsInstance<TextView>().first { it.text.toString() == "Bridge" }
+            fun View.yIn(root: View): Int { var y = 0; var v: View = this; while (v !== root) { y += v.top; v = v.parent as View }; return y }
+            val labelCentre = label.yIn(row) + label.lineHeight / 2f
+            val ledCentre = led.yIn(row) + led.height / 2f
+            assertEquals("single line at $scale", labelCentre, ledCentre, 1.5f)
+        }
+    }
+
+    @Test
+    fun `a clickable row keeps its content clear of the focus ring`() {
+        val a = host()
+        val panel = a.place(Panel.create(a))
+        val row = StatusRow.create(a, "Debug log", "Open", onClick = {})
+        panel.addView(row)
+        idle()
+        val ring = (com.mido.phonebridge.ui.kit.FOCUS_ROW_INSET_DP * a.resources.displayMetrics.density).toInt()
+        assertTrue("left padding clears the ring", row.paddingLeft >= ring)
+        assertTrue("right padding clears the ring", row.paddingRight >= ring)
     }
 }

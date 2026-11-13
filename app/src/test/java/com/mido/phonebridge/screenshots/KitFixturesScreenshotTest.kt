@@ -243,7 +243,7 @@ object KitFixtures {
             add(KitFixture("kit_status_row", "long_value_no_led") { a ->
                 panelOf(
                     a,
-                    StatusRow.create(a, "Google account", "Not connected", StatusRow.Tone.CAUTION, detail = "eng.mohammed.alawady@gmail.com"),
+                    StatusRow.create(a, "Google account", "Not connected", StatusRow.Tone.CAUTION, detail = "someone@example.com"),
                     StatusRow.create(a, "Secret vault", "Needs a reset", StatusRow.Tone.CAUTION, onClick = {}),
                 )
             })

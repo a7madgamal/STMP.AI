@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.9 (build 324)**.
+Current build: **v0.52.10 (build 325)**.
 
 ---
 
@@ -5610,7 +5610,7 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.52.8 (build 323) — 2026-11-13
 - Home: if the bridge fails to start or stop, the card no longer stays on "Starting..." or "Stopping...". It shows the failure as soon as it happens, or when the wait runs out.
 
-## 0.52.9 (build 324) — 2026-11-13 — CURRENT
+## 0.52.9 (build 324) — 2026-11-13
 - The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
 - Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
 - The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
@@ -5626,6 +5626,11 @@ devDependencies. `node_modules/` is gitignored.
 - The Don't disturb card shows at most three lines of the action and then says how many more lines there are, so a very long email subject can no longer push the risk word off the screen.
 - The Don't disturb card counts the hidden lines of a long action the same way it draws them, so "+N more lines" can no longer be missing when the fourth line is cut off.
 - On an approval card, a line that is cut in the middle of a word or address now ends in a different arrow than a line that wraps at a space, so a wrap can no longer be read as a space or as part of the word before it.
+
+## 0.52.10 (build 325) — 2026-11-13 — CURRENT
+- Rows that open something (the Debug log row, the toggles) leave a small margin on each side, so the keyboard focus ring no longer cuts through the title or the switch.
+- The status light on a one-line row sits on the title line instead of floating above it.
+- A freeze report on Home now has a Dismiss row, and it is cleared by an upgrade like a crash report. When both a crash and a freeze are recorded, Home shows the crash and copies the crash.
 
 ## Keeping this file honest
 

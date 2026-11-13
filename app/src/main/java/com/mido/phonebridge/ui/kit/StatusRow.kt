@@ -72,10 +72,27 @@ object StatusRow {
         val row = RuleLinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             minimumHeight = ctx.dp(56)
-            setPadding(0, ctx.dp(10), 0, ctx.dp(10))
+            setPadding(ctx.dp(FOCUS_ROW_INSET_DP), ctx.dp(10), ctx.dp(FOCUS_ROW_INSET_DP), ctx.dp(10))
             layoutParams = matchWrap()
         }
-        val line = LinearLayout(ctx).apply {
+        val line = object : LinearLayout(ctx) {
+            var ledView: View? = null
+            var bodyView: View? = null
+            var titleView: TextView? = null
+
+            /**
+             * The body is centred in the line, so on a single-line row its real top is below the
+             * line's top. Put the LED on the title's first line from where the body actually sits.
+             */
+            override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+                super.onLayout(changed, l, t, r, b)
+                val led = ledView ?: return
+                val body = bodyView ?: return
+                val title = titleView ?: return
+                val target = body.top + title.top + (title.lineHeight - led.height) / 2
+                led.offsetTopAndBottom(target - led.top)
+            }
+        }.apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = ctx.dp(36)
@@ -84,13 +101,13 @@ object StatusRow {
 
         val labelView = Type.text(ctx, label, TypeRole.ROW_LABEL, p.ink)
         if (led != null) {
-            // On the first text line: centred on the label's line box, not on the whole body.
+            // On the first text line: centred on the label's line box (placed in line.onLayout).
             val ledSize = ctx.dp(16)
-            val top = ((labelView.lineHeight - ledSize) / 2).coerceAtLeast(0)
-            line.addView(Led(ctx).apply { state = led }, LinearLayout.LayoutParams(ledSize, ledSize).apply {
+            val ledView = Led(ctx).apply { state = led }
+            line.ledView = ledView
+            line.addView(ledView, LinearLayout.LayoutParams(ledSize, ledSize).apply {
                 marginEnd = ctx.dp(10)
                 gravity = Gravity.TOP
-                topMargin = top
             })
         }
 
@@ -112,6 +129,8 @@ object StatusRow {
                 addView(Type.text(ctx, shownDetail, TypeRole.DETAIL, p.etched), matchWrap().apply { topMargin = ctx.dp(2) })
             }
         }
+        line.bodyView = body
+        line.titleView = labelView
         line.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         if (valueView != null && !stacked) {

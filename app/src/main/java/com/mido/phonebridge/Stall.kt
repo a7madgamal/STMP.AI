@@ -91,10 +91,11 @@ object Stall {
             val stack = main.thread.stackTrace
                 .joinToString("\n") { "    at $it" }
             val text = buildString {
-                append("at=").append(System.currentTimeMillis()).append('\n')
+                // Same header as a crash record, so an upgrade clears it (Evidence.read).
+                append(Evidence.header(context = app))
                 append("heartbeat posted at=").append(postedAt).append('\n')
                 append("main thread did not process a message for ").append(STALL_MS).append("ms\n")
-                append("thread=").append(main.thread.name).append("\n")
+                append("frozen thread=").append(main.thread.name).append("\n")
                 append(stack)
             }
             File(app.filesDir, FILE).writeText(text)
@@ -107,11 +108,7 @@ object Stall {
     }
 
     /** The last recorded stall, or null when the main thread has never frozen. */
-    fun last(ctx: Context): String? = try {
-        File(ctx.applicationContext.filesDir, FILE).takeIf { it.isFile }?.readText()
-    } catch (e: Exception) {
-        null
-    }
+    fun last(ctx: Context): String? = Evidence.read(ctx, FILE)
 
     /** Clear the record, so a later stall is distinguishable from this one. */
     fun clear(ctx: Context) {

@@ -55,8 +55,8 @@ class StateCopyR3Test {
     }
 
     @Test fun `the Google account email may break before the at sign only`() {
-        val d = PluginCopy.humanDetail("google", PluginStatus.State.OK, "eng.mohammed.alawady@gmail.com")
-        assertEquals("eng.mohammed.alawady​@gmail.com", d)
+        val d = PluginCopy.humanDetail("google", PluginStatus.State.OK, "someone@example.com")
+        assertEquals("someone​@example.com", d)
     }
 
     @Test fun `brand names keep their casing`() {

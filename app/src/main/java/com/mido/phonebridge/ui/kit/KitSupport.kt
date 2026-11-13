@@ -55,12 +55,21 @@ internal val BELOW_API_30: Boolean get() = Build.VERSION.SDK_INT < 30
 internal const val FOCUS_GAP_DP = 1
 
 /**
- * A [Palette.focus] ring drawn OUTSIDE the control's edge (COMPONENTS 0 "Focus"): a [FOCUS_GAP_DP]
- * gap, then the 2dp stroke, so it never covers the key's own border. Shown only while the view has
- * keyboard focus. [insetDp] is how far the visible face sits inside the view's bounds vertically
- * (a SMALL key is a 48dp target around a 36dp face).
- *
- * The ring stays inside the view's own bounds (a child is clipped to them).
+ * Horizontal inset of a row whose focus ring sits inside its edge (gap plus stroke), so the ring
+ * clears the title and the end control. Every row in a panel uses it, so left edges line up.
+ */
+internal const val FOCUS_ROW_INSET_DP = FOCUS_GAP_DP + Dimens.FOCUS_RING
+
+/**
+ * A [Palette.focus] ring (COMPONENTS 0 "Focus"). Shown only while the view has keyboard focus.
+ * The ring always stays inside the view's own bounds (a child is clipped to them), so where it sits
+ * relative to the face depends on [insetDp], how far the visible face sits inside the bounds
+ * vertically (a SMALL key is a 48dp target around a 36dp face):
+ *  - [insetDp] > 0: the ring is drawn OUTSIDE the face, in that margin: a [FOCUS_GAP_DP] gap, then
+ *    the 2dp stroke, so it never covers the key's own border.
+ *  - [insetDp] == 0: the face fills the bounds, so the ring sits just INSIDE the edge, over the
+ *    face. A row that does this must keep its content [FOCUS_ROW_INSET_DP] clear of the edge, or
+ *    the ring cuts through the title and the control.
  */
 internal fun installFocusRing(view: View, radiusDp: Int, insetDp: Int = 0) {
     val ctx = view.context
@@ -106,7 +115,9 @@ internal class OutsetRing(
 
     override fun draw(canvas: Canvas) {
         rect.set(ringRect(bounds))
-        val r = radiusPx + gapPx + strokePx / 2f
+        // Outside the face the ring wraps it (radius grows by gap + half stroke); inside the face
+        // the stroke centre line already follows the face's corner.
+        val r = if (insetPx > 0f) radiusPx + gapPx + strokePx / 2f else radiusPx
         canvas.drawRoundRect(rect, r, r, paint)
     }
 
