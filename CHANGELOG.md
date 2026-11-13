@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.0 (build 315)**.
+Current build: **v0.52.1 (build 316)**.
 
 ---
 
@@ -5568,7 +5568,16 @@ devDependencies. `node_modules/` is gitignored.
 - Added an opt-in emulator ABI build flag.
 - The hint card stamp fixes from upstream 0.51.6 and 0.51.7 are not needed: the new punch already plays on the card.
 
-## 0.52.1 (build 316) — 2026-11-13 — CURRENT
+## 0.52.1 (build 316) — 2026-11-13
+- A status row with a long value, such as "Not connected", now puts that value under its title so the text keeps its width at large font sizes; the status light sits on the first line and the action key is at the end of the row.
+- The gate selector labels have room on each side and no longer run together.
+- In dark mode the switch OFF cap and label, and the outlines of the small keys and read chips, are clearly visible.
+- The download key keeps its label readable over the progress fill, and disabled keys and fields now look disabled.
+- Switches and rows show their pressed and focus states, and the focus ring is drawn clear of the control and inside its own edges, so all four sides show.
+- The recent-request rows line their text up in one column whatever the verb.
+- Deleting a caller, secret, SSH connection or the vault asks with a Keep key first and an outlined delete key set apart below it; the Exceptions mode picker has large rows with a radio mark and shows the current mode.
+
+## 0.52.2 (build 317) — 2026-11-13 — CURRENT
 - Crash recording and frozen main thread detection are now really switched on at start-up, so the last crash and stall show up on Home and in the debug commands.
 - Setup docs now really install the Hermes plugin by its catalog name.
 - Removed the unused paper-look fonts from the app again.

@@ -49,6 +49,102 @@ object StmpDialog {
         return b.show()
     }
 
+    /**
+     * A delete confirmation in the D54 style (Forget, Delete secret, Delete SSH connection, Reset
+     * vault): the safe key first and focused, the delete key LAST as an OUTLINE key with an ink
+     * label (never signal orange), [Dimens.DESTRUCTIVE_GAP] clear of it. Returns the dialog
+     * created, not shown, so a secure screen can show it with FLAG_SECURE. [onDelete] runs after
+     * the dialog has dismissed.
+     */
+    fun confirmDelete(
+        ctx: Context,
+        title: String,
+        message: String,
+        deleteLabel: String,
+        keepLabel: String = "Cancel",
+        onKeep: (() -> Unit)? = null,
+        onDelete: () -> Unit,
+    ): AlertDialog {
+        val p = Theme.palette(ctx)
+        var dialog: AlertDialog? = null
+        val keep = KeyButton.create(ctx, keepLabel, KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) {
+            dialog?.dismiss()
+            onKeep?.invoke()
+        }
+        val delete = KeyButton.create(ctx, deleteLabel, KeyButton.Kind.OUTLINE, KeyButton.Size.REGULAR) {
+            dialog?.dismiss()
+            onDelete()
+        }
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ctx.dp(Dimens.SPACE_XL), ctx.dp(Dimens.SPACE_S), ctx.dp(Dimens.SPACE_XL), ctx.dp(Dimens.SPACE_S))
+            addView(Type.text(ctx, message, TypeRole.BODY, p.ink), matchWrap())
+            addView(keep, matchWrap().apply { topMargin = ctx.dp(Dimens.SPACE_L) })
+            addView(delete, matchWrap().apply { topMargin = ctx.dp(Dimens.DESTRUCTIVE_GAP) })
+        }
+        val scroll = NestedScrollView(ctx).apply { addView(body) }
+        return builder(ctx).setTitle(title).setView(scroll).create().also { d ->
+            dialog = d
+            // The key that destroys data is never the one a stray tap lands on.
+            d.setOnShowListener {
+                keep.isFocusableInTouchMode = true
+                keep.requestFocus()
+            }
+        }
+    }
+
+    /** One row of [choose]. [detail] is the second line; [selected] marks the current value. */
+    data class Choice(val label: String, val detail: String? = null, val selected: Boolean = false)
+
+    /**
+     * A single-choice list: every row is at least 56dp, has a [RadioMark], and is separated from
+     * the next by [Dimens.TARGET_GAP], so options never run together. Picking a row dismisses the
+     * dialog and reports its index; Cancel is the one text button.
+     */
+    fun choose(ctx: Context, title: String, choices: List<Choice>, onPick: (Int) -> Unit): AlertDialog {
+        val p = Theme.palette(ctx)
+        var dialog: AlertDialog? = null
+        val list = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ctx.dp(Dimens.SPACE_XL), ctx.dp(Dimens.SPACE_XS), ctx.dp(Dimens.SPACE_XL), 0)
+        }
+        choices.forEachIndexed { i, c ->
+            val text = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(Type.text(ctx, c.label, TypeRole.ROW_LABEL, p.ink), matchWrap())
+                if (c.detail != null) {
+                    addView(Type.text(ctx, c.detail, TypeRole.DETAIL, p.etched), matchWrap().apply { topMargin = ctx.dp(2) })
+                }
+            }
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                minimumHeight = ctx.dp(56)
+                setPadding(ctx.dp(Dimens.SPACE_S), ctx.dp(Dimens.SPACE_S), ctx.dp(Dimens.SPACE_S), ctx.dp(Dimens.SPACE_S))
+                tag = i
+                isClickable = true
+                isFocusable = true
+                installPressedFill(this, Dimens.RADIUS_KEY)
+                installFocusRing(this, Dimens.RADIUS_KEY)
+                addView(RadioMark.create(ctx, c.selected), LinearLayout.LayoutParams(ctx.dp(RadioMark.SIZE_DP), ctx.dp(RadioMark.SIZE_DP)).apply {
+                    marginEnd = ctx.dp(Dimens.SPACE_M)
+                })
+                addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                contentDescription = listOfNotNull(c.label, c.detail).joinToString(", ")
+                setRole(this, "android.widget.RadioButton")
+                androidx.core.view.ViewCompat.setStateDescription(this, if (c.selected) "Selected" else "Not selected")
+                setOnClickListener {
+                    dialog?.dismiss()
+                    onPick(i)
+                }
+            }
+            list.addView(row, matchWrap().apply { if (i > 0) topMargin = ctx.dp(Dimens.TARGET_GAP) })
+        }
+        val scroll = NestedScrollView(ctx).apply { addView(list) }
+        return builder(ctx).setTitle(title).setView(scroll).setNegativeButton("Cancel", null).create()
+            .also { dialog = it }
+    }
+
     /** An etched label with its value underneath. */
     fun line(ctx: Context, label: String, value: String): View {
         val p = Theme.palette(ctx)

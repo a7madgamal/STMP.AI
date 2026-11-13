@@ -205,7 +205,7 @@ class RockerSwitch(ctx: Context) : View(ctx) {
         val baseline = cap.centerY() + down - (labelPaint.ascent() + labelPaint.descent()) / 2f - context.dpf(0.5f)
         canvas.drawText(word, cap.centerX(), baseline, labelPaint)
 
-        if (isFocused && !isInTouchMode) {
+        if (isFocused && (!isInTouchMode || isFocusableInTouchMode)) {
             ringPaint.color = p.focus
             val g = context.dpf(2f)
             canvas.drawRoundRect(

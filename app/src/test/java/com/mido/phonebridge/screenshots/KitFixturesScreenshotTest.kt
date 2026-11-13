@@ -143,7 +143,11 @@ object KitFixtures {
             add(KitFixture("kit_key", "outline_unarmed") { a ->
                 keyRow(a, key(a, "Deny", KeyButton.Kind.OUTLINE, KeyButton.Size.LARGE).also { KeyButton.setArmed(it, false, 1) })
             })
-            add(KitFixture("kit_key", "progress_40") { a -> keyRow(a, KeyButton.progress(a, "Downloading", 40)) })
+            add(KitFixture("kit_key", "outline_disabled") { a -> keyRow(a, key(a, "Delete", KeyButton.Kind.OUTLINE).also { it.isEnabled = false }) })
+            add(KitFixture("kit_key", "panel_disabled") { a -> keyRow(a, key(a, "Cancel", KeyButton.Kind.PANEL).also { it.isEnabled = false }) })
+            for (pct in listOf(0, 40, 75, 100)) {
+                add(KitFixture("kit_key", "progress_$pct") { a -> keyRow(a, KeyButton.progress(a, "Downloading $pct%", pct)) })
+            }
             add(KitFixture("kit_key", "long_label_wraps") { a ->
                 keyRow(a, key(a, "Replace the stored value everywhere", KeyButton.Kind.PANEL))
             })
@@ -161,6 +165,9 @@ object KitFixtures {
             for (i in 0..2) add(KitFixture("kit_knob", "gate_${listOf("whitelist", "paranoid", "dont_disturb")[i]}") { a -> gate(a, i) })
             add(KitFixture("kit_knob", "ai_on_this_phone") { a ->
                 KnobSelector(a, "AI", listOf("Off", "On this phone", "Remote server")).also { it.select(1, false) }
+            })
+            add(KitFixture("kit_knob", "ai_remote_server") { a ->
+                KnobSelector(a, "AI", listOf("Off", "On this phone", "Remote server")).also { it.select(2, false) }
             })
             add(KitFixture("kit_knob", "gate_disabled") { a -> gate(a, 0).also { it.isEnabled = false } })
             // 9 Chips
@@ -223,6 +230,26 @@ object KitFixtures {
                     StatusRow.create(a, "Address", "", detail = "192.168.1.100:8787"),
                 )
             })
+            // Long values go under the title for every caller (measured rule), LED on the first
+            // line, action key at the row's end.
+            add(KitFixture("kit_status_row", "long_value") { a ->
+                panelOf(
+                    a,
+                    StatusRow.create(a, "Notification access", "Not connected", StatusRow.Tone.CAUTION, detail = "Allow it in Android settings so STMP can read notifications.", led = Led.State.CAUTION, action = spec("Open settings")),
+                    StatusRow.create(a, "AI model", "Not downloaded", StatusRow.Tone.CAUTION, led = Led.State.CAUTION),
+                    StatusRow.create(a, "Bridge", "Running", StatusRow.Tone.OK, led = Led.State.OK),
+                )
+            })
+            add(KitFixture("kit_status_row", "long_value_no_led") { a ->
+                panelOf(
+                    a,
+                    StatusRow.create(a, "Google account", "Not connected", StatusRow.Tone.CAUTION, detail = "eng.mohammed.alawady@gmail.com"),
+                    StatusRow.create(a, "Secret vault", "Needs a reset", StatusRow.Tone.CAUTION, onClick = {}),
+                )
+            })
+            add(KitFixture("kit_status_row", "clickable_pressed", drive = { view, _ ->
+                touch((view as ViewGroup).getChildAt(0), MotionEvent.ACTION_DOWN, SystemClock.uptimeMillis())
+            }) { a -> panelOf(a, StatusRow.create(a, "Exceptions", "2", onClick = {})) })
             add(KitFixture("kit_status_row", "clickable") { a ->
                 panelOf(a, StatusRow.create(a, "Exceptions", "2", onClick = {}), StatusRow.create(a, "Request log", "", detail = "Latest first", onClick = {}))
             })
@@ -268,6 +295,9 @@ object KitFixtures {
                     Tape.row(a, Verb.EXECUTE, "ssh run on kvm-box", Fixtures.NOW_MS + 60_000),
                     Tape.row(a, Verb.DELETE, "files delete report.pdf", Fixtures.NOW_MS + 120_000),
                 )
+            })
+            add(KitFixture("kit_tape", "every_verb") { a ->
+                panelOf(a, *Verb.entries.mapIndexed { i, v -> Tape.row(a, v, "${v.name.lowercase()} on kvm-box", Fixtures.NOW_MS + i * 60_000L) }.toTypedArray())
             })
             add(KitFixture("kit_tape", "clickable") { a ->
                 panelOf(a, Tape.row(a, Verb.WRITE, "notes add", Fixtures.NOW_MS, onClick = {}), Tape.row(a, Verb.EDIT, "notes edit", Fixtures.NOW_MS + 1, onClick = {}))
@@ -357,7 +387,9 @@ object KitFixtures {
                 val row = (view as ViewGroup).getChildAt(0)
                 touch(row, MotionEvent.ACTION_DOWN, SystemClock.uptimeMillis())
             }) { a -> panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, false) {}) })
-            add(KitFixture("kit_toggle_row", "focused", drive = { view, _ -> (view as ViewGroup).getChildAt(0).requestFocus() }) { a ->
+            add(KitFixture("kit_toggle_row", "focused", drive = { view, _ ->
+                (view as ViewGroup).getChildAt(0).also { it.isFocusableInTouchMode = true }.requestFocus()
+            }) { a ->
                 panelOf(a, ToggleRow.create(a, "Sound effects", toggleDetail, true) {})
             })
             add(KitFixture("kit_toggle_row", "disabled") { a ->

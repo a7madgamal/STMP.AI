@@ -13,8 +13,6 @@ import android.view.Gravity
 object Bevel {
     enum class Kind { PANEL, INK, SIGNAL, OUTLINE }
 
-    private const val DISABLED_ALPHA = 97
-
     private fun px(ctx: Context, dp: Float): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, ctx.resources.displayMetrics).toInt()
 
@@ -59,15 +57,21 @@ object Bevel {
         } else {
             listOf(intArrayOf(0, 0, 0, 0), intArrayOf(0, 0, 0, 2), intArrayOf(0, 1, 0, 2))
         }
-        return layers(ctx, listOf(rect(lip, rp), rect(hi, rp), rect(face, rp)), insets)
+        val faceLayer = rect(face, rp)
+        // Dark PANEL keys: the face is the panel colour, so without an edge the key vanishes. A
+        // 1dp outline (4.9:1 on the panel) gives WCAG 1.4.11's 3:1 for the control's boundary.
+        if (kind == Kind.PANEL && p.isDark) faceLayer.setStroke(px(ctx, 1f), p.outline)
+        return layers(ctx, listOf(rect(lip, rp), rect(hi, rp), faceLayer), insets)
     }
 
-    /** A key: pressed variant moves the face down 2dp; disabled is the unpressed one at 38 %. */
+    /**
+     * A key: pressed variant moves the face down 2dp. A disabled key looks like the unpressed one;
+     * the dimming is the key view's own 38 % alpha (KeyButton), so the label dims with the face.
+     */
     fun key(ctx: Context, kind: Kind, pressed: Boolean = false): Drawable {
         if (pressed) return keyFace(ctx, kind, true)
         return StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_pressed), keyFace(ctx, kind, true))
-            addState(intArrayOf(-android.R.attr.state_enabled), keyFace(ctx, kind, false).apply { alpha = DISABLED_ALPHA })
             addState(intArrayOf(), keyFace(ctx, kind, false))
         }
     }

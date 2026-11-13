@@ -21,6 +21,9 @@ import com.mido.phonebridge.ui.tokens.Motion
 import com.mido.phonebridge.ui.tokens.Type
 import com.mido.phonebridge.ui.tokens.TypeRole
 
+/** Side padding of every segment label; a floor, never less (WCAG touch/visual breathing room). */
+const val SEGMENT_PAD_H_DP = 12
+
 /**
  * The segmented knob (COMPONENTS 5): gate mode, AI mode. `onSelect` fires on a user tap only; the
  * caller renders stored truth with [select], so the thumb never moves on its own.
@@ -41,6 +44,11 @@ class KnobSelector(
         private set
 
     private val segments = ArrayList<TextView>()
+    internal val segmentViews: List<TextView> get() = segments
+
+    /** Left edge and width of each segment, px, relative to the track's inner area. */
+    private var segLefts = IntArray(0)
+    private var segWidths = IntArray(0)
     private val trackDrawable = Bevel.sunkenTrack(ctx, Theme.palette(ctx).sunken, Dimens.RADIUS_READOUT)
     private var spring: SpringAnimation? = null
     private val thumbRect = RectF()
@@ -68,7 +76,7 @@ class KnobSelector(
                 isClickable = true
                 isFocusable = true
                 contentDescription = label
-                setPadding(ctx.dp(4), ctx.dp(8), ctx.dp(4), ctx.dp(8))
+                setPadding(ctx.dp(SEGMENT_PAD_H_DP), ctx.dp(8), ctx.dp(SEGMENT_PAD_H_DP), ctx.dp(8))
                 minimumHeight = ctx.dp(Dimens.MIN_TARGET)
                 installFocusRing(this, Dimens.RADIUS_KNOB_THUMB)
                 setOnClickListener { onTap(i) }
@@ -129,13 +137,41 @@ class KnobSelector(
         alpha = if (enabled) 1f else DISABLED_ALPHA_F
     }
 
+    /**
+     * Segment widths for [total] px, in three tiers. 1) Every label on one line, if the full single
+     * line widths (text + 12dp sides) fit: each segment is its own width plus an equal share of the
+     * spare. 2) Otherwise each label's longest word plus sides, so a long label ("Don't disturb")
+     * wraps at its space and takes more of the track instead of breaking a word. 3) Equal shares.
+     */
+    internal fun segmentWidths(total: Int): IntArray {
+        val n = labels.size
+        val equal = total / n
+        fun measure(whole: Boolean) = IntArray(n) { i ->
+            val seg = segments[i]
+            val text = seg.text.toString().uppercase()
+            val widest = if (whole) seg.paint.measureText(text)
+            else text.split(Regex("\\s+")).filter { it.isNotEmpty() }.maxOfOrNull { seg.paint.measureText(it) } ?: 0f
+            Math.ceil(widest.toDouble()).toInt() + seg.paddingLeft + seg.paddingRight
+        }
+        for (whole in listOf(true, false)) {
+            val needed = measure(whole)
+            val sum = needed.sum()
+            if (sum <= total) {
+                val spare = (total - sum) / n
+                return IntArray(n) { needed[it] + spare }
+            }
+        }
+        return IntArray(n) { equal }
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val segW = (w - context.dp(6)) / labels.size
+        val inner = w - context.dp(6)
+        segWidths = segmentWidths(inner)
         var tallest = 0
-        segments.forEach {
+        segments.forEachIndexed { i, it ->
             it.measure(
-                MeasureSpec.makeMeasureSpec(segW, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(segWidths[i], MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
             )
             tallest = maxOf(tallest, it.measuredHeight)
@@ -145,9 +181,9 @@ class KnobSelector(
         val total = maxOf(context.dp(Dimens.MIN_TARGET), trackH + context.dp(8))
         trackTop = (total - trackH) / 2
         trackBottom = trackTop + trackH
-        segments.forEach {
+        segments.forEachIndexed { i, it ->
             it.measure(
-                MeasureSpec.makeMeasureSpec(segW, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(segWidths[i], MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(total, MeasureSpec.EXACTLY),
             )
         }
@@ -156,10 +192,12 @@ class KnobSelector(
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         val inset = context.dp(3)
-        val segW = (r - l - inset * 2) / labels.size
+        segLefts = IntArray(labels.size)
+        var x = inset
         segments.forEachIndexed { i, s ->
-            val x = inset + i * segW
-            s.layout(x, 0, x + segW, b - t)
+            segLefts[i] = x
+            s.layout(x, 0, x + segWidths[i], b - t)
+            x += segWidths[i]
         }
     }
 
@@ -168,8 +206,12 @@ class KnobSelector(
         trackDrawable.setBounds(0, trackTop, width, trackBottom)
         trackDrawable.draw(canvas)
         val inset = context.dpf(3f)
-        val segW = (width - inset * 2) / labels.size
-        val left = inset + segW * position + context.dpf(2f)
+        if (segLefts.isEmpty()) return
+        val lo = position.toInt().coerceIn(0, labels.size - 1)
+        val hi = (lo + 1).coerceAtMost(labels.size - 1)
+        val f = (position - lo).coerceIn(0f, 1f)
+        val left = segLefts[lo] + (segLefts[hi] - segLefts[lo]) * f + context.dpf(2f)
+        val segW = segWidths[lo] + (segWidths[hi] - segWidths[lo]) * f
         thumbRect.set(left, trackTop + inset, left + segW - context.dpf(4f), trackBottom - inset)
         KeyPaint.draw(
             canvas, thumbRect, context.dpf(Dimens.RADIUS_KNOB_THUMB.toFloat()), context.dpf(2f),

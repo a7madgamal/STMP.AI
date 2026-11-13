@@ -421,33 +421,22 @@ class SshActivity : FragmentActivity() {
             showError("Can't delete $label", "Unlock the vault first. Deleting rewrites the stored secrets.")
             return
         }
-        val dialog = StmpDialog.builder(this)
-            .setTitle("Delete '$label'?")
-            .setMessage(
-                "This removes the connection and its private key from the vault. The public key " +
-                    "stays in authorized_keys on the server — remove that line there too if you " +
-                    "want to revoke it."
-            )
-            .setPositiveButton("Delete") { _, _ ->
-                try {
-                    SecretVault.delete(this, vaultName)
-                    render()
-                    Toasts.show(this, "Deleted ${label.take(NAME_IN_TOAST)}")
-                } catch (e: Exception) {
-                    showError("Couldn't delete $label", e.message ?: e.javaClass.simpleName)
-                }
+        StmpDialog.confirmDelete(
+            this,
+            title = "Delete '$label'?",
+            message = "This removes the connection and its private key from the vault. The public key " +
+                "stays in authorized_keys on the server — remove that line there too if you " +
+                "want to revoke it.",
+            deleteLabel = "Delete",
+        ) {
+            try {
+                SecretVault.delete(this, vaultName)
+                render()
+                Toasts.show(this, "Deleted ${label.take(NAME_IN_TOAST)}")
+            } catch (e: Exception) {
+                showError("Couldn't delete $label", e.message ?: e.javaClass.simpleName)
             }
-            .setNegativeButton("Cancel", null)
-            .create()
-        // The key that destroys data is never the one a stray tap lands on.
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).apply {
-                // Focusable in touch mode too, or the request is ignored on a phone in use.
-                isFocusableInTouchMode = true
-                requestFocus()
-            }
-        }
-        dialog.showSecure()
+        }.showSecure()
     }
 
     /** An error stays on the screen until the next action; a toast would be gone before it was read. */

@@ -25,8 +25,10 @@ object Tape {
             setPadding(0, ctx.dp(8), 0, ctx.dp(8))
             minimumHeight = ctx.dp(if (onClick != null) Dimens.MIN_TARGET else 40)
             layoutParams = matchWrap()
+            // One chip column: every verb's chip is as wide as EXECUTE, so the text after it starts
+            // at the same x on every row.
             addView(VerbChip.create(ctx, verb), LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+                VerbChip.columnWidthPx(ctx), LinearLayout.LayoutParams.WRAP_CONTENT,
             ))
             addView(
                 Type.text(ctx, text, TypeRole.READOUT, p.ink),

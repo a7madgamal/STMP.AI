@@ -8,6 +8,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.os.Build
@@ -50,20 +51,83 @@ internal fun setState(view: View, state: String) {
 
 internal val BELOW_API_30: Boolean get() = Build.VERSION.SDK_INT < 30
 
+/** Gap between a control's edge and its focus ring, dp. The ring sits clear of a face that has margin. */
+internal const val FOCUS_GAP_DP = 1
+
 /**
- * A 2dp [Palette.focus] ring, drawn as a foreground only while the view has keyboard focus
- * (COMPONENTS 0 "Focus"). Touch mode never focuses a button, so it never shows there.
+ * A [Palette.focus] ring drawn OUTSIDE the control's edge (COMPONENTS 0 "Focus"): a [FOCUS_GAP_DP]
+ * gap, then the 2dp stroke, so it never covers the key's own border. Shown only while the view has
+ * keyboard focus. [insetDp] is how far the visible face sits inside the view's bounds vertically
+ * (a SMALL key is a 48dp target around a 36dp face).
+ *
+ * The ring stays inside the view's own bounds (a child is clipped to them).
  */
-internal fun installFocusRing(view: View, radiusDp: Int) {
+internal fun installFocusRing(view: View, radiusDp: Int, insetDp: Int = 0) {
     val ctx = view.context
     val p = Theme.palette(ctx)
-    val ring = GradientDrawable().apply {
-        setColor(Color.TRANSPARENT)
-        setStroke(ctx.dp(Dimens.FOCUS_RING), p.focus)
-        cornerRadius = ctx.dpf(radiusDp.toFloat())
-    }
+    val ring = OutsetRing(
+        color = p.focus,
+        strokePx = ctx.dpf(Dimens.FOCUS_RING.toFloat()),
+        gapPx = ctx.dpf(FOCUS_GAP_DP.toFloat()),
+        radiusPx = ctx.dpf(radiusDp.toFloat()),
+        insetPx = ctx.dpf(insetDp.toFloat()),
+    )
     view.foreground = StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_focused), ring)
+        addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+    }
+}
+
+/** The ring itself: a rounded stroke outside the drawable's bounds. */
+internal class OutsetRing(
+    color: Int, private val strokePx: Float, private val gapPx: Float,
+    private val radiusPx: Float, private val insetPx: Float,
+) : Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        this.color = color
+        strokeWidth = strokePx
+    }
+    private val rect = RectF()
+
+    /**
+     * The stroke's centre line for [b]. It never leaves [b]: a child is clipped to its own bounds,
+     * and a ring outside them would show only its rounded corners. Where the face sits inside the
+     * bounds ([insetPx] > 0) the ring is drawn in that margin, a gap clear of the face; otherwise
+     * the stroke sits just inside the edge.
+     */
+    fun ringRect(b: android.graphics.Rect): RectF {
+        val half = strokePx / 2f
+        val out = gapPx + half
+        val top = maxOf(b.top + half, b.top + insetPx - out)
+        val bottom = minOf(b.bottom - half, b.bottom - insetPx + out)
+        return RectF(b.left + half, top, b.right - half, bottom)
+    }
+
+    override fun draw(canvas: Canvas) {
+        rect.set(ringRect(bounds))
+        val r = radiusPx + gapPx + strokePx / 2f
+        canvas.drawRoundRect(rect, r, r, paint)
+    }
+
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+    @Deprecated("Drawable API", ReplaceWith("PixelFormat.TRANSLUCENT"))
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/**
+ * A pressed fill for a row that is a whole-row target. [installFocusRing] owns the foreground, so
+ * the press is a state background (a [Palette.ripple] wash) and is visible without a ripple.
+ */
+internal fun installPressedFill(view: View, radiusDp: Int) {
+    val ctx = view.context
+    val wash = GradientDrawable().apply {
+        setColor(Theme.palette(ctx).ripple)
+        cornerRadius = ctx.dpf(radiusDp.toFloat())
+    }
+    view.background = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), wash)
         addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
     }
 }
@@ -132,3 +196,7 @@ internal fun typePaint(
         it.typeface = com.mido.phonebridge.ui.tokens.Fonts.get(ctx, face)
     }
 }
+
+/** Width of [text] in [role] at the user's font scale, measured on a real styled TextView. */
+internal fun measureText(ctx: Context, role: com.mido.phonebridge.ui.tokens.TypeRole, text: String): Float =
+    com.mido.phonebridge.ui.tokens.Type.text(ctx, text, role, 0).paint.measureText(text)

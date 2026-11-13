@@ -78,7 +78,8 @@ class SettingsFragmentTest {
         ShadowLooper.idleMainLooper()
         assertEquals(1, CallerStore.from(Fixtures.app).all().size)
         val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
-        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+        dialog.window!!.decorView.all().filterIsInstance<com.google.android.material.button.MaterialButton>()
+            .last { it.text.toString() == "Forget" }.performClick()
         ShadowLooper.idleMainLooper()
         assertEquals(0, CallerStore.from(Fixtures.app).all().size)
     }

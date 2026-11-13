@@ -36,6 +36,20 @@ object KeyButton {
         var onClickAction: (() -> Unit)? = null
         var percent = -1
         var dropped = false
+
+        /** Disabled and not-yet-armed keys both read as 38 %: the face and the label together. */
+        fun syncAlpha() {
+            if (ready) alpha = if (isEnabled && armed) 1f else DISABLED_ALPHA_F
+        }
+
+        // The MaterialButton constructor can call setEnabled before the fields above exist.
+        private var ready = false
+        init { ready = true }
+
+        override fun setEnabled(enabled: Boolean) {
+            super.setEnabled(enabled)
+            syncAlpha()
+        }
     }
 
     fun create(
@@ -54,24 +68,35 @@ object KeyButton {
         return button
     }
 
-    /** A download key: the fill is clipped to [percent]; not clickable while in progress. */
+    /**
+     * A download key: the fill is clipped to [percent]; not clickable while in progress. The label
+     * is always [Palette.ink] over a light tint of ink (the fill), never ink-on-ink, so it reads at
+     * every percentage; the 1.5dp ink edge is the control's 3:1 boundary.
+     */
     fun progress(ctx: Context, label: String, percent: Int): MaterialButton {
         val p = Theme.palette(ctx)
         val pct = percent.coerceIn(0, 100)
-        val button = build(ctx, label, Kind.INK, Size.REGULAR)
+        val button = build(ctx, label, Kind.OUTLINE, Size.REGULAR)
         val r = ctx.dpf(Dimens.RADIUS_KEY.toFloat())
-        val track = GradientDrawable().apply { setColor(Colors.withAlpha(p.ink, 0x33)); cornerRadius = r }
+        val track = GradientDrawable().apply {
+            setColor(Color.TRANSPARENT)
+            setStroke(ctx.dpf(Dimens.OUTLINE_STROKE_DP).toInt().coerceAtLeast(1), p.ink)
+            cornerRadius = r
+        }
         val fill = ClipDrawable(
-            GradientDrawable().apply { setColor(p.ink); cornerRadius = r },
+            GradientDrawable().apply { setColor(Colors.withAlpha(p.ink, PROGRESS_FILL_ALPHA)); cornerRadius = r },
             Gravity.START, ClipDrawable.HORIZONTAL,
         ).apply { level = pct * 100 }
-        button.background = LayerDrawable(arrayOf(track, fill))
-        button.setTextColor(if (pct >= 50) p.onInk else p.ink)
+        button.background = LayerDrawable(arrayOf(fill, track))
+        button.setTextColor(p.ink)
         button.percent = pct
         button.isClickable = false
         button.contentDescription = "$label, $pct percent"
         return button
     }
+
+    /** Alpha of the progress fill (ink at this alpha over the panel); the label stays ink on it. */
+    const val PROGRESS_FILL_ALPHA = 0x38
 
     /** COMPONENTS 8.3 "armed = false". Safe to call every tick; no-op when unchanged. */
     fun setArmed(button: MaterialButton, armed: Boolean, secondsUntilArmed: Int) {
@@ -79,7 +104,7 @@ object KeyButton {
         if (key.armed == armed && (armed || key.secondsUntilArmed == secondsUntilArmed)) return
         key.armed = armed
         key.secondsUntilArmed = if (armed) 0 else secondsUntilArmed
-        key.alpha = if (armed) 1f else DISABLED_ALPHA_F
+        key.syncAlpha()
         val base = key.baseDescription ?: key.text.toString()
         key.contentDescription = if (armed) key.baseDescription else
             "$base, available in $secondsUntilArmed ${if (secondsUntilArmed == 1) "second" else "seconds"}"
@@ -128,7 +153,7 @@ object KeyButton {
             // the InsetDrawable is (0, inset, 0, inset). Keep the vertical inset so a two-line
             // label stays inside the visible face, and restore the side padding.
             setPadding(ctx.dp(padH), inset, ctx.dp(padH), inset)
-            installFocusRing(this, Dimens.RADIUS_KEY)
+            installFocusRing(this, Dimens.RADIUS_KEY, insetDp = if (size == Size.SMALL) (Dimens.MIN_TARGET - Dimens.KEY_SMALL_VISUAL) / 2 else 0)
             setOnTouchListener(::onKeyTouch)
         }
     }
