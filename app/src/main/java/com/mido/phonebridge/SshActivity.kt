@@ -195,6 +195,7 @@ class SshActivity : FragmentActivity() {
                 "Its stored entry is damaged. Delete it and add the connection again.",
                 details = e.message ?: e.javaClass.simpleName,
                 recovery = delete.copy(label = "Delete"),
+                destructiveRecovery = true,
             )
         }
 

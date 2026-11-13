@@ -10,7 +10,7 @@ import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * The one error card (R3): a plain-words title and sentence, the raw exception text behind a
- * "Details" disclosure inside the same card, and one recovery key. Every screen that used to print
+ * "Details" disclosure inside the same card, and one recovery key. A destructive recovery (delete) is an OUTLINE key, never filled (D54). Every screen that used to print
  * `e.message` into a panel of its own builds this instead.
  */
 object ErrorBlock {
@@ -25,6 +25,7 @@ object ErrorBlock {
         details: String?,
         recovery: KeyButton.Spec? = null,
         framed: Boolean = true,
+        destructiveRecovery: Boolean = false,
     ): LinearLayout {
         val p = Theme.palette(ctx)
         // [framed] false is for a card that already sits inside a panel: no second bevel.
@@ -69,7 +70,7 @@ object ErrorBlock {
         }
         if (recovery != null) {
             panel.addView(
-                KeyButton.create(ctx, recovery.label, KeyButton.Kind.INK, KeyButton.Size.REGULAR, describe = recovery.describe, onClick = recovery.onClick),
+                KeyButton.create(ctx, recovery.label, if (destructiveRecovery) KeyButton.Kind.OUTLINE else KeyButton.Kind.INK, KeyButton.Size.REGULAR, describe = recovery.describe, onClick = recovery.onClick),
                 matchWrap().apply { topMargin = ctx.dp(Dimens.SPACE_M) },
             )
         }

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.3 (build 318)**.
+Current build: **v0.52.4 (build 319)**.
 
 ---
 
@@ -5582,7 +5582,7 @@ devDependencies. `node_modules/` is gitignored.
 - Setup docs now really install the Hermes plugin by its catalog name.
 - Removed the unused paper-look fonts from the app again.
 
-## 0.52.3 (build 318) — 2026-11-13 — CURRENT
+## 0.52.3 (build 318) — 2026-11-13
 - Updates: an update is offered only when its build number is higher than the installed one, and never when it would be a downgrade (a release with no build number falls back to comparing the version name). Release notes show as plain bullets without the heading line or Markdown marks.
 - Plugins: a plugin that is not in this build (the Google ones without sign-in) shows its switch OFF and locked, is not counted as on, offers no Sign in key and says "This build has no Google sign-in. Install the official release to use it." everywhere, including the Google sign-in screen, which now has a Back key.
 - Plugin screen: a plugin that is switched on but cannot serve reads "Can't serve" instead of "Disabled", never says "Open this plugin" from inside the plugin, the SSH plugin has an Add connection key, routes list one per entry with the description on its own indented line in sentence case, and the Google account email only wraps before the "@".
@@ -5591,6 +5591,10 @@ devDependencies. `node_modules/` is gitignored.
 - Home: the bridge card says "Starting..." or "Stopping..." while the switch settles instead of "Stopped", "Edit exceptions" only shows in Whitelist mode where exceptions apply, the log warning no longer sits against the bridge card, and the Updates key no longer repeats "Checking".
 - Copy: "Needs action" is the one word for something that needs you, onboarding step 4 no longer says STMP can only ask more, permission states read Granted, Needed or Optional on every screen, the Secret vault sits outside Permissions, a wrong model file with equal rounded sizes shows exact bytes, empty secret and SSH lists say to unlock the vault first when it is locked, and "GitHub" keeps its capitals.
 - Onboarding: step 1 is left out once the bridge is on, and Copy prompt and Copy commands are off while the address is still a placeholder.
+
+## 0.52.4 (build 319) — 2026-11-13 — CURRENT
+- Settings: the Notification access row no longer shows "Not connected" when nothing is granted; it reads "Needed" like a fresh install.
+- SSH: a damaged connection offers an outlined Delete key, like every other delete key, instead of a filled one.
 
 ## Keeping this file honest
 
