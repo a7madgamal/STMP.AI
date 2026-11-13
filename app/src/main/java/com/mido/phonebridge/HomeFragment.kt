@@ -74,6 +74,20 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         /** How long the rocker shows a pending look after a tap. */
         const val PENDING_WINDOW_MS = 3_000L
 
+        /** Extra delay so the repaint that ends the pending look lands after the window closed. */
+        const val PENDING_CLOSE_MARGIN_MS = 100L
+
+        /**
+         * True while a start/stop tap is still settling. Ends when the window closes, when the bridge
+         * reached the asked state, or when a start failed (startBridge clears lastError, so one set
+         * afterwards is new).
+         */
+        internal fun isBridgePending(want: Boolean?, up: Boolean, since: Long, now: Long, lastError: String?): Boolean {
+            if (want == null || since <= 0L || up == want) return false
+            if (now - since >= PENDING_WINDOW_MS) return false
+            return !(want && !lastError.isNullOrBlank())
+        }
+
         /** Rows on the Recent requests tape. */
         const val TAPE_ROWS = 3
 
@@ -232,6 +246,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 render()
             }
             uiTickHandler.postDelayed({ render() }, 600)
+            // The tick only repaints on a changed signature, so close the pending look explicitly.
+            uiTickHandler.postDelayed({ render() }, PENDING_WINDOW_MS + PENDING_CLOSE_MARGIN_MS)
         }
         rowA.addView(serverRocker, wrapParams().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
         panel.addView(rowA, matchWrapParams())
@@ -444,9 +460,13 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // so right after the tap `up` still shows the old state.
         val up = BridgeService.serverUp
         val want = pendingWant
-        val windowOpen = pendingSince > 0L &&
-            android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        val pending = windowOpen && want != null && up != want
+        val pending = isBridgePending(
+            want = want,
+            up = up,
+            since = pendingSince,
+            now = android.os.SystemClock.elapsedRealtime(),
+            lastError = BridgeService.lastError,
+        )
         val starting = want == true
         if (pending) {
             serverRocker.pending = true

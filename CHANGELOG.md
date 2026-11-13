@@ -5604,8 +5604,11 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.52.6 (build 321) — 2026-11-13
 - Home: while the bridge switch settles, the card now says "Starting..." after you turn it on and "Stopping..." after you turn it off. It had the two the wrong way round.
 
-## 0.52.7 (build 322) — 2026-11-13 — CURRENT
+## 0.52.7 (build 322) — 2026-11-13
 - Home: "Starting..." and "Stopping..." now actually show after you flip the bridge switch, and stay until the bridge reaches the state you asked for.
+
+## 0.52.8 (build 323) — 2026-11-13 — CURRENT
+- Home: if the bridge fails to start or stop, the card no longer stays on "Starting..." or "Stopping...". It shows the failure as soon as it happens, or when the wait runs out.
 
 ## Keeping this file honest
 
