@@ -94,6 +94,24 @@ class ReadoutWrapTest : KitTest() {
     }
 
     @Test
+    fun `lines stay left-aligned and clear of the glyph when the layout direction is right-to-left`() {
+        val a = host()
+        val h = Readout.create(a, long, Readout.Kind.COMMAND)
+        val text = h.text as ReadoutText
+        text.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        a.place(h.root)
+        val l = text.layout
+        assertTrue(text.insertedAt.isNotEmpty())
+        val glyph = text.paint.measureText(com.mido.phonebridge.ui.SoftWrap.GLYPH)
+        val limit = text.width - text.totalPaddingRight - text.totalPaddingLeft - glyph
+        for (at in text.insertedAt) {
+            val line = l.getLineForOffset(at)
+            assertEquals("line $line not at left edge", 0f, l.getLineLeft(line), 0.5f)
+            assertTrue("line $line reaches the glyph", l.getLineRight(line) <= limit + 0.5f)
+        }
+    }
+
+    @Test
     fun `an IPv6 address at a very narrow width is broken with the glyph, not by the platform`() {
         val ip = "fd7a:115c:a1e0:ab12:4843:cd96:6258:2f01"
         val a = host()

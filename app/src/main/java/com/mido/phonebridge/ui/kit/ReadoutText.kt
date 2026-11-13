@@ -31,7 +31,9 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
             // inside an RTL run is not re-ordered and the glyph (always drawn right) stays in its gutter.
             if (value) {
                 textDirection = TEXT_DIRECTION_LTR
-                textAlignment = TEXT_ALIGNMENT_VIEW_START
+                // TEXT_START follows the pinned LTR text direction; VIEW_START would follow an RTL
+                // layout direction and right-align the lines under the glyph.
+                textAlignment = TEXT_ALIGNMENT_TEXT_START
             }
             requestLayout()
         }

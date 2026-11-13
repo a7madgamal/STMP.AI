@@ -5597,8 +5597,11 @@ devDependencies. `node_modules/` is gitignored.
 - The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
 
-## 0.52.5 (build 320) — 2026-11-13 — CURRENT
+## 0.52.5 (build 320) — 2026-11-13
 - A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
+
+## 0.52.6 (build 321) — 2026-11-13 — CURRENT
+- On a phone set to Arabic, Hebrew or Persian, a wrapped command stays left-aligned, so the wrap arrow never covers the end of a line.
 
 ## Keeping this file honest
 
