@@ -140,6 +140,13 @@ object GateCopy {
     const val BIO_VAULT_BROKEN = "The vault key is invalid or was reset (a new fingerprint can do this). " +
         "Reset the vault in Settings → Secret vault and add the secrets again. Deny still works."
     const val BIO_SUBTITLE_FALLBACK = "STMP"
+
+    /**
+     * The biometric prompt's subtitle: the caller-supplied "$method $path", escaped. A system dialog
+     * takes no spans, so hidden characters are written out as plain `\u{XXXX}` text.
+     */
+    fun bioSubtitle(endpoint: String?): String =
+        endpoint?.let { com.mido.phonebridge.ui.UntrustedText.escape(it) } ?: BIO_SUBTITLE_FALLBACK
     const val APPROVE_WITH_FINGERPRINT = "Approve, then confirm with your fingerprint"
 
     // --- keys and expander -----------------------------------------------------------------------

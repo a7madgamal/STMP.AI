@@ -639,7 +639,7 @@ class ApprovalActivity : FragmentActivity() {
         else BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
 
     private fun endpointLabel(): String =
-        intent.getStringExtra(EXTRA_ENDPOINT) ?: GateCopy.BIO_SUBTITLE_FALLBACK
+        GateCopy.bioSubtitle(intent.getStringExtra(EXTRA_ENDPOINT))
 
     /**
      * Why approval is or is not possible right now. **A boolean was not enough, and the modal

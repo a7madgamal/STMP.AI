@@ -11,9 +11,16 @@ import androidx.annotation.ColorInt
  * that cannot be seen, or that can change how the text around it is ordered or read, is replaced by
  * a visible `\u{XXXX}` token drawn in the caution colour, so the shown text is the sent text.
  *
- * Escaped: every Unicode format character (Cf: bidi controls U+202A to U+202E and U+2066 to U+2069,
- * U+200B to U+200F, U+FEFF, U+00AD, tags and more), the line and paragraph separators U+2028 and
- * U+2029, a lone surrogate, and every C0/C1 control except `\n` and `\t`.
+ * Escaped, exactly: every code point in the general categories Cc (C0/C1 controls, except `\n` and
+ * `\t`), Cf (bidi controls U+202A to U+202E and U+2066 to U+2069, U+200B to U+200F, U+FEFF, U+00AD,
+ * tags, ...), Zl and Zp (U+2028, U+2029) and Cs (a lone surrogate); plus the rest of the Unicode
+ * Default_Ignorable_Code_Point set, listed in [EXTRA_RANGES] (U+034F, Hangul fillers U+115F, U+1160,
+ * U+3164 and U+FFA0, variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, U+2060 to U+206F, ...).
+ * It is strict on purpose: approval text is security text, so U+FE0F and U+200D are escaped even
+ * inside an emoji sequence. Inside the readout the wrap marks are escaped too (`escapeWrapGlyphs`).
+ *
+ * The rule is published as `contract/text-sanitiser.json`, the source of truth shared with the iOS
+ * client. Any change here must change that file and bump its "version".
  *
  * Only for text a caller sent. The app's own copy is never passed through here: PluginCopy puts a
  * deliberate U+200B before an "@" so a Google address wraps, and that must keep working.
@@ -23,6 +30,13 @@ object UntrustedText {
     /** The wrap marks [SoftWrap] draws; a source occurrence must not pass for one of ours. */
     private val WRAP_GLYPHS = setOf(SoftWrap.GLYPH.codePointAt(0), SoftWrap.GLYPH_HARD.codePointAt(0))
 
+    /** Default_Ignorable_Code_Point ranges outside Cc/Cf/Zl/Zp/Cs (or unassigned gaps inside them). */
+    val EXTRA_RANGES: List<IntRange> = listOf(
+        0x034F..0x034F, 0x115F..0x1160, 0x17B4..0x17B5, 0x180B..0x180F, 0x2060..0x206F,
+        0x3164..0x3164, 0xFE00..0xFE0F, 0xFFA0..0xFFA0, 0xFFF0..0xFFF8, 0x1BCA0..0x1BCA3,
+        0x1D173..0x1D17A, 0xE0000..0xE0FFF,
+    )
+
     /** `\u{202E}`: at least four upper-case hex digits. */
     fun token(codePoint: Int): String = "\\u{%04X}".format(codePoint)
 
@@ -30,11 +44,12 @@ object UntrustedText {
     fun needsEscape(codePoint: Int, escapeWrapGlyphs: Boolean = false): Boolean {
         if (codePoint == '\n'.code || codePoint == '\t'.code) return false
         if (escapeWrapGlyphs && codePoint in WRAP_GLYPHS) return true
-        return when (Character.getType(codePoint).toByte()) {
+        val byCategory = when (Character.getType(codePoint).toByte()) {
             Character.CONTROL, Character.FORMAT, Character.LINE_SEPARATOR,
             Character.PARAGRAPH_SEPARATOR, Character.SURROGATE -> true
             else -> false
         }
+        return byCategory || EXTRA_RANGES.any { codePoint in it }
     }
 
     /** True when [text] holds anything [escape] would change. */

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.12 (build 327)**.
+Current build: **v0.52.13 (build 328)**.
 
 ---
 
@@ -5637,12 +5637,17 @@ devDependencies. `node_modules/` is gitignored.
 - "Not in this build" on the Plugins list breaks as "Not in / this build" instead of leaving "build" alone on a line.
 - The version in the Home header reads "v0.52.11", not "V0.52.11".
 
-## 0.52.12 (build 327) — 2026-11-13 — CURRENT
+## 0.52.12 (build 327) — 2026-11-13
 - The approval card, the Don't disturb card and the request log now show every hidden character in a request as a visible `\u{XXXX}` mark in the caution colour (text-direction controls, zero-width characters, soft hyphens, control codes), so the text you approve can no longer be re-ordered or hide something.
 - A `↵` or `↩` that is part of a command is shown as its own mark, so it cannot be mistaken for a line break the app added.
 - Selecting text in a command box offers only Copy and Select all, and a long press no longer drags the selection out, so a wrapped command cannot leave the app with the added line breaks in it.
 - A command that cannot fit the screen is marked with a caution-coloured ellipsis and read out as "Text did not fit" instead of being cut off silently.
 - A Don't disturb card that cuts off part of the request ("+N more lines") no longer approves when its time runs out. It says so on the card, and only a tap approves it.
+
+## 0.52.13 (build 328) — 2026-11-13 — CURRENT
+- The fingerprint prompt that approves a request now shows the request's method and path with hidden characters written out as `\u{XXXX}` marks, like the approval card. Before, it showed them raw, so a path could be re-ordered on the one screen that asks for your fingerprint.
+- More invisible characters are now shown as marks: the combining grapheme joiner, Hangul and Khmer fillers, variation selectors (U+FE00 to U+FE0F and the tag-block ones), U+2060 to U+206F, and the whole tag block. This is strict on purpose: U+FE0F and the zero-width joiner are marked even inside an emoji, so a heart or a family emoji in a request may show a small mark next to it.
+- The exact list of what is marked is now one shared file in the repository (`contract/text-sanitiser.json`) with test cases, so the iOS app can show the same thing.
 
 ## Keeping this file honest
 
