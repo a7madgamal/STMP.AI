@@ -5596,10 +5596,13 @@ devDependencies. `node_modules/` is gitignored.
 - Settings: the Notification access row no longer shows "Not connected" when nothing is granted; it reads "Needed" like a fresh install.
 - SSH: a damaged connection offers an outlined Delete key, like every other delete key, instead of a filled one.
 
-## 0.52.5 (build 320) — 2026-11-13 — CURRENT
+## 0.52.5 (build 320) — 2026-11-13
 - This build includes upstream 0.51.8 and 0.51.9, kept in the new look.
 - The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
 - A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
+
+## 0.52.6 (build 321) — 2026-11-13 — CURRENT
+- Home: while the bridge switch settles, the card now says "Starting..." after you turn it on and "Stopping..." after you turn it off. It had the two the wrong way round.
 
 ## Keeping this file honest
 

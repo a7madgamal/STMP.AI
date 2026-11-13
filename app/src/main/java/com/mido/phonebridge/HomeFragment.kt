@@ -88,6 +88,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     private lateinit var serverRocker: RockerSwitch
     private lateinit var bridgeLed: Led
     private lateinit var bridgeTitle: TextView
+
+    /** The bridge headline as painted; for tests. */
+    internal val bridgeTitleText: String get() = bridgeTitle.text.toString()
     private lateinit var bridgeDetailHost: LinearLayout
 
     /** When the last start/stop tap was made, so the rocker can show a pending look while binding. */
@@ -438,6 +441,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         val windowOpen = pendingSince > 0L &&
             android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
         val pending = windowOpen && !settled
+        // The rocker is never flipped by the tap, so while pending it still shows the OLD position:
+        // the direction of the change is the opposite of it.
+        val starting = !serverRocker.checked
         if (pending) {
             serverRocker.pending = true
         } else {
@@ -453,7 +459,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ServerStatus.State.UNRESPONSIVE,
             ServerStatus.State.FAILED -> Led.State.CAUTION
         }
-        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = !up) else ServerStatus.title(state)
+        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = starting) else ServerStatus.title(state)
         bridgeTitle.setTextColor(
             when (state) {
                 ServerStatus.State.STOPPED, ServerStatus.State.RUNNING_HEALTHY -> p.ink
@@ -470,7 +476,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         if (pending) {
             bridgeDetailHost.removeAllViews()
             bridgeDetailHost.addView(
-                Type.text(ctx, ServerStatus.pendingDetail(starting = !up), TypeRole.DETAIL, p.etched),
+                Type.text(ctx, ServerStatus.pendingDetail(starting = starting), TypeRole.DETAIL, p.etched),
                 matchWrapParams(),
             )
             return

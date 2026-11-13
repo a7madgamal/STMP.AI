@@ -9,6 +9,7 @@ import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.Rule
 import com.mido.phonebridge.ui.Theme
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Home: every bridge, gate, recent-requests, request-log and Updates state (WP04 section 11.2). */
@@ -27,7 +28,7 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun unresponsive() { Fixtures.server(Fixtures.Server.UNRESPONSIVE); capture("unresponsive") }
     @Test fun failed() { Fixtures.server(Fixtures.Server.FAILED); capture("failed") }
 
-    /** The rocker still says ON while the service has gone down: the pending look. */
+    /** Stop tapped: the rocker still says ON while the service has gone down. */
     @Test fun pending() {
         Fixtures.server(Fixtures.Server.RUNNING_HEALTHY)
         val activity = hostTab(HomeFragment::class.java, Theme.Tab.HOME)
@@ -35,7 +36,20 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
         BridgeService.serverUp = false
         home.pendingSince = SystemClock.elapsedRealtime()
         home.repaint()
+        assertEquals("Stopping\u2026", home.bridgeTitleText)
         capture(activity, "home", "pending")
+    }
+
+    /** Start tapped: the rocker still says OFF while the service has come up. */
+    @Test fun pending_start() {
+        Fixtures.server(Fixtures.Server.STOPPED)
+        val activity = hostTab(HomeFragment::class.java, Theme.Tab.HOME)
+        val home = home(activity)
+        BridgeService.serverUp = true
+        home.pendingSince = SystemClock.elapsedRealtime()
+        home.repaint()
+        assertEquals("Starting\u2026", home.bridgeTitleText)
+        capture(activity, "home", "pending_start")
     }
 
     @Test fun audit_degraded() { Fixtures.auditDegraded(); capture("audit_degraded") }
