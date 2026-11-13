@@ -5602,6 +5602,15 @@ devDependencies. `node_modules/` is gitignored.
 - A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
 
 ## 0.52.6 (build 321) — 2026-11-13
+- Home: while the bridge switch settles, the card now says "Starting..." after you turn it on and "Stopping..." after you turn it off. It had the two the wrong way round.
+
+## 0.52.7 (build 322) — 2026-11-13
+- Home: "Starting..." and "Stopping..." now actually show after you flip the bridge switch, and stay until the bridge reaches the state you asked for.
+
+## 0.52.8 (build 323) — 2026-11-13
+- Home: if the bridge fails to start or stop, the card no longer stays on "Starting..." or "Stopping...". It shows the failure as soon as it happens, or when the wait runs out.
+
+## 0.52.9 (build 324) — 2026-11-13 — CURRENT
 - The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
 - Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
 - The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
@@ -5614,14 +5623,8 @@ devDependencies. `node_modules/` is gitignored.
 - The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
 - A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
-
-## 0.52.7 (build 322) — 2026-11-13
 - The Don't disturb card shows at most three lines of the action and then says how many more lines there are, so a very long email subject can no longer push the risk word off the screen.
-
-## 0.52.8 (build 323) — 2026-11-13
 - The Don't disturb card counts the hidden lines of a long action the same way it draws them, so "+N more lines" can no longer be missing when the fourth line is cut off.
-
-## 0.52.9 (build 324) — 2026-11-13 — CURRENT
 - On an approval card, a line that is cut in the middle of a word or address now ends in a different arrow than a line that wraps at a space, so a wrap can no longer be read as a space or as part of the word before it.
 
 ## Keeping this file honest

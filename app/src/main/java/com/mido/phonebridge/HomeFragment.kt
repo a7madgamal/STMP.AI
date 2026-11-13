@@ -74,6 +74,20 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         /** How long the rocker shows a pending look after a tap. */
         const val PENDING_WINDOW_MS = 3_000L
 
+        /** Extra delay so the repaint that ends the pending look lands after the window closed. */
+        const val PENDING_CLOSE_MARGIN_MS = 100L
+
+        /**
+         * True while a start/stop tap is still settling. Ends when the window closes, when the bridge
+         * reached the asked state, or when a start failed (startBridge clears lastError, so one set
+         * afterwards is new).
+         */
+        internal fun isBridgePending(want: Boolean?, up: Boolean, since: Long, now: Long, lastError: String?): Boolean {
+            if (want == null || since <= 0L || up == want) return false
+            if (now - since >= PENDING_WINDOW_MS) return false
+            return !(want && !lastError.isNullOrBlank())
+        }
+
         /** Rows on the Recent requests tape. */
         const val TAPE_ROWS = 3
 
@@ -88,11 +102,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     private lateinit var serverRocker: RockerSwitch
     private lateinit var bridgeLed: Led
     private lateinit var bridgeTitle: TextView
+
+    /** The bridge headline as painted; for tests. */
+    internal val bridgeTitleText: String get() = bridgeTitle.text.toString()
     private lateinit var bridgeDetailHost: LinearLayout
 
     /** When the last start/stop tap was made, so the rocker can show a pending look while binding. */
     @androidx.annotation.VisibleForTesting
     internal var pendingSince: Long = 0L
+
+    /** The direction the user asked for at tap time (true = start); null when nothing is pending. */
+    @androidx.annotation.VisibleForTesting
+    internal var pendingWant: Boolean? = null
 
     private lateinit var degradedHost: LinearLayout
     private lateinit var crashHost: LinearLayout
@@ -218,12 +239,15 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // repaints. The rocker is NOT flipped here; `render()` moves it once
             // `BridgeService.serverUp` actually changes, so a failed stop cannot show a lie.
             pendingSince = android.os.SystemClock.elapsedRealtime()
+            pendingWant = want
             serverRocker.pending = true
             uiTickHandler.post {
                 if (want) startBridge() else stopBridge()
                 render()
             }
             uiTickHandler.postDelayed({ render() }, 600)
+            // The tick only repaints on a changed signature, so close the pending look explicitly.
+            uiTickHandler.postDelayed({ render() }, PENDING_WINDOW_MS + PENDING_CLOSE_MARGIN_MS)
         }
         rowA.addView(serverRocker, wrapParams().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
         panel.addView(rowA, matchWrapParams())
@@ -431,17 +455,24 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             lastError = BridgeService.lastError,
         )
 
-        // Settled as soon as the real state matches the rocker; the timeout covers a start that
-        // has not landed yet.
+        // Pending until the real state reaches the direction the user asked for; the timeout covers
+        // a start or stop that never lands. `startForegroundService`/`stopService` are asynchronous,
+        // so right after the tap `up` still shows the old state.
         val up = BridgeService.serverUp
-        val settled = serverRocker.checked == up
-        val windowOpen = pendingSince > 0L &&
-            android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        val pending = windowOpen && !settled
+        val want = pendingWant
+        val pending = isBridgePending(
+            want = want,
+            up = up,
+            since = pendingSince,
+            now = android.os.SystemClock.elapsedRealtime(),
+            lastError = BridgeService.lastError,
+        )
+        val starting = want == true
         if (pending) {
             serverRocker.pending = true
         } else {
             pendingSince = 0L
+            pendingWant = null
             serverRocker.pending = false
             if (serverRocker.checked != up) serverRocker.setCheckedAnimated(up)
         }
@@ -453,7 +484,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ServerStatus.State.UNRESPONSIVE,
             ServerStatus.State.FAILED -> Led.State.CAUTION
         }
-        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = !up) else ServerStatus.title(state)
+        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = starting) else ServerStatus.title(state)
         bridgeTitle.setTextColor(
             when (state) {
                 ServerStatus.State.STOPPED, ServerStatus.State.RUNNING_HEALTHY -> p.ink
@@ -470,7 +501,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         if (pending) {
             bridgeDetailHost.removeAllViews()
             bridgeDetailHost.addView(
-                Type.text(ctx, ServerStatus.pendingDetail(starting = !up), TypeRole.DETAIL, p.etched),
+                Type.text(ctx, ServerStatus.pendingDetail(starting = starting), TypeRole.DETAIL, p.etched),
                 matchWrapParams(),
             )
             return
