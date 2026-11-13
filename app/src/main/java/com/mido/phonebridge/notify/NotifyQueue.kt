@@ -89,6 +89,14 @@ class NotifyQueue<T>(private val keyOf: (T) -> Long, private val maxWaiting: Int
     /** Everything in the system: the one on screen plus the line. */
     fun depth(): Int = synchronized(lock) { (if (current == null) 0 else 1) + waiting.size }
 
+    /** Isolated copies in FIFO order; mutating a result cannot mutate queue membership. */
+    fun <R> snapshot(copy: (T, Boolean) -> R): List<R> = synchronized(lock) {
+        val all = ArrayList<R>(waiting.size + 1)
+        current?.let { all.add(copy(it, true)) }
+        waiting.forEach { all.add(copy(it, false)) }
+        all
+    }
+
     /**
      * Empty the queue, returning everything that was in it, current first. Used when
      * the service stops: each returned item must still be resolved by the caller, so

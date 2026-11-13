@@ -92,6 +92,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     internal var pendingSince: Long = 0L
 
     private lateinit var degradedHost: LinearLayout
+    private lateinit var crashHost: LinearLayout
     private lateinit var gateKnob: KnobSelector
     private lateinit var gateDetailHost: LinearLayout
     private lateinit var gateExtrasHost: LinearLayout
@@ -132,6 +133,9 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         degradedHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(degradedHost, matchWrapParams())
+
+        crashHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(crashHost, matchWrapParams())
 
         container.addView(buildBridgePanel(p))
 
@@ -316,6 +320,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         append(AuthManager.isLoggedIn(ctx)).append('|')
         append(AuthManager.accountEmail ?: "").append('|')
         append(AuditHealth.reason ?: "").append('|')
+        append(Crash.last(ctx)?.length ?: -1).append('|')
+        append(Stall.last(ctx)?.length ?: -1).append('|')
         append(tapeSnapshot().first).append('|')
         // The update check is part of what this screen displays: without these a check that
         // finished while Home was visible left the card on "checking…" (reported 2026-11-10).
@@ -347,6 +353,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         lastRenderSignature = renderSignature()
         // The update section is NOT rebuilt here, on purpose (see [updatesHost]).
         renderDegraded()
+        renderCrash()
         renderBridge()
         renderGate()
         renderTape()
@@ -381,6 +388,47 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         panel.addView(row, matchWrapParams())
         panel.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         degradedHost.addView(panel, matchWrapParams())
+    }
+
+    /**
+     * The app's own crash or freeze, on the screen that is always reachable.
+     *
+     * `GET /debug` reports both, but that route needs the bridge running, and these failures are
+     * exactly the ones that stop it serving. Tapping copies the whole trace, so it travels by
+     * paste instead of another round trip.
+     */
+    private fun renderCrash() {
+        crashHost.removeAllViews()
+        val crash = Crash.last(ctx)
+        val stall = Stall.last(ctx)
+        if (crash == null && stall == null) return
+        val isStall = crash == null
+        val detail: String = stall ?: crash ?: return
+        val headline = detail.lineSequence()
+            .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
+            ?.trim() ?: "no detail recorded"
+        val panel = Panel.create(ctx, Panel.Tone.CAUTION)
+        panel.addView(
+            StatusRow.create(
+                ctx,
+                label = if (isStall) "The screen froze" else "The app crashed",
+                value = "Copy trace",
+                tone = StatusRow.Tone.CAUTION,
+                detail = headline,
+                led = Led.State.CAUTION,
+                onClick = {
+                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText(
+                            "STMP ${if (isStall) "stall" else "crash"}", detail,
+                        ),
+                    )
+                    toast("copied — paste it to whoever is fixing this")
+                },
+            ),
+        )
+        crashHost.addView(panel, matchWrapParams())
     }
 
     private fun renderBridge() {

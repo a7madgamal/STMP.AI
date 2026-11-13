@@ -129,6 +129,23 @@ class OptionsFragment : BridgeFragment() {
 
     override fun repaint() = render()
 
+    /** A coalescing flag so a burst of repaint requests becomes one rebuild. */
+    private var renderQueued = false
+
+    /**
+     * Rebuild on the NEXT loop, never inside the tap that asked for it. A synchronous `render()`
+     * at the end of a toggle or save tore the screen down while the click was still being
+     * dispatched, so the press never completed ("hangs on preference click").
+     */
+    private fun renderPosted() {
+        if (renderQueued) return
+        renderQueued = true
+        container.post {
+            renderQueued = false
+            if (isAdded) render()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // Repaint on the way back, ALWAYS: a permission granted in Android settings must show up
@@ -276,7 +293,7 @@ class OptionsFragment : BridgeFragment() {
                 policy.fingerprintForModals,
             ) { want ->
                 FingerprintSetting.request(this, want, onError = { saveError = it }) {
-                    if (isAdded) render()
+                    renderPosted()
                 }
             }
         }
@@ -395,7 +412,7 @@ class OptionsFragment : BridgeFragment() {
 
     private fun vaultRow(): View {
         val failure = VaultUnlock.lastFailure?.let { " Last attempt failed: $it. The debug log below has more." } ?: ""
-        val unlock = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { uiSafe { render() } } }
+        val unlock = { VaultUnlock.ensureUnlocked(hostActivity, force = true) { uiSafe { renderPosted() } } }
         return when (SettingsState.vault(
             SecretVault.isUnlocked(), SecretVault.isUnrecoverable(ctx), SecretVault.isOrphaned(ctx),
             SecretVault.exists(ctx),
@@ -573,7 +590,7 @@ class OptionsFragment : BridgeFragment() {
             store.set(next)
         } catch (e: Exception) {
             saveError = e.message ?: e.javaClass.simpleName
-            render()
+            renderPosted()
             return false
         }
         try {
@@ -581,7 +598,7 @@ class OptionsFragment : BridgeFragment() {
         } catch (e: Exception) {
             AuditHealth.markDegraded("preference change not recorded: ${e.message}")
         }
-        render()
+        renderPosted()
         return true
     }
 
@@ -735,7 +752,7 @@ class OptionsFragment : BridgeFragment() {
         Thread({
             val result = ModelProvisioner.provision(
                 app, force = force,
-                onProgress = { uiSafe { if (percentChangedOnScreen()) render() } },
+                onProgress = { uiSafe { if (percentChangedOnScreen()) renderPosted() } },
             )
             uiSafe {
                 Debug.log("model provision: ${result.detail}")

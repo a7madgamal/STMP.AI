@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.core.executesOrDeletes
 import com.mido.phonebridge.policy.GlobalMode
@@ -672,6 +673,35 @@ object ApprovalGate {
         needsPassword: Boolean = false
     ): GateResult {
         val id = seq.incrementAndGet()
+
+        // **FAIL FAST: a prompt that cannot reach the screen must refuse, not wait.**
+        //
+        // Reported 2026-11-11: *"i didn't get the modal!"* — `fullScreenIntent` was false and
+        // the phone was in another app, so the Activity could not be raised. The request then
+        // sat in the queue for the full 60s and answered `approval_timeout`, which reads as
+        // "nobody answered" when the truth is "the prompt was never shown". A silent timeout
+        // is the worst possible outcome: the human believes they were asked, and the caller
+        // believes they were ignored.
+        //
+        // An overlay window (SYSTEM_ALERT_WINDOW) is what makes a background launch legal, and
+        // full-screen intent is what lets the card cross a locked screen or another app. With
+        // NEITHER, presenting is impossible — so answer immediately with the reason and the one
+        // action that fixes it. The reference precondition is stated once, here, and applies to
+        // every path that presents a modal.
+        val presentation = PromptSurface.of(
+            fullScreenIntent = canUseFullScreenIntent(ctx),
+            overlayGranted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx),
+        )
+        if (presentation == PromptSurface.NONE) {
+            Debug.log("gate: refusing — no way to present a prompt (fullScreenIntent=false, overlay=false)")
+            throw PluginError(
+                "prompt_unreachable",
+                "This phone cannot display an approval prompt right now, so the request was " +
+                    "refused instead of waiting 60s for an answer nobody could give. Fix: " +
+                    PromptSurface.remedy(),
+            )
+        }
+
         val behind = synchronized(this) { (queue.size).coerceAtLeast(0) }
         val pending = Pending(
             requestId = id,
@@ -763,7 +793,7 @@ object ApprovalGate {
             if (next != null) {
                 postApprovalNotification(ctx, next)
             }
-        }
+            }
     }
 
     private fun postApprovalNotification(

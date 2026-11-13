@@ -1323,6 +1323,57 @@ class HttpServer(
             val mode = if (needsPassword) Mode.PARANOID else resolvedPolicyMode
             val globalMode = policy.global
 
+            // **THE VAULT, BEFORE THE ROWS.**
+            //
+            // A route that signs or spends a stored credential cannot even build its approval card
+            // while the vault is shut: `describeRows` reads the key to name the target, and that
+            // runs pre-gate. So a locked vault used to kill the request in milliseconds with
+            // `secret_locked` and NO prompt — the caller saw a refusal it could not act on and the
+            // human was never asked (2026-11-11: four attempts to run `gh` from the bridge, all
+            // refused, which read as inattention rather than a locked vault).
+            //
+            // Asking here fixes that at the only point where it CAN be fixed: before the rows are
+            // built. And it is still only a key release — the request then proceeds to its normal
+            // gate, where the human reads the real host and taps APPROVE. A fingerprint must never
+            // be readable as consent.
+            if (resolved.route.needsVault) {
+                val vaultState = SecretVault.state(ctx)
+                val need = VaultNeed.decide(
+                    needsVault = true,
+                    unlocked = SecretVault.isUnlocked(),
+                    state = vaultState,
+                    mode = mode,
+                    canPresent = PromptSurface.of(
+                        fullScreenIntent = ApprovalGate.canUseFullScreenIntent(ctx),
+                        overlayGranted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx),
+                    ) != null,
+                )
+                if (need == VaultNeed.Action.UNLOCK) {
+                    Debug.log("${resolved.plugin.id}: vault locked, asking for a fingerprint")
+                    val opened = VaultUnlockGate.awaitUnlock(
+                        ctx = ctx,
+                        endpoint = "$method $path",
+                        remote = remote,
+                    )
+                    if (!opened) {
+                        draft.outcome(AuditOutcome.REJECTED_INVALID)
+                        draft.error("secret_locked")
+                        val obj = err("secret_locked", VaultNeed.detail(VaultNeed.Action.UNLOCK, vaultState))
+                        draft.response(403, obj.toString())
+                        return Dispatched(Response.Status.FORBIDDEN, obj)
+                    }
+                } else if (need != VaultNeed.Action.PROCEED) {
+                    // A dead end, or a gate mode with nowhere to put a fingerprint. Both refuse
+                    // with the thing that would actually change it — never a prompt that cannot
+                    // succeed, and never a silent wait.
+                    draft.outcome(AuditOutcome.REJECTED_INVALID)
+                    draft.error("secret_locked")
+                    val obj = err("secret_locked", VaultNeed.detail(need, vaultState))
+                    draft.response(403, obj.toString())
+                    return Dispatched(Response.Status.FORBIDDEN, obj)
+                }
+            }
+
             // ATTENDANCE. A request that cannot be shown to an attending human is DENIED —
             // with one exception, and it is a deliberate reversal of the original rule.
             //
@@ -1408,7 +1459,7 @@ class HttpServer(
                                         url = body.optString("url", "")
                                     )
                                 else null,
-                                needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary)
+                                needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary),
                             )
                             when (decision) {
                                 is NotifyGate.Result.Approved -> {

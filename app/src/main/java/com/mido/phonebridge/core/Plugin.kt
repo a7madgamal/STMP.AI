@@ -150,6 +150,24 @@ data class Route(
      */
     val needsPassword: ((Req) -> Boolean)? = null,
     /**
+     * Whether this route reads a value stored in the secret vault.
+     *
+     * **Why a declared flag rather than letting the plugin throw.** A locked vault used to be
+     * discovered while approval rows were being built — `describeRows` reads the key to name the
+     * target — and that happens pre-gate, so the request died in milliseconds with `secret_locked`
+     * and **no prompt at all**. The caller saw a refusal it could do nothing about, and the human
+     * was never asked. Reported 2026-11-11: the bridge was used four times to promote a release
+     * and answered `secret_locked` every time, which read as "your attention is the problem".
+     *
+     * Declaring it lets dispatch ask for the unlock BEFORE it builds rows, so the request survives
+     * its own setup. It is a fact about the route, not about a payload, so it is a plain `Boolean`
+     * rather than the `((Req) -> Boolean)` shape [needsPassword] needs.
+     *
+     * **Unlocking is not approving.** The fingerprint only opens the vault; the request still goes
+     * to its normal gate afterwards, where the human reads the real target and taps APPROVE.
+     */
+    val needsVault: Boolean = false,
+    /**
      * Whether this route SKIPS the approval gate entirely.
      *
      * **The only such route in the app, and it should stay that way.** Every other route asks a

@@ -109,6 +109,23 @@
             android:showOnLockScreen="true"
             android:theme="@style/Theme.STMP.Approval" />
 
+        <!--
+          The vault-unlock prompt, raised by a blocked request.
+
+          Its own Activity rather than a control on the approval card, because the two acts are
+          deliberately separate: this releases the key, the NEXT screen asks for consent. Given the
+          approval theme so it reads as part of the same decision surface, and `showOnLockScreen`
+          so a request that arrived while the phone was locked can still be released.
+        -->
+        <activity
+            android:name=".VaultUnlockActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:showOnLockScreen="true"
+            android:theme="@style/Theme.STMP.Approval" />
+
         <activity
             android:name=".GoogleLoginActivity"
             android:exported="false"

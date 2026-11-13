@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.43.12 (build 166)**.
+Current build: **v0.52.0 (build 315)**.
 
 ---
 
@@ -5483,8 +5483,85 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.49.17 (build 313) — 2026-11-12
 - Stopping the bridge no longer leaves a "starting" notice behind, even when a network check was still running as it stopped.
 
-## 0.49.18 (build 314) — 2026-11-12 — CURRENT
+## 0.49.18 (build 314) — 2026-11-12
 - On the Gmail, Calendar and Drive screens, tap the "Sign in" status to sign in with Google.
+
+||||||| 062d573
+## 0.49.0 (build 293) — 2026-11-11
+- The Refined Paper foundation bundles Atkinson Hyperlegible Next for readable UI text and JetBrains Mono NL for exact payloads, while Handlee remains the display and stamp face.
+- Semantic text and control colours meet the agreed contrast floor; the stamp accent and destructive danger are now distinct.
+- Paper switches expose their role, checked state, pending state and keyboard activation to accessibility services without moving before a real state change.
+- Home now separates live health and specific remedies from pending requests and recent decisions; Activity keeps queue snapshots and recorded request details read-only.
+- Home, Activity and Preferences replace the artificial Plugins/Settings split. Plugin-owned settings and the verified update/install flow keep one implementation in the consolidated Preferences screen.
+- Approval facts come before optional model context, long payloads have visible overflow guidance, and the paper entrance, stamp impact and denial tear have reduced-motion and forced-exit paths.
+
+## 0.49.1 (build 294) — 2026-11-11
+- Preference taps no longer freeze: rebuilding the screen now waits until the tap finishes instead of tearing down the view mid-click, and bursts of updates coalesce into one rebuild.
+- The Activity filter chips now carry real gaps and margins instead of rendering as one touching bar; the same spacing reaches the older log screen.
+
+## 0.49.2 (build 295) — 2026-11-11
+- A crash now records its own stack trace to a file, and `GET /debug` reports it as `lastCrash`. Previously the trace rotated out of logcat before it could be read, so a crash report had no evidence to act on.
+- The plugin inventory no longer re-orders its own children while Android is still attaching them, which could tear the hierarchy apart mid-dispatch.
+
+## 0.49.3 (build 296) — 2026-11-11
+- A frozen screen is now detected and its stack recorded, reported as `lastStall`. A hang produces no exception, so the crash handler added in 0.49.2 could never have seen it.
+- Home shows the last crash or freeze and copies the full trace on tap, so the evidence is readable when the bridge itself is what failed.
+- One plugin whose stored state is corrupt can no longer take Preferences down with it; its row names the failure instead.
+
+## 0.49.4 (build 297) — 2026-11-11
+- Preferences opens again: the plugin inventory rendered itself before its own group list was initialised, so every construction threw a NullPointerException. The exception surfaced as the tab freezing, then as a crash.
+- A construction test now asserts the declaration order the initialiser depends on, and renders the inventory for real, so this cannot ship again.
+
+## 0.50.0 (build 298) — 2026-11-11
+- Every animation plays, always. The reduced-motion branch collapsed the approval stamp to a 110ms static fade with no contact frame, so the receipt for a security decision was invisible; it is gone, along with the whole `reducedMotion` path.
+- A request that cannot be shown an approval prompt is now REFUSED immediately as `prompt_unreachable`, naming the grant to give. Previously it waited the full 60 seconds and answered `approval_timeout`, which is indistinguishable from a human declining.
+- Home states it outright when neither full-screen intent nor draw-over-apps is available, because that combination makes the entire gate unreachable.
+
+## 0.50.1 (build 299) — 2026-11-11
+- The approval stamp is visible again after a fingerprint. Its clock started while the biometric window was still closing, so the whole animation elapsed behind that dialog and finished on its first visible frame; it now waits for window focus, with a bounded fallback so a platform that never reports focus plays a late stamp instead of none.
+- The exit backstop includes that wait, so it can no longer dismiss the modal mid-wait and cancel the stamp it protects.
+
+## 0.50.2 (build 300) — 2026-11-11
+- The help badge is half its previous size and sits flush against the row title, so it no longer reserves dead space beside the name it belongs to.
+
+## 0.50.3 (build 301) — 2026-11-11
+- The approval stamp now HOLDS its result for over a second after the motion finishes. The animation was running correctly at 650ms, but that is shorter than the beat it takes to look back at the page after dismissing a fingerprint dialog, so the receipt was real and never seen.
+- A drawn-frame count is logged with the stamp's completion, so "the animation did not play" is now distinguishable from "it played too briefly" without guessing.
+
+## 0.51.0 (build 302) — 2026-11-11
+- The approval stamp no longer expires. It plays, settles at full ink, and stays until the human taps it, so no clock can remove the receipt before it has been read.
+- The frame counter that claimed "105 frames" was incrementing in the tick, not in `onDraw`, so it measured the timer rather than the paint. It now counts real draws and logs the first one, which is what makes an invisible stamp diagnosable.
+- Pressing back after a decision resolves the request and leaves the stamp on screen instead of destroying the window in the same frame.
+
+## 0.51.1 (build 303) — 2026-11-11
+- The stamp is visible. It was painted on every frame and then covered: `PaperEntranceView` carries 4dp of elevation, and a ViewGroup draws children in ascending Z order once any child has elevation, so the sheet was painted over an overlay sitting at the default Z=0. The overlay and the denial tear now carry 32dp, above the sheet's 28dp entrance peak.
+- The same cause made the modal appear frozen: the sheet on top received the taps the stamp was waiting for. Both are fixed by the one elevation change.
+
+## 0.51.2 (build 304) — 2026-11-11
+- The stamp no longer leaves a doubled shadow: the ink bleed was held at full strength for as long as the stamp stayed on screen, and it draws the mark plus two offset copies. It is a 240ms transient at impact again.
+- The modal dismisses itself after the stamp is read; the previous "wait for a tap" turned every approval into a screen that never closed. A tap still dismisses early.
+
+## 0.51.3 (build 305) — 2026-11-12
+- Getting started installs the Hermes plugin by its catalog name (`hermes plugins install stmp --yes-deps`) instead of the GitHub path, now that `stmp` is a curated entry. The bare name resolves to a reviewed, SHA-pinned commit and can be moved forward by `hermes plugins update`.
+
+## 0.51.4 (build 306) — 2026-11-12
+- A locked vault now asks for a fingerprint instead of refusing the request. Routes that read a stored credential (`needsVault`) unlock before their approval card is built, so the request survives instead of dying in milliseconds with `secret_locked` and no prompt.
+- Unlocking is not approving: the fingerprint only releases the key, and the real host and command are then shown for a separate APPROVE.
+- Dead-end vault states (never created, unrecoverable, orphaned) and gate modes with no fingerprint surface refuse with the specific remedy instead of showing a prompt that cannot succeed.
+
+## 0.51.5 (build 307) — 2026-11-12
+- Added an opt-in `-PemuAbi=true` build flag that adds `x86_64` alongside `arm64-v8a`, so an x86_64 emulator can load the native model library. A normal build is unchanged and still arm64 only.
+
+
+## 0.52.0 (build 315) — 2026-11-13 — CURRENT
+- This build includes everything from upstream 0.49.0 through 0.51.5, brought into the new look.
+- STMP now asks for your fingerprint when a request needs a locked vault, then carries on with the request.
+- Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
+- Plugin groups no longer fail to draw on first open, and preference taps no longer freeze.
+- A request that cannot be shown on screen is refused instead of waiting.
+- The result stamp waits for a tap instead of expiring on its own.
+- Setup docs install the Hermes plugin by its catalog name.
+- Added an opt-in emulator ABI build flag.
 
 ## Keeping this file honest
 

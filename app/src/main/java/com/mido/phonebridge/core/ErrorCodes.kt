@@ -104,6 +104,14 @@ object ErrorCodes {
         // A human explicitly blocked this address. Refused silently with no prompt, so a blocked
         // caller cannot make the phone light up again.
         "caller_denied" to FORBIDDEN,
+        // **The prompt could not be DISPLAYED, so the request was refused outright.**
+        //
+        // Distinct from `denied`: nobody declined anything. `fullScreenIntent` is off and
+        // draw-over-apps is denied, so an Activity cannot be raised from the background and the
+        // card cannot replace another app's window. Reported 2026-11-11 as a request that simply
+        // "timed out" — the human was never shown anything. 503 rather than 403 because the phone
+        // is not-ready for approval, and try-again becomes true the moment the grant is given.
+        "prompt_unreachable" to UNAVAILABLE,
 
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
@@ -271,6 +279,7 @@ object ErrorCodes {
         "denied" to "No approval was recorded: the human declined, a NOTIFY card was rejected, or the gate could not be presented (screen off or locked).",
         "caller_unverified" to "This address has never been named. A human must approve it on the phone (with a name) before any route will answer.",
         "caller_denied" to "A human blocked this address. No route will answer it until that block is removed on the phone.",
+        "prompt_unreachable" to "The approval prompt cannot be displayed on this phone, so the request was refused instead of waiting. Grant full-screen notifications or draw-over-apps in Preferences.",
 
         // --- our side ---
         "auth_not_configured" to "This build has no OAuth credentials; it cannot serve Google routes.",
