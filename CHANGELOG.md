@@ -5592,9 +5592,14 @@ devDependencies. `node_modules/` is gitignored.
 - Copy: "Needs action" is the one word for something that needs you, onboarding step 4 no longer says STMP can only ask more, permission states read Granted, Needed or Optional on every screen, the Secret vault sits outside Permissions, a wrong model file with equal rounded sizes shows exact bytes, empty secret and SSH lists say to unlock the vault first when it is locked, and "GitHub" keeps its capitals.
 - Onboarding: step 1 is left out once the bridge is on, and Copy prompt and Copy commands are off while the address is still a placeholder.
 
-## 0.52.4 (build 319) — 2026-11-13 — CURRENT
+## 0.52.4 (build 319) — 2026-11-13
 - Settings: the Notification access row no longer shows "Not connected" when nothing is granted; it reads "Needed" like a fresh install.
 - SSH: a damaged connection offers an outlined Delete key, like every other delete key, instead of a filled one.
+
+## 0.52.5 (build 320) — 2026-11-13 — CURRENT
+- This build includes upstream 0.51.8 and 0.51.9, kept in the new look.
+- The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
+- A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
 
 ## Keeping this file honest
 
