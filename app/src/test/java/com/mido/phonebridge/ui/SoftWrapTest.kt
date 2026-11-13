@@ -98,8 +98,52 @@ class SoftWrapTest {
     }
 
     @Test
-    fun `too few columns leaves the text to the platform`() {
-        assertEquals(emptyList<Int>(), SoftWrap.breaks("a very long line indeed, longer than the width", 4))
+    fun `a very narrow width still breaks with the glyph, never leaves it to the platform`() {
+        val text = "a very long line indeed, longer than the width"
+        val cuts = SoftWrap.breaks(text, 4)
+        assertTrue(cuts.isNotEmpty())
+        val sb = StringBuilder(text)
+        for (i in cuts.indices.reversed()) sb.insert(cuts[i], "\n")
+        assertEquals(text, sb.toString().replace("\n", ""))
+        // Every line leaves a column for the glyph.
+        assertTrue(sb.toString().split("\n").dropLast(1).all { it.length <= 3 })
+    }
+
+    @Test
+    fun `an IPv6 address at a width narrower than a hextet breaks with the glyph and loses nothing`() {
+        val ip = "fd7a:115c:a1e0:ab12:4843:cd96:6258:2f01"
+        for (cols in 2..8) assertEquals(ip, wrapped(ip, cols).joinToString(""))
+        // Wide enough for one hextet, its colon and the glyph: still only after colons.
+        for (line in wrapped(ip, 6).dropLast(1)) assertTrue(line.endsWith(":"))
+    }
+
+    @Test
+    fun `measured advances decide the break, so wide characters wrap earlier`() {
+        val text = "ab cd ef gh"
+        val narrow = FloatArray(text.length) { 1f }
+        val wide = FloatArray(text.length) { 2f }
+        assertTrue(SoftWrap.breaks(text, wide, 12f, 1f).size > SoftWrap.breaks(text, narrow, 12f, 1f).size)
+    }
+
+    @Test
+    fun `a wide-glyph token is hard-broken with the glyph and never inside a surrogate pair`() {
+        val face = "\uD83D\uDE00" // one emoji, two chars
+        val text = face.repeat(12)
+        val adv = FloatArray(text.length) { if (it % 2 == 0) 2f else 0f }
+        val cuts = SoftWrap.breaks(text, adv, 9f, 1f)
+        assertTrue(cuts.isNotEmpty())
+        assertTrue(cuts.all { it % 2 == 0 })
+    }
+
+    @Test
+    fun `an Arabic or CJK token wider than the line is broken with the glyph`() {
+        val text = "تحقق من هذا الطلب قبل الموافقة 你好世界你好世界你好世界 done"
+        val adv = FloatArray(text.length) { 1.6f }
+        val cuts = SoftWrap.breaks(text, adv, 14f, 1f)
+        val sb = StringBuilder(text)
+        for (i in cuts.indices.reversed()) sb.insert(cuts[i], "\n")
+        assertEquals(text, sb.toString().replace("\n", ""))
+        for (line in sb.toString().split("\n")) assertTrue(line.length * 1.6f <= 14f + 0.01f)
     }
 
     @Test

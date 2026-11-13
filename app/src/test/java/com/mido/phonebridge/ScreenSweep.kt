@@ -105,7 +105,7 @@ object ScreenSweep {
                 com.mido.phonebridge.notify.NotifyOverlay.show(
                     ctx = app, id = 9_300L + i, summary = "Run uptime on kvm-box and report the load",
                     label = "RUN", verb = verb, windowMs = 60_000L, facts = null, needsAi = false,
-                    fetchCapMs = 0L, onOutcome = { },
+                    fetchCapMs = 0L, requester = "Work laptop", onOutcome = { },
                 )
                 idle()
                 val card = org.robolectric.shadow.api.Shadow

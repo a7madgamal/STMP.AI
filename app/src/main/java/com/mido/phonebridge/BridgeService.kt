@@ -1460,6 +1460,9 @@ class HttpServer(
                                     )
                                 else null,
                                 needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary),
+                                // Who is asking, by the registry name (falls back to the address),
+                                // so the human who stays silent still saw who asked.
+                                requester = callerLabelFor(remote),
                             )
                             when (decision) {
                                 is NotifyGate.Result.Approved -> {

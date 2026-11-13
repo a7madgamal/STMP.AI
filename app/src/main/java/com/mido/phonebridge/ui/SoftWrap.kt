@@ -14,39 +14,64 @@ package com.mido.phonebridge.ui
  *    boundary near the line end (after `/ ? & = # , ;`, or after a `:` of an IPv6 address, so a
  *    hextet is never cut), else at the last column. The glyph always marks it.
  *
- * Every visual line holds at most `columns - 1` characters, so the last cell is free for the glyph.
+ * A broken line leaves room for the glyph. Widths are measured advances, not a fixed cell, so
+ * fallback-font text (Arabic, CJK, emoji) cannot make a line wider than the view.
  */
 object SoftWrap {
     /** The glyph drawn at the end of a soft-wrapped line. */
     const val GLYPH = "↵"
-
-    /** Fewer columns than this and wrapping would be noise; the text is left to the platform. */
-    internal const val MIN_COLUMNS = 8
 
     private const val BOUNDARY_CHARS = "/?&=#,;"
 
     /** How far back from the line end a hard break may search for a natural boundary. */
     private const val BOUNDARY_SEARCH_FRACTION = 0.4
 
+    /** Float slack so a line that exactly fills the width is not broken by rounding. */
+    private const val EPSILON = 0.01f
+
     /**
-     * Sorted indices of [text] before which a display-only break is inserted. A line that already
-     * fits in [columns] is never broken, and an existing `\n` always ends a line.
+     * Column form: every character is one cell wide. Kept for callers and tests that reason in
+     * cells; the readout itself uses the measured form below.
      */
-    fun breaks(text: CharSequence, columns: Int, keepTogether: List<IntRange> = emptyList()): List<Int> {
-        if (columns < MIN_COLUMNS) return emptyList()
+    fun breaks(text: CharSequence, columns: Int, keepTogether: List<IntRange> = emptyList()): List<Int> =
+        breaks(text, FloatArray(text.length) { 1f }, columns.toFloat(), 1f, keepTogether)
+
+    /**
+     * Sorted indices of [text] before which a display-only break is inserted, measured in real
+     * advances: [advances] holds the drawn width of each char, [available] the line width and
+     * [glyphWidth] the room the continuation glyph needs. A line that already fits [available] is
+     * never broken, and an existing `\n` always ends a line. A broken line always leaves
+     * [glyphWidth] free. There is no width too small to wrap: at least one char goes on each line
+     * and the glyph marks the break, so the platform never has to wrap silently.
+     */
+    fun breaks(
+        text: CharSequence,
+        advances: FloatArray,
+        available: Float,
+        glyphWidth: Float,
+        keepTogether: List<IntRange> = emptyList()
+    ): List<Int> {
+        require(advances.size >= text.length) { "one advance per char" }
         val out = ArrayList<Int>()
         var lineStart = 0
         while (lineStart <= text.length) {
             val lineEnd = nextNewline(text, lineStart)
             var start = lineStart
-            while (lineEnd - start > columns) {
-                val at = breakFor(text, start, columns, keepTogether)
+            while (width(advances, start, lineEnd) > available + EPSILON) {
+                val at = breakFor(text, advances, start, lineEnd, available - glyphWidth, keepTogether)
+                if (at <= start || at >= lineEnd) break
                 out.add(at)
                 start = at
             }
             lineStart = lineEnd + 1
         }
         return out
+    }
+
+    private fun width(advances: FloatArray, from: Int, to: Int): Float {
+        var w = 0f
+        for (i in from until to) w += advances[i]
+        return w
     }
 
     private fun nextNewline(text: CharSequence, from: Int): Int {
@@ -57,27 +82,45 @@ object SoftWrap {
 
     private fun splits(at: Int, r: IntRange) = r.first < at && at <= r.last
 
-    private fun breakFor(text: CharSequence, start: Int, columns: Int, keep: List<IntRange>): Int {
-        val cap = start + columns - 1
+    /** The furthest break index `b` (the next line starts at `b`) with `[start, b)` within [budget]. */
+    private fun capFor(advances: FloatArray, start: Int, lineEnd: Int, budget: Float): Int {
+        var w = 0f
+        var b = start
+        while (b < lineEnd && w + advances[b] <= budget + EPSILON) { w += advances[b]; b++ }
+        return maxOf(b, start + 1)
+    }
+
+    private fun breakFor(
+        text: CharSequence, advances: FloatArray, start: Int, lineEnd: Int, budget: Float, keep: List<IntRange>
+    ): Int {
+        val cap = minOf(capFor(advances, start, lineEnd, budget), lineEnd - 1)
         // 1. After whitespace, the furthest one that leaves a whole token on the next line.
         for (b in cap downTo start + 1) {
             if (text[b - 1].isWhitespace() && !text[b].isWhitespace() && keep.none { splits(b, it) }) return b
         }
         // 2. One token is wider than the line. Keep a danger token whole when it fits a line.
-        keep.firstOrNull { splits(cap, it) && it.first > start && it.last - it.first + 1 <= columns - 1 }
-            ?.let { return it.first }
-        return hardBreak(text, start, cap)
+        keep.firstOrNull {
+            splits(cap, it) && it.first > start && width(advances, it.first, it.last + 1) <= budget + EPSILON
+        }?.let { return it.first }
+        return hardBreak(text, advances, start, cap)
     }
 
-    private fun hardBreak(text: CharSequence, start: Int, cap: Int): Int {
+    private fun hardBreak(text: CharSequence, advances: FloatArray, start: Int, cap: Int): Int {
         val tokenStart = tokenStart(text, cap, start)
         val isHexAddress = isAddress(text, tokenStart, cap)
         val floor = maxOf(start + 1, cap - ((cap - start) * BOUNDARY_SEARCH_FRACTION).toInt())
         for (b in cap downTo floor) {
             val c = text[b - 1]
-            if (c in BOUNDARY_CHARS || (isHexAddress && c == ':')) return b
+            if (c in BOUNDARY_CHARS || (isHexAddress && c == ':')) return keepCluster(advances, start, b)
         }
-        return cap
+        return keepCluster(advances, start, cap)
+    }
+
+    /** Never cut a surrogate pair or a combining mark away from its base: back up over zero-width chars. */
+    private fun keepCluster(advances: FloatArray, start: Int, at: Int): Int {
+        var b = at
+        while (b > start + 1 && b < advances.size && advances[b] == 0f) b--
+        return b
     }
 
     private fun tokenStart(text: CharSequence, from: Int, floor: Int): Int {

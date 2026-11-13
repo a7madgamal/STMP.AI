@@ -5582,7 +5582,7 @@ devDependencies. `node_modules/` is gitignored.
 - Setup docs now really install the Hermes plugin by its catalog name.
 - Removed the unused paper-look fonts from the app again.
 
-## 0.52.3 (build 318) — 2026-11-13 — CURRENT
+## 0.52.3 (build 318) — 2026-11-13
 - The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
 - Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
 - The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
@@ -5592,6 +5592,10 @@ devDependencies. `node_modules/` is gitignored.
 - The "To approve" caption under the hold key stays on one line, the countdown and the request number no longer run together, and the AI summary shows its risk on its own line.
 - The approved and denied stamp grows with its text and shrinks to fit the screen, and the receipt slip is as tall as its lines instead of a fixed height, and sits clear of the keys.
 - The new-device screen explains a cancelled fingerprint check in its own words and in amber instead of showing the system's wording.
+
+## 0.52.4 (build 319) — 2026-11-13 — CURRENT
+- The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
+- Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
 
 ## Keeping this file honest
 

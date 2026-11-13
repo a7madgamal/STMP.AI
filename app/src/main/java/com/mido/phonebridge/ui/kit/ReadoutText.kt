@@ -10,7 +10,6 @@ import android.text.Spanned
 import android.text.SpannableStringBuilder
 import androidx.appcompat.widget.AppCompatTextView
 import com.mido.phonebridge.ui.SoftWrap
-import kotlin.math.floor
 
 /**
  * The text of a [Readout]. With [softWrap] on it wraps only at whitespace (see [SoftWrap]) and marks
@@ -25,7 +24,7 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
 
     /** Wrap at whitespace and mark soft wraps. Off: the platform wraps as it always did. */
     var softWrap: Boolean = false
-        set(value) { field = value; columns = -1; requestLayout() }
+        set(value) { field = value; wrappedFor = null; requestLayout() }
 
     /** Colour of the continuation glyph. */
     var glyphColor: Int = 0
@@ -35,38 +34,58 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         private set
 
     private var source: CharSequence? = null
-    private var columns = -1
+    private var wrappedFor: Key? = null
     private var isRewrapping = false
     private val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override fun setText(text: CharSequence?, type: BufferType?) {
         if (!isRewrapping) {
             source = text
-            columns = -1
+            wrappedFor = null
             insertedAt = IntArray(0)
         }
         super.setText(text, type)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        if (softWrap && MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
-            rewrap(MeasureSpec.getSize(widthMeasureSpec) - totalPaddingLeft - totalPaddingRight)
+        if (!softWrap || MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            return
         }
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        val available = MeasureSpec.getSize(widthMeasureSpec) - totalPaddingLeft - totalPaddingRight
+        // The advances are measured, so a line SoftWrap calls full really is. Shaping can still make
+        // a run wider than the sum of its chars, so the layout is checked: if the platform added a
+        // wrap of its own (a line count that is not logical lines + our breaks), the budget shrinks
+        // and the text is wrapped again. A silent platform wrap is never left on screen.
+        var factor = 1f
+        for (attempt in 0..MAX_SHRINKS) {
+            rewrap(available, factor)
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            if (!hasForeignWrap()) return
+            factor *= SHRINK_STEP
+        }
     }
 
-    private fun rewrap(availablePx: Int) {
+    private fun hasForeignWrap(): Boolean {
+        val l = layout ?: return false
+        val logical = text.count { it == '\n' } + 1
+        return l.lineCount != logical
+    }
+
+    private fun rewrap(availablePx: Int, factor: Float) {
         val src = source ?: return
-        val advance = paint.measureText("0")
-        if (advance <= 0f || availablePx <= 0) return
-        val cols = floor(availablePx / advance).toInt()
-        if (cols == columns) return
-        columns = cols
+        if (availablePx <= 0) return
+        val key = Key(availablePx, factor, paint.textSize)
+        if (key == wrappedFor) return
+        wrappedFor = key
+        val advances = FloatArray(src.length)
+        paint.getTextWidths(src, 0, src.length, advances)
+        val glyphWidth = paint.measureText(SoftWrap.GLYPH)
         val spanned = src as? Spanned
         val keep = spanned?.getSpans(0, src.length, DangerUnderlineSpan::class.java)
             ?.map { spanned.getSpanStart(it) until spanned.getSpanEnd(it) }
             .orEmpty()
-        val cuts = SoftWrap.breaks(src, cols, keep)
+        val cuts = SoftWrap.breaks(src, advances, availablePx * factor, glyphWidth, keep)
         isRewrapping = true
         try {
             if (cuts.isEmpty()) {
@@ -82,6 +101,13 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         } finally {
             isRewrapping = false
         }
+    }
+
+    private data class Key(val availablePx: Int, val factor: Float, val textSize: Float)
+
+    private companion object {
+        const val MAX_SHRINKS = 6
+        const val SHRINK_STEP = 0.85f
     }
 
     /** [text] as it was given, without the breaks this view added. */

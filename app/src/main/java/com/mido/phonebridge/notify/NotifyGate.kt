@@ -121,8 +121,8 @@ object NotifyGate {
         verb: Verb,
         facts: RequestFacts?,
         needsAi: Boolean,
-        /** Who is asking, by the name the caller registry knows. Blank when unknown. */
-        requester: String = "",
+        /** Who is asking, by the name the caller registry knows. The card shows "unknown requester" when blank. */
+        requester: String,
     ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)

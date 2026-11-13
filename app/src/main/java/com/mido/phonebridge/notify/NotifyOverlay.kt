@@ -280,7 +280,7 @@ object NotifyOverlay {
         facts: RequestFacts?,
         needsAi: Boolean,
         fetchCapMs: Long,
-        requester: String = "",
+        requester: String,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {

@@ -19,9 +19,12 @@ internal object NotifyCardCopy {
     /** D21: a plugin is named by its display name, never its id. */
     fun pluginName(id: String): String = PluginRegistry.all().firstOrNull { it.id == id }?.displayName ?: id
 
-    /** `Work laptop · Contacts`, or just the plugin when the requester is not known to the card. */
+    /** What the card says when no requester name arrives; never an empty header. */
+    const val UNKNOWN_REQUESTER = "unknown requester"
+
+    /** `Work laptop · Contacts`; `unknown requester · Contacts` when no name arrives. */
     fun requesterLine(requester: String, pluginName: String): String =
-        if (requester.isBlank()) pluginName else "$requester · $pluginName"
+        "${requester.ifBlank { UNKNOWN_REQUESTER }} · $pluginName"
 
     /** The AI's call, spelled out so "HIGH" cannot be read as confidence. */
     fun riskWord(risk: Risk): String = "${risk.name} risk"

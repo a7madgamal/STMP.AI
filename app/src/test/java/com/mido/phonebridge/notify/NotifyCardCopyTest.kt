@@ -16,9 +16,16 @@ class NotifyCardCopyTest {
     }
 
     @Test
-    fun `an unnamed requester leaves just the plugin, never a dangling separator`() {
-        assertEquals("Gmail", NotifyCardCopy.requesterLine("", "Gmail"))
-        assertEquals("Gmail", NotifyCardCopy.requesterLine("   ", "Gmail"))
+    fun `an unnamed requester is named unknown, never left out`() {
+        assertEquals("unknown requester · Gmail", NotifyCardCopy.requesterLine("", "Gmail"))
+        assertEquals("unknown requester · Gmail", NotifyCardCopy.requesterLine("   ", "Gmail"))
+    }
+
+    @Test
+    fun `the production call site passes the caller name as requester`() {
+        val src = java.io.File("src/main/java/com/mido/phonebridge/BridgeService.kt").readText()
+        val call = src.substringAfter("NotifyGate.await(").substringBefore("when (decision)")
+        assertTrue(call.contains("requester = callerLabelFor(remote)"))
     }
 
     @Test

@@ -49,6 +49,41 @@ class ReadoutWrapTest : KitTest() {
         for (at in text.insertedAt) assertTrue(text.text[at - 1].isWhitespace())
     }
 
+    /** The platform must never add a wrap of its own: lines = logical lines + our breaks. */
+    private fun assertNoForeignWrap(text: ReadoutText, source: String) {
+        val logical = source.count { it == '\n' } + 1
+        assertEquals(logical + text.insertedAt.size, text.layout.lineCount)
+        val skip = text.insertedAt.toSet()
+        assertEquals(source, text.text.filterIndexed { i, _ -> i !in skip }.toString())
+    }
+
+    @Test
+    fun `Arabic, CJK and emoji never make the platform wrap silently`() {
+        val samples = listOf(
+            "send --subject \"مرحبا بالعالم هذا موضوع طويل جدا للرسالة\" --body \"تحقق من الطلب قبل الموافقة عليه\"",
+            "contact set 你好世界你好世界你好世界你好世界你好世界你好世界你好世界你好世界 done",
+            "post \uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00\uD83D\uDE00 end of message that keeps going and going",
+            "tab\tseparated\tvalues\twith\ttabs\tand a long tail that must wrap at spaces only please ok"
+        )
+        for (src in samples) {
+            val a = host()
+            val h = Readout.create(a, src, Readout.Kind.COMMAND)
+            a.place(h.root)
+            assertNoForeignWrap(h.text as ReadoutText, src)
+        }
+    }
+
+    @Test
+    fun `an IPv6 address at a very narrow width is broken with the glyph, not by the platform`() {
+        val ip = "fd7a:115c:a1e0:ab12:4843:cd96:6258:2f01"
+        val a = host()
+        val h = Readout.create(a, ip, Readout.Kind.DISPLAY, softWrap = true)
+        a.place(h.root)
+        val text = h.text as ReadoutText
+        assertTrue(text.insertedAt.isNotEmpty())
+        assertNoForeignWrap(text, ip)
+    }
+
     @Test
     fun `a short command is not touched`() {
         val a = host()

@@ -55,7 +55,7 @@ class NotifyObscuredTapTest {
         NotifyOverlay.show(
             ctx = ctx, id = id, summary = "Search contacts for sara", label = "SEARCH CONTACTS",
             verb = Verb.READ, windowMs = 60_000L, facts = null, needsAi = false, fetchCapMs = 0L,
-            onOutcome = { outcomes.add(it.reason) },
+            requester = "Work laptop", onOutcome = { outcomes.add(it.reason) },
         )
         shadowOf(Looper.getMainLooper()).idle()
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
