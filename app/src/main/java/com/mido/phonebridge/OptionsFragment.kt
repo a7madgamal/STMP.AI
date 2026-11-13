@@ -815,7 +815,7 @@ class OptionsFragment : BridgeFragment() {
                 "reach; a tailnet address usually works from anywhere.", p.etched,
         ))
         val tokenField = Field.create(
-            ctx, "Token (optional)", token, "Leave empty if the server trusts this phone", Field.Kind.SECRET,
+            ctx, "Token (optional)", token, "Empty if the server trusts this phone", Field.Kind.SECRET,
             onChange = { draft = draft.copy(token = it) },
         )
         panel.addView(spaced(tokenField.root))

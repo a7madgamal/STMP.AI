@@ -206,7 +206,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ViewCompat.setAccessibilityHeading(this, true)
         }
         row.addView(mark, weightParams())
-        row.addView(Etched.label(ctx, "v" + BuildConfig.VERSION_NAME), wrapParams())
+        row.addView(Etched.label(ctx, "v" + BuildConfig.VERSION_NAME).apply { isAllCaps = false }, wrapParams())
         row.layoutParams = matchWrapParams().apply { bottomMargin = ctx.dp(Dimens.SPACE_M) }
         return row
     }

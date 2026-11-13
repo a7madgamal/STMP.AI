@@ -49,7 +49,10 @@ object Field {
         val edit = EditText(ctx).apply {
             id = View.generateViewId()
             setText(value)
-            this.hint = hint
+            // The hint is always the sans face, even in a mono (URL, secret) field, and cut with an
+            // ellipsis rather than mid-glyph when it is too long for the box.
+            this.hint = sansHint(ctx, hint)
+            ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(p.ink)
             setHintTextColor(p.etched)
             Type.apply(this, if (kind == Kind.TEXT) TypeRole.BODY else TypeRole.MONO_BODY)
@@ -132,5 +135,15 @@ object Field {
             })
         }
         return handle
+    }
+}
+
+private fun sansHint(ctx: Context, hint: String): CharSequence {
+    val face = com.mido.phonebridge.ui.tokens.Fonts.get(ctx, TypeRole.BODY.face)
+    return android.text.SpannableString(hint).apply {
+        setSpan(object : android.text.style.MetricAffectingSpan() {
+            override fun updateDrawState(tp: android.text.TextPaint) { tp.typeface = face }
+            override fun updateMeasureState(tp: android.text.TextPaint) { tp.typeface = face }
+        }, 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }

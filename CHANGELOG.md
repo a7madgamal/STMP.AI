@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.10 (build 325)**.
+Current build: **v0.52.11 (build 326)**.
 
 ---
 
@@ -5627,10 +5627,15 @@ devDependencies. `node_modules/` is gitignored.
 - The Don't disturb card counts the hidden lines of a long action the same way it draws them, so "+N more lines" can no longer be missing when the fourth line is cut off.
 - On an approval card, a line that is cut in the middle of a word or address now ends in a different arrow than a line that wraps at a space, so a wrap can no longer be read as a space or as part of the word before it.
 
-## 0.52.10 (build 325) — 2026-11-13 — CURRENT
+## 0.52.10 (build 325) — 2026-11-13
 - Rows that open something (the Debug log row, the toggles) leave a small margin on each side, so the keyboard focus ring no longer cuts through the title or the switch.
 - The status light on a one-line row sits on the title line instead of floating above it.
 - A freeze report on Home now has a Dismiss row, and it is cleared by an upgrade like a crash report. When both a crash and a freeze are recorded, Home shows the crash and copies the crash.
+
+## 0.52.11 (build 326) — 2026-11-13 — CURRENT
+- Field hints are always in the regular face and end in an ellipsis instead of being cut mid-letter; the longest hints in Secrets and Settings are shorter.
+- "Not in this build" on the Plugins list breaks as "Not in / this build" instead of leaving "build" alone on a line.
+- The version in the Home header reads "v0.52.11", not "V0.52.11".
 
 ## Keeping this file honest
 

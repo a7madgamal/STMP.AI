@@ -70,7 +70,7 @@ object PluginRow {
             },
         )
         status.addView(
-            Type.text(ctx, model.word, TypeRole.LABEL, wordColor),
+            Type.text(ctx, balanceWord(model.word), TypeRole.LABEL, wordColor),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
         )
         text.addView(status, matchWrap().apply { topMargin = ctx.dp(Dimens.SPACE_XS) })
@@ -89,4 +89,15 @@ object PluginRow {
         })
         return row
     }
+}
+
+/**
+ * A status word that has to wrap breaks in the middle, not with one orphan word: "NOT IN" over
+ * "THIS BUILD". Words of three or more get their break after the first half, display only.
+ */
+internal fun balanceWord(word: String): String {
+    val parts = word.split(' ')
+    if (parts.size < 4) return word
+    val half = parts.size / 2
+    return parts.take(half).joinToString("\u00A0") + " " + parts.drop(half).joinToString("\u00A0")
 }

@@ -462,13 +462,13 @@ class SecretsActivity : FragmentActivity() {
         // The two links are NOT secret (they are pointers, not credentials), so they are
         // ordinary text fields and they are stored in the plaintext index. Both optional.
         val docsField = Field.create(this, "API DOCS", existingLinks.docs, "API docs URL (optional)", Field.Kind.URL)
-        val keyField = Field.create(this, "WHERE TO GET THE KEY", existingLinks.key, "Where to get the key (optional)", Field.Kind.URL)
+        val keyField = Field.create(this, "WHERE TO GET THE KEY", existingLinks.key, "Where to get it (optional)", Field.Kind.URL)
         // Allowed hosts live in the SAME dialog as everything else about the secret: a secret and
         // its domains are one thing. Prefilled from what is stored so a replace does not silently
         // drop the rules.
         val hostsField = Field.create(
             this, "ALLOWED HOSTS", existingLinks.hosts.joinToString(", "),
-            "Allowed hosts, comma-separated, e.g. api.todoist.com",
+            "api.todoist.com, comma-separated",
         )
         StmpDialog.builder(this)
             .setTitle(
