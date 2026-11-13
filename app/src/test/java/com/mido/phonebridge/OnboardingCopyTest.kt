@@ -42,7 +42,7 @@ class OnboardingCopyTest {
     @Test fun `hermes commands are two lines`() {
         val lines = OnboardingCopy.hermesCommands(base).lines()
         assertEquals(2, lines.size)
-        assertEquals("hermes plugins install a7madgamal/hermes-stmp --enable", lines[0])
+        assertEquals("hermes plugins install stmp --enable --yes-deps", lines[0])
         assertTrue(lines[1].endsWith(base))
     }
 

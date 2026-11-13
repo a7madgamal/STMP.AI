@@ -4,6 +4,12 @@ package com.mido.phonebridge
 class StmpApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
+        // Skipped under Robolectric: its paused main looper never runs the stall heartbeat, so the
+        // watchdog thread would pile up and run the unit-test JVM out of memory.
+        if (android.os.Build.FINGERPRINT != "robolectric") {
+            Crash.install(this)
+            Stall.install(this)
+        }
         com.mido.phonebridge.ui.Theme.install(this)
     }
 }

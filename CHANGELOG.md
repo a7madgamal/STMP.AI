@@ -5486,7 +5486,6 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.49.18 (build 314) — 2026-11-12
 - On the Gmail, Calendar and Drive screens, tap the "Sign in" status to sign in with Google.
 
-||||||| 062d573
 ## 0.49.0 (build 293) — 2026-11-11
 - The Refined Paper foundation bundles Atkinson Hyperlegible Next for readable UI text and JetBrains Mono NL for exact payloads, while Handlee remains the display and stamp face.
 - Semantic text and control colours meet the agreed contrast floor; the stamp accent and destructive danger are now distinct.
@@ -5552,8 +5551,7 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.5 (build 307) — 2026-11-12
 - Added an opt-in `-PemuAbi=true` build flag that adds `x86_64` alongside `arm64-v8a`, so an x86_64 emulator can load the native model library. A normal build is unchanged and still arm64 only.
 
-
-## 0.52.0 (build 315) — 2026-11-13 — CURRENT
+## 0.52.0 (build 315) — 2026-11-13
 - This build includes everything from upstream 0.49.0 through 0.51.5, brought into the new look.
 - STMP now asks for your fingerprint when a request needs a locked vault, then carries on with the request.
 - Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
@@ -5562,6 +5560,11 @@ devDependencies. `node_modules/` is gitignored.
 - The result stamp waits for a tap instead of expiring on its own.
 - Setup docs install the Hermes plugin by its catalog name.
 - Added an opt-in emulator ABI build flag.
+
+## 0.52.1 (build 316) — 2026-11-13 — CURRENT
+- Crash recording and frozen main thread detection are now really switched on at start-up, so the last crash and stall show up on Home and in the debug commands.
+- Setup docs now really install the Hermes plugin by its catalog name.
+- Removed the unused paper-look fonts from the app again.
 
 ## Keeping this file honest
 

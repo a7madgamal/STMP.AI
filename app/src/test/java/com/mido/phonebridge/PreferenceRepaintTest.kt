@@ -20,7 +20,7 @@ import java.io.File
 class PreferenceRepaintTest {
 
     private val options = File("src/main/java/com/mido/phonebridge/OptionsFragment.kt")
-    private val inventory = File("src/main/java/com/mido/phonebridge/ui/PluginInventoryView.kt")
+    private val inventory = File("src/main/java/com/mido/phonebridge/PluginsFragment.kt")
 
     @Test
     fun `preference repaints are posted and coalesced, never run inside the click`() {
@@ -48,7 +48,7 @@ class PreferenceRepaintTest {
 
     @Test
     fun `the plugin toggle defers its row rebuild out of click dispatch`() {
-        assertTrue("PluginInventoryView.kt missing", inventory.isFile)
+        assertTrue("PluginsFragment.kt missing", inventory.isFile)
         val source = inventory.readText()
 
         assertTrue(

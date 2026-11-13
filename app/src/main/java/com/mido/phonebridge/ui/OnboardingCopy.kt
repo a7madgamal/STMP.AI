@@ -29,7 +29,7 @@ internal object OnboardingCopy {
 
     /** The address is interpolated, so the second line cannot be pasted with a stale IP. */
     fun hermesCommands(base: String): String =
-        "hermes plugins install a7madgamal/hermes-stmp --enable\n" +
+        "hermes plugins install stmp --enable --yes-deps\n" +
             "hermes config set plugins.entries.stmp.settings.base_url $base"
 
     /**
