@@ -5552,9 +5552,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.5 (build 307) — 2026-11-12
 - Added an opt-in `-PemuAbi=true` build flag that adds `x86_64` alongside `arm64-v8a`, so an x86_64 emulator can load the native model library. A normal build is unchanged and still arm64 only.
 
+## 0.51.6 (build 308) — 2026-11-12
+- The stamp plays on a hint card again. Its overlay window cannot take focus, so the arming loop never armed and the removal backstop fired first: zero frames, and no impact callback, which is where the sound came from.
+- The stamp lands on the card it approves, sized from the card's own rect rather than the whole display.
+
+## 0.51.7 (build 309) — 2026-11-13
+- The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
 
 ## 0.52.0 (build 315) — 2026-11-13 — CURRENT
-- This build includes everything from upstream 0.49.0 through 0.51.5, brought into the new look.
+- This build includes everything from upstream 0.49.0 through 0.51.7, brought into the new look.
 - STMP now asks for your fingerprint when a request needs a locked vault, then carries on with the request.
 - Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
 - Plugin groups no longer fail to draw on first open, and preference taps no longer freeze.
@@ -5562,6 +5568,7 @@ devDependencies. `node_modules/` is gitignored.
 - The result stamp waits for a tap instead of expiring on its own.
 - Setup docs install the Hermes plugin by its catalog name.
 - Added an opt-in emulator ABI build flag.
+- The hint card stamp fixes from upstream 0.51.6 and 0.51.7 are not needed: the new punch already plays on the card.
 
 ## Keeping this file honest
 
