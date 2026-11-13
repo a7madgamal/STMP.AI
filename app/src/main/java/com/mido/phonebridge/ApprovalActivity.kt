@@ -165,8 +165,11 @@ class ApprovalActivity : FragmentActivity() {
         // that decision (see ApprovalView.requiresBiometric). Read once, here.
         val requiresBiometric = view?.requiresBiometric == true
         // The exception offer, or null. Read once, like requiresBiometric: the gate
-        // decided whether the modal may offer it (only under AUTOMATIC).
-        val offer = view?.exceptionOffer
+        // decided whether the modal may offer it (only under WHITELIST, never with a
+        // password). Dropped here too for a password request: the exception tap carries no
+        // password, so it must never render beside a password field — the gate would refuse
+        // it anyway (ApprovalGate.resolveWithException).
+        val offer = if (view?.needsPassword == true) null else view?.exceptionOffer
         // The gate decided whether this request cannot proceed without a password.
         // Read once, like the other two: the UI renders decisions, it does not make them.
         needsPassword = view?.needsPassword == true

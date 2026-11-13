@@ -5454,9 +5454,13 @@ devDependencies. `node_modules/` is gitignored.
 
 ## 0.51.7 (build 309) — 2026-11-13
 - The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
-## 0.51.8 (build 310) — 2026-11-13 — CURRENT
+## 0.51.8 (build 310) — 2026-11-13
 - The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
 - A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
+
+## 0.51.9 (build 311) — 2026-11-13 — CURRENT
+- A sudo request can no longer be approved by the exception button. That button carries no password, so one tap approved with an empty field, skipped the password path, and wrote a rule relaxing every SSH command for the plugin/verb pair.
+- The offer is not built for a password request, and the gate refuses any approval of one that does not carry the password, whichever button sent it. DENY still works.
 
 ## Keeping this file honest
 

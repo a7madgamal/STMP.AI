@@ -9,7 +9,11 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.policy.GlobalMode
+import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.Rule
+import com.mido.phonebridge.policy.exceptionModeFor
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -194,6 +198,43 @@ object ApprovalGate {
      * on the gate/dispatch side, where it is unit-tested and audited.
      */
     class ExceptionOffer(val rule: Rule, val label: String)
+
+    /**
+     * The exception the modal may offer for this request, or null when it must not.
+     *
+     * **Only under `WHITELIST`.** `resolve()` reads the rule table in that mode alone, so
+     * under a forced `PARANOID`/`DONT_DISTURB` a written rule is inert — offering the button
+     * there would be offering a tap that changes nothing. Rather than flip the switch behind
+     * the human's back (Mido's call, 2026-10-19: *"it should work with automatic and that's
+     * it"*), the offer is simply absent and the button does not render.
+     *
+     * **Never for a request that needs a password.** The exception button approves through
+     * [resolveWithException], which carries no password: offering it on a sudo modal let one
+     * tap approve with an empty field, skipping the password path entirely, and write a rule
+     * that relaxes the whole plugin/verb pair from a prompt the human opened for one sudo
+     * command. A password request is approvable only through APPROVE + the typed password.
+     *
+     * Lives here rather than in the dispatcher so the password rule and the mode rule cannot
+     * drift apart: this is the single place that decides whether the button may exist.
+     *
+     * The mode is the OTHER one — see [exceptionModeFor] — so the label always names the
+     * behaviour the tap will produce.
+     */
+    fun exceptionOfferFor(
+        globalMode: GlobalMode,
+        plugin: String,
+        verb: Verb,
+        resolvedMode: Mode,
+        needsPassword: Boolean
+    ): ExceptionOffer? {
+        if (needsPassword) return null
+        if (globalMode != GlobalMode.WHITELIST) return null
+        val exceptionMode = exceptionModeFor(resolvedMode)
+        return ExceptionOffer(
+            rule = Rule(plugin, verb, exceptionMode),
+            label = if (exceptionMode == Mode.DONT_DISTURB) "ALWAYS NOTIFY" else "ALWAYS ASK"
+        )
+    }
 
     /**
      * Everything the modal needs to state, in human terms, exactly what is being
@@ -530,6 +571,11 @@ object ApprovalGate {
     fun resolve(requestId: Long, approved: Boolean): Boolean {
         val p = current ?: return false
         if (p.requestId != requestId) return false
+        // **Refuses an approval for a request that needs a password.** Such a request may only
+        // be approved through [resolveWithPassword]; approving it here would let the command
+        // reach sudo with nothing on its stdin. Enforced at the gate, not only by the disabled
+        // button, so no UI path can approve around the password. A DENY is always accepted.
+        if (approved && p.needsPassword) return false
         p.approved = approved
         p.decidedAtMs = System.currentTimeMillis()
         p.latch.countDown()
@@ -547,6 +593,9 @@ object ApprovalGate {
     fun resolveWithException(requestId: Long, rule: Rule): Boolean {
         val p = current ?: return false
         if (p.requestId != requestId) return false
+        // Defence in depth behind [exceptionOfferFor]: the exception tap carries no password,
+        // so a request that needs one can never be approved through it, offer or not.
+        if (p.needsPassword) return false
         p.exceptionRule = rule
         p.approved = true
         p.decidedAtMs = System.currentTimeMillis()
