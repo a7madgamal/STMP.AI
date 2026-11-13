@@ -150,4 +150,15 @@ class SoftWrapTest {
     fun `an empty text has no breaks`() {
         assertEquals(emptyList<Int>(), SoftWrap.breaks("", 20))
     }
+
+    @Test
+    fun `a break after whitespace and a break inside a token are told apart`() {
+        val text = "curl -fsSL https://downloads.example.com/releases/v1/installer.sh"
+        val cuts = SoftWrap.breaks(text, 14)
+        val hard = cuts.map { SoftWrap.isHardBreak(text, it) }
+        assertTrue("expected a whitespace break", hard.contains(false))
+        assertTrue("expected a break inside the URL", hard.contains(true))
+        for (at in cuts) assertEquals(!text[at - 1].isWhitespace(), SoftWrap.isHardBreak(text, at))
+        assertTrue(SoftWrap.GLYPH != SoftWrap.GLYPH_HARD)
+    }
 }

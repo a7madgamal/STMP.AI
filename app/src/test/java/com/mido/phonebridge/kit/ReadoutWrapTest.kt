@@ -41,6 +41,19 @@ class ReadoutWrapTest : KitTest() {
     }
 
     @Test
+    fun `a break that cuts a token is flagged so it draws another glyph than a whitespace wrap`() {
+        val a = host()
+        val url = "curl -fsSL https://downloads.example.com/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/installer.sh"
+        val h = Readout.create(a, url, Readout.Kind.COMMAND)
+        a.place(h.root)
+        val text = h.text as ReadoutText
+        assertEquals(text.insertedAt.size, text.insertedHard.size)
+        for (i in text.insertedAt.indices) {
+            assertEquals(!text.text[text.insertedAt[i] - 1].isWhitespace(), text.insertedHard[i])
+        }
+    }
+
+    @Test
     fun `each wrap sits right after whitespace`() {
         val a = host()
         val h = Readout.create(a, long, Readout.Kind.COMMAND)

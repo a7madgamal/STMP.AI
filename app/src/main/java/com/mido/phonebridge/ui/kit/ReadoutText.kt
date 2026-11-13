@@ -45,6 +45,10 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
     internal var insertedAt: IntArray = IntArray(0)
         private set
 
+    /** Parallel to [insertedAt]: true where the break cuts a token (no space there), drawn with another glyph. */
+    internal var insertedHard: BooleanArray = BooleanArray(0)
+        private set
+
     private var source: CharSequence? = null
     private var wrappedFor: Key? = null
     private var isRewrapping = false
@@ -55,6 +59,7 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
             source = text
             wrappedFor = null
             insertedAt = IntArray(0)
+            insertedHard = BooleanArray(0)
         }
         super.setText(text, type)
     }
@@ -92,7 +97,7 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         wrappedFor = key
         val advances = FloatArray(src.length)
         paint.getTextWidths(src, 0, src.length, advances)
-        val glyphWidth = paint.measureText(SoftWrap.GLYPH)
+        val glyphWidth = maxOf(paint.measureText(SoftWrap.GLYPH), paint.measureText(SoftWrap.GLYPH_HARD))
         val spanned = src as? Spanned
         val keep = spanned?.getSpans(0, src.length, DangerUnderlineSpan::class.java)
             ?.map { spanned.getSpanStart(it) until spanned.getSpanEnd(it) }
@@ -102,12 +107,14 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         try {
             if (cuts.isEmpty()) {
                 insertedAt = IntArray(0)
+                insertedHard = BooleanArray(0)
                 super.setText(src, BufferType.SPANNABLE)
             } else {
                 val wrapped = SpannableStringBuilder(src)
                 // Back to front, so the earlier indices are still valid while inserting.
                 for (i in cuts.indices.reversed()) wrapped.insert(cuts[i], "\n")
                 insertedAt = IntArray(cuts.size) { cuts[it] + it }
+                insertedHard = BooleanArray(cuts.size) { SoftWrap.isHardBreak(src, cuts[it]) }
                 super.setText(wrapped, BufferType.SPANNABLE)
             }
         } finally {
@@ -131,11 +138,14 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         if (insertedAt.isEmpty()) return
         glyphPaint.set(paint)
         glyphPaint.color = glyphColor
-        val x = (width - totalPaddingRight).toFloat() - glyphPaint.measureText(SoftWrap.GLYPH)
-        for (at in insertedAt) {
+        val right = (width - totalPaddingRight).toFloat()
+        for (i in insertedAt.indices) {
+            val at = insertedAt[i]
             if (at >= text.length) continue
+            val glyph = if (insertedHard[i]) SoftWrap.GLYPH_HARD else SoftWrap.GLYPH
+            val x = right - glyphPaint.measureText(glyph)
             val y = totalPaddingTop + l.getLineBaseline(l.getLineForOffset(at)).toFloat()
-            canvas.drawText(SoftWrap.GLYPH, x, y, glyphPaint)
+            canvas.drawText(glyph, x, y, glyphPaint)
         }
     }
 

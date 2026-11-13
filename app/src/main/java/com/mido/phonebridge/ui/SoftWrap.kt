@@ -21,6 +21,12 @@ object SoftWrap {
     /** The glyph drawn at the end of a soft-wrapped line. */
     const val GLYPH = "↵"
 
+    /** Drawn instead of [GLYPH] where a token is cut in two: there is no space at this break. */
+    const val GLYPH_HARD = "↩"
+
+    /** True when a break before [at] cuts through a token (the line above does not end in whitespace). */
+    fun isHardBreak(text: CharSequence, at: Int): Boolean = at > 0 && !text[at - 1].isWhitespace()
+
     private const val BOUNDARY_CHARS = "/?&=#,;"
 
     /** How far back from the line end a hard break may search for a natural boundary. */
