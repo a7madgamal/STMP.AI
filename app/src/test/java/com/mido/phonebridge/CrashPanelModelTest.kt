@@ -40,6 +40,12 @@ class CrashPanelModelTest {
         assertEquals("STMP stall", m.clipName)
     }
 
+    @Test fun `a stall headline drops the package path`() {
+        val long = "at=2\nfrozen thread=main\n    at com.mido.phonebridge.HomeFragment.render(HomeFragment.kt:377)"
+        assertEquals("Frozen in HomeFragment.render (HomeFragment.kt:377)", CrashPanelModel.of(null, long)!!.headline)
+        assertEquals("Frozen in B.d (B.kt:2)", CrashPanelModel.of(null, stall)!!.headline)
+    }
+
     @Test fun `a recorded stall is read through the evidence rule and clear removes it`() {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         File(ctx.filesDir, "last-stall.txt").writeText(stall)

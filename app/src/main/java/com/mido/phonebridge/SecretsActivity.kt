@@ -223,7 +223,7 @@ class SecretsActivity : FragmentActivity() {
                 KeyButton.Spec("REVEAL", "Reveal $n") { revealValue(n) },
                 KeyButton.Spec("REPLACE", "Replace $n") { addSecretDialog(n) },
             ),
-            delete,
+            null,
         )
         card.addView(header, fullWidth())
         VaultModule.setKeyEnabled(header, "Reveal $n", unlocked)
@@ -231,6 +231,14 @@ class SecretsActivity : FragmentActivity() {
 
         addLinks(card, n, meta)
         addHosts(card, n, meta)
+        // The destructive key closes the card, away from the keys that only read or change a value.
+        card.addView(
+            KeyButton.create(
+                this, delete.label, KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL, describe = delete.describe,
+                onClick = delete.onClick,
+            ),
+            endAligned().apply { topMargin = dp(Dimens.SPACE_M) },
+        )
         return card
     }
 

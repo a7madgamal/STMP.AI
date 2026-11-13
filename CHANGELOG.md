@@ -5644,10 +5644,20 @@ devDependencies. `node_modules/` is gitignored.
 - A command that cannot fit the screen is marked with a caution-coloured ellipsis and read out as "Text did not fit" instead of being cut off silently.
 - A Don't disturb card that cuts off part of the request ("+N more lines") no longer approves when its time runs out. It says so on the card, and only a tap approves it.
 
-## 0.52.13 (build 328) — 2026-11-13 — CURRENT
+## 0.52.13 (build 328) — 2026-11-13
 - The fingerprint prompt that approves a request now shows the request's method and path with hidden characters written out as `\u{XXXX}` marks, like the approval card. Before, it showed them raw, so a path could be re-ordered on the one screen that asks for your fingerprint.
 - More invisible characters are now shown as marks: the combining grapheme joiner, Hangul and Khmer fillers, variation selectors (U+FE00 to U+FE0F and the tag-block ones), U+2060 to U+206F, and the whole tag block. This is strict on purpose: U+FE0F and the zero-width joiner are marked even inside an emoji, so a heart or a family emoji in a request may show a small mark next to it.
 - The exact list of what is marked is now one shared file in the repository (`contract/text-sanitiser.json`) with test cases, so the iOS app can show the same thing.
+
+## 0.52.14 (build 329) — 2026-11-14 — CURRENT
+- A field hint that is too long for its box now ends in an ellipsis; it is cut to fit the box at every text size.
+- A crash or freeze report on Home no longer touches the Bridge card below it, and a freeze report names the code that was running in short form.
+- The request detail screen keeps the status light and the clock on the first line of a long title, and the verb tag sits beside the plugin name.
+- In a secret's card the Delete key is the last thing in the card.
+- Every dialog is the same width.
+- The debug log lines up wrapped lines under the message, not under the time, never shows a half-cut line at the top, and its Show/Hide and Copy keys are the same kind of key.
+- Home cards all open with their own heading, and the secondary keys (What is STMP, Check now, Open releases page) are the same small key.
+- A caller in Settings has a status light: green when allowed, hollow when blocked.
 
 ## Keeping this file honest
 

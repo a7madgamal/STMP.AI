@@ -24,7 +24,13 @@ class ActionRow(
     detail: String?,
     actions: List<KeyButton.Spec>,
     destructive: KeyButton.Spec?,
+    led: Led.State? = null,
 ) : ViewGroup(ctx) {
+
+    private companion object {
+        const val LED_DP = 16
+        const val LED_GAP_DP = 10
+    }
 
     private val content: LinearLayout
     private val keys: List<MaterialButton>
@@ -51,9 +57,27 @@ class ActionRow(
         val p = Theme.palette(ctx)
         content = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            addView(Type.text(ctx, title, TypeRole.ROW_LABEL, p.ink), matchWrap())
+            val titleView = Type.text(ctx, title, TypeRole.ROW_LABEL, p.ink)
+            // With a status light the text hangs under the title, as in StatusRow, and the light
+            // sits on the title's first line.
+            val textInset = if (led != null) ctx.dp(LED_DP) + ctx.dp(LED_GAP_DP) else 0
+            if (led != null) {
+                addView(LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(Led(ctx).apply { state = led }, LinearLayout.LayoutParams(ctx.dp(LED_DP), ctx.dp(LED_DP)).apply {
+                        marginEnd = ctx.dp(LED_GAP_DP)
+                        topMargin = (titleView.lineHeight - ctx.dp(LED_DP)).coerceAtLeast(0) / 2
+                    })
+                    addView(titleView, LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }, matchWrap())
+            } else {
+                addView(titleView, matchWrap())
+            }
             if (!detail.isNullOrEmpty()) {
-                addView(Type.text(ctx, detail, TypeRole.DETAIL, p.etched), matchWrap().apply { topMargin = ctx.dp(2) })
+                addView(Type.text(ctx, detail, TypeRole.DETAIL, p.etched), matchWrap().apply {
+                    topMargin = ctx.dp(2)
+                    marginStart = textInset
+                })
             }
             contentDescription = if (detail.isNullOrEmpty()) title else "$title, $detail"
             androidx.core.view.ViewCompat.setScreenReaderFocusable(this, true)

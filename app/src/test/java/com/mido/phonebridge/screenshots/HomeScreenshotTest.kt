@@ -92,6 +92,11 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun tape_gate_changes() { Fixtures.auditTapeGateChanges(); capture("tape_gate_changes") }
     @Test fun tape_empty() { capture("tape_empty") }
 
+    // --- crash / freeze panel --------------------------------------------------------------------
+    @Test fun crash_only() { Fixtures.selfReports(crash = true, stall = false); capture("crash_only") }
+    @Test fun stall_only() { Fixtures.selfReports(crash = false, stall = true); capture("stall_only") }
+    @Test fun crash_and_stall() { Fixtures.selfReports(crash = true, stall = true); capture("crash_and_stall") }
+
     // --- updates -------------------------------------------------------------------------------
     @Test fun updates_up_to_date() { Fixtures.updatesUpToDate(); capture("updates_up_to_date") }
     @Test fun updates_available() { Fixtures.updatesAvailable(); capture("updates_available") }

@@ -392,9 +392,33 @@ object Fixtures {
     }
 
     fun resetHome() {
+        deleteSelfReports()
         Updater.installing = false
         Updater.installingVersion = null
         Updater.installCancelled = false
+    }
+
+    private const val CRASH_FILE = "last-crash.txt"
+    private const val STALL_FILE = "last-stall.txt"
+
+    private fun deleteSelfReports() {
+        listOf(CRASH_FILE, STALL_FILE).forEach { java.io.File(app.filesDir, it).delete() }
+    }
+
+    /** Home crash panel: a recorded crash and/or freeze report (R5). */
+    fun selfReports(crash: Boolean, stall: Boolean) {
+        deleteSelfReports()
+        val header = "at=1\nversion=0.52.12 (327)\n"
+        if (crash) java.io.File(app.filesDir, CRASH_FILE).writeText(
+            header + "thread=main\njava.lang.IllegalStateException: Vault is locked while a request was in flight\n" +
+                "    at com.mido.phonebridge.SecretVault.read(SecretVault.kt:212)\n" +
+                "    at com.mido.phonebridge.BridgeService.handle(BridgeService.kt:480)\n",
+        )
+        if (stall) java.io.File(app.filesDir, STALL_FILE).writeText(
+            header + "thread=stall-watch\nfrozen thread=main\n" +
+                "    at com.mido.phonebridge.HomeFragment.render(HomeFragment.kt:377)\n" +
+                "    at android.os.Handler.handleCallback(Handler.java:942)\n",
+        )
     }
 
     // --- WP08: request log, request detail, Exceptions -------------------------------------------

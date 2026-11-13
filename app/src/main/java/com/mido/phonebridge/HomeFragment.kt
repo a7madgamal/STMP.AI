@@ -163,20 +163,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         container.addView(buildBridgePanel(p))
 
-        container.addView(SectionHeader.create(ctx, "Get started"))
-        container.addView(
-            KeyButton.create(ctx, "What is STMP?", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) {
+        // Every module opens with its own in-panel header (COMPONENTS 12); a secondary key is a
+        // small PANEL key, start-aligned, whichever card it sits in.
+        val startPanel = Panel.create(ctx)
+        startPanel.addView(SectionHeader.create(ctx, "Get started", inPanel = true))
+        startPanel.addView(
+            KeyButton.create(ctx, "What is STMP?", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
                 go(Intent(ctx, OnboardingActivity::class.java))
             },
-            matchWrapParams().apply { bottomMargin = ctx.dp(Dimens.MODULE_GAP) },
+            wrapParams(),
         )
+        container.addView(startPanel)
 
         container.addView(buildGatePanel(p))
 
         tapeHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(tapeHost, matchWrapParams())
 
-        container.addView(SectionHeader.create(ctx, "Updates"))
         updatesHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(updatesHost, matchWrapParams())
         // Filled at build time: a host that only `refreshUpdateSection` fills shows a bare header
@@ -444,7 +447,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 ),
             )
         }
-        crashHost.addView(panel, matchWrapParams())
+        crashHost.addView(panel, matchWrapParams().apply { bottomMargin = ctx.dp(Dimens.MODULE_GAP) })
     }
 
     private fun renderBridge() {
@@ -895,6 +898,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     private fun updateBlock(): View {
         val p = Theme.palette(ctx)
         val panel = Panel.create(ctx)
+        panel.addView(SectionHeader.create(ctx, "Updates", inPanel = true))
         val outcome = Updater.lastOutcome
         val checking = Updater.checking
         val channel = UpdatePrefs.channel(requireContext())
@@ -973,7 +977,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         // 5. Primary action
         val primary = when {
-            checking -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { }
+            checking -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) { }
                 .apply { isEnabled = false }
             installing -> KeyButton.create(ctx, "Cancel", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL) {
                 // Offered while the download is running; once Android's own dialog is up the
@@ -987,11 +991,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             outcome is Updater.Outcome.Available -> KeyButton.create(
                 ctx, "Update to v${outcome.version}", KeyButton.Kind.INK, KeyButton.Size.REGULAR,
             ) { installUpdate(outcome) }
-            else -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { checkForUpdates() }
+            else -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) { checkForUpdates() }
         }
         panel.addView(
             primary,
-            (if (installing) wrapParams() else matchWrapParams()).apply { topMargin = ctx.dp(10) },
+            (if (outcome is Updater.Outcome.Available && !installing && !checking) matchWrapParams() else wrapParams())
+                .apply { topMargin = ctx.dp(10) },
         )
 
         // 6. Last checked
@@ -1022,7 +1027,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             val releases = if (failed) {
                 KeyButton.create(ctx, "Get it from GitHub", KeyButton.Kind.INK, KeyButton.Size.REGULAR) { openReleasesPage() }
             } else {
-                KeyButton.create(ctx, "Open releases page", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL) { openReleasesPage() }
+                KeyButton.create(ctx, "Open releases page", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) { openReleasesPage() }
             }
             panel.addView(
                 releases,

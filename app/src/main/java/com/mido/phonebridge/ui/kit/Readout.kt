@@ -63,6 +63,26 @@ object Readout {
 
     class Handle(val root: View, val text: TextView, val prompt: TextView?)
 
+    /** A log line starts with `HH:MM:SS` and two spaces; a wrapped line lines up under the message. */
+    private const val LOG_STAMP = "00:00:00  "
+
+    /** [text] with every line after the first row of each log entry indented by [hang] pixels. */
+    internal fun hangingIndent(text: CharSequence, hang: Float): CharSequence {
+        val out = android.text.SpannableStringBuilder(text)
+        var start = 0
+        while (start <= out.length) {
+            val nl = out.indexOf('\n', start).let { if (it < 0) out.length else it }
+            if (nl > start) {
+                out.setSpan(
+                    android.text.style.LeadingMarginSpan.Standard(0, hang.toInt()), start, nl,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+            start = nl + 1
+        }
+        return out
+    }
+
     /**
      * @param softWrap wrap only at whitespace and mark each soft wrap with a continuation glyph
      *   (see [com.mido.phonebridge.ui.SoftWrap]). On by default for a command, where a wrap read
@@ -100,7 +120,7 @@ object Readout {
             glyphColor = p.readoutMuted
             cautionColor = p.readoutDanger
             this.softWrap = softWrap
-            setText(shown)
+            setText(if (kind == Kind.LOG) hangingIndent(shown, paint.measureText(LOG_STAMP)) else shown)
             setTextIsSelectable(true)
             hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE
             breakStrategy = Layout.BREAK_STRATEGY_SIMPLE
@@ -116,7 +136,14 @@ object Readout {
             fadeColor = p.readout
             val h = ctx.resources.displayMetrics.heightPixels
             maxHeightPx = when (kind) {
-                Kind.COMMAND, Kind.LOG -> (h * 0.4f).toInt()
+                Kind.COMMAND -> (h * 0.4f).toInt()
+                // A log is scrolled to its end: a height of whole lines keeps the top line from
+                // being cut through when it is.
+                Kind.LOG -> {
+                    val pad = ctx.dp(12) * 2
+                    val lines = ((h * 0.4f).toInt() - pad) / text.lineHeight
+                    lines * text.lineHeight + pad
+                }
                 Kind.BODY -> (h * 0.5f).toInt()
                 Kind.DISPLAY -> Int.MAX_VALUE
             }

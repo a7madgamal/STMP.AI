@@ -16,12 +16,24 @@ internal data class CrashPanelModel(
     val headline: String,
 ) {
     companion object {
+        private val FRAME = Regex("""^\s*at\s+(?:[\w$]+\.)*([\w$]+\.[\w$<>]+)(\(.*\))\s*$""")
+
+        /**
+         * The line that names the failure. A bare stack frame is shortened to `Frozen in Class.method (File:line)`, with a space to break at:
+         * the full package path has no break points and splits in the middle of a word on a narrow screen.
+         */
+        internal fun headlineOf(detail: String): String {
+            val line = detail.lineSequence()
+                .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }?.trim()
+                ?: return "no detail recorded"
+            val frame = FRAME.matchEntire(line) ?: return line
+            return "Frozen in ${frame.groupValues[1]} ${frame.groupValues[2]}"
+        }
+
         fun of(crash: String?, stall: String?): CrashPanelModel? {
             val isStall = crash == null
             val detail = crash ?: stall ?: return null
-            val headline = detail.lineSequence()
-                .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
-                ?.trim() ?: "no detail recorded"
+            val headline = headlineOf(detail)
             return CrashPanelModel(
                 isStall = isStall,
                 label = if (isStall) "The screen froze" else "The app crashed",

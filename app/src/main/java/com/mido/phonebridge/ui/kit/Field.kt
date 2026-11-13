@@ -49,10 +49,16 @@ object Field {
         val edit = EditText(ctx).apply {
             id = View.generateViewId()
             setText(value)
-            // The hint is always the sans face, even in a mono (URL, secret) field, and cut with an
-            // ellipsis rather than mid-glyph when it is too long for the box.
+            // The hint is always the sans face, even in a mono (URL, secret) field. An EditText has a
+            // key listener, so TextView.ellipsize never applies to it: the hint is cut with an ellipsis
+            // here, against the inner width, every time the box is laid out.
             this.hint = sansHint(ctx, hint)
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+                val e = v as EditText
+                val inner = (r - l) - e.compoundPaddingLeft - e.compoundPaddingRight
+                val fitted = fitHint(ctx, hint, inner, e.paint)
+                if (inner > 0 && e.hint.toString() != fitted.toString()) e.hint = fitted
+            }
             setTextColor(p.ink)
             setHintTextColor(p.etched)
             Type.apply(this, if (kind == Kind.TEXT) TypeRole.BODY else TypeRole.MONO_BODY)
@@ -146,4 +152,19 @@ private fun sansHint(ctx: Context, hint: String): CharSequence {
             override fun updateMeasureState(tp: android.text.TextPaint) { tp.typeface = face }
         }, 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
+}
+
+private const val ELLIPSIS = "…"
+
+/** [hint] in the sans face, cut with an ellipsis so it is never wider than [inner] pixels. */
+internal fun fitHint(ctx: Context, hint: String, inner: Int, base: android.text.TextPaint): CharSequence {
+    if (inner <= 0) return sansHint(ctx, hint)
+    val paint = android.text.TextPaint(base).apply {
+        typeface = com.mido.phonebridge.ui.tokens.Fonts.get(ctx, TypeRole.BODY.face)
+    }
+    if (paint.measureText(hint) <= inner) return sansHint(ctx, hint)
+    // Longest prefix that, with the ellipsis after it, fits.
+    var keep = hint.length
+    while (keep > 0 && paint.measureText(hint.substring(0, keep).trimEnd() + ELLIPSIS) > inner) keep--
+    return sansHint(ctx, hint.substring(0, keep).trimEnd() + ELLIPSIS)
 }

@@ -177,7 +177,7 @@ internal object VaultModule {
      */
     fun dialogBody(activity: FragmentActivity, body: View): View =
         androidx.core.widget.NestedScrollView(activity).apply {
-            setPadding(Theme.dp(activity, Dimens.SPACE_XL), 0, Theme.dp(activity, Dimens.SPACE_XL), 0)
+            setPadding(Theme.dp(activity, Dimens.SPACE_XL), Theme.dp(activity, Dimens.SPACE_S), Theme.dp(activity, Dimens.SPACE_XL), 0)
             addView(body)
         }
 }

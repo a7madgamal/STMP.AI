@@ -471,7 +471,7 @@ class OptionsFragment : BridgeFragment() {
         val panel = Panel.create(ctx)
         val open = DebugLogOpen.open
         val keys = mutableListOf<MaterialButton>(
-            KeyButton.create(ctx, if (open) "Hide log" else "Show log", KeyButton.Kind.OUTLINE) {
+            KeyButton.create(ctx, if (open) "Hide log" else "Show log", KeyButton.Kind.PANEL) {
                 DebugLogOpen.open = !DebugLogOpen.open
                 render()
             }
@@ -483,7 +483,7 @@ class OptionsFragment : BridgeFragment() {
         }
         panel.addView(keyLine(keys))
         if (open) {
-            val readout = Readout.create(ctx, Debug.dump(), Readout.Kind.LOG, prompt = "stmp debug log, newest last")
+            val readout = Readout.create(ctx, Debug.dump(), Readout.Kind.LOG)
             readout.root.layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = ctx.dp(Dimens.SPACE_M) }
@@ -551,6 +551,7 @@ class OptionsFragment : BridgeFragment() {
             panel.addView(ActionRow(
                 ctx, title, detail, emptyList(),
                 KeyButton.Spec("Forget", "Forget $title") { confirmForget(entry, title, policy) },
+                led = if (entry.state is CallerState.Denied) Led.State.OFF else Led.State.OK,
             ))
         }
         container.addView(panel)

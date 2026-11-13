@@ -128,28 +128,26 @@ class LogDetailActivity : AppCompatActivity() {
 
     private fun header(content: LinearLayout, m: LogDetailModel, word: String, tone: AuditCopy.Tone, chip: Boolean) {
         val panel = section(content, null)
-        val line1 = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
+        // The title may wrap to two lines at a large font scale, so the LED and the clock sit on
+        // the FIRST line (not centred on the whole block) and the verb chip moves down beside the
+        // plugin name, where it no longer takes width from the title.
+        val line1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val titleView = Type.text(this, word, TypeRole.TITLE, tone.color(p))
+        val clockView = Type.text(this, clock(m.ts), TypeRole.READOUT, p.etched)
         line1.addView(Led(this).apply {
             state = tone.led()
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(16), dp(16)))
+        }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { topMargin = (titleView.lineHeight - dp(16)).coerceAtLeast(0) / 2 })
         line1.addView(
-            Type.text(this, word, TypeRole.TITLE, tone.color(p)),
+            titleView,
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginStart = dp(Dimens.SPACE_S)
                 marginEnd = dp(Dimens.SPACE_S)
             },
         )
-        val verb = m.verb
-        if (chip && verb != null) {
-            line1.addView(VerbChip.create(this, verb), LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginEnd = dp(Dimens.SPACE_S) })
-        }
-        line1.addView(Type.text(this, clock(m.ts), TypeRole.READOUT, p.etched))
+        line1.addView(clockView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = (titleView.lineHeight - clockView.lineHeight).coerceAtLeast(0) / 2 })
         panel.addView(line1, full())
 
         val headline = when {
@@ -157,7 +155,21 @@ class LogDetailActivity : AppCompatActivity() {
             m.isPolicyChange -> "Gate change"
             else -> "Unrouted request"
         }
-        panel.addView(Type.text(this, headline, TypeRole.ROW_LABEL, p.ink), full().apply { topMargin = dp(Dimens.SPACE_S) })
+        val verb = m.verb
+        val headlineRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        if (chip && verb != null) {
+            headlineRow.addView(VerbChip.create(this, verb), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(Dimens.SPACE_S) })
+        }
+        headlineRow.addView(
+            Type.text(this, headline, TypeRole.ROW_LABEL, p.ink),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        panel.addView(headlineRow, full().apply { topMargin = dp(Dimens.SPACE_S) })
         if (m.isPolicyChange) {
             panel.addView(Type.text(this, "Changed on the phone", TypeRole.DETAIL, p.etched), full())
         }

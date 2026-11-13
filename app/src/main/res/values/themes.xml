@@ -41,6 +41,10 @@
         <item name="colorOnSurfaceVariant">@color/stmp_etched</item>
         <item name="colorPrimary">@color/stmp_ink</item>
         <item name="android:backgroundDimAmount">0.45</item>
+        <!-- One width for every dialog: the minimum is the whole available width, so a short message
+             and a four-field form are the same size. -->
+        <item name="android:windowMinWidthMajor">100%</item>
+        <item name="android:windowMinWidthMinor">100%</item>
         <item name="shapeAppearanceOverlay">@style/ShapeAppearance.STMP.Dialog</item>
         <item name="materialAlertDialogTitleTextStyle">@style/MaterialAlertDialog.STMP.Title.Text</item>
         <item name="materialAlertDialogBodyTextStyle">@style/MaterialAlertDialog.STMP.Body.Text</item>
