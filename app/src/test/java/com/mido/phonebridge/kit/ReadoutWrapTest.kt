@@ -74,6 +74,26 @@ class ReadoutWrapTest : KitTest() {
     }
 
     @Test
+    fun `an Arabic command keeps every line left-to-right with room for the glyph`() {
+        val src = "send --subject \"مرحبا بالعالم هذا موضوع طويل جدا للرسالة\" --body \"تحقق من الطلب قبل الموافقة عليه\""
+        val a = host()
+        val h = Readout.create(a, src, Readout.Kind.COMMAND)
+        a.place(h.root)
+        val text = h.text as ReadoutText
+        val l = text.layout
+        assertTrue(text.insertedAt.isNotEmpty())
+        val glyph = text.paint.measureText(com.mido.phonebridge.ui.SoftWrap.GLYPH)
+        val limit = text.width - text.totalPaddingRight - text.totalPaddingLeft - glyph
+        for (line in 0 until l.lineCount) {
+            assertEquals(android.text.Layout.DIR_LEFT_TO_RIGHT, l.getParagraphDirection(line))
+        }
+        for (at in text.insertedAt) {
+            val line = l.getLineForOffset(at)
+            assertTrue("line $line too wide", l.getLineRight(line) <= limit + 0.5f)
+        }
+    }
+
+    @Test
     fun `an IPv6 address at a very narrow width is broken with the glyph, not by the platform`() {
         val ip = "fd7a:115c:a1e0:ab12:4843:cd96:6258:2f01"
         val a = host()

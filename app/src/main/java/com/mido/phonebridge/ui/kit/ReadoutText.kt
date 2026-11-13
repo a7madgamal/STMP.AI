@@ -24,7 +24,17 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
 
     /** Wrap at whitespace and mark soft wraps. Off: the platform wraps as it always did. */
     var softWrap: Boolean = false
-        set(value) { field = value; wrappedFor = null; requestLayout() }
+        set(value) {
+            field = value
+            wrappedFor = null
+            // Inserted breaks make each line its own paragraph; pin the direction so a line that starts
+            // inside an RTL run is not re-ordered and the glyph (always drawn right) stays in its gutter.
+            if (value) {
+                textDirection = TEXT_DIRECTION_LTR
+                textAlignment = TEXT_ALIGNMENT_VIEW_START
+            }
+            requestLayout()
+        }
 
     /** Colour of the continuation glyph. */
     var glyphColor: Int = 0

@@ -5593,9 +5593,12 @@ devDependencies. `node_modules/` is gitignored.
 - The approved and denied stamp grows with its text and shrinks to fit the screen, and the receipt slip is as tall as its lines instead of a fixed height, and sits clear of the keys.
 - The new-device screen explains a cancelled fingerprint check in its own words and in amber instead of showing the system's wording.
 
-## 0.52.4 (build 319) — 2026-11-13 — CURRENT
+## 0.52.4 (build 319) — 2026-11-13
 - The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
+
+## 0.52.5 (build 320) — 2026-11-13 — CURRENT
+- A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
 
 ## Keeping this file honest
 
