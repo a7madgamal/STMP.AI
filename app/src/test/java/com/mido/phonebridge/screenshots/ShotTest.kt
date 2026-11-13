@@ -31,6 +31,7 @@ abstract class ShotTest(protected val variant: Variant) {
     fun applyVariant() {
         Fixtures.dropSingletons()
         Fixtures.freezeClock()
+        Fixtures.resetSystemState()
         variant.apply()
     }
 

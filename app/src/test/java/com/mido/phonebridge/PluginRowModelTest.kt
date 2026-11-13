@@ -47,9 +47,9 @@ class PluginRowModelTest {
     }
 
     @Test
-    fun `needs attention is ACTION NEEDED`() {
+    fun `needs attention is NEEDS ACTION`() {
         val m = model(Fake("contacts", "Contacts", PluginStatus.State.NEEDS_ATTENTION, "READ_CONTACTS not granted - 503 contacts_unavailable"))
-        assertEquals("ACTION NEEDED", m.word); assertEquals(Tone.CAUTION, m.tone); assertEquals(Led.State.CAUTION, m.led)
+        assertEquals("NEEDS ACTION", m.word); assertEquals(Tone.CAUTION, m.tone); assertEquals(Led.State.CAUTION, m.led)
         assertFalse(m.showsOn); assertEquals(1, m.rank)
         assertEquals("Contacts permission isn't granted. Open this plugin to allow it.", m.detail)
     }
@@ -82,13 +82,32 @@ class PluginRowModelTest {
     fun `google rows say not in this build without a client and win over every state`() {
         for (id in listOf("google", "gmail", "calendar", "drive")) {
             val on = model(Fake(id, id, PluginStatus.State.OFF, "no OAuth client id configured"), enabled = true, google = false)
-            assertEquals("NOT IN THIS BUILD", on.word); assertEquals(5, on.rank); assertTrue(on.showsOn)
+            assertEquals("NOT IN THIS BUILD", on.word); assertEquals(5, on.rank); assertFalse("rocker is OFF whatever was stored", on.showsOn)
             assertEquals(Led.State.OFF, on.led); assertEquals(Tone.NEUTRAL, on.tone)
             assertEquals("This build has no Google sign-in. Install the official release to use it.", on.detail)
             val off = model(Fake(id, id), enabled = false, google = false)
             assertEquals("NOT IN THIS BUILD", off.word); assertFalse(off.showsOn)
         }
         assertEquals("ON", model(Fake("gmail"), google = true).word)
+    }
+
+    @Test
+    fun `a plugin not in this build is not counted on and its detail is the D70 sentence`() {
+        val rows = listOf(
+            model(Fake("gmail"), enabled = true, google = false),
+            model(Fake("notifications"), enabled = true, google = false),
+        )
+        assertTrue(PluginRowModel.isNotInBuild(rows[0]))
+        assertEquals("2 plugins · 1 on", PluginRowModel.summary(rows))
+    }
+
+    @Test
+    fun `inside the plugin the detail never says open this plugin`() {
+        val p = Fake("contacts", "Contacts", PluginStatus.State.NEEDS_ATTENTION, "no permission")
+        val inside = PluginRowModel.of(p, true, hasGoogleClient = true, insidePlugin = true)
+        assertFalse(inside.detail, inside.detail.contains("Open this plugin"))
+        val onTab = PluginRowModel.of(p, true, hasGoogleClient = true)
+        assertTrue(onTab.detail.contains("Open this plugin"))
     }
 
     @Test
@@ -138,9 +157,9 @@ class PluginRowModelTest {
         fun on(n: Int) = List(n) { model(Fake("o$it")) }
         fun action(n: Int) = List(n) { model(Fake("a$it", state = PluginStatus.State.NEEDS_ATTENTION)) }
         fun off(n: Int) = List(n) { model(Fake("f$it"), enabled = false) }
-        assertEquals("12 plugins · 6 on · 2 need attention", PluginRowModel.summary(on(6) + action(2) + off(4)))
+        assertEquals("12 plugins · 6 on · 2 need action", PluginRowModel.summary(on(6) + action(2) + off(4)))
         assertEquals("1 plugin · 1 on", PluginRowModel.summary(on(1)))
-        assertEquals("3 plugins · 0 on · 1 needs attention", PluginRowModel.summary(action(1) + off(2)))
+        assertEquals("3 plugins · 0 on · 1 needs action", PluginRowModel.summary(action(1) + off(2)))
         assertEquals("0 plugins · 0 on", PluginRowModel.summary(emptyList()))
     }
 

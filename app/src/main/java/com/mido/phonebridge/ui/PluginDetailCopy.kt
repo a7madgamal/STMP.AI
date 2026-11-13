@@ -33,6 +33,31 @@ object PluginDetailCopy {
         SpecialAccess.FULL_SCREEN_INTENT -> "Lets an approval wake the screen while the phone is locked."
     }
 
+    /** The first row's label: never "Disabled" for a plugin that is switched on (R3). */
+    fun switchLabel(on: Boolean, showsOn: Boolean, notInBuild: Boolean): String = when {
+        notInBuild -> "Not in this build"
+        showsOn -> "Enabled"
+        on -> "Can't serve"
+        else -> "Disabled"
+    }
+
+    private val LETTERS = Regex("[A-Za-z]")
+    private val LOWER = Regex("[a-z]")
+
+    /** A route's description in sentence case: "TRASH EMAIL" reads "Trash email"; mixed case is kept. */
+    fun routeDescription(describe: String): String {
+        val d = describe.trim()
+        if (!LETTERS.containsMatchIn(d) || LOWER.containsMatchIn(d)) return d
+        val lower = d.lowercase().replaceFirstChar { it.uppercase() }
+        return ACRONYM.replace(lower) { it.value.uppercase() }
+    }
+
+    private val ACRONYM = Regex("""\b(ssh|tts|url|api|ai|http|https|id|pdf)\b""", RegexOption.IGNORE_CASE)
+
+    /** One route as two lines: `METHOD path`, then its description indented under it. */
+    fun routeEntry(method: String, path: String, describe: String): String =
+        "$method $path\n    ${routeDescription(describe)}"
+
     /** [on] is the stored switch; [showsOn] is what the rocker shows (on and able to serve). */
     fun switchSentence(on: Boolean, showsOn: Boolean): String = when {
         showsOn -> "On. Its requests are served and gated like any other."

@@ -61,9 +61,11 @@ class LogScreensTest {
         val a = log()
         assertEquals(8, rows(a).size)
         chip(a, "Denied").performClick()
-        assertEquals(1, rows(a).size)
+        // Denied covers every refusal (D50): the plain denial and "Denied, phone unattended".
+        assertEquals(2, rows(a).size)
         assertTrue(texts(a).contains("Denied"))
-        assertEquals("1 of 8 records", summary(a).substringBefore(" ·"))
+        assertTrue(texts(a).contains("Denied, phone unattended"))
+        assertEquals("2 of 8 records", summary(a).substringBefore(" ·"))
         chip(a, "Denied").performClick()
         assertEquals(8, rows(a).size)
     }

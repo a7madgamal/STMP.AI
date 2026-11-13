@@ -41,6 +41,7 @@ import com.mido.phonebridge.ui.VaultRow
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.KnobSelector
 import com.mido.phonebridge.ui.kit.Led
@@ -196,7 +197,7 @@ class OptionsFragment : BridgeFragment() {
         } catch (e: PolicyException) {
             container.addView(errorBlock(
                 "Settings can't be read",
-                "The policy file is unreadable, so the server will not start until it is fixed or removed.",
+                "The policy file is unreadable, so the bridge will not start until it is fixed or removed.",
                 e.message ?: "unreadable",
                 retry = true,
             ))
@@ -209,9 +210,10 @@ class OptionsFragment : BridgeFragment() {
             approvalsSection(policy)
         }
         permissionsSection()
+        vaultSection()
         toolsSection(policy)
-        debugSection()
         callersSection(policy)
+        debugSection()
 
         container.addView(
             Type.text(
@@ -230,13 +232,10 @@ class OptionsFragment : BridgeFragment() {
 
     /** An inline error: a block with the reason, optionally a retry key, and the raw message in a readout. */
     private fun errorBlock(title: String, body: String, message: String, retry: Boolean = false): View {
-        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(StateBlock.create(
-            ctx, StateBlock.Kind.ERROR, title, body,
-            action = if (retry) KeyButton.Spec("Try again", "Read the settings again") { render() } else null,
-        ))
-        box.addView(Readout.create(ctx, message, Readout.Kind.BODY).root)
-        return box
+        return ErrorBlock.create(
+            ctx, title, body, details = message,
+            recovery = if (retry) KeyButton.Spec("Try again", "Read the settings again") { render() } else null,
+        )
     }
 
     // --- bridge ----------------------------------------------------------------------------------
@@ -251,7 +250,7 @@ class OptionsFragment : BridgeFragment() {
                     "opens. Tailscale can take a few seconds to come up, so it retries for about " +
                     "3 minutes and tells you if it gives up."
             } else {
-                "Nothing starts on its own. Open the app and switch the server on. After a " +
+                "Nothing starts on its own. Open the app and switch the bridge on. After a " +
                     "reboot the bridge stays down until you do."
             },
             policy.autoStartOnBoot,
@@ -326,7 +325,7 @@ class OptionsFragment : BridgeFragment() {
             NotificationAccess.NEEDED -> panel.addView(StatusRow.create(
                 ctx, "Notification access", "Needed", caution,
                 "Tap to turn it on. Without it the Notifications plugin sees nothing, and Home " +
-                    "reports that the bridge needs attention.",
+                    "reports that the bridge needs action.",
                 Led.State.CAUTION, { SystemAccess.openNotificationAccessSettings(ctx) },
             ))
         }
@@ -377,7 +376,7 @@ class OptionsFragment : BridgeFragment() {
 
         if (SystemAccess.batteryExempt(ctx)) {
             panel.addView(StatusRow.create(
-                ctx, "Battery optimization", "Exempt", ok,
+                ctx, "Battery optimization", "Granted", ok,
                 "Android will not pause the bridge while the screen is off.",
                 Led.State.OK, { SystemAccess.requestBatteryExemption(ctx) },
             ))
@@ -389,8 +388,6 @@ class OptionsFragment : BridgeFragment() {
                 Led.State.CAUTION, { SystemAccess.requestBatteryExemption(ctx) },
             ))
         }
-
-        panel.addView(vaultRow())
 
         if (SystemAccess.phoneDndOn(ctx)) {
             panel.addView(StatusRow.create(
@@ -407,6 +404,14 @@ class OptionsFragment : BridgeFragment() {
                 Led.State.OK, { SystemAccess.openDndSettings(ctx) },
             ))
         }
+        container.addView(panel)
+    }
+
+    /** The secret vault is not an Android permission, so it no longer sits among them (R3). */
+    private fun vaultSection() {
+        header("Secret vault")
+        val panel = Panel.create(ctx)
+        panel.addView(vaultRow())
         container.addView(panel)
     }
 
@@ -625,11 +630,12 @@ class OptionsFragment : BridgeFragment() {
 
         isLocalBodyShown = policy.aiBackend == AiBackend.LOCAL
         when (policy.aiBackend) {
-            AiBackend.OFF -> panel.addView(StatusRow.create(
-                ctx, "AI summaries are off", "OFF", StatusRow.Tone.NEUTRAL,
+            // The knob above already says Off: one explanatory sentence, no second heading or status.
+            AiBackend.OFF -> panel.addView(Type.text(
+                ctx,
                 "Nothing is described. Requests still show the exact target and payload; they are " +
                     "built without a model. This also frees the memory the model holds.",
-                Led.State.OFF,
+                TypeRole.DETAIL, Theme.palette(ctx).etched,
             ))
             AiBackend.LOCAL -> localBody(panel)
             AiBackend.EXTERNAL -> remoteBody(panel, store, policy)
@@ -704,8 +710,8 @@ class OptionsFragment : BridgeFragment() {
             is LocalModelState.WrongFile -> {
                 panel.addView(StatusRow.create(
                     ctx, label, "Wrong file", caution,
-                    "The file is ${mb(state.have)} but ${mb(state.expected)} was expected. Download " +
-                        "again to replace it.", Led.State.CAUTION,
+                    SettingsState.wrongFile(state.have, state.expected, ::mb) + " Download again to replace it.",
+                    Led.State.CAUTION,
                 ))
                 panel.addView(key(download()))
             }
@@ -718,13 +724,13 @@ class OptionsFragment : BridgeFragment() {
                 panel.addView(key(KeyButton.progress(ctx, "Downloading ${state.percent}%", state.percent)))
             }
             is LocalModelState.Failed -> {
-                panel.addView(StatusRow.create(
-                    ctx, label, "Failed", caution,
+                panel.addView(ErrorBlock.create(
+                    ctx, "Download failed",
                     "The last download did not finish. Nothing is wrong with the phone; try again.",
-                    Led.State.CAUTION,
+                    details = state.reason,
+                    recovery = KeyButton.Spec("Try again", "Download the model again") { startModelDownload() },
+                    framed = false,
                 ))
-                panel.addView(Readout.create(ctx, state.reason, Readout.Kind.BODY).root)
-                panel.addView(key(KeyButton.create(ctx, "Try again", KeyButton.Kind.INK) { startModelDownload() }))
             }
         }
     }
@@ -741,7 +747,7 @@ class OptionsFragment : BridgeFragment() {
             message = "The model is already downloaded and verified. Re-downloading fetches " +
                 "${ModelReadiness.mb(ModelRegistry.EXPECTED_SIZE)} again and replaces the working copy.",
             positive = "Re-download",
-            negative = "Keep it",
+            negative = "Keep",
             onNegative = { Debug.log("re-download declined") },
         ) { startModelDownload(force = true) }
     }

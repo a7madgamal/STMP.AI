@@ -79,7 +79,7 @@ object LogDetailParser {
         val outcomeRaw = o.text("outcome").orEmpty()
         val trunc = o.optJSONObject("truncated")
         val query = o.optJSONObject("query")?.takeIf { it.length() > 0 }?.toString()
-        val headers = o.optJSONObject("requestHeaders")?.takeIf { it.length() > 0 }?.toString(2)
+        val headers = o.optJSONObject("requestHeaders")?.takeIf { it.length() > 0 }?.let { JsonCode.present(it.toString()) }
         return LogDetail.Ok(
             LogDetailModel(
                 id = o.text("id").orEmpty(),

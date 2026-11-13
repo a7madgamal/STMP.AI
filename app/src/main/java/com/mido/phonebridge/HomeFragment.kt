@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
@@ -31,6 +32,8 @@ import com.mido.phonebridge.ui.HomeCopy
 import com.mido.phonebridge.ui.ServerStatus
 import com.mido.phonebridge.ui.FingerprintSetting
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.AuditCopy
+import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.dp
 import com.mido.phonebridge.ui.kit.KeyButton
@@ -365,29 +368,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         lastDegraded = reason
         degradedHost.removeAllViews()
         if (reason == null) return
-        val p = Theme.palette(ctx)
-        val panel = Panel.create(ctx, Panel.Tone.CAUTION)
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(Led(ctx).apply { state = Led.State.CAUTION }, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
-            marginEnd = ctx.dp(10)
-            topMargin = ctx.dp(3)
-        })
-        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(Type.text(ctx, "Request log is degraded", TypeRole.ROW_LABEL, p.cautionText), matchWrapParams())
-        col.addView(
-            Type.text(ctx, "Requests are being refused until this is fixed.", TypeRole.DETAIL, p.ink),
-            matchWrapParams(),
+        val panel = ErrorBlock.create(
+            ctx, "Request log is degraded", "Requests are being refused until this is fixed.",
+            details = reason,
         )
-        if (reason.isNotBlank()) {
-            col.addView(
-                Readout.create(ctx, reason, Readout.Kind.BODY).root,
-                matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) },
-            )
-        }
-        row.addView(col, weightParams())
-        panel.addView(row, matchWrapParams())
         panel.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        degradedHost.addView(panel, matchWrapParams())
+        degradedHost.addView(panel)
     }
 
     /**
@@ -467,7 +453,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ServerStatus.State.UNRESPONSIVE,
             ServerStatus.State.FAILED -> Led.State.CAUTION
         }
-        bridgeTitle.text = ServerStatus.title(state)
+        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = !up) else ServerStatus.title(state)
         bridgeTitle.setTextColor(
             when (state) {
                 ServerStatus.State.STOPPED, ServerStatus.State.RUNNING_HEALTHY -> p.ink
@@ -478,9 +464,17 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             if (pendingSince > 0L) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
 
         val attention = ServerStatus.attention(listenerOk, notifOk)
-        val key = "$state|${BridgeService.bindAddress}|${BridgeService.PORT}|${BridgeService.lastError}|$attention"
+        val key = "$state|${BridgeService.bindAddress}|${BridgeService.PORT}|${BridgeService.lastError}|$attention|$pending"
         if (key == lastBridgeKey) return
         lastBridgeKey = key
+        if (pending) {
+            bridgeDetailHost.removeAllViews()
+            bridgeDetailHost.addView(
+                Type.text(ctx, ServerStatus.pendingDetail(starting = !up), TypeRole.DETAIL, p.etched),
+                matchWrapParams(),
+            )
+            return
+        }
         fillBridgeDetail(p, state, attention)
     }
 
@@ -606,12 +600,16 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 gateDetailHost.addView(row, matchWrapParams())
             }
         }
-        gateExtrasHost.addView(
-            KeyButton.create(ctx, "Edit exceptions", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
-                go(Intent(ctx, ExceptionsActivity::class.java))
-            },
-            wrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_M) },
-        )
+        // Exceptions only apply in Whitelist: in Paranoid and Don't disturb the key would edit
+        // something that is ignored, so it is not offered there (R3).
+        if (policy.global == GlobalMode.WHITELIST) {
+            gateExtrasHost.addView(
+                KeyButton.create(ctx, "Edit exceptions", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
+                    go(Intent(ctx, ExceptionsActivity::class.java))
+                },
+                wrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_M) },
+            )
+        }
         val caption = when (policy.global) {
             GlobalMode.WHITELIST -> null
             GlobalMode.PARANOID -> "Exceptions are ignored in Paranoid mode."
@@ -635,23 +633,15 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateDetailHost.removeAllViews()
         gateExtrasHost.removeAllViews()
         gateExtrasHost.visibility = View.GONE
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(Led(ctx).apply { state = Led.State.CAUTION }, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
-            marginEnd = ctx.dp(10)
-            topMargin = ctx.dp(3)
-        })
-        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(Type.text(ctx, "Policy unreadable", TypeRole.ROW_LABEL, p.cautionText), matchWrapParams())
-        col.addView(
-            Type.text(ctx, e.message ?: "The policy file could not be read.", TypeRole.DETAIL, p.ink),
+        gateDetailHost.addView(
+            ErrorBlock.create(
+                ctx, "Policy unreadable", "STMP refuses requests until this is fixed.",
+                details = e.message ?: "The policy file could not be read.",
+                recovery = KeyButton.Spec("Try again", "Read the policy again") { lastGateKey = null; render() },
+                framed = false,
+            ),
             matchWrapParams(),
         )
-        col.addView(
-            Type.text(ctx, "STMP refuses requests until this is fixed.", TypeRole.DETAIL, p.ink),
-            matchWrapParams(),
-        )
-        row.addView(col, weightParams())
-        gateDetailHost.addView(row, matchWrapParams())
         fingerprintRule.visibility = View.GONE
         fingerprintRow.visibility = View.GONE
         fingerprintWhy.visibility = View.GONE
@@ -765,11 +755,18 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         val panel = Panel.create(ctx)
         panel.addView(SectionHeader.create(ctx, "Recent requests", inPanel = true))
         for ((header, verb) in rows) {
-            panel.addView(
-                Tape.row(ctx, verb, header.summary.ifBlank { header.label }, header.ts) {
-                    go(Intent(ctx, LogDetailActivity::class.java).putExtra(LogDetailActivity.EXTRA_ID, header.id))
-                },
-            )
+            val text = AuditCopy.summary(header.outcome, header.summary, header.label)
+            val row = Tape.row(ctx, verb, text, header.ts) {
+                go(Intent(ctx, LogDetailActivity::class.java).putExtra(LogDetailActivity.EXTRA_ID, header.id))
+            }
+            // D50: a gate change has no verb chip. Its column stays empty so the text keeps its left edge.
+            if (!AuditCopy.outcome(header.outcome).allowsChip && row is ViewGroup) {
+                val width = row.getChildAt(0).layoutParams.width
+                row.removeViewAt(0)
+                row.addView(View(ctx), 0, LinearLayout.LayoutParams(width, 1))
+                row.contentDescription = row.contentDescription?.toString()?.substringAfter(", ")
+            }
+            panel.addView(row)
         }
         panel.addView(
             KeyButton.create(ctx, "All requests", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
@@ -939,7 +936,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
 
         // 5. Primary action
         val primary = when {
-            checking -> KeyButton.create(ctx, "Checking…", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { }
+            checking -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { }
                 .apply { isEnabled = false }
             installing -> KeyButton.create(ctx, "Cancel", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL) {
                 // Offered while the download is running; once Android's own dialog is up the

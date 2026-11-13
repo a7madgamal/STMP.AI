@@ -67,23 +67,34 @@ internal object OnboardingCopy {
             "Either way the gate is alive; only a timeout or a 5xx is a real failure.",
     ).joinToString("\n")
 
-    fun steps(): List<String> = listOf(
-        "1. Turn STMP on at the top of Home.",
-        "2. Paste the prompt into your agent and send it.",
-        "3. Approve the first request. Name this machine if asked.",
-        "4. From then on, every call asks you first.",
+    /** Step 4's lead sentence. Don't disturb approves by silence, so it must not promise "never less". */
+    const val GATE_INTRO =
+        "One setting decides how it asks: the gate mode on Home. Each mode below says what it costs you."
+
+    /** The numbered steps; the "turn STMP on" step is left out once the bridge is already on. */
+    fun steps(serverOn: Boolean = false): List<String> = numbered(
+        listOfNotNull(
+            "Turn STMP on at the top of Home.".takeUnless { serverOn },
+            "Paste the prompt into your agent and send it.",
+            "Approve the first request. Name this machine if asked.",
+            "From then on, every call asks you first.",
+        ),
     )
+
+    private fun numbered(lines: List<String>): List<String> = lines.mapIndexed { i, l -> "${i + 1}. $l" }
 
     /**
      * The Hermes steps, a different shape from the generic ones. Step 3 is the important line:
      * `caller_unverified` looks like a failure and is not. Left unexplained, it is the point where
      * people conclude the plugin is broken.
      */
-    fun hermesSteps(): List<String> = listOf(
-        "1. Turn STMP on at the top of Home.",
-        "2. Run the two commands above.",
-        "3. Call stmp_help. It is refused with caller_unverified. That is the phone asking who this machine is, not a fault.",
-        "4. Name this machine on the phone, then retry. You do this once.",
-        "5. From then on, every call asks you first.",
+    fun hermesSteps(serverOn: Boolean = false): List<String> = numbered(
+        listOfNotNull(
+            "Turn STMP on at the top of Home.".takeUnless { serverOn },
+            "Run the two commands above.",
+            "Call stmp_help. It is refused with caller_unverified. That is the phone asking who this machine is, not a fault.",
+            "Name this machine on the phone, then retry. You do this once.",
+            "From then on, every call asks you first.",
+        ),
     )
 }

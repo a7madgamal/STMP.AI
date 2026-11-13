@@ -12,6 +12,11 @@ object PluginLabel {
     fun of(id: String): String {
         if (id.isBlank()) return ""
         PluginRegistry.get(id)?.displayName?.let { return it }
-        return id.trim().replace(Regex("[-_.]"), " ").replaceFirstChar { it.uppercase() }
+        val words = id.trim().replace(Regex("[-_.]"), " ")
+        // Brand names keep their own casing ("github" is "GitHub", never "Github").
+        BRANDS[words.lowercase()]?.let { return it }
+        return words.replaceFirstChar { it.uppercase() }
     }
+
+    private val BRANDS = mapOf("github" to "GitHub", "gitlab" to "GitLab", "openai" to "OpenAI")
 }

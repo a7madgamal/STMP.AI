@@ -90,7 +90,7 @@ class OnboardingActivityTest {
 
     @Test fun `pane title changes per step`() {
         val a = open()
-        assertEquals("Step 1 of 5. Your phone is the server", paneTitle(a))
+        assertEquals("Step 1 of 5. Your phone runs the bridge", paneTitle(a))
         tap(a, "NEXT")
         assertEquals("Step 2 of 5. What it can do", paneTitle(a))
     }
@@ -122,19 +122,19 @@ class OnboardingActivityTest {
         )
     }
 
-    @Test fun `step 3 mixed grants show ON, TURN ON and the optional row`() {
+    @Test fun `step 3 mixed grants show GRANTED, NEEDED and the optional row`() {
         OnboardingFixtures.permissions(listener = true, overlay = false, battery = true)
         val a = openStep3()
         val t = texts(a)
         permissionLabels.forEach { assertTrue(it, t.contains(it)) }
         // sdk 33: the full-screen intent is not revocable, so Lock-screen popup reads granted.
-        assertEquals(3, t.count { it == "ON" })
-        assertEquals(1, t.count { it == "TURN ON" })
+        assertEquals(3, t.count { it == "GRANTED" })
+        assertEquals(1, t.count { it == "NEEDED" })
         assertEquals(0, t.count { it == "OPTIONAL" })
-        assertRow(a, "Notification access", "ON", Led.State.OK)
-        assertRow(a, "Draw over apps", "TURN ON", Led.State.CAUTION)
-        assertRow(a, "Lock-screen popup", "ON", Led.State.OK)
-        assertRow(a, "Battery optimization", "ON", Led.State.OK)
+        assertRow(a, "Notification access", "GRANTED", Led.State.OK)
+        assertRow(a, "Draw over apps", "NEEDED", Led.State.CAUTION)
+        assertRow(a, "Lock-screen popup", "GRANTED", Led.State.OK)
+        assertRow(a, "Battery optimization", "GRANTED", Led.State.OK)
         assertTrue(t.contains("You can change these later in the Settings tab, under Permissions."))
     }
 
@@ -142,20 +142,20 @@ class OnboardingActivityTest {
         OnboardingFixtures.permissions(listener = false, overlay = false, battery = false)
         val a = openStep3()
         val t = texts(a)
-        assertEquals(3, t.count { it == "TURN ON" })
-        assertEquals(1, t.count { it == "ON" })
-        assertRow(a, "Notification access", "TURN ON", Led.State.CAUTION)
-        assertRow(a, "Draw over apps", "TURN ON", Led.State.CAUTION)
-        assertRow(a, "Battery optimization", "TURN ON", Led.State.CAUTION)
+        assertEquals(3, t.count { it == "NEEDED" })
+        assertEquals(1, t.count { it == "GRANTED" })
+        assertRow(a, "Notification access", "NEEDED", Led.State.CAUTION)
+        assertRow(a, "Draw over apps", "NEEDED", Led.State.CAUTION)
+        assertRow(a, "Battery optimization", "NEEDED", Led.State.CAUTION)
     }
 
-    @Test fun `step 3 with everything granted shows four ON and no ask`() {
+    @Test fun `step 3 with everything granted shows four GRANTED and no ask`() {
         OnboardingFixtures.permissions(listener = true, overlay = true, battery = true)
         val a = openStep3()
         val t = texts(a)
-        assertEquals(4, t.count { it == "ON" })
-        assertEquals(0, t.count { it == "TURN ON" })
-        permissionLabels.forEach { assertRow(a, it, "ON", Led.State.OK) }
+        assertEquals(4, t.count { it == "GRANTED" })
+        assertEquals(0, t.count { it == "NEEDED" })
+        permissionLabels.forEach { assertRow(a, it, "GRANTED", Led.State.OK) }
     }
 
     @Test @Config(sdk = [34], shadows = [FullScreenIntentDeniedShadow::class]) fun `step 3 on sdk 34 shows the lock-screen popup as optional when denied`() {
@@ -163,7 +163,7 @@ class OnboardingActivityTest {
         val a = openStep3()
         assertEquals(1, texts(a).count { it == "OPTIONAL" })
         assertRow(a, "Lock-screen popup", "OPTIONAL", Led.State.OFF)
-        assertRow(a, "Notification access", "ON", Led.State.OK)
+        assertRow(a, "Notification access", "GRANTED", Led.State.OK)
     }
 
     @Test fun `tapping a permission row opens its settings screen`() {

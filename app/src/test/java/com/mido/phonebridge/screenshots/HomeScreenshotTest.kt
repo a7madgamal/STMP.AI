@@ -60,6 +60,7 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     // --- recent requests -----------------------------------------------------------------------
     @Test fun tape_three() { Fixtures.auditTape(); capture("tape_three") }
+    @Test fun tape_gate_changes() { Fixtures.auditTapeGateChanges(); capture("tape_gate_changes") }
     @Test fun tape_empty() { capture("tape_empty") }
 
     // --- updates -------------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.Readout
@@ -24,7 +25,9 @@ object PluginHelp {
     /** Show the help dialog for [plugin]; [onOpenDetail] adds an "Open plugin" action when it is not healthy. */
     fun show(ctx: Context, plugin: Plugin, enabled: Boolean, onOpenDetail: (() -> Unit)? = null) {
         val info = PluginCopy.forId(plugin.id, plugin.displayName)
-        val line = PluginCopy.statusLine(plugin.id, enabled, PluginRowModel.statusOf(plugin))
+        val line = PluginCopy.statusLine(
+            plugin.id, enabled, PluginRowModel.statusOf(plugin), hasGoogleClient = AuthManager.clientId.isNotBlank(),
+        )
         val healthy = line.led == Led.State.OK
         val p = Theme.palette(ctx)
 

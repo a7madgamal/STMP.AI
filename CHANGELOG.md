@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.3 (build 318)**.
+Current build: **v0.52.6 (build 321)**.
 
 ---
 
@@ -5583,6 +5583,25 @@ devDependencies. `node_modules/` is gitignored.
 - Removed the unused paper-look fonts from the app again.
 
 ## 0.52.3 (build 318) — 2026-11-13
+- Updates: an update is offered only when its build number is higher than the installed one, and never when it would be a downgrade (a release with no build number falls back to comparing the version name). Release notes show as plain bullets without the heading line or Markdown marks.
+- Plugins: a plugin that is not in this build (the Google ones without sign-in) shows its switch OFF and locked, is not counted as on, offers no Sign in key and says "This build has no Google sign-in. Install the official release to use it." everywhere, including the Google sign-in screen, which now has a Back key.
+- Plugin screen: a plugin that is switched on but cannot serve reads "Can't serve" instead of "Disabled", never says "Open this plugin" from inside the plugin, the SSH plugin has an Add connection key, routes list one per entry with the description on its own indented line in sentence case, and the Google account email only wraps before the "@".
+- Request log: Home and the log show the same summary text. Turning "Fingerprint for approvals" on or off reads "Fingerprint for approvals: on" or "off", a settings save that kept the gate mode no longer reads "WHITELIST to WHITELIST", a gate change has no verb chip, "Denied, phone unattended" is grey and counts under Denied, and a gate change or an unknown path has no Decision panel. "Rule" reads "Exception" and "Switch was" reads "Gate mode before".
+- Errors: one error card everywhere. Raw error text sits behind a "Details" key inside the card, with a way to try again (policy, exceptions, callers, vault lists, model download, request log) or to delete a damaged SSH connection. Messages after a failed secret or SSH action can be dismissed.
+- Home: the bridge card says "Starting..." or "Stopping..." while the switch settles instead of "Stopped", "Edit exceptions" only shows in Whitelist mode where exceptions apply, the log warning no longer sits against the bridge card, and the Updates key no longer repeats "Checking".
+- Copy: "Needs action" is the one word for something that needs you, onboarding step 4 no longer says STMP can only ask more, permission states read Granted, Needed or Optional on every screen, the Secret vault sits outside Permissions, a wrong model file with equal rounded sizes shows exact bytes, empty secret and SSH lists say to unlock the vault first when it is locked, and "GitHub" keeps its capitals.
+- Onboarding: step 1 is left out once the bridge is on, and Copy prompt and Copy commands are off while the address is still a placeholder.
+
+## 0.52.4 (build 319) — 2026-11-13
+- Settings: the Notification access row no longer shows "Not connected" when nothing is granted; it reads "Needed" like a fresh install.
+- SSH: a damaged connection offers an outlined Delete key, like every other delete key, instead of a filled one.
+
+## 0.52.5 (build 320) — 2026-11-13
+- This build includes upstream 0.51.8 and 0.51.9, kept in the new look.
+- The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
+- A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
+
+## 0.52.6 (build 321) — 2026-11-13 — CURRENT
 - The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
 - Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
 - The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
@@ -5592,16 +5611,10 @@ devDependencies. `node_modules/` is gitignored.
 - The "To approve" caption under the hold key stays on one line, the countdown and the request number no longer run together, and the AI summary shows its risk on its own line.
 - The approved and denied stamp grows with its text and shrinks to fit the screen, and the receipt slip is as tall as its lines instead of a fixed height, and sits clear of the keys.
 - The new-device screen explains a cancelled fingerprint check in its own words and in amber instead of showing the system's wording.
-
-## 0.52.4 (build 319) — 2026-11-13
 - The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
-
-## 0.52.5 (build 320) — 2026-11-13
 - A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
 
-## 0.52.6 (build 321) — 2026-11-13 — CURRENT
-- On a phone set to Arabic, Hebrew or Persian, a wrapped command stays left-aligned, so the wrap arrow never covers the end of a line.
 
 ## Keeping this file honest
 

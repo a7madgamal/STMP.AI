@@ -124,10 +124,10 @@ object Fixtures {
     fun updatesAvailable() {
         UpdatePrefs.setLastCheckAt(app, System.currentTimeMillis() - FOUR_HOURS_MS)
         Updater.lastOutcome = Updater.Outcome.Available(
-            version = "0.49.0",
-            versionCode = 296,
-            notes = "- Dark mode follows the system.\n- Text is set in Geist.",
-            apkUrl = "https://example.invalid/stmp-v0.49.0.apk",
+            version = "99.0.0",
+            versionCode = 9900,
+            notes = "## 99.0.0 (build 9900) \u2014 fixture\n\n- Dark mode follows the system.\n- Text is set in `Geist`.",
+            apkUrl = "https://example.invalid/stmp-v99.0.0.apk",
             sha256 = null,
             sizeBytes = 71_303_168L,
             isBeta = false,
@@ -350,6 +350,22 @@ object Fixtures {
             auditRecord("2026-11-11T09-59-00-noise00", NOW_MS + 10 * 60_000L, com.mido.phonebridge.audit.AuditOutcome.APPROVED, 9)
                 .copy(noise = true, summary = "Background poll"),
         )
+    }
+
+    // --- R3 ---
+
+    /** A request, a fingerprint-only settings change and a no-op settings save, newest last. */
+    fun auditTapeGateChanges() {
+        val store = com.mido.phonebridge.audit.AuditLog.from(app)
+        val approved = com.mido.phonebridge.audit.AuditOutcome.APPROVED
+        store.append(
+            auditRecord("2026-11-11T09-40-00-r3a", NOW_MS, approved, 0)
+                .copy(verb = "READ", summary = "Read the plugin help"),
+        )
+        val fp = com.mido.phonebridge.audit.PolicyAudit.recordFingerprint(true, GlobalMode.WHITELIST, "settings")
+        store.append(fp.copy(id = "2026-11-11T09-41-00-r3b", ts = NOW_MS + 60_000L))
+        val noOp = com.mido.phonebridge.audit.PolicyAudit.record(GlobalMode.WHITELIST, GlobalMode.WHITELIST, "settings")
+        store.append(noOp.copy(id = "2026-11-11T09-42-00-r3c", ts = NOW_MS + 120_000L))
     }
 
     fun updatesChecking() { Updater.lastOutcome = null; Updater.checking = true }
@@ -653,7 +669,21 @@ object Fixtures {
 
     // --- everything ----------------------------------------------------------------------------
 
+    /**
+     * R3: the enabled-listeners setting and the system-access shadows outlive a test, so a fixture
+     * that never set them inherited the last test's Notification access row (NEEDED in one render,
+     * NOT CONNECTED in the next). Every test ends with them back at "nothing granted".
+     */
+    fun resetSystemState() {
+        android.provider.Settings.Secure.putString(app.contentResolver, "enabled_notification_listeners", "")
+        BridgeService.listenerRef = null
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        val pm = app.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        shadowOf(pm).setIgnoringBatteryOptimizations(app.packageName, false)
+    }
+
     fun reset() {
+        resetSystemState()
         unpinLogClock()
         resetServer()
         resetAudit()

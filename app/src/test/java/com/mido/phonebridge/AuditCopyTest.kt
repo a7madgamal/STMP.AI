@@ -9,6 +9,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -26,7 +27,7 @@ class AuditCopyTest {
         AuditOutcome.DENIED to Triple("Denied", Tone.NEUTRAL, true),
         AuditOutcome.NOTIFY_REJECTED to Triple("Denied from the card", Tone.NEUTRAL, true),
         AuditOutcome.TIMEOUT to Triple("Timed out", Tone.CAUTION, true),
-        AuditOutcome.DENIED_UNATTENDED to Triple("Denied, phone unattended", Tone.CAUTION, true),
+        AuditOutcome.DENIED_UNATTENDED to Triple("Denied, phone unattended", Tone.NEUTRAL, true),
         AuditOutcome.HANDLER_FAILED to Triple("Failed", Tone.CAUTION, true),
         AuditOutcome.CLIENT_GONE to Triple("Caller left", Tone.NEUTRAL, true),
         AuditOutcome.POLICY_CHANGED to Triple("Gate changed", Tone.NEUTRAL, false),
@@ -80,6 +81,28 @@ class AuditCopyTest {
         assertEquals("40,112 bytes", AuditCopy.bytes(40_112, us))
     }
 
+    @Test fun `a fingerprint-only change names the fingerprint and never reads as X to X`() {
+        assertEquals("Fingerprint for approvals: on", AuditCopy.policySummary("fingerprint: on (settings)"))
+        assertEquals("Fingerprint for approvals: off", AuditCopy.policySummary("fingerprint: off (home)"))
+        val noOp = AuditCopy.policySummary("switch: WHITELIST → WHITELIST (settings)")
+        assertFalse(noOp, noOp.contains("→"))
+    }
+
+    @Test fun `home and the log read one formatter`() {
+        val raw = "fingerprint: on (settings)"
+        assertEquals("Fingerprint for approvals: on", AuditCopy.summary(AuditOutcome.POLICY_CHANGED, raw))
+        assertEquals("GET /x", AuditCopy.summary(AuditOutcome.APPROVED, "GET /x"))
+        assertEquals("gmail.read", AuditCopy.summary(AuditOutcome.APPROVED, "", "gmail.read"))
+    }
+
+    @Test fun `a policy change has no verb chip and every refusal is in the denied filter`() {
+        assertFalse(AuditCopy.outcome(AuditOutcome.POLICY_CHANGED).allowsChip)
+        for (o in listOf(AuditOutcome.DENIED, AuditOutcome.NOTIFY_REJECTED, AuditOutcome.DENIED_UNATTENDED)) {
+            assertTrue(o.name, AuditCopy.isDenial(o))
+        }
+        assertFalse(AuditCopy.isDenial(AuditOutcome.TIMEOUT))
+    }
+
     @Test fun `policy summaries are shown in words`() {
         assertEquals(
             "Gate mode Whitelist → Paranoid, changed in Settings",
@@ -90,7 +113,7 @@ class AuditCopyTest {
             AuditCopy.policySummary("rule: gmail/EDIT default → DONT_DISTURB (settings; switch WHITELIST)"),
         )
         assertEquals(
-            "Gate mode unchanged (Paranoid), recorded from Settings",
+            "Settings saved, gate mode stays Paranoid",
             AuditCopy.policySummary("switch: PARANOID → PARANOID (options)"),
         )
         assertEquals("something else entirely", AuditCopy.policySummary("something else entirely"))

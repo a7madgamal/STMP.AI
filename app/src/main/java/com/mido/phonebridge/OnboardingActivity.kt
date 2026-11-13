@@ -232,7 +232,7 @@ class OnboardingActivity : FragmentActivity() {
     // --- 1. what this is ---------------------------------------------------
 
     private fun stepWhatThisIs(p: Palette): String {
-        val title = "Your phone is the server"
+        val title = "Your phone runs the bridge"
         body.addView(heading(p, title))
         body.addView(line(p, "Your agent asks. You approve on the phone."))
 
@@ -315,7 +315,7 @@ class OnboardingActivity : FragmentActivity() {
         ) { SystemAccess.openFullScreenIntentSettings(this) })
         panel.addView(permissionRow(
             "Battery optimization",
-            "Without it Android may freeze the server while the screen sleeps.",
+            "Without it Android may freeze the bridge while the screen sleeps.",
             granted = SystemAccess.batteryExempt(this),
             optional = false,
         ) { SystemAccess.requestBatteryExemption(this) })
@@ -346,9 +346,9 @@ class OnboardingActivity : FragmentActivity() {
         onClick: () -> Unit,
     ): View {
         val (led, tone, value) = when {
-            granted -> Triple(Led.State.OK, StatusRow.Tone.OK, "ON")
+            granted -> Triple(Led.State.OK, StatusRow.Tone.OK, "GRANTED")
             optional -> Triple(Led.State.OFF, StatusRow.Tone.NEUTRAL, "OPTIONAL")
-            else -> Triple(Led.State.CAUTION, StatusRow.Tone.CAUTION, "TURN ON")
+            else -> Triple(Led.State.CAUTION, StatusRow.Tone.CAUTION, "NEEDED")
         }
         return StatusRow.create(this, label, value, tone, detail = why, led = led, onClick = onClick)
     }
@@ -365,7 +365,7 @@ class OnboardingActivity : FragmentActivity() {
     private fun stepHowTheGateDecides(p: Palette): String {
         val title = "How it asks you"
         body.addView(heading(p, title))
-        body.addView(line(p, "One setting decides how it asks: the gate mode on Home. It can only make STMP ask more, never less."))
+        body.addView(line(p, OnboardingCopy.GATE_INTRO))
 
         val panel = Panel.create(this, Panel.Tone.PLAIN).apply {
             (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M)
@@ -436,10 +436,10 @@ class OnboardingActivity : FragmentActivity() {
         // The address is interpolated, so the second line cannot be pasted with a stale IP.
         val commands = OnboardingCopy.hermesCommands(base)
         body.addView(Readout.create(this, commands, Readout.Kind.COMMAND).root)
-        body.addView(copyKey("COPY COMMANDS", "Copy the commands", commands), copyKeyParams())
+        body.addView(copyKey("COPY COMMANDS", "Copy the commands", commands, enabled = BridgeService.bindAddress.isNotBlank()), copyKeyParams())
 
         body.addView(SectionHeader.create(this, "Then"))
-        for (line in OnboardingCopy.hermesSteps()) body.addView(stepLine(p, line))
+        for (line in OnboardingCopy.hermesSteps(serverOn = BridgeService.bindAddress.isNotBlank())) body.addView(stepLine(p, line))
 
         body.addView(
             Type.text(this, "Read the plugin first: https://github.com/a7madgamal/hermes-stmp", TypeRole.DETAIL, p.etched)
@@ -457,10 +457,10 @@ class OnboardingActivity : FragmentActivity() {
         // A bounded readout: it scrolls inside itself, so the prompt never pushes the page.
         val prompt = OnboardingCopy.buildPrompt(baseUrl())
         body.addView(Readout.create(this, prompt, Readout.Kind.BODY).root)
-        body.addView(copyKey("COPY PROMPT", "Copy the prompt", prompt), copyKeyParams())
+        body.addView(copyKey("COPY PROMPT", "Copy the prompt", prompt, enabled = BridgeService.bindAddress.isNotBlank()), copyKeyParams())
 
         body.addView(SectionHeader.create(this, "Then"))
-        for (line in OnboardingCopy.steps()) body.addView(stepLine(p, line))
+        for (line in OnboardingCopy.steps(serverOn = BridgeService.bindAddress.isNotBlank())) body.addView(stepLine(p, line))
     }
 
     // --- shared building blocks --------------------------------------------
@@ -564,12 +564,13 @@ class OnboardingActivity : FragmentActivity() {
      * pick, so a closure over it would copy whatever was in the PREVIOUS one after the agent
      * changed.
      */
-    private fun copyKey(label: String, describe: String, value: String): View =
+    /** [enabled] is false while the bridge is off: the text holds a placeholder address nobody should paste. */
+    private fun copyKey(label: String, describe: String, value: String, enabled: Boolean = true): View =
         KeyButton.create(this, label, KeyButton.Kind.INK, KeyButton.Size.REGULAR, describe = describe) {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("STMP", value))
             Toasts.show(this, "Copied")
-        }
+        }.apply { isEnabled = enabled }
 
     private companion object {
         const val STEP_COUNT = 5

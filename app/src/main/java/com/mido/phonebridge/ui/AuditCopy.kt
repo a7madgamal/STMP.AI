@@ -19,12 +19,26 @@ object AuditCopy {
         AuditOutcome.DENIED -> OutcomeLook("Denied", Tone.NEUTRAL, true)
         AuditOutcome.NOTIFY_REJECTED -> OutcomeLook("Denied from the card", Tone.NEUTRAL, true)
         AuditOutcome.TIMEOUT -> OutcomeLook("Timed out", Tone.CAUTION, true)
-        AuditOutcome.DENIED_UNATTENDED -> OutcomeLook("Denied, phone unattended", Tone.CAUTION, true)
+        AuditOutcome.DENIED_UNATTENDED -> OutcomeLook("Denied, phone unattended", Tone.NEUTRAL, true)
         AuditOutcome.HANDLER_FAILED -> OutcomeLook("Failed", Tone.CAUTION, true)
         AuditOutcome.CLIENT_GONE -> OutcomeLook("Caller left", Tone.NEUTRAL, true)
         AuditOutcome.POLICY_CHANGED -> OutcomeLook("Gate changed", Tone.NEUTRAL, false)
         AuditOutcome.REJECTED_INVALID -> OutcomeLook("Bad request", Tone.NOISE, false)
         AuditOutcome.UNROUTED -> OutcomeLook("Unknown path", Tone.NOISE, false)
+    }
+
+    /** The outcomes the log's "Denied" filter covers: every way a request was refused (D50). */
+    fun isDenial(o: AuditOutcome): Boolean =
+        o == AuditOutcome.DENIED || o == AuditOutcome.NOTIFY_REJECTED || o == AuditOutcome.DENIED_UNATTENDED
+
+    /**
+     * The one summary line for a record, shared by Home's tape and the request log. A gate change's
+     * stored text is turned into words; any other summary is shown as stored; a blank one falls back
+     * to [label].
+     */
+    fun summary(outcome: AuditOutcome, raw: String, label: String = ""): String {
+        val text = if (outcome == AuditOutcome.POLICY_CHANGED) policySummary(raw) else raw
+        return text.ifBlank { label }
     }
 
     fun modeWords(raw: String): String = when (raw.trim().uppercase()) {
@@ -79,15 +93,20 @@ object AuditCopy {
 
     fun bytes(n: Int, locale: Locale): String = String.format(locale, "%,d bytes", n)
 
+    private val FINGERPRINT = Regex("""^fingerprint: (on|off) \((.+)\)$""")
     private val SWITCH = Regex("""^switch: (\S+) → (\S+) \((.+)\)$""")
     private val RULE = Regex("""^rule: ([^/\s]+)/(\S+) (\S+) → (\S+) \((.+?); switch (\S+)\)$""")
 
     /** Display text for a POLICY_CHANGED record's stored summary; anything unrecognised is unchanged. */
     fun policySummary(raw: String): String {
+        FINGERPRINT.matchEntire(raw)?.let { m ->
+            return "Fingerprint for approvals: ${m.groupValues[1]}"
+        }
         SWITCH.matchEntire(raw)?.let { m ->
             val (from, to, src) = m.destructured
             val by = sourceWords2(src)
-            return if (from == to) "Gate mode unchanged (${modeWords(from)}), recorded from $by"
+            // A switch record whose two sides agree is a settings save that left the mode alone.
+            return if (from == to) "Settings saved, gate mode stays ${modeWords(from)}"
             else "Gate mode ${modeWords(from)} → ${modeWords(to)}, changed in $by"
         }
         RULE.matchEntire(raw)?.let { m ->
