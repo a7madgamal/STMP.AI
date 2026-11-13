@@ -97,6 +97,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     @androidx.annotation.VisibleForTesting
     internal var pendingSince: Long = 0L
 
+    /** The direction the user asked for at tap time (true = start); null when nothing is pending. */
+    @androidx.annotation.VisibleForTesting
+    internal var pendingWant: Boolean? = null
+
     private lateinit var degradedHost: LinearLayout
     private lateinit var crashHost: LinearLayout
     private lateinit var gateKnob: KnobSelector
@@ -221,6 +225,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // repaints. The rocker is NOT flipped here; `render()` moves it once
             // `BridgeService.serverUp` actually changes, so a failed stop cannot show a lie.
             pendingSince = android.os.SystemClock.elapsedRealtime()
+            pendingWant = want
             serverRocker.pending = true
             uiTickHandler.post {
                 if (want) startBridge() else stopBridge()
@@ -434,20 +439,20 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             lastError = BridgeService.lastError,
         )
 
-        // Settled as soon as the real state matches the rocker; the timeout covers a start that
-        // has not landed yet.
+        // Pending until the real state reaches the direction the user asked for; the timeout covers
+        // a start or stop that never lands. `startForegroundService`/`stopService` are asynchronous,
+        // so right after the tap `up` still shows the old state.
         val up = BridgeService.serverUp
-        val settled = serverRocker.checked == up
+        val want = pendingWant
         val windowOpen = pendingSince > 0L &&
             android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        val pending = windowOpen && !settled
-        // The rocker is never flipped by the tap, so while pending it still shows the OLD position:
-        // the direction of the change is the opposite of it.
-        val starting = !serverRocker.checked
+        val pending = windowOpen && want != null && up != want
+        val starting = want == true
         if (pending) {
             serverRocker.pending = true
         } else {
             pendingSince = 0L
+            pendingWant = null
             serverRocker.pending = false
             if (serverRocker.checked != up) serverRocker.setCheckedAnimated(up)
         }

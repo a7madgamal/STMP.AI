@@ -5601,8 +5601,11 @@ devDependencies. `node_modules/` is gitignored.
 - The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
 - A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
 
-## 0.52.6 (build 321) — 2026-11-13 — CURRENT
+## 0.52.6 (build 321) — 2026-11-13
 - Home: while the bridge switch settles, the card now says "Starting..." after you turn it on and "Stopping..." after you turn it off. It had the two the wrong way round.
+
+## 0.52.7 (build 322) — 2026-11-13 — CURRENT
+- Home: "Starting..." and "Stopping..." now actually show after you flip the bridge switch, and stay until the bridge reaches the state you asked for.
 
 ## Keeping this file honest
 

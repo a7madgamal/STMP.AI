@@ -28,28 +28,43 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun unresponsive() { Fixtures.server(Fixtures.Server.UNRESPONSIVE); capture("unresponsive") }
     @Test fun failed() { Fixtures.server(Fixtures.Server.FAILED); capture("failed") }
 
-    /** Stop tapped: the rocker still says ON while the service has gone down. */
+    /** Stop tapped: the service has not stopped yet, so the rocker and `serverUp` still say ON. */
     @Test fun pending() {
         Fixtures.server(Fixtures.Server.RUNNING_HEALTHY)
         val activity = hostTab(HomeFragment::class.java, Theme.Tab.HOME)
         val home = home(activity)
-        BridgeService.serverUp = false
         home.pendingSince = SystemClock.elapsedRealtime()
+        home.pendingWant = false
         home.repaint()
         assertEquals("Stopping\u2026", home.bridgeTitleText)
         capture(activity, "home", "pending")
     }
 
-    /** Start tapped: the rocker still says OFF while the service has come up. */
+    /** Start tapped: the service has not come up yet, so the rocker and `serverUp` still say OFF. */
     @Test fun pending_start() {
         Fixtures.server(Fixtures.Server.STOPPED)
         val activity = hostTab(HomeFragment::class.java, Theme.Tab.HOME)
         val home = home(activity)
-        BridgeService.serverUp = true
         home.pendingSince = SystemClock.elapsedRealtime()
+        home.pendingWant = true
         home.repaint()
         assertEquals("Starting\u2026", home.bridgeTitleText)
         capture(activity, "home", "pending_start")
+    }
+
+    /** Once the service reaches the requested state the pending look ends and the final title shows. */
+    @Test fun pending_ends_when_service_reaches_requested_state() {
+        Fixtures.server(Fixtures.Server.STOPPED)
+        val activity = hostTab(HomeFragment::class.java, Theme.Tab.HOME)
+        val home = home(activity)
+        home.pendingSince = SystemClock.elapsedRealtime()
+        home.pendingWant = true
+        home.repaint()
+        assertEquals("Starting\u2026", home.bridgeTitleText)
+        BridgeService.serverUp = true
+        home.repaint()
+        assertEquals(null, home.pendingWant)
+        assert(!home.bridgeTitleText.startsWith("Starting"))
     }
 
     @Test fun audit_degraded() { Fixtures.auditDegraded(); capture("audit_degraded") }
