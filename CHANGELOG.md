@@ -5452,8 +5452,11 @@ devDependencies. `node_modules/` is gitignored.
 - The stamp plays on a hint card again. Its overlay window cannot take focus, so the arming loop never armed and the removal backstop fired first: zero frames, and no impact callback, which is where the sound came from.
 - The stamp lands on the card it approves, sized from the card's own rect rather than the whole display.
 
-## 0.51.7 (build 309) — 2026-11-13 — CURRENT
+## 0.51.7 (build 309) — 2026-11-13
 - The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
+## 0.51.8 (build 310) — 2026-11-13 — CURRENT
+- The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
+- A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
 
 ## Keeping this file honest
 
