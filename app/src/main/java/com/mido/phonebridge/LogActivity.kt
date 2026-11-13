@@ -248,7 +248,7 @@ class LogActivity : AppCompatActivity() {
         val chipVerb = verb.takeIf { look.allowsChip }
         val summary = AuditCopy.summary(h.outcome, h.summary)
         val plugin = PluginLabel.of(h.plugin)
-        val detail = listOfNotNull(plugin.takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale))
+        val detail = listOfNotNull(UntrustedText.escape(plugin).takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale))
             .joinToString(" · ")
 
         val row = RuleLinearLayout(this).apply {

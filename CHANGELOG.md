@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.13 (build 328)**.
+Current build: **v0.52.15 (build 330)**.
 
 ---
 
@@ -5649,7 +5649,7 @@ devDependencies. `node_modules/` is gitignored.
 - More invisible characters are now shown as marks: the combining grapheme joiner, Hangul and Khmer fillers, variation selectors (U+FE00 to U+FE0F and the tag-block ones), U+2060 to U+206F, and the whole tag block. This is strict on purpose: U+FE0F and the zero-width joiner are marked even inside an emoji, so a heart or a family emoji in a request may show a small mark next to it.
 - The exact list of what is marked is now one shared file in the repository (`contract/text-sanitiser.json`) with test cases, so the iOS app can show the same thing.
 
-## 0.52.14 (build 329) — 2026-11-14 — CURRENT
+## 0.52.14 (build 329) — 2026-11-14
 - A field hint that is too long for its box now ends in an ellipsis; it is cut to fit the box at every text size.
 - A crash or freeze report on Home no longer touches the Bridge card below it, and a freeze report names the code that was running in short form.
 - The request detail screen keeps the status light and the clock on the first line of a long title, and the verb tag sits beside the plugin name.
@@ -5658,6 +5658,11 @@ devDependencies. `node_modules/` is gitignored.
 - The debug log lines up wrapped lines under the message, not under the time, never shows a half-cut line at the top, and its Show/Hide and Copy keys are the same kind of key.
 - Home cards all open with their own heading, and the secondary keys (What is STMP, Check now, Open releases page) are the same small key.
 - A caller in Settings has a status light: green when allowed, hollow when blocked.
+
+## 0.52.15 (build 330) — 2026-11-14 — CURRENT
+- The list of hidden characters that get a visible mark is now written out in full for one Unicode version (15.1) instead of being looked up in each phone's own tables. Before, a character such as U+0890 or U+13430 could be marked on one device and shown raw on another. The iOS app reads the same list.
+- The spoken announcement of an AI summary, the Home list of recent requests (shown and read out), the "text did not fit" reading and the plugin name in the request log now show hidden characters as marks too, so TalkBack and the screen cannot be fooled by a summary or request text.
+- The line under the fingerprint prompt stays on one line (a newline or tab shows as `\u{000A}` or `\u{0009}`) and stops at 120 characters with a "(+N chars)" ending, so a long or multi-line path cannot push the real request out of view.
 
 ## Keeping this file honest
 

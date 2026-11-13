@@ -22,6 +22,7 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import com.mido.phonebridge.ui.CallerCopy
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
 import com.mido.phonebridge.ui.kit.KeyButton
@@ -264,7 +265,7 @@ class CallerActivity : FragmentActivity() {
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle(if (allow) "Allow $ip?" else "Block $ip?")
-                .setSubtitle(if (allow) "Named: $name" else "This address will be refused silently")
+                .setSubtitle(if (allow) UntrustedText.escapeForSystemSurface("Named: $name") else "This address will be refused silently")
                 .setAllowedAuthenticators(authenticators)
                 .build()
         )

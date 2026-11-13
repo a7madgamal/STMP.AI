@@ -53,7 +53,9 @@ object GateCopy {
     /** The AI's risk call, named as what it is so "HIGH" cannot be read as confidence. */
     fun aiRiskLine(risk: Risk): String = "${risk.name} risk"
     fun aiFailed(detail: String): String = "Could not summarise — $detail. You can still decide."
-    fun aiAnnounceReady(description: String): String = "AI summary: $description"
+    /** Spoken text: the model's summary is untrusted, so hidden characters are read as their tokens. */
+    fun aiAnnounceReady(description: String): String =
+        "AI summary: ${com.mido.phonebridge.ui.UntrustedText.escape(description)}"
     const val AI_ANNOUNCE_FAILED = "AI summary unavailable"
 
     /**
@@ -142,11 +144,14 @@ object GateCopy {
     const val BIO_SUBTITLE_FALLBACK = "STMP"
 
     /**
-     * The biometric prompt's subtitle: the caller-supplied "$method $path", escaped. A system dialog
-     * takes no spans, so hidden characters are written out as plain `\u{XXXX}` text.
+     * The biometric prompt's subtitle: the caller-supplied "$method $path", made safe for a system
+     * dialog (one line, no spans, little room): hidden characters, newline and tab written out as
+     * `\u{XXXX}` text, and capped with a visible "(+N chars)" ending. See
+     * [com.mido.phonebridge.ui.UntrustedText.escapeForSystemSurface].
      */
     fun bioSubtitle(endpoint: String?): String =
-        endpoint?.let { com.mido.phonebridge.ui.UntrustedText.escape(it) } ?: BIO_SUBTITLE_FALLBACK
+        endpoint?.let { com.mido.phonebridge.ui.UntrustedText.escapeForSystemSurface(it) } ?: BIO_SUBTITLE_FALLBACK
+
     const val APPROVE_WITH_FINGERPRINT = "Approve, then confirm with your fingerprint"
 
     // --- keys and expander -----------------------------------------------------------------------

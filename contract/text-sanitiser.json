@@ -1,10 +1,16 @@
 {
-  "version": 1,
+  "version": 2,
+  "unicodeVersion": "15.1",
   "token": {"format": "\\u{XXXX}", "minHexDigits": 4, "hexCase": "upper"},
   "neverEscaped": [10, 9],
-  "escapedCategories": ["Cc", "Cf", "Zl", "Zp", "Cs"],
-  "escapedRanges": [[847, 847], [4447, 4448], [6068, 6069], [6155, 6159], [8288, 8303], [12644, 12644], [65024, 65039], [65440, 65440], [65520, 65528], [113824, 113827], [119155, 119162], [917504, 921599]],
+  "escapedRanges": [
+    [0, 8], [11, 31], [127, 159], [173, 173], [847, 847], [1536, 1541], [1564, 1564], [1757, 1757],
+    [1807, 1807], [2192, 2193], [2274, 2274], [4447, 4448], [6068, 6069], [6155, 6159], [8203, 8207], [8232, 8238],
+    [8288, 8303], [12644, 12644], [55296, 57343], [65024, 65039], [65279, 65279], [65440, 65440], [65520, 65531], [69821, 69821],
+    [69837, 69837], [78896, 78911], [113824, 113827], [119155, 119162], [917504, 921599]
+  ],
   "wrapGlyphs": {"soft": 8629, "hard": 8617, "escapedInReadout": true},
+  "systemSurface": {"escapeNewlineTab": true, "maxCodePoints": 120, "overflowSuffix": "\u2026(+%d chars)", "countUnit": "codePoint", "cutOn": "unit", "description": "Escape as usual, then write newline as \\u{000A} and tab as \\u{0009}. Count the rendered text in code points. If it is longer than maxCodePoints, keep the longest prefix of whole units (one token or one code point) that fits, and append overflowSuffix with %d replaced by the number of rendered code points dropped. A token or a surrogate pair is never cut."},
   "vectors": [
     {"name": "bidi control LRE", "input": [97, 8234, 98], "escapeWrapGlyphs": false, "expected": "a\\u{202A}b"},
     {"name": "bidi control RLE", "input": [97, 8235, 98], "escapeWrapGlyphs": false, "expected": "a\\u{202B}b"},
@@ -76,6 +82,31 @@
     {"name": "spoof curl with RLO in URL", "input": [99, 117, 114, 108, 32, 104, 116, 116, 112, 115, 58, 47, 47, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109, 47, 8238, 103, 112, 106, 46, 101, 120, 101], "escapeWrapGlyphs": false, "expected": "curl https://example.com/\\u{202E}gpj.exe"},
     {"name": "spoof ssh with ZWSP host", "input": [115, 115, 104, 32, 114, 111, 111, 116, 64, 101, 118, 105, 108, 8203, 46, 99, 111, 109], "escapeWrapGlyphs": false, "expected": "ssh root@evil\\u{200B}.com"},
     {"name": "spoof path with LRI and PDI", "input": [71, 69, 84, 32, 47, 102, 105, 108, 101, 115, 47, 8294, 46, 46, 47, 101, 116, 99, 47, 112, 97, 115, 115, 119, 100, 8297], "escapeWrapGlyphs": false, "expected": "GET /files/\\u{2066}../etc/passwd\\u{2069}"},
-    {"name": "several hidden in a row", "input": [8238, 8203, 65279], "escapeWrapGlyphs": false, "expected": "\\u{202E}\\u{200B}\\u{FEFF}"}
+    {"name": "several hidden in a row", "input": [8238, 8203, 65279], "escapeWrapGlyphs": false, "expected": "\\u{202E}\\u{200B}\\u{FEFF}"},
+    {"name": "Arabic number sign U+0600 (Cf)", "input": [97, 1536, 98], "escapeWrapGlyphs": false, "expected": "a\\u{0600}b"},
+    {"name": "Unicode 14 Arabic pound mark above U+0890", "input": [97, 2192, 98], "escapeWrapGlyphs": false, "expected": "a\\u{0890}b"},
+    {"name": "Unicode 14 Arabic piastre mark above U+0891", "input": [97, 2193, 98], "escapeWrapGlyphs": false, "expected": "a\\u{0891}b"},
+    {"name": "Unicode 15 Egyptian hieroglyph format U+13430", "input": [97, 78896, 98], "escapeWrapGlyphs": false, "expected": "a\\u{13430}b"},
+    {"name": "Unicode 15 Egyptian hieroglyph format U+1343F", "input": [97, 78911, 98], "escapeWrapGlyphs": false, "expected": "a\\u{1343F}b"},
+    {"name": "shorthand format at string start U+1BCA0", "input": [113824, 97], "escapeWrapGlyphs": false, "expected": "\\u{1BCA0}a"},
+    {"name": "lone high surrogate at string end", "input": [97, 55296], "escapeWrapGlyphs": false, "expected": "a\\u{D800}"},
+    {"name": "lone low surrogate at string end", "input": [97, 57343], "escapeWrapGlyphs": false, "expected": "a\\u{DFFF}"},
+    {"name": "lone high surrogate alone", "input": [56319], "escapeWrapGlyphs": false, "expected": "\\u{DBFF}"},
+    {"name": "astral pair next to a lone low surrogate", "input": [128512, 56320], "escapeWrapGlyphs": false, "expected": "\ud83d\ude00\\u{DC00}"}
+  ],
+  "systemSurfaceVectors": [
+    {"name": "plain endpoint unchanged", "input": [71, 69, 84, 32, 47, 115, 116, 97, 116, 117, 115], "expected": "GET /status"},
+    {"name": "newline becomes a visible token", "input": [80, 79, 83, 84, 32, 47, 97, 10, 98], "expected": "POST /a\\u{000A}b"},
+    {"name": "tab becomes a visible token", "input": [97, 9, 98], "expected": "a\\u{0009}b"},
+    {"name": "bidi override still escaped", "input": [97, 8238, 98], "expected": "a\\u{202E}b"},
+    {"name": "exactly at the cap is not cut", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"name": "one over the cap", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026(+1 chars)"},
+    {"name": "long path", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026(+10 chars)"},
+    {"name": "cut never splits a token", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 8238, 98, 98], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026(+10 chars)"},
+    {"name": "token that ends exactly at the cap", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 8238, 98, 98], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\u{202E}\u2026(+2 chars)"},
+    {"name": "newline token at the cap edge", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 10, 97, 97], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026(+10 chars)"},
+    {"name": "astral code point counts as one", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 128512, 128512, 128512], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\ud83d\ude00\u2026(+2 chars)"},
+    {"name": "astral pair is not cut", "input": [97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 128512], "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u2026(+1 chars)"},
+    {"name": "empty", "input": [], "expected": ""}
   ]
 }

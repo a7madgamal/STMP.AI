@@ -14,6 +14,7 @@ import android.text.Spanned
 import android.text.SpannableStringBuilder
 import androidx.appcompat.widget.AppCompatTextView
 import com.mido.phonebridge.ui.SoftWrap
+import com.mido.phonebridge.ui.UntrustedText
 
 /**
  * The text of a [Readout]. With [softWrap] on it wraps only at whitespace (see [SoftWrap]) and marks
@@ -114,7 +115,7 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
     private fun setFitFailed(failed: Boolean) {
         if (didNotFit == failed) return
         didNotFit = failed
-        contentDescription = if (failed) "$DID_NOT_FIT_DESCRIPTION. ${verbatimText()}" else null
+        contentDescription = if (failed) "$DID_NOT_FIT_DESCRIPTION. ${UntrustedText.escape(verbatimText())}" else null
     }
 
     private fun overflows(availablePx: Int): Boolean {

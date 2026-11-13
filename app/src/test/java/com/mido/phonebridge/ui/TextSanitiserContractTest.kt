@@ -27,7 +27,6 @@ class TextSanitiserContractTest {
     @Test
     fun `contract holds at least 40 vectors and the published token shape`() {
         assertTrue(json.getJSONArray("vectors").length() >= 40)
-        assertEquals(1, json.getInt("version"))
         val token = json.getJSONObject("token")
         assertEquals("\\u{XXXX}", token.getString("format"))
         assertEquals(4, token.getInt("minHexDigits"))
@@ -48,29 +47,68 @@ class TextSanitiserContractTest {
         }
     }
 
-    private fun categoryNames(): Set<Int> {
-        val map = mapOf(
-            "Cc" to Character.CONTROL, "Cf" to Character.FORMAT, "Zl" to Character.LINE_SEPARATOR,
-            "Zp" to Character.PARAGRAPH_SEPARATOR, "Cs" to Character.SURROGATE,
-        )
-        val a = json.getJSONArray("escapedCategories")
-        return (0 until a.length()).map { map.getValue(a.getString(it)).toInt() }.toSet()
+    private fun jsonRanges(): List<IntRange> = json.getJSONArray("escapedRanges").let { a ->
+        (0 until a.length()).map { a.getJSONArray(it).getInt(0)..a.getJSONArray(it).getInt(1) }
     }
 
     @Test
-    fun `needsEscape matches the contract for every code point`() {
-        val cats = categoryNames()
-        val ranges = json.getJSONArray("escapedRanges").let { a ->
-            (0 until a.length()).map { a.getJSONArray(it).getInt(0)..a.getJSONArray(it).getInt(1) }
-        }
+    fun `needsEscape matches the contract ranges for every code point`() {
+        val ranges = jsonRanges()
         val never = setOf(10, 9)
+        // Linear scan over the JSON: independent of the binary search and of Character.getType.
         for (cp in 0..0x10FFFF) {
-            val expected = cp !in never && (Character.getType(cp) in cats || ranges.any { cp in it })
+            val expected = cp !in never && ranges.any { cp in it }
             if (expected != UntrustedText.needsEscape(cp)) {
                 throw AssertionError("U+%04X: contract says %b".format(cp, expected))
             }
         }
-        assertEquals(UntrustedText.EXTRA_RANGES, ranges)
+    }
+
+    @Test
+    fun `the contract states its Unicode version and no longer names categories`() {
+        assertEquals(2, json.getInt("version"))
+        assertEquals("15.1", json.getString("unicodeVersion"))
+        assertFalse(json.has("escapedCategories"))
+    }
+
+    @Test
+    fun `the contract ranges are sorted, merged and leave tab and newline out`() {
+        val ranges = jsonRanges()
+        for ((i, r) in ranges.withIndex()) {
+            assertTrue("empty range", r.first <= r.last)
+            if (i > 0) assertTrue("range %d not sorted or not merged".format(i), r.first > ranges[i - 1].last + 1)
+        }
+        assertFalse(ranges.any { 9 in it || 10 in it })
+        assertTrue(ranges.any { 0xD800 in it && 0xDFFF in it })
+    }
+
+    @Test
+    fun `the generated Kotlin table equals the contract ranges`() {
+        val ranges = jsonRanges()
+        assertEquals(ranges.map { it.first }, TextSanitiserTable.STARTS.toList())
+        assertEquals(ranges.map { it.last }, TextSanitiserTable.ENDS.toList())
+        assertEquals(json.getString("unicodeVersion"), TextSanitiserTable.UNICODE_VERSION)
+    }
+
+    @Test
+    fun `escape never consults the runtime's own Unicode tables for the characters that differ by version`() {
+        for (cp in listOf(0x0890, 0x0891, 0x13430, 0x1343F, 0x1BCA0)) {
+            assertEquals("a\\u{%04X}b".format(cp), UntrustedText.escape("a" + String(Character.toChars(cp)) + "b"))
+        }
+    }
+
+    @Test
+    fun `system surface rule is the published one and matches every vector`() {
+        val rule = json.getJSONObject("systemSurface")
+        assertTrue(rule.getBoolean("escapeNewlineTab"))
+        assertEquals(UntrustedText.SYSTEM_MAX_CODE_POINTS, rule.getInt("maxCodePoints"))
+        assertEquals("\u2026(+%d chars)", rule.getString("overflowSuffix"))
+        val vectors = json.getJSONArray("systemSurfaceVectors")
+        assertTrue(vectors.length() >= 10)
+        for (i in 0 until vectors.length()) {
+            val v = vectors.getJSONObject(i)
+            assertEquals(v.getString("name"), v.getString("expected"), UntrustedText.escapeForSystemSurface(codePoints(v.getJSONArray("input"))))
+        }
     }
 
     @Test
@@ -87,10 +125,12 @@ class TextSanitiserContractTest {
     }
 
     @Test
-    fun `vectors cover each default-ignorable range`() {
+    fun `vectors cover the versioned code points and the string-end surrogates`() {
         val inputs = json.getJSONArray("vectors").let { a -> (0 until a.length()).map { codePoints(a.getJSONObject(it).getJSONArray("input")) } }
-        for (r in UntrustedText.EXTRA_RANGES) {
-            assertTrue("no vector touches %X".format(r.first), inputs.any { s -> s.codePoints().anyMatch { it in r } })
+        for (cp in listOf(0x0890, 0x13430, 0x1BCA0)) {
+            assertTrue("no vector for U+%04X".format(cp), inputs.any { s -> s.codePoints().anyMatch { it == cp } })
         }
+        assertTrue(inputs.any { it.isNotEmpty() && it.last() == '\uD800' })
+        assertTrue(inputs.any { it.isNotEmpty() && it.last() == '\uDFFF' })
     }
 }

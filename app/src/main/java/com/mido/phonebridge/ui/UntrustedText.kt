@@ -11,16 +11,19 @@ import androidx.annotation.ColorInt
  * that cannot be seen, or that can change how the text around it is ordered or read, is replaced by
  * a visible `\u{XXXX}` token drawn in the caution colour, so the shown text is the sent text.
  *
- * Escaped, exactly: every code point in the general categories Cc (C0/C1 controls, except `\n` and
- * `\t`), Cf (bidi controls U+202A to U+202E and U+2066 to U+2069, U+200B to U+200F, U+FEFF, U+00AD,
- * tags, ...), Zl and Zp (U+2028, U+2029) and Cs (a lone surrogate); plus the rest of the Unicode
- * Default_Ignorable_Code_Point set, listed in [EXTRA_RANGES] (U+034F, Hangul fillers U+115F, U+1160,
- * U+3164 and U+FFA0, variation selectors U+FE00 to U+FE0F and U+E0100 to U+E01EF, U+2060 to U+206F, ...).
+ * Escaped, exactly: the code points listed in [TextSanitiserTable] (contract v2), generated at Unicode
+ * 15.1: every Cc (C0/C1 controls, except `\n` and `\t`), Cf (bidi controls U+202A to U+202E and U+2066
+ * to U+2069, U+200B to U+200F, U+FEFF, U+00AD, tags, ...), Zl and Zp (U+2028, U+2029), every surrogate
+ * (U+D800 to U+DFFF, so a lone one), the Unicode Default_Ignorable_Code_Point set and the project's
+ * extra ranges (U+034F, Hangul fillers U+115F, U+1160, U+3164 and U+FFA0, variation selectors, ...).
+ * The table, not `Character.getType`, decides: API 26 knows Unicode 9, and U+0890 or U+13430 must be
+ * escaped there exactly as on a newer runtime and on iOS.
  * It is strict on purpose: approval text is security text, so U+FE0F and U+200D are escaped even
  * inside an emoji sequence. Inside the readout the wrap marks are escaped too (`escapeWrapGlyphs`).
  *
  * The rule is published as `contract/text-sanitiser.json`, the source of truth shared with the iOS
- * client. Any change here must change that file and bump its "version".
+ * client. Any change here must change that file and bump its "version"; the table comes from
+ * tools/gen-text-sanitiser.ts.
  *
  * Only for text a caller sent. The app's own copy is never passed through here: PluginCopy puts a
  * deliberate U+200B before an "@" so a Google address wraps, and that must keep working.
@@ -30,13 +33,6 @@ object UntrustedText {
     /** The wrap marks [SoftWrap] draws; a source occurrence must not pass for one of ours. */
     private val WRAP_GLYPHS = setOf(SoftWrap.GLYPH.codePointAt(0), SoftWrap.GLYPH_HARD.codePointAt(0))
 
-    /** Default_Ignorable_Code_Point ranges outside Cc/Cf/Zl/Zp/Cs (or unassigned gaps inside them). */
-    val EXTRA_RANGES: List<IntRange> = listOf(
-        0x034F..0x034F, 0x115F..0x1160, 0x17B4..0x17B5, 0x180B..0x180F, 0x2060..0x206F,
-        0x3164..0x3164, 0xFE00..0xFE0F, 0xFFA0..0xFFA0, 0xFFF0..0xFFF8, 0x1BCA0..0x1BCA3,
-        0x1D173..0x1D17A, 0xE0000..0xE0FFF,
-    )
-
     /** `\u{202E}`: at least four upper-case hex digits. */
     fun token(codePoint: Int): String = "\\u{%04X}".format(codePoint)
 
@@ -44,12 +40,7 @@ object UntrustedText {
     fun needsEscape(codePoint: Int, escapeWrapGlyphs: Boolean = false): Boolean {
         if (codePoint == '\n'.code || codePoint == '\t'.code) return false
         if (escapeWrapGlyphs && codePoint in WRAP_GLYPHS) return true
-        val byCategory = when (Character.getType(codePoint).toByte()) {
-            Character.CONTROL, Character.FORMAT, Character.LINE_SEPARATOR,
-            Character.PARAGRAPH_SEPARATOR, Character.SURROGATE -> true
-            else -> false
-        }
-        return byCategory || EXTRA_RANGES.any { codePoint in it }
+        return TextSanitiserTable.contains(codePoint)
     }
 
     /** True when [text] holds anything [escape] would change. */
@@ -97,5 +88,48 @@ object UntrustedText {
             end = start
         }
         return out
+    }
+
+    /** Newline and tab, written out as visible tokens on a system surface (`neverEscaped` elsewhere). */
+    private const val NEWLINE_TOKEN = "\\u{000A}"
+    private const val TAB_TOKEN = "\\u{0009}"
+
+    /** Longest system-surface text, in code points of the rendered text (contract `systemSurface.maxCodePoints`). */
+    const val SYSTEM_MAX_CODE_POINTS = 120
+
+    /** `…(+N chars)`, N being the rendered code points dropped (contract `systemSurface.overflowSuffix`). */
+    private const val SYSTEM_OVERFLOW_SUFFIX = "\u2026(+%d chars)"
+
+    /**
+     * [text] for a system dialog line (BiometricPrompt subtitle), which is one line, takes no spans
+     * and has little room: [escape], then `\n` and `\t` as visible tokens, then at most
+     * [SYSTEM_MAX_CODE_POINTS] code points. A longer text keeps the longest prefix of whole units (a
+     * token, or one code point, so no token and no surrogate pair is cut) and ends with the overflow
+     * suffix naming how many code points were dropped. The rule is `systemSurface` in the contract.
+     */
+    fun escapeForSystemSurface(text: CharSequence): String {
+        val units = ArrayList<String>(text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = Character.codePointAt(text, i)
+            units += when {
+                cp == '\n'.code -> NEWLINE_TOKEN
+                cp == '\t'.code -> TAB_TOKEN
+                needsEscape(cp) -> token(cp)
+                else -> String(Character.toChars(cp))
+            }
+            i += Character.charCount(cp)
+        }
+        val total = units.sumOf { it.codePointCount(0, it.length) }
+        if (total <= SYSTEM_MAX_CODE_POINTS) return units.joinToString("")
+        val out = StringBuilder()
+        var kept = 0
+        for (unit in units) {
+            val length = unit.codePointCount(0, unit.length)
+            if (kept + length > SYSTEM_MAX_CODE_POINTS) break
+            out.append(unit)
+            kept += length
+        }
+        return out.append(SYSTEM_OVERFLOW_SUFFIX.format(total - kept)).toString()
     }
 }
