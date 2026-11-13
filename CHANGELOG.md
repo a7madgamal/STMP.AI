@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.7 (build 322)**.
+Current build: **v0.52.8 (build 323)**.
 
 ---
 
@@ -5615,8 +5615,11 @@ devDependencies. `node_modules/` is gitignored.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
 - A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
 
-## 0.52.7 (build 322) — 2026-11-13 — CURRENT
+## 0.52.7 (build 322) — 2026-11-13
 - The Don't disturb card shows at most three lines of the action and then says how many more lines there are, so a very long email subject can no longer push the risk word off the screen.
+
+## 0.52.8 (build 323) — 2026-11-13 — CURRENT
+- The Don't disturb card counts the hidden lines of a long action the same way it draws them, so "+N more lines" can no longer be missing when the fourth line is cut off.
 
 ## Keeping this file honest
 

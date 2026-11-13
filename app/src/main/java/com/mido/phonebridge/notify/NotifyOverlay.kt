@@ -444,6 +444,7 @@ object NotifyOverlay {
             // hides is announced by `moreLine` below, never dropped silently.
             maxLines = SUMMARY_MAX_LINES
             ellipsize = null
+            pinSummaryBreaking(this)
         }
         column.addView(summaryView, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             topMargin = dp(Dimens.SPACE_XS)
@@ -460,8 +461,7 @@ object NotifyOverlay {
             val tv = v as TextView
             val width = (r - l) - tv.compoundPaddingLeft - tv.compoundPaddingRight
             if (width <= 0) return@addOnLayoutChangeListener
-            val full = android.text.StaticLayout.Builder
-                .obtain(tv.text, 0, tv.text.length, tv.paint, width).build().lineCount
+            val full = summaryFullLineCount(tv, width)
             val hidden = (full - SUMMARY_MAX_LINES).coerceAtLeast(0)
             val label = if (hidden > 0) "+$hidden more ${if (hidden == 1) "line" else "lines"}" else ""
             if (moreLine.text.toString() != label) {
@@ -1430,6 +1430,28 @@ object NotifyOverlay {
     /** Space between the pending LED and the "summarising…" line. */
     private const val AI_LED_GAP_DP = 6
     private const val SUMMARY_MAX_LINES = 3
+
+    /**
+     * Greedy breaking and no hyphenation, as Readout pins them: the TextView and the line count
+     * below then break the text identically, so "+N more lines" can never read lower than what
+     * the view really lays out.
+     */
+    internal fun pinSummaryBreaking(tv: TextView) {
+        tv.apply {
+            breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
+            hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
+        }
+    }
+
+    /** Uncapped line count of [tv]'s text at [width], with the view's own break settings. */
+    internal fun summaryFullLineCount(tv: TextView, width: Int): Int =
+        android.text.StaticLayout.Builder
+            .obtain(tv.text, 0, tv.text.length, tv.paint, width)
+            .setBreakStrategy(tv.breakStrategy)
+            .setHyphenationFrequency(tv.hyphenationFrequency)
+            .setIncludePad(tv.includeFontPadding)
+            .setLineSpacing(tv.lineSpacingExtra, tv.lineSpacingMultiplier)
+            .build().lineCount
 
     /**
      * Drag slop. Generous on purpose: a tap is now an APPROVAL, so a small slop would
