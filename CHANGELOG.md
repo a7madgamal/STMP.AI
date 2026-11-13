@@ -5557,7 +5557,6 @@ devDependencies. `node_modules/` is gitignored.
 - Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
 - Plugin groups no longer fail to draw on first open, and preference taps no longer freeze.
 - A request that cannot be shown on screen is refused instead of waiting.
-- The result stamp waits for a tap instead of expiring on its own.
 - Setup docs install the Hermes plugin by its catalog name.
 - Added an opt-in emulator ABI build flag.
 
