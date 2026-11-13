@@ -20,6 +20,7 @@ import com.mido.phonebridge.ui.tokens.TypeRole
 
 /** One themed single-line text field with an etched label and an error line (COMPONENTS 25). */
 object Field {
+
     enum class Kind { TEXT, URL, NUMBER, SECRET }
 
     class Handle(val root: View, val edit: EditText) {
@@ -27,9 +28,10 @@ object Field {
         internal var applyError: (String?) -> Unit = {}
         internal var label: View? = null
         fun setError(text: String?) = applyError(text)
+        internal var applyEnabled: (Boolean) -> Unit = {}
         fun setEnabled(enabled: Boolean) {
             edit.isEnabled = enabled
-            edit.alpha = if (enabled) 1f else DISABLED_ALPHA_F
+            applyEnabled(enabled)
         }
     }
 
@@ -88,6 +90,16 @@ object Field {
         handle.errorView = errorView
         handle.label = labelView
         fun track(error: Boolean, focused: Boolean) {
+            if (!edit.isEnabled) {
+                // Not editable: a flat box with a dashed edge and no inner shade, so it reads as
+                // locked rather than as an empty field showing its placeholder.
+                edit.background = GradientDrawable().apply {
+                    setColor(p.panel)
+                    setStroke(ctx.dp(1), p.outline, ctx.dpf(4f), ctx.dpf(3f))
+                    cornerRadius = ctx.dpf(Dimens.RADIUS_READOUT.toFloat())
+                }
+                return
+            }
             val bg = Bevel.sunkenTrack(ctx, p.sunken, Dimens.RADIUS_READOUT)
             edit.background = bg
             if (error || focused) {
@@ -100,6 +112,10 @@ object Field {
             }
         }
         var hasError = false
+        handle.applyEnabled = { enabled ->
+            edit.alpha = if (enabled) 1f else DISABLED_ALPHA_F
+            track(hasError, edit.isFocused)
+        }
         track(false, false)
         edit.setOnFocusChangeListener { _, focused -> track(hasError, focused) }
         handle.applyError = { text ->

@@ -2,6 +2,7 @@ package com.mido.phonebridge
 
 import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
+import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.tokens.Palette
 import com.mido.phonebridge.ui.tokens.Palettes
 import org.junit.Assert.assertTrue
@@ -16,9 +17,17 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class ContrastTest {
 
-    private class Pair(val name: String, val min: Double, val fg: (Palette) -> Int, val bg: (Palette) -> Int)
+    private class Pair(val name: String, val min: Double, val fg: (Palette) -> Int, val bg: (Palette) -> Int, val darkOnly: Boolean = false)
 
-    private fun p(name: String, min: Double, fg: (Palette) -> Int, bg: (Palette) -> Int) = Pair(name, min, fg, bg)
+    private fun p(name: String, min: Double, fg: (Palette) -> Int, bg: (Palette) -> Int, darkOnly: Boolean = false) =
+        Pair(name, min, fg, bg, darkOnly)
+
+    /** [fg] drawn over [bg] at [alpha] (0..255), the colour the eye gets. */
+    private fun over(fg: Int, bg: Int, alpha: Int): Int {
+        val a = alpha / 255.0
+        fun mix(f: Int, b: Int) = Math.round(f * a + b * (1 - a)).toInt()
+        return Color.rgb(mix(Color.red(fg), Color.red(bg)), mix(Color.green(fg), Color.green(bg)), mix(Color.blue(fg), Color.blue(bg)))
+    }
 
     private val surfaces: List<kotlin.Pair<String, (Palette) -> Int>> = listOf(
         "body" to { x: Palette -> x.body }, "panel" to { x: Palette -> x.panel }, "sunken" to { x: Palette -> x.sunken },
@@ -64,6 +73,18 @@ class ContrastTest {
         add(p("LED ring signalText on panel", 3.0, { it.signalText }, { it.panel }))
         add(p("LED ring etched on panel", 3.0, { it.etched }, { it.panel }))
         add(p("focus on body", 3.0, { it.focus }, { it.body }))
+        // R2 kit. Rocker OFF cap (dark): the cap must stand off its track (1.4.11) and its label
+        // must read on it (1.4.3, asserted above). The verb chip's edge on its sunken fill, the
+        // PANEL key's outline on the panel and the progress label on the progress fill.
+        add(p("rockerCapOff on rockerTrack", 3.0, { it.rockerCapOff }, { it.rockerTrack }, darkOnly = true))
+        add(p("rockerTrack edge (outline) on panel", 3.0, { it.outline }, { it.panel }))
+        add(p("verb chip edge (outline) on sunken", 3.0, { it.outline }, { it.sunken }))
+        add(p("ink on verb chip sunken fill", 4.5, { it.ink }, { it.sunken }))
+        for (n in listOf("body", "panel")) {
+            val bg = surfaces.first { it.first == n }.second
+            add(p("progress label (ink) on its fill over $n", 4.5, { it.ink }, { x -> over(x.ink, bg(x), KeyButton.PROGRESS_FILL_ALPHA) }))
+            add(p("progress label (ink) on its track over $n", 4.5, { it.ink }, bg))
+        }
     }
 
     private fun lum(c: Int): Double {
@@ -85,7 +106,7 @@ class ContrastTest {
         Palettes.clearCacheForTest()
         val palette = Palettes.of(ApplicationProvider.getApplicationContext())
         val theme = if (night) "dark" else "light"
-        val failures = pairs.mapNotNull { pair ->
+        val failures = pairs.filter { !it.darkOnly || night }.mapNotNull { pair ->
             val r = ratio(pair.fg(palette), pair.bg(palette))
             if (r + 1e-9 >= pair.min) null else "%s (%s): %.2f < %.1f".format(pair.name, theme, r, pair.min)
         }

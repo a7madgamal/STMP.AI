@@ -147,7 +147,8 @@ class SecretsActivityStateTest {
         keyByDescription(a, "Delete todoist").performClick()
         idle()
         val dialog = ShadowDialog.getLatestDialog() as androidx.appcompat.app.AlertDialog
-        assertTrue(dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE).isFocused)
+        val focused = dialog.currentFocus as android.widget.TextView
+        assertEquals("Cancel", focused.text.toString())
     }
 
     @Test

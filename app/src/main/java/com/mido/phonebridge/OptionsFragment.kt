@@ -552,13 +552,13 @@ class OptionsFragment : BridgeFragment() {
     }
 
     private fun confirmForget(entry: CallerEntry, title: String, policy: Policy?) {
-        confirm(
+        com.mido.phonebridge.ui.kit.StmpDialog.confirmDelete(
+            ctx,
             title = "Forget $title?",
             message = "Its next request will be refused until you name it again. This cannot be undone.",
-            positive = "Forget",
-            negative = "Keep",
-            onNegative = null,
-        ) { forget(entry, policy) }
+            deleteLabel = "Forget",
+            keepLabel = "Keep",
+        ) { forget(entry, policy) }.show()
     }
 
     private fun forget(entry: CallerEntry, policy: Policy?) {

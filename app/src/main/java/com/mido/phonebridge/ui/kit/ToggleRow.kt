@@ -1,8 +1,6 @@
 package com.mido.phonebridge.ui.kit
 
 import android.content.Context
-import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.RippleDrawable
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
@@ -55,7 +53,7 @@ object ToggleRow {
 
         row.isClickable = enabled
         row.isFocusable = enabled
-        row.foreground = RippleDrawable(rippleColor(ctx), null, ColorDrawable(p.ink))
+        installPressedFill(row, Dimens.RADIUS_KEY)
         installFocusRing(row, Dimens.RADIUS_KEY)
         if (enabled) row.setOnClickListener { rocker.performClick() }
         row.alpha = if (enabled) 1f else DISABLED_ALPHA_F

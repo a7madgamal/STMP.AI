@@ -110,19 +110,20 @@ object VaultUnlock {
                 "re-add your secrets; nothing else is touched."
         }
 
-        com.mido.phonebridge.ui.kit.StmpDialog.builder(activity)
-            .setTitle("Secret vault needs a reset")
-            .setMessage(message)
-            .setPositiveButton("Reset vault") { _, _ ->
-                SecretVault.destroy(activity)
-                Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
-                lastFailure = null
-                PromptGuard.attempted = false
-                ResetGuard.offered = false
-                ensureUnlocked(activity, force = true, onChanged = onChanged)
-            }
-            .setNegativeButton("Not now", null)
-            .show()
+        com.mido.phonebridge.ui.kit.StmpDialog.confirmDelete(
+            activity,
+            title = "Secret vault needs a reset",
+            message = message,
+            deleteLabel = "Reset vault",
+            keepLabel = "Not now",
+        ) {
+            SecretVault.destroy(activity)
+            Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
+            lastFailure = null
+            PromptGuard.attempted = false
+            ResetGuard.offered = false
+            ensureUnlocked(activity, force = true, onChanged = onChanged)
+        }.show()
     }
 
     private object ResetGuard {

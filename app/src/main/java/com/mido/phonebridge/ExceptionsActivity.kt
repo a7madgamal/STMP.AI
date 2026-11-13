@@ -258,22 +258,20 @@ class ExceptionsActivity : AppCompatActivity() {
         if (v == null) "Any action" else AuditCopy.verbWords(v).replaceFirstChar { it.uppercase() }
 
     private fun pickMode(policy: Policy, plugin: String, verb: Verb?) {
-        val labels = arrayOf(
-            "Default · ask for your stamp (removes any exception)",
-            "Don't disturb · 5 s card, silence approves",
-            "Paranoid · full prompt, asks for your stamp",
+        // The current setting is marked: "Default" when no exception exists for this plugin+action.
+        val current = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }?.mode
+        val choices = listOf(
+            StmpDialog.Choice("Default", "Ask for your stamp. Removes any exception.", current == null),
+            StmpDialog.Choice("Don't disturb", "5 s card. Silence approves.", current == Mode.DONT_DISTURB),
+            StmpDialog.Choice("Paranoid", "Full prompt. Asks for your stamp.", current == Mode.PARANOID),
         )
-        StmpDialog.builder(this)
-            .setTitle("${PluginLabel.of(plugin)} · ${AuditCopy.verbWords(verb)}")
-            .setItems(labels) { _, which ->
-                when (which) {
-                    0 -> clearRule(plugin, verb, "settings")
-                    1 -> setRule(Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
-                    else -> setRule(Rule(plugin, verb, Mode.PARANOID), "settings")
-                }
+        StmpDialog.choose(this, "${PluginLabel.of(plugin)} · ${AuditCopy.verbWords(verb)}", choices) { which ->
+            when (which) {
+                0 -> clearRule(plugin, verb, "settings")
+                1 -> setRule(Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
+                else -> setRule(Rule(plugin, verb, Mode.PARANOID), "settings")
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }.show()
     }
 
     /**

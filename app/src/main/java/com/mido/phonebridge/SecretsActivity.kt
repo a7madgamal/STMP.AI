@@ -519,29 +519,20 @@ class SecretsActivity : FragmentActivity() {
             showError("Can't delete $name", "Unlock the vault first. Deleting rewrites the stored secrets.")
             return
         }
-        val dialog = StmpDialog.builder(this)
-            .setTitle("Delete '$name'?")
-            .setMessage("The secret is removed from the vault and its ciphertext goes with the next write.")
-            .setPositiveButton("Delete") { _, _ ->
-                try {
-                    SecretVault.delete(this, name)
-                    Toasts.show(this, "Deleted ${name.take(NAME_IN_TOAST)}")
-                    render()
-                } catch (e: PluginError) {
-                    showError("Couldn't delete $name", "${e.code}: ${e.message}")
-                }
+        StmpDialog.confirmDelete(
+            this,
+            title = "Delete '$name'?",
+            message = "The secret is removed from the vault and its ciphertext goes with the next write.",
+            deleteLabel = "Delete",
+        ) {
+            try {
+                SecretVault.delete(this, name)
+                Toasts.show(this, "Deleted ${name.take(NAME_IN_TOAST)}")
+                render()
+            } catch (e: PluginError) {
+                showError("Couldn't delete $name", "${e.code}: ${e.message}")
             }
-            .setNegativeButton("Cancel", null)
-            .create()
-        // The key that destroys data is never the one a stray tap lands on.
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).apply {
-                // Focusable in touch mode too, or the request is ignored on a phone in use.
-                isFocusableInTouchMode = true
-                requestFocus()
-            }
-        }
-        dialog.showSecure()
+        }.showSecure()
     }
 
     private fun addHostDialog(secret: String) {

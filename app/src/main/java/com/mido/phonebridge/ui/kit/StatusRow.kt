@@ -20,6 +20,29 @@ import com.mido.phonebridge.ui.tokens.TypeRole
 object StatusRow {
     enum class Tone { NEUTRAL, OK, CAUTION }
 
+    /**
+     * A value is "long" when its single-line width exceeds this share of the row. Beside the title
+     * it would leave the title under 70 % of the row, which at the large font scale is what
+     * crushed the body to 125dp and 8 lines. Measured with the real typeface and font scale, so
+     * the same value flips at 1.35 where it fits at 1.0, for every caller.
+     */
+    internal const val INLINE_VALUE_MAX_SHARE = 0.3f
+
+    /** Row width the rule measures against: the screen minus the gutters and the panel padding. */
+    private fun rowWidthPx(ctx: Context): Float =
+        ctx.resources.displayMetrics.widthPixels.toFloat() - 2 * ctx.dp(Dimens.GUTTER) - 2 * ctx.dp(Dimens.MODULE_PAD)
+
+    /** Whether [value] goes under the title (true) or at the row's end (false). */
+    internal fun isLongValue(ctx: Context, value: String): Boolean {
+        if (value.isEmpty()) return false
+        val width = measureText(ctx, TypeRole.LABEL, value.uppercase())
+        return width > rowWidthPx(ctx) * INLINE_VALUE_MAX_SHARE
+    }
+
+    private fun wrap() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+    )
+
     fun create(
         ctx: Context,
         label: String,
@@ -36,72 +59,78 @@ object StatusRow {
         }
         require(action == null || onClick == null) { "a row with an action key is not itself a link" }
         val p = Theme.palette(ctx)
+        // The detail repeats the value in some screens ("Off" / "off"); say it once.
+        val shownDetail = detail?.takeIf { it.isNotEmpty() && !it.equals(value, ignoreCase = true) }
         val description = buildString {
             append(label)
             if (value.isNotEmpty()) append(", ").append(value)
-            if (!detail.isNullOrEmpty()) append(", ").append(detail)
+            if (!shownDetail.isNullOrEmpty()) append(", ").append(shownDetail)
         }
+        val stacked = isLongValue(ctx, value)
+
+        // The row is a column: the line (LED, text, end control) and, under it, the action key.
         val row = RuleLinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
             minimumHeight = ctx.dp(56)
             setPadding(0, ctx.dp(10), 0, ctx.dp(10))
             layoutParams = matchWrap()
         }
+        val line = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ctx.dp(36)
+        }
+        row.addView(line, matchWrap())
+
+        val labelView = Type.text(ctx, label, TypeRole.ROW_LABEL, p.ink)
         if (led != null) {
-            row.addView(Led(ctx).apply { state = led }, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
+            // On the first text line: centred on the label's line box, not on the whole body.
+            val ledSize = ctx.dp(16)
+            val top = ((labelView.lineHeight - ledSize) / 2).coerceAtLeast(0)
+            line.addView(Led(ctx).apply { state = led }, LinearLayout.LayoutParams(ledSize, ledSize).apply {
                 marginEnd = ctx.dp(10)
                 gravity = Gravity.TOP
-                topMargin = ctx.dp(1)
+                topMargin = top
             })
         }
 
-        val labelView = Type.text(ctx, label, TypeRole.ROW_LABEL, p.ink)
+        val valueColor = when (tone) {
+            Tone.NEUTRAL -> p.etched
+            Tone.OK -> p.okText
+            Tone.CAUTION -> p.cautionText
+        }
+        val valueView = if (value.isEmpty()) null else Type.text(ctx, value, TypeRole.LABEL, valueColor).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
         val body = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             addView(labelView, matchWrap())
-            if (!detail.isNullOrEmpty()) {
-                addView(Type.text(ctx, detail, TypeRole.DETAIL, p.etched), matchWrap().apply { topMargin = ctx.dp(2) })
+            if (valueView != null && stacked) {
+                addView(valueView, matchWrap().apply { topMargin = ctx.dp(Dimens.SPACE_2XS) })
+            }
+            if (shownDetail != null) {
+                addView(Type.text(ctx, shownDetail, TypeRole.DETAIL, p.etched), matchWrap().apply { topMargin = ctx.dp(2) })
             }
         }
-        val content = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(body, matchWrap())
-            if (action != null) {
-                val key = KeyButton.create(
-                    ctx, action.label, KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL,
-                    describe = action.describe, onClick = action.onClick,
-                )
-                addView(key, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { gravity = Gravity.END; topMargin = ctx.dp(Dimens.TARGET_GAP) })
-            }
-        }
-        row.addView(content, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        line.addView(body, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-        if (value.isNotEmpty()) {
-            val color = when (tone) {
-                Tone.NEUTRAL -> p.etched
-                Tone.OK -> p.okText
-                Tone.CAUTION -> p.cautionText
-            }
-            val valueView = Type.text(ctx, value, TypeRole.LABEL, color).apply {
-                gravity = Gravity.END
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            val maxW = (ctx.resources.displayMetrics.widthPixels * 0.45f).toInt()
-            valueView.maxWidth = maxW
-            row.addView(valueView, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = ctx.dp(Dimens.SPACE_S) })
+        if (valueView != null && !stacked) {
+            valueView.gravity = Gravity.END
+            line.addView(valueView, wrap().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
         }
         if (trailing != null) {
-            row.addView(trailing, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = ctx.dp(Dimens.SPACE_S) })
+            line.addView(trailing, wrap().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
+        }
+        if (action != null) {
+            // Its own line, end-aligned to the row (not to the text column).
+            val key = KeyButton.create(
+                ctx, action.label, KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL,
+                describe = action.describe, onClick = action.onClick,
+            )
+            row.addView(key, wrap().apply { gravity = Gravity.END; topMargin = ctx.dp(Dimens.TARGET_GAP) })
         }
         if (onClick != null) {
-            row.addView(ImageView(ctx).apply {
+            line.addView(ImageView(ctx).apply {
                 setImageResource(R.drawable.ic_kit_chevron)
                 setColorFilter(p.etched, PorterDuff.Mode.SRC_IN)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -109,7 +138,7 @@ object StatusRow {
             row.minimumHeight = ctx.dp(56)
             row.isClickable = true
             row.isFocusable = true
-            row.foreground = RippleDrawable(rippleColor(ctx), null, ColorDrawable(p.ink))
+            installPressedFill(row, Dimens.RADIUS_KEY)
             installFocusRing(row, Dimens.RADIUS_KEY)
             row.setOnClickListener { onClick() }
             setRole(row, "android.widget.Button")

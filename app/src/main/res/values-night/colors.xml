@@ -36,9 +36,9 @@
     <color name="stmp_key_lip_ink">#9A988F</color>
     <color name="stmp_key_lip_signal">#C2502A</color>
     <color name="stmp_readout_shadow">#B3000000</color>
-    <color name="stmp_rocker_track">#2F2F33</color>
-    <color name="stmp_rocker_cap_off">#3A3A3F</color>
-    <color name="stmp_rocker_off_text">#A6A49E</color>
+    <color name="stmp_rocker_track">#0F0F11</color>
+    <color name="stmp_rocker_cap_off">#60606A</color>
+    <color name="stmp_rocker_off_text">#ECEBE7</color>
     <color name="stmp_hold_track">#3A3A3F</color>
     <color name="stmp_tape_paper">#2A2A2E</color>
     <color name="stmp_scrim">#99000000</color>

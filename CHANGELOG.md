@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.0 (build 315)**.
+Current build: **v0.52.1 (build 316)**.
 
 ---
 
@@ -5559,7 +5559,7 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.7 (build 309) — 2026-11-13
 - The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
 
-## 0.52.0 (build 315) — 2026-11-13 — CURRENT
+## 0.52.0 (build 315) — 2026-11-13
 - This build includes everything from upstream 0.49.0 through 0.51.7, brought into the new look.
 - STMP now asks for your fingerprint when a request needs a locked vault, then carries on with the request.
 - Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
@@ -5569,6 +5569,15 @@ devDependencies. `node_modules/` is gitignored.
 - Setup docs install the Hermes plugin by its catalog name.
 - Added an opt-in emulator ABI build flag.
 - The hint card stamp fixes from upstream 0.51.6 and 0.51.7 are not needed: the new punch already plays on the card.
+
+## 0.52.1 (build 316) — 2026-11-13 — CURRENT
+- A status row with a long value, such as "Not connected", now puts that value under its title so the text keeps its width at large font sizes; the status light sits on the first line and the action key is at the end of the row.
+- The gate selector labels have room on each side and no longer run together.
+- In dark mode the switch OFF cap and label, and the outlines of the small keys and read chips, are clearly visible.
+- The download key keeps its label readable over the progress fill, and disabled keys and fields now look disabled.
+- Switches and rows show their pressed and focus states, and the focus ring is drawn clear of the control and inside its own edges, so all four sides show.
+- The recent-request rows line their text up in one column whatever the verb.
+- Deleting a caller, secret, SSH connection or the vault asks with a Keep key first and an outlined delete key set apart below it; the Exceptions mode picker has large rows with a radio mark and shows the current mode.
 
 ## Keeping this file honest
 
