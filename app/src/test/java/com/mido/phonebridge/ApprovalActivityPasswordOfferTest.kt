@@ -83,7 +83,7 @@ class ApprovalActivityPasswordOfferTest {
         val shown = renderedTexts(needsPassword = true)
         assertFalse(
             "the exception button must not render on a password request; saw $shown",
-            shown.any { it.equals("ALWAYS NOTIFY", ignoreCase = true) }
+            shown.any { isExceptionKey(it) }
         )
     }
 
@@ -92,7 +92,12 @@ class ApprovalActivityPasswordOfferTest {
         val shown = renderedTexts(needsPassword = false)
         assertTrue(
             "the offer must still render where it is allowed; saw $shown",
-            shown.any { it.equals("ALWAYS NOTIFY", ignoreCase = true) }
+            shown.any { isExceptionKey(it) }
         )
     }
+
+    /** The key's copy names what it does (D64), on a tap gate and on a hold gate. */
+    private fun isExceptionKey(text: String) =
+        text.startsWith(com.mido.phonebridge.gate.GateCopy.EXCEPTION_APPROVE_KEY, ignoreCase = true) ||
+            text.startsWith(com.mido.phonebridge.gate.GateCopy.EXCEPTION_ALSO_KEY, ignoreCase = true)
 }

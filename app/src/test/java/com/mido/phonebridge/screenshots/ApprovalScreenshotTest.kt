@@ -75,7 +75,17 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun ai_loading() { contacts("ai_loading", ai = ApprovalGate.AiState.Loading, enabled = null) }
     @Test fun ai_ready_low() { contacts("ai_ready_low", ai = summary(Risk.LOW)) }
     @Test fun ai_ready_medium() { contacts("ai_ready_medium", ai = summary(Risk.MEDIUM)) }
-    @Test fun ai_ready_high() { contacts("ai_ready_high", ai = summary(Risk.HIGH)) }
+    @Test fun ai_ready_high() {
+        contacts(
+            "ai_ready_high",
+            ai = ApprovalGate.AiState.Ready(
+                RequestSummary(
+                    "Reads every contact with notes and sends all of it back in one response.", Risk.HIGH,
+                    "Large export of personal data to whoever holds the token.",
+                ),
+            ),
+        )
+    }
     @Test fun ai_failed() { contacts("ai_failed", ai = ApprovalGate.AiState.Failed("the model did not answer in time")) }
     @Test fun not_needed() { contacts("not_needed") }
 
@@ -126,6 +136,13 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun hold_ssh_long() {
         val long = buildString { while (length < 1_200) append("cp -r ~/src/module-$length /mnt/backup/ && ") }.take(1_200)
         shot(GateFixtures.launch(GateFixtures.ssh(long), "POST /ssh/kvm-box"), "hold_ssh_long", full = true)
+    }
+
+    /** Long tokens and a URL: wraps only at spaces, each wrap marked with the continuation glyph. */
+    @Test fun hold_ssh_wrap_marks() {
+        val cmd = "curl -fsSL https://downloads.example.com/releases/stmp/2026/11/installer-linux-arm64.tar.gz " +
+            "-o /tmp/installer.tgz && tar -xzf /tmp/installer.tgz -C /opt/stmp --strip-components=1 && rm -rf /tmp/installer.tgz"
+        shot(GateFixtures.launch(GateFixtures.ssh(cmd), "POST /ssh/kvm-box"), "hold_ssh_wrap_marks")
     }
 
     @Test fun tap_probe_read() {
@@ -191,7 +208,7 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     @Test fun exception_offer_hold_on() {
         val a = GateFixtures.launch(GateFixtures.ssh("ls -la ~/builds", offer = sshOffer), "POST /ssh/kvm-box")
-        findByText(a.window.decorView, "ALWAYS NOTIFY")!!.performClick()
+        findByText(a.window.decorView, "ALSO ADD EXCEPTION")!!.performClick()
         shot(a, "exception_offer_hold_on")
     }
 

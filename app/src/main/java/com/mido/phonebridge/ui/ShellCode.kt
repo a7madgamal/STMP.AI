@@ -95,12 +95,13 @@ object ShellCode {
         command: String,
         palette: Map<String, Int> = palette(),
         fallback: Int? = null,
+        breakAtSeparators: Boolean = true,
     ): CharSequence {
         if (command.isEmpty()) return command
 
         // Breaks are resolved from the SAME tokens the colours come from, so "where a line
         // ends" and "what colour it is" can never disagree.
-        val cuts = lineBreakOffsets(command)
+        val cuts = if (breakAtSeparators) lineBreakOffsets(command) else emptyList()
 
         // Insert the breaks first, then colour against display offsets. Colouring first and
         // inserting after would shift every span by the number of newlines before it — the
@@ -186,13 +187,15 @@ object ShellCode {
     /**
      * [command] for the gate's readout: [render] with [readoutPalette], plus the D11 underline on
      * every dangerous token that is not entirely inside a quoted string. Characters are only ever
-     * inserted (the line breaks of [render]); nothing is removed or reordered.
+     * inserted (none today: the readout form adds no separator breaks); nothing is removed or reordered.
      */
     fun renderForReadout(command: String, p: Palette): CharSequence {
-        val rendered = render(command, readoutPalette(p), fallback = p.readoutCommand)
+        // No separator breaks here: the readout shows the command as it was sent. Long lines wrap
+        // at whitespace with a visible continuation glyph (ReadoutText), never at a "prettier" place.
+        val rendered = render(command, readoutPalette(p), fallback = p.readoutCommand, breakAtSeparators = false)
         if (command.isEmpty()) return rendered
         val text = rendered as? android.text.Spannable ?: android.text.SpannableString(rendered)
-        val cuts = lineBreakOffsets(command)
+        val cuts = emptyList<Int>()
         // Regions are 1-based and inclusive; as half-open zero-based ranges they are [start-1, end).
         val quoted = Highlight.highlight(command)
             .filter { it.styleKey in QUOTED_KEYS }

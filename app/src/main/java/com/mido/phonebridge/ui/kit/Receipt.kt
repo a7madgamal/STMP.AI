@@ -29,7 +29,7 @@ class Receipt(
     var onDone: (() -> Unit)? = null
 
     private val slip = LinearLayout(ctx)
-    private val heightPx = ctx.dp(HEIGHT_DP)
+    private var isFeeding = false
     private var step = 0
     private var finished = false
     private var stepRunnables = ArrayList<Runnable>()
@@ -58,43 +58,54 @@ class Receipt(
         }
         // The slip sits inside a clip so it appears to come out of the slot.
         val clip = FrameLayout(ctx).apply { clipChildren = true; clipToPadding = true }
-        clip.addView(slip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        addView(clip, LayoutParams(LayoutParams.MATCH_PARENT, heightPx))
+        // The slip is as tall as its lines need (at 1.35 text it is taller than at 1.0), so it is
+        // never clipped and never padded with empty paper.
+        clip.addView(slip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(clip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         val slot = View(ctx).apply {
             background = GradientDrawable().apply { setColor(p.readout); cornerRadius = ctx.dpf(3f) }
         }
         addView(slot, LayoutParams(LayoutParams.MATCH_PARENT, ctx.dp(6)).apply {
             leftMargin = -ctx.dp(10); rightMargin = -ctx.dp(10); gravity = Gravity.TOP
         })
+        // Below the punch and above the keys, so the slip never covers them (R1).
         layoutParams = LayoutParams(
-            context.resources.displayMetrics.widthPixels - ctx.dp(80), heightPx,
-            Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM,
-        ).apply { bottomMargin = ctx.dp(30) }
+            context.resources.displayMetrics.widthPixels - ctx.dp(80), LayoutParams.WRAP_CONTENT,
+            Gravity.CENTER_HORIZONTAL or Gravity.TOP,
+        ).apply { topMargin = (context.resources.displayMetrics.heightPixels * SLIP_TOP_FRACTION).toInt() }
         contentDescription = "Receipt $entryNo, $status"
         accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE
         isClickable = true
         isFocusable = true
         setRole(this, "android.widget.Button")
         setOnClickListener { finish() }
-        slip.translationY = -heightPx.toFloat()
+        // Hidden in its slot until the feed starts; set again once the real height is known.
+        slip.translationY = -ctx.dp(HIDDEN_BEFORE_LAYOUT_DP).toFloat()
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        if (!isFeeding && slip.height > 0) slip.translationY = -slip.height.toFloat()
     }
 
     /** Start the feed. Reduced motion shows the slip at once with a single tick. */
     fun feed() {
         cancel()
         finished = false
+        isFeeding = true
         if (Motion.reduced(context)) {
             slip.translationY = 0f
             Haptics.perform(this, HapticEvent.TAPE_STEP)
             postDelayed(done, Motion.RECEIPT_SHOW_MS)
             return
         }
-        val stepPx = context.dp(30).toFloat()
         step = 0
         for (i in 1..Motion.TAPE_STEPS) {
             val r = Runnable {
                 step = i
-                slip.translationY = if (i == Motion.TAPE_STEPS) 0f else -heightPx + stepPx * i
+                // Equal steps of the slip's real height, so a taller slip still feeds out completely.
+                val slipHeight = maxOf(slip.height, slip.measuredHeight).toFloat()
+                slip.translationY = if (i == Motion.TAPE_STEPS) 0f else -slipHeight + slipHeight / Motion.TAPE_STEPS * i
                 Haptics.perform(this, HapticEvent.TAPE_STEP)
             }
             stepRunnables.add(r)
@@ -124,5 +135,11 @@ class Receipt(
         cancel()
     }
 
-    private companion object { const val HEIGHT_DP = 123 }
+    private companion object {
+        /** Before the first layout the slip height is unknown; any value that hides the slip will do. */
+        const val HIDDEN_BEFORE_LAYOUT_DP = 400
+
+        /** The slip's top edge, as a share of the screen height. */
+        const val SLIP_TOP_FRACTION = 0.56f
+    }
 }

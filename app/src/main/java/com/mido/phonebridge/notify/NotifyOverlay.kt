@@ -185,6 +185,8 @@ object NotifyOverlay {
         val needsAi: Boolean,
         /** How long the fetch may take before the clock starts regardless. */
         val fetchCapMs: Long,
+        /** Who is asking, as the caller registry names them; blank when the caller did not say. */
+        val requester: String,
         val onOutcome: (Outcome) -> Unit
     ) {
         /** True once a result has been reported. Guards the tap-versus-timer race. */
@@ -234,6 +236,9 @@ object NotifyOverlay {
         /** The pending light beside [aiLine]; hidden once the summary has arrived. */
         var aiLed: Led? = null
 
+        /** The AI's risk call as a word ("HIGH risk"); hidden until the summary has arrived. */
+        var riskLabel: TextView? = null
+
         /** "Another app is covering this screen", shown when an approve tap was obscured (D17). */
         var obscuredLine: TextView? = null
 
@@ -275,12 +280,13 @@ object NotifyOverlay {
         facts: RequestFacts?,
         needsAi: Boolean,
         fetchCapMs: Long,
+        requester: String = "",
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
             val entry = Entry(
                 ctx.applicationContext, id, summary, label, verb, windowMs, facts, needsAi,
-                fetchCapMs, onOutcome
+                fetchCapMs, requester, onOutcome
             )
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
@@ -331,6 +337,9 @@ object NotifyOverlay {
         fun dp(v: Int): Int = (v * density).roundToInt()
 
         val radius = dp(Dimens.RADIUS_MODULE).toFloat()
+        val cardWidthPx = minOf(screenSize(wm).first - 2 * dp(CARD_SIDE_MARGIN_DP), dp(CARD_MAX_WIDTH_DP))
+        val pluginName = NotifyCardCopy.pluginName(NotifyCardCopy.pluginId(entry.label, entry.facts?.plugin))
+        val requesterLine = NotifyCardCopy.requesterLine(entry.requester, pluginName)
 
         // Whatever decorates the card must be a BACKGROUND LAYER, never a child view: a
         // MATCH_PARENT child inside a WRAP_CONTENT FrameLayout forces the parent to match ITS
@@ -371,8 +380,7 @@ object NotifyOverlay {
                 setLayerInsetBottom(1, dp(DRAIN_INSET_BOTTOM_DP))
             }
             isClickable = true
-            contentDescription = "${entry.verb.name} request: ${entry.summary}. " +
-                "Tap to approve now, the ✕ denies, silence approves."
+            contentDescription = NotifyCardCopy.description(entry.verb, requesterLine, entry.summary)
         }
         entry.cardBg = cardBg
         entry.cardDrain = entryDrain
@@ -391,7 +399,6 @@ object NotifyOverlay {
 
         // The verb chip, first so the eye reads WHAT this is before reading the text. Signal
         // orange only for EXECUTE and DELETE (D1, D6); every other verb sits on the sunken fill.
-        // WRAP_CONTENT and single-line, so the summary takes the rest of the width.
         val badge = VerbChip.create(ctx, entry.verb)
         row.addView(
             badge,
@@ -400,19 +407,14 @@ object NotifyOverlay {
             }
         )
 
-        // Named `summaryView`, not `text`: a local called `text` shadows the TextView
-        // `text` property inside the `apply` blocks below and the assignment silently
-        // targets the local instead.
-        // Two lines with an ellipsis: this is the card's summary, not the verbatim command (D10
-        // applies to the gate, which the full-gate modes show).
-        val summaryView = TextView(ctx).apply {
-            text = entry.summary
-            Type.apply(this, TypeRole.BODY_STRONG)
+        // WHO is asking and WHICH plugin (R1). Wraps, never ellipsizes: silence approves after
+        // five seconds, so a name cut short is consent to something half-read.
+        val requesterView = TextView(ctx).apply {
+            text = requesterLine
+            Type.apply(this, TypeRole.DETAIL)
             setTextColor(p.ink)
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        row.addView(summaryView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        row.addView(requesterView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
 
         // The deny control: a plain glyph in a 48dp box (D20 touch target), so the target is real
         // without a visible button pulling the eye off the text. It is described by the summary,
@@ -428,6 +430,21 @@ object NotifyOverlay {
         row.addView(close, LinearLayout.LayoutParams(dp(Dimens.MIN_TARGET), dp(Dimens.MIN_TARGET)))
 
         column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // The action, on the full card width and all of it: this is the card's summary, not the
+        // verbatim command (D10 applies to the gate). No line cap and no ellipsis (R1), so a long
+        // target ("Delete the notification from Signal") is never cut mid-word. Named `summaryView`,
+        // not `text`: a local called `text` shadows the TextView `text` property in `apply` blocks.
+        val summaryView = TextView(ctx).apply {
+            text = entry.summary
+            Type.apply(this, TypeRole.BODY_STRONG)
+            setTextColor(p.ink)
+        }
+        column.addView(summaryView, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            topMargin = dp(Dimens.SPACE_XS)
+            // The column has no end padding (the header row's ✕ supplies its own), so give the text one.
+            marginEnd = dp(Dimens.SPACE_M)
+        })
 
         // The AI description line, present from the start so the fetch can fill it in
         // WITHOUT A RELAYOUT SURPRISE. While the fetch runs it reads as a status, not as an
@@ -448,13 +465,23 @@ object NotifyOverlay {
             text = if (entry.facts != null) "summarising…" else ""
             Type.apply(this, TypeRole.DETAIL)
             setTextColor(p.etched)
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        // The AI's risk call, as a word on its own line above the description (R1). Hidden until
+        // the summary arrives; HIGH is inverted, so it cannot be mistaken for MEDIUM.
+        val riskLabel = TextView(ctx).apply {
+            Type.apply(this, TypeRole.ROW_LABEL)
+            visibility = GONE
+        }
+        val aiText = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(riskLabel, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+            addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
         aiRow.addView(
-            aiLine,
+            aiText,
             LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(AI_LED_GAP_DP) }
         )
+        entry.riskLabel = riskLabel
         entry.aiLine = aiLine
         entry.aiLed = aiLed
         column.addView(aiRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -495,11 +522,11 @@ object NotifyOverlay {
         if (anchorX == Int.MIN_VALUE || anchorOrientation != orientation) {
             val stored = CardAnchorStore.load(ctx, orientation)
             val restored = CardAnchor.clamp(
-                x = stored?.x ?: minEdge,
+                x = stored?.x ?: dp(CARD_SIDE_MARGIN_DP),
                 y = stored?.y ?: minEdge,
                 screenWidth = size.first,
                 screenHeight = size.second,
-                cardWidth = dp(CARD_WIDTH_DP),
+                cardWidth = cardWidthPx,
                 cardHeight = 0,
                 minEdge = minEdge,
             )
@@ -509,7 +536,7 @@ object NotifyOverlay {
         }
 
         val params = WindowManager.LayoutParams(
-            dp(CARD_WIDTH_DP),
+            cardWidthPx,
             WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // NOT_FOCUSABLE: never takes focus or the keyboard.
@@ -570,7 +597,7 @@ object NotifyOverlay {
                             y = (originY - dy).roundToInt(),
                             screenWidth = size.first,
                             screenHeight = size.second,
-                            cardWidth = dp(CARD_WIDTH_DP),
+                            cardWidth = cardWidthPx,
                             cardHeight = card.height,
                             minEdge = minEdge,
                         )
@@ -704,7 +731,7 @@ object NotifyOverlay {
                     y = anchorY,
                     screenWidth = size.first,
                     screenHeight = size.second,
-                    cardWidth = dp(CARD_WIDTH_DP),
+                    cardWidth = cardWidthPx,
                     cardHeight = h,
                     minEdge = minEdge,
                 )
@@ -723,7 +750,7 @@ object NotifyOverlay {
         entry.shownAt = System.currentTimeMillis()
 
         com.mido.phonebridge.Debug.log(
-            "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
+            "notify[${entry.id}] attached w=${cardWidthPx} h=WRAP anchored x=$anchorX y=$anchorY"
         )
 
         // The subtle alert. Enforced inside SoundAlerts: it plays only while the
@@ -919,6 +946,36 @@ object NotifyOverlay {
         // without touching geometry — the same property that made the old band safe, kept.
         // LOW gives okSurface, MEDIUM and HIGH cautionSurface; never signal (D6, D36).
         entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(Theme.palette(entry.ctx), result.risk))
+        applyRisk(entry, result.risk)
+    }
+
+    /**
+     * Name the risk as a word, and make HIGH look different from MEDIUM (R1). D36 keeps the two on
+     * the same amber, so the difference is the word and the weight: HIGH is an inverted chip on a
+     * card with a heavy outline, MEDIUM is amber text on a plain card, LOW is green text.
+     */
+    private fun applyRisk(entry: Entry, risk: com.mido.phonebridge.ai.Risk) {
+        val label = entry.riskLabel ?: return
+        val p = Theme.palette(entry.ctx)
+        val density = entry.ctx.resources.displayMetrics.density
+        label.text = NotifyCardCopy.riskWord(risk)
+        label.visibility = View.VISIBLE
+        val high = risk == com.mido.phonebridge.ai.Risk.HIGH
+        if (high) {
+            label.setTextColor(p.onInk)
+            label.background = GradientDrawable().apply {
+                setColor(p.ink)
+                cornerRadius = 4 * density
+            }
+            val padX = (8 * density).roundToInt()
+            val padY = (2 * density).roundToInt()
+            label.setPadding(padX, padY, padX, padY)
+            entry.cardBg?.setStroke((HIGH_RISK_STROKE_DP * density).roundToInt(), p.cautionText)
+        } else {
+            label.setTextColor(if (risk == com.mido.phonebridge.ai.Risk.LOW) p.okText else p.cautionText)
+            label.background = null
+            label.setPadding(0, 0, 0, 0)
+        }
     }
 
     /**
@@ -1329,7 +1386,14 @@ object NotifyOverlay {
      * 240dp, so the `EXECUTE` chip, two lines of summary and the 48dp ✕ fit side by side at a
      * 1.35 font scale. Every clamp reads this same value.
      */
-    private const val CARD_WIDTH_DP = 240
+    /** The card spans the screen minus this margin on each side (R1: was a fixed 240 dp). */
+    private const val CARD_SIDE_MARGIN_DP = 20
+
+    /** On a wide screen (tablet, landscape) the card stops growing here. */
+    private const val CARD_MAX_WIDTH_DP = 560
+
+    /** The HIGH-risk card is outlined this thick, so it differs from MEDIUM at a glance. */
+    private const val HIGH_RISK_STROKE_DP = 3
     private const val EDGE_DP = 14
 
     /** The panel's alpha on the card: nearly opaque, so the app below never shows through text. */

@@ -203,16 +203,16 @@ class ApprovalActivityBehaviourTest {
         val offer = ApprovalGate.ExceptionOffer(Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), "ALWAYS NOTIFY")
         val a = GateFixtures.launch(GateFixtures.ssh("sudo -S true", sudo = true, offer = offer), "POST /ssh/kvm-box")
         assertTrue((a.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0)
-        assertNull(a.text("ALWAYS NOTIFY"))
+        assertNull(a.text("ALSO ADD EXCEPTION"))
     }
 
     @Test
     fun `on a hold gate the exception tap only arms, and the hold approves with it`() {
         val rule = Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB)
         val a = GateFixtures.launch(GateFixtures.ssh("ls", offer = ApprovalGate.ExceptionOffer(rule, "ALWAYS NOTIFY")), "POST /ssh/kvm-box")
-        a.text("ALWAYS NOTIFY")!!.performClick()
+        a.text("ALSO ADD EXCEPTION")!!.performClick()
         assertNull(pending.approved)
-        assertNotNull(a.text("ALWAYS NOTIFY · ON"))
+        assertNotNull(a.text("ALSO ADD EXCEPTION · ON"))
         val hold = a.views().first { it is HoldKey }
         assertTrue(hold.performAccessibilityAction(AccessibilityNodeInfoCompat.ACTION_LONG_CLICK, null))
         assertEquals(true, pending.approved)
@@ -229,6 +229,33 @@ class ApprovalActivityBehaviourTest {
         idle()
         assertNull(pending.approved)
         assertTrue(a.text(ObscuredTouchGuard.BANNER_TEXT)!!.isShown)
+    }
+
+    @Test
+    fun `while another app covers the screen the keys look disabled, and come back when it clears`() {
+        val a = GateFixtures.launch(ssh, "POST /ssh/kvm-box")
+        val keyRow = a.text("DENY")!!.parent as View
+        assertEquals(1f, keyRow.alpha, 0f)
+        obscuredTap(a)
+        idle()
+        assertEquals(GateScreen.OBSCURED_KEY_ALPHA, keyRow.alpha, 0f)
+        val guard = a.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+        val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0 })
+        val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = 5f; y = 5f; pressure = 1f; size = 1f })
+        val t = android.os.SystemClock.uptimeMillis()
+        guard.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, 1, props, coords, 0, 0, 1f, 1f, 0, 0, 0, 0))
+        idle()
+        assertEquals(1f, keyRow.alpha, 0f)
+    }
+
+    @Test
+    fun `the exception key says what it does`() {
+        val rule = Rule("contacts", Verb.READ, Mode.DONT_DISTURB)
+        val tap = GateFixtures.launch(
+            GateFixtures.contacts(offer = ApprovalGate.ExceptionOffer(rule, "ALWAYS NOTIFY")), "GET /contacts",
+        )
+        assertNotNull(tap.text(GateCopy.EXCEPTION_APPROVE_KEY))
+        assertNull(tap.text("ALWAYS NOTIFY"))
     }
 
     @Test

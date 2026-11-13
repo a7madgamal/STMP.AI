@@ -60,7 +60,11 @@ class GateCopyTest {
     fun `small strings`() {
         assertEquals("1 waiting behind this one", GateCopy.queue(1))
         assertEquals("REQ 1043", GateCopy.trailing(1043))
-        assertEquals("ALWAYS NOTIFY · ON", GateCopy.exceptionKey("ALWAYS NOTIFY", on = true))
+        assertEquals("ALSO ADD EXCEPTION · ON", GateCopy.exceptionKey(ApproveGesture.HOLD, on = true))
+        assertEquals("ALSO ADD EXCEPTION", GateCopy.exceptionKey(ApproveGesture.HOLD, on = false))
+        assertEquals("APPROVE + ADD EXCEPTION", GateCopy.exceptionKey(ApproveGesture.TAP, on = false))
+        assertEquals("APPROVE + ADD EXCEPTION", GateCopy.exceptionKey(ApproveGesture.TAP_THEN_BIOMETRIC, on = false))
+        assertEquals("HIGH risk", GateCopy.aiRiskLine(Risk.HIGH))
         assertEquals("AI summary · may be wrong · HIGH", GateCopy.aiReadyLabel(Risk.HIGH))
         assertEquals("100.64.0.7 · as me@example.com", GateCopy.addressLine("100.64.0.7", "me@example.com"))
         assertEquals("100.64.0.7", GateCopy.addressLine("100.64.0.7", "—"))

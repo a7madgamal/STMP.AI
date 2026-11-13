@@ -52,8 +52,8 @@ internal object GateRows {
             (r.style != Row.Style.WARN && r.style != Row.Style.CODE && JsonCode.looksJson(r.value))
         return when {
             r.style == Row.Style.CODE ->
-                Readout.create(ctx, ShellCode.renderForReadout(r.value, p), Readout.Kind.BODY).root
-            asJson -> Readout.create(ctx, JsonCode.render(r.value, JsonCode.readoutInk(p)), Readout.Kind.BODY).root
+                Readout.create(ctx, ShellCode.renderForReadout(r.value, p), Readout.Kind.BODY, softWrap = true).root
+            asJson -> Readout.create(ctx, JsonCode.render(r.value, JsonCode.readoutInk(p)), Readout.Kind.BODY, softWrap = true).root
             else -> {
                 val (role, color) = when (r.style) {
                     Row.Style.MONO -> TypeRole.MONO_BODY to p.ink

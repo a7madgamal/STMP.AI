@@ -204,11 +204,12 @@ class ApprovalActivity : FragmentActivity() {
     /** D17: touches in a gesture another window fully covers never reach the gate. */
     private fun installTouchGuard(id: Long) {
         views.guard.onObscuredTouch = {
-            views.obscuredBanner.visibility = View.VISIBLE
+            // The banner says why, and the keys look as dead as they are (D17).
+            views.setObscured(true)
             Haptics.perform(views.guard, HapticEvent.REJECT)
             Debug.log("approval[$id] touch ignored: window obscured")
         }
-        views.guard.onClearTouch = { views.obscuredBanner.visibility = View.GONE }
+        views.guard.onClearTouch = { views.setObscured(false) }
     }
 
     /** What the caller registry knows about [remote]. A registry that cannot be read is "unverified". */
@@ -310,7 +311,7 @@ class ApprovalActivity : FragmentActivity() {
     /** The banner names the CAUSE, because each one needs a different action. */
     private fun renderBio() {
         val show = gesture == ApproveGesture.TAP_THEN_BIOMETRIC && bioStatus != BioStatus.Usable
-        views.bioBanner.visibility = if (show) View.VISIBLE else View.GONE
+        views.setBioShown(show)
         if (!show) return
         val (title, body) = when (bioStatus) {
             BioStatus.Usable -> return

@@ -131,6 +131,16 @@ class PunchView(context: Context, private val scrimAlpha: Int = 0x66) : View(con
         }
     }
 
+    private companion object {
+        const val MIN_WIDTH_DP = 220f
+        const val FRAME_INSET_DP = 6f
+        const val TEXT_PAD_DP = 12f
+        const val SCREEN_MARGIN_DP = 12f
+        const val TOP_PAD_DP = 14f
+        const val BOTTOM_PAD_DP = 12f
+        const val META_GAP_DP = 8f
+    }
+
     override fun onDraw(canvas: Canvas) {
         val v = verdict ?: return
         val t = elapsed()
@@ -165,14 +175,25 @@ class PunchView(context: Context, private val scrimAlpha: Int = 0x66) : View(con
         joltTarget?.translationY = context.dpf(joltDp(t))
 
         val color = if (v == Verdict.APPROVED) p.okGlyph else p.ink
-        val w = context.dpf(220f)
         val cx = width / 2f
         val cy = height * 0.38f + translate
         val hasMeta = meta.isNotEmpty()
-        val h = context.dpf(if (hasMeta) 96f else 72f)
+        // The stamp is sized from the text it has to hold. At large font scales "APPROVED" and the
+        // entry line are wider than the old fixed 220 dp frame and ran over its border (R1). The
+        // frame grows with the text; past the screen width the whole stamp scales down to fit.
+        val edge = context.dpf(FRAME_INSET_DP)
+        val pad = context.dpf(TEXT_PAD_DP)
+        val textW = maxOf(word.measureText(v.word), if (hasMeta) metaPaint.measureText(meta) else 0f)
+        val w = maxOf(context.dpf(MIN_WIDTH_DP), textW + 2 * (edge + pad))
+        val fit = minOf(1f, (width - 2 * context.dpf(SCREEN_MARGIN_DP)) / w)
+        val wordH = word.descent() - word.ascent()
+        val metaH = if (hasMeta) metaPaint.descent() - metaPaint.ascent() else 0f
+        val topPad = context.dpf(TOP_PAD_DP)
+        val gap = if (hasMeta) context.dpf(META_GAP_DP) else 0f
+        val h = 2 * edge + topPad + wordH + gap + metaH + context.dpf(BOTTOM_PAD_DP)
         canvas.save()
         canvas.rotate(-4f, cx, cy)
-        canvas.scale(scale, scale, cx, cy)
+        canvas.scale(scale * fit, scale * fit, cx, cy)
         frame.set(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
         val a = (alpha * fade * 255).toInt()
         fill.color = Colors.withAlpha(p.panel, (0xEB * alpha * fade).toInt())
@@ -180,15 +201,15 @@ class PunchView(context: Context, private val scrimAlpha: Int = 0x66) : View(con
         stroke.color = Colors.withAlpha(color, a)
         stroke.strokeWidth = context.dpf(3f)
         canvas.drawRoundRect(frame, context.dpf(12f), context.dpf(12f), stroke)
-        frame.inset(context.dpf(6f), context.dpf(6f))
+        frame.inset(edge, edge)
         stroke.strokeWidth = context.dpf(1.5f)
         canvas.drawRoundRect(frame, context.dpf(7f), context.dpf(7f), stroke)
         word.color = Colors.withAlpha(color, a)
-        val wordBase = frame.top + context.dpf(14f) - word.ascent()
+        val wordBase = frame.top + topPad - word.ascent()
         canvas.drawText(v.word, cx, wordBase, word)
         if (hasMeta) {
             metaPaint.color = Colors.withAlpha(color, a)
-            canvas.drawText(meta, cx, wordBase + context.dpf(8f) - metaPaint.ascent() + word.descent(), metaPaint)
+            canvas.drawText(meta, cx, wordBase + word.descent() + gap - metaPaint.ascent(), metaPaint)
         }
         canvas.restore()
         if (!finished) postInvalidateOnAnimation()

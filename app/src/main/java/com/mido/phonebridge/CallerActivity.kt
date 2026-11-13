@@ -87,7 +87,8 @@ class CallerActivity : FragmentActivity() {
 
         root.addView(Etched.label(this, "NEW DEVICE").also { ViewCompat.setAccessibilityHeading(it, true) })
         root.addView(
-            Readout.create(this, ip, Readout.Kind.DISPLAY, prompt = "first request from").root,
+            // Wrapped with a continuation glyph, so a long IPv6 address never breaks inside a hextet.
+            Readout.create(this, ip, Readout.Kind.DISPLAY, prompt = "first request from", softWrap = true).root,
             fullWidth().apply { topMargin = dp(Dimens.SPACE_S) },
         )
 
@@ -132,6 +133,9 @@ class CallerActivity : FragmentActivity() {
         // Three full-width keys, stacked: robust at 1.35 text where a row of three does not fit,
         // and the consequential ones are separated by distance rather than by hoping for aim.
         // BLOCK is last and 24dp from NOT NOW; none of them is the default-focused key.
+        // The tapjacking banner sits right above the keys, where the approval gate puts it (R1).
+        val banner = ObscuredTouchGuard.banner(this)
+        root.addView(banner, fullWidth().apply { topMargin = dp(Dimens.GUTTER) })
         root.addView(
             KeyButton.create(
                 this, "ALLOW", KeyButton.Kind.INK, KeyButton.Size.LARGE, describe = "Allow this device",
@@ -164,14 +168,18 @@ class CallerActivity : FragmentActivity() {
         // Tapjacking (D17): while another window fully covers this screen, no touch reaches
         // allow, block, not now or the name field, and the banner says why. Partial cover is
         // allowed (D60). System back still works; it resolves Unavailable, which is safe.
-        val banner = ObscuredTouchGuard.banner(this)
-        root.addView(banner, 0)
         val guard = ObscuredTouchGuard(this)
+        // The keys look as dead as they are while covered: dimmed, like the approval gate's.
+        val keys = (0 until root.childCount).map(root::getChildAt).filterIsInstance<com.google.android.material.button.MaterialButton>()
+        fun setObscured(obscured: Boolean) {
+            banner.visibility = if (obscured) View.VISIBLE else View.GONE
+            keys.forEach { it.alpha = if (obscured) OBSCURED_KEY_ALPHA else 1f }
+        }
         guard.onObscuredTouch = {
-            banner.visibility = View.VISIBLE
+            setObscured(true)
             Haptics.perform(guard, HapticEvent.REJECT)
         }
-        guard.onClearTouch = { banner.visibility = View.GONE }
+        guard.onClearTouch = { setObscured(false) }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
@@ -247,7 +255,9 @@ class CallerActivity : FragmentActivity() {
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     // Nothing is written. The waiting request stays unverified and can retry.
-                    showStatus("Not confirmed: $errString", isProblem = false)
+                    // The platform's string is not shown: CallerCopy maps the code to our words, and
+                    // it is caution-coloured because the human still has a decision to make.
+                    showStatus(CallerCopy.notConfirmed(errorCode), isProblem = true)
                 }
             }
         )
@@ -296,5 +306,8 @@ class CallerActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_IP = "ip"
+
+        /** Alpha of the keys while another window covers the screen (same as the approval gate). */
+        private const val OBSCURED_KEY_ALPHA = 0.38f
     }
 }

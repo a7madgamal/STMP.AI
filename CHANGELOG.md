@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.1 (build 316)**.
+Current build: **v0.52.3 (build 318)**.
 
 ---
 
@@ -5577,10 +5577,21 @@ devDependencies. `node_modules/` is gitignored.
 - The recent-request rows line their text up in one column whatever the verb.
 - Deleting a caller, secret, SSH connection or the vault asks with a Keep key first and an outlined delete key set apart below it; the Exceptions mode picker has large rows with a radio mark and shows the current mode.
 
-## 0.52.2 (build 317) — 2026-11-13 — CURRENT
+## 0.52.2 (build 317) — 2026-11-13
 - Crash recording and frozen main thread detection are now really switched on at start-up, so the last crash and stall show up on Home and in the debug commands.
 - Setup docs now really install the Hermes plugin by its catalog name.
 - Removed the unused paper-look fonts from the app again.
+
+## 0.52.3 (build 318) — 2026-11-13 — CURRENT
+- The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
+- Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
+- The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
+- The key that approves and saves an exception now says so: "Approve + add exception" (or "Also add exception" where you hold to approve).
+- While another app covers the approval screen or the new-device screen, the keys look disabled instead of only ignoring your touch.
+- The approval screen keeps room for the request when the fingerprint notice, the cover warning and the password field are all showing: the notices share one panel and the lower block scrolls on its own. A line above the keys and a fade show that the content scrolls.
+- The "To approve" caption under the hold key stays on one line, the countdown and the request number no longer run together, and the AI summary shows its risk on its own line.
+- The approved and denied stamp grows with its text and shrinks to fit the screen, and the receipt slip is as tall as its lines instead of a fixed height, and sits clear of the keys.
+- The new-device screen explains a cancelled fingerprint check in its own words and in amber instead of showing the system's wording.
 
 ## Keeping this file honest
 

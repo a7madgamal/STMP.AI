@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
@@ -24,6 +25,7 @@ import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.HoldKey
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.MaxHeightScrollView
 import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
 import com.mido.phonebridge.ui.kit.Panel
 import com.mido.phonebridge.ui.kit.Readout
@@ -74,6 +76,10 @@ internal class GateViews(
     val bioTitle: TextView,
     val bioBody: TextView,
     val obscuredBanner: View,
+    /** The notices panel (fingerprint + obscured); visible while either of them is. */
+    val notices: View,
+    /** The key row, dimmed while another app covers the screen. */
+    val keyRow: View,
 ) {
     private var approveArmed: Boolean? = null
     private var approveSeconds = -1
@@ -86,6 +92,31 @@ internal class GateViews(
         approveTap?.let { KeyButton.setArmed(it, armed, secondsUntilArmed) }
         holdKey?.let { it.armed = armed; it.secondsUntilArmed = if (armed) 0 else secondsUntilArmed }
         exception?.setArmed(armed, secondsUntilArmed)
+    }
+
+    /**
+     * While another window fully covers the screen the guard drops every touch (D17), so the keys
+     * must LOOK dead: dimmed, not merely ignored. [GateScreen.OBSCURED_KEY_ALPHA] is the dim level.
+     */
+    fun setObscured(obscured: Boolean) {
+        isObscured = obscured
+        val alpha = if (obscured) GateScreen.OBSCURED_KEY_ALPHA else 1f
+        keyRow.alpha = alpha
+        exception?.root?.alpha = alpha
+        obscuredBanner.visibility = if (obscured) View.VISIBLE else View.GONE
+        refreshNotices()
+    }
+
+    /** Show or hide the fingerprint notice; the panel around it follows. */
+    fun setBioShown(shown: Boolean) {
+        bioBanner.visibility = if (shown) View.VISIBLE else View.GONE
+        refreshNotices()
+    }
+
+    private var isObscured = false
+
+    private fun refreshNotices() {
+        notices.visibility = if (isObscured || bioBanner.visibility == View.VISIBLE) View.VISIBLE else View.GONE
     }
 
     /** After the decision: nothing on the gate takes another tap. */
@@ -112,6 +143,7 @@ internal object GateScreen {
             unarmedText = GateCopy.ARM_SUMMARY_PENDING
             armed = false
         }
+        padTrailing(ticks, ctx)
         val queueLine = Type.text(ctx, "", TypeRole.CAPTION, p.etched).apply { visibility = View.GONE }
         val top = column(ctx).apply {
             setPadding(gutter, Theme.dp(ctx, Dimens.SPACE_M), gutter, 0)
@@ -150,26 +182,40 @@ internal object GateScreen {
         exception?.let { content.addView(it.root) }
         content.addView(rawExpander(ctx, GateCopy.raw(input.endpoint, input.detail)))
         val scroll = NestedScrollView(ctx).apply { isFillViewport = true; addView(content) }
-
-        // --- bottom pinned: banners, the password, the keys
-        val obscured = ObscuredTouchGuard.banner(ctx)
-        val bioTitle = Type.text(ctx, "", TypeRole.ROW_LABEL, p.cautionText)
-        val bioBody = Type.text(ctx, "", TypeRole.DETAIL, p.ink)
-        val bioBanner = bioBanner(ctx, bioTitle, bioBody)
-        val bottom = column(ctx).apply {
-            setPadding(gutter, Theme.dp(ctx, Dimens.SPACE_S), gutter, 0)
-            addView(obscured)
-            addView(bioBanner)
+        val scrollArea = FrameLayout(ctx).apply {
+            addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(scrollFade(ctx, scroll), FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Theme.dp(ctx, FADE_DP), Gravity.BOTTOM,
+            ))
         }
+
+        // --- bottom pinned: the notices, the password, the keys. The notices and the password sit in
+        // a scroll of their own with a cap, so a tall stack (fingerprint locked + covered + password)
+        // can never squeeze the request itself out of the screen (R1). The keys stay pinned below it.
+        val notices = Notices(ctx)
         val password = if (input.needsPassword) passwordField(ctx, cb.onPasswordChanged) else null
-        password?.let { addPassword(ctx, bottom, it) }
+        val stack = column(ctx).apply {
+            setPadding(gutter, Theme.dp(ctx, Dimens.SPACE_S), gutter, 0)
+            addView(notices.panel, matchWrap())
+            password?.let { addPassword(ctx, this, it) }
+        }
+        val stackScroll = MaxHeightScrollView(ctx).apply {
+            maxHeightPx = (ctx.resources.displayMetrics.heightPixels * STACK_MAX_FRACTION).toInt()
+            fadeColor = p.body
+            clipToPadding = false
+            addView(stack)
+        }
         val keys = keys(ctx, input, signal, cb)
-        bottom.addView(keys.row, matchWrap())
+        val bottom = column(ctx).apply {
+            addView(hairline(ctx), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Theme.dp(ctx, 1)))
+            addView(stackScroll, matchWrap())
+            addView(keys.row, matchWrap().apply { marginStart = gutter; marginEnd = gutter })
+        }
 
         val outer = column(ctx).apply {
             setBackgroundColor(p.body)
             addView(top, matchWrap())
-            addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(scrollArea, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(bottom, matchWrap())
         }
         // Clear of the system bars as WINDOW INSETS, not a fixed dp: the status bar differs per
@@ -185,8 +231,8 @@ internal object GateScreen {
         return GateViews(
             guard = guard, outer = outer, scroll = scroll, ticks = ticks, queueLine = queueLine,
             ai = GateAiPanel(ctx, aiSlot), deny = keys.deny, approveTap = keys.approveTap, holdKey = keys.holdKey,
-            exception = exception, passwordField = password, bioBanner = bioBanner, bioTitle = bioTitle,
-            bioBody = bioBody, obscuredBanner = obscured,
+            exception = exception, passwordField = password, bioBanner = notices.bio, bioTitle = notices.bioTitle,
+            bioBody = notices.bioBody, obscuredBanner = notices.obscured, notices = notices.panel, keyRow = keys.row,
         )
     }
 
@@ -196,7 +242,7 @@ internal object GateScreen {
         val view = input.view
         val quiet = if (signal) p.ink else p.etched
         val panel = Panel.create(ctx, if (signal) Panel.Tone.SIGNAL else Panel.Tone.PLAIN)
-        panel.addView(Type.text(ctx, view?.requester ?: input.remote, TypeRole.TITLE, p.ink).apply {
+        panel.addView(Type.text(ctx, view?.requester ?: GateCopy.FALLBACK_TITLE, TypeRole.TITLE, p.ink).apply {
             ViewCompat.setAccessibilityHeading(this, true)
         }, matchWrap())
         panel.addView(
@@ -229,23 +275,81 @@ internal object GateScreen {
                 open = !open
                 render()
             }))
-            if (open) panel.addView(Readout.create(ctx, raw, Readout.Kind.LOG).root)
+            if (open) panel.addView(Readout.create(ctx, raw, Readout.Kind.LOG, softWrap = true).root)
         }
         render()
         return panel
     }
 
-    private fun bioBanner(ctx: Context, title: TextView, body: TextView): LinearLayout =
-        Panel.create(ctx, Panel.Tone.CAUTION).apply {
-            addView(row(ctx).apply {
-                addView(Led(ctx).apply { state = Led.State.CAUTION }, LinearLayout.LayoutParams(Theme.dp(ctx, 16), Theme.dp(ctx, 16)))
-                addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Theme.dp(ctx, Dimens.SPACE_S) })
-            }, matchWrap())
-            addView(body, matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
+    /**
+     * One caution panel for everything that explains why the keys will not work right now: the
+     * fingerprint notice and the "another app is covering this screen" line (D17). One LED, one
+     * panel, so the two together cost one card of height instead of two.
+     */
+    private class Notices(ctx: Context) {
+        private val p = Theme.palette(ctx)
+        val bioTitle: TextView = Type.text(ctx, "", TypeRole.ROW_LABEL, p.cautionText)
+        val bioBody: TextView = Type.text(ctx, "", TypeRole.DETAIL, p.ink)
+        val bio: LinearLayout = column(ctx).apply {
+            addView(bioTitle, matchWrap())
+            addView(bioBody, matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
+            visibility = View.GONE
+        }
+        val obscured: TextView = Type.text(ctx, ObscuredTouchGuard.BANNER_TEXT, TypeRole.BODY_STRONG, p.cautionText).apply {
+            visibility = View.GONE
+        }
+        val panel: LinearLayout = Panel.create(ctx, Panel.Tone.CAUTION).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(Led(ctx).apply { state = Led.State.CAUTION },
+                LinearLayout.LayoutParams(Theme.dp(ctx, 16), Theme.dp(ctx, 16)).apply { topMargin = Theme.dp(ctx, 2) })
+            addView(column(ctx).apply {
+                addView(bio, matchWrap())
+                addView(obscured, matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Theme.dp(ctx, Dimens.SPACE_S) })
             layoutParams = matchWrap().apply { bottomMargin = Theme.dp(ctx, Dimens.SPACE_S) }
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             visibility = View.GONE
         }
+    }
+
+    /** A 1 dp line above the pinned keys, so scrolled content visibly ends at them. */
+    private fun hairline(ctx: Context): View = View(ctx).apply {
+        setBackgroundColor(Theme.palette(ctx).hairline)
+    }
+
+    /** A fade at the foot of the scroll while more lies below, so content never just ends at a key. */
+    private fun scrollFade(ctx: Context, scroll: NestedScrollView): View {
+        val body = Theme.palette(ctx).body
+        val fade = View(ctx).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(body, android.graphics.Color.TRANSPARENT),
+            )
+            visibility = View.GONE
+            isClickable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val update = {
+            val more = scroll.canScrollVertically(1)
+            if ((fade.visibility == View.VISIBLE) != more) fade.visibility = if (more) View.VISIBLE else View.GONE
+        }
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> update() }
+        scroll.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> update() }
+        return fade
+    }
+
+    /**
+     * A gap between the countdown text and the request number: the countdown is the first thing
+     * that grows at large text, and the two ran together at 1.35.
+     */
+    private fun padTrailing(ticks: CountdownTicks, ctx: Context) {
+        val trailing = ticks.trailingText ?: return
+        fun find(v: View): TextView? {
+            if (v is TextView && v.text == trailing) return v
+            if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
+            return null
+        }
+        find(ticks)?.setPaddingRelative(Theme.dp(ctx, Dimens.SPACE_M), 0, 0, 0)
+    }
 
     /**
      * The sudo password field. Every security attribute is load-bearing:
@@ -328,13 +432,18 @@ internal object GateScreen {
                 val column = column(ctx).apply {
                     gravity = Gravity.CENTER_HORIZONTAL
                     addView(hold, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    // One line, and the column is as wide as the caption needs (never narrower than the
+                    // key): at 1.35 the caption wrapped to two lines under a 72 dp column and sat
+                    // off-centre (R1). DENY takes the width that is left.
                     addView(Type.text(ctx, GateCopy.HOLD_CAPTION, TypeRole.LABEL, p.etched).apply {
                         gravity = Gravity.CENTER
-                        maxLines = 2
+                        maxLines = 1
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }, matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                        .apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS); gravity = Gravity.CENTER_HORIZONTAL })
+                    minimumWidth = Theme.dp(ctx, Dimens.HOLD_KEY)
                 }
-                row.addView(column, LinearLayout.LayoutParams(Theme.dp(ctx, Dimens.HOLD_KEY), ViewGroup.LayoutParams.WRAP_CONTENT))
+                row.addView(column, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
                 Keys(row, deny, null, hold)
             }
             ApproveGesture.TAP, ApproveGesture.TAP_THEN_BIOMETRIC -> {
@@ -348,6 +457,15 @@ internal object GateScreen {
             }
         }
     }
+
+    /** Alpha of the keys while another window covers the screen. */
+    const val OBSCURED_KEY_ALPHA = 0.38f
+
+    /** Height of the fade at the foot of the scrolling content. */
+    private const val FADE_DP = 16
+
+    /** The notices and the password may take this share of the screen before they scroll. */
+    private const val STACK_MAX_FRACTION = 0.38f
 
     internal fun column(ctx: Context) = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
     internal fun row(ctx: Context) = LinearLayout(ctx).apply {
@@ -393,7 +511,10 @@ internal class GateAiPanel(private val ctx: Context, private val slot: LinearLay
         val p = Theme.palette(ctx)
         slot.removeAllViews()
         body = null
-        data class Look(val tone: Panel.Tone, val led: Led.State, val label: String, val labelColor: Int, val text: String, val textColor: Int, val reason: String)
+        data class Look(
+            val tone: Panel.Tone, val led: Led.State, val label: String, val labelColor: Int, val text: String,
+            val textColor: Int, val reason: String, val risk: String = "", val riskColor: Int = 0,
+        )
         val look = when (state) {
             ApprovalGate.AiState.NotNeeded -> return
             is ApprovalGate.AiState.Loading -> Look(Panel.Tone.PLAIN, Led.State.PENDING, GateCopy.AI_LABEL, p.etched, "", p.etched, "")
@@ -401,7 +522,8 @@ internal class GateAiPanel(private val ctx: Context, private val slot: LinearLay
                 val low = state.summary.risk == com.mido.phonebridge.ai.Risk.LOW
                 Look(
                     if (low) Panel.Tone.OK else Panel.Tone.CAUTION, if (low) Led.State.OK else Led.State.CAUTION,
-                    GateCopy.aiReadyLabel(state.summary.risk), p.ink, state.summary.description, p.ink, state.summary.reason,
+                    GateCopy.AI_LABEL, p.ink, state.summary.description, p.ink, state.summary.reason,
+                    risk = GateCopy.aiRiskLine(state.summary.risk), riskColor = if (low) p.okText else p.cautionText,
                 )
             }
             is ApprovalGate.AiState.Failed -> Look(
@@ -414,6 +536,12 @@ internal class GateAiPanel(private val ctx: Context, private val slot: LinearLay
             addView(Type.text(ctx, look.label, TypeRole.LABEL, look.labelColor),
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Theme.dp(ctx, Dimens.SPACE_S) })
         }, GateScreen.matchWrap())
+        // The risk call is its own line, so the label never wraps around it and "HIGH" reads as
+        // the model's risk rating, not its confidence.
+        if (look.risk.isNotEmpty()) {
+            panel.addView(Type.text(ctx, look.risk, TypeRole.BODY_STRONG, look.riskColor),
+                GateScreen.matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
+        }
         val text = Type.text(ctx, look.text, TypeRole.DETAIL, look.textColor)
         panel.addView(text, GateScreen.matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
         body = text
@@ -457,7 +585,7 @@ internal class GateExceptionOffer(
     val keyView: MaterialButton get() = key
 
     private fun buildKey(): MaterialButton = KeyButton.create(
-        ctx, GateCopy.exceptionKey(offer.label, isOn),
+        ctx, GateCopy.exceptionKey(gesture, isOn),
         kind = if (isOn) KeyButton.Kind.INK else KeyButton.Kind.PANEL,
         size = KeyButton.Size.REGULAR,
     ) { if (!disabled) onTap() }

@@ -31,4 +31,28 @@ class CallerCopyTest {
             assertTrue(CallerCopy.cannotConfirm(code).endsWith("nothing was decided."))
         }
     }
+
+    @Test
+    fun `a cancelled prompt is never shown as the platform's own string`() {
+        // BiometricPrompt: USER_CANCELED 10, CANCELED 5, NEGATIVE_BUTTON 13.
+        for (code in listOf(5, 10, 13)) {
+            val text = CallerCopy.notConfirmed(code)
+            assertTrue(text, text.contains("nothing was decided"))
+            assertTrue(text, !text.contains("canceled", ignoreCase = true))
+            assertTrue(text, !text.contains("cancelled", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `every known prompt error says nothing was decided and what to do`() {
+        for (code in listOf(2, 3, 4, 5, 7, 8, 9, 10, 13, 14, 99)) {
+            val text = CallerCopy.notConfirmed(code)
+            assertTrue("$code: $text", text.contains("nothing was decided", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `an unknown prompt error names its code`() {
+        assertTrue(CallerCopy.notConfirmed(99).contains("code 99"))
+    }
 }

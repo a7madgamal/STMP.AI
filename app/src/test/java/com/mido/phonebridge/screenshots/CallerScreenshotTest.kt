@@ -36,7 +36,8 @@ class CallerScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     @Test fun caller_not_confirmed() {
         val a = open()
-        a.showStatusForTest("Not confirmed: Authentication canceled", isProblem = false)
+        // The platform's own "Authentication canceled" is mapped to our words and shown in caution.
+        a.showStatusForTest(com.mido.phonebridge.ui.CallerCopy.notConfirmed(10), isProblem = true)
         capture(a, "caller", "not_confirmed")
     }
 
@@ -45,6 +46,9 @@ class CallerScreenshotTest(variant: Variant) : ShotTest(variant) {
         a.showStatusForTest("Could not save: disk full", isProblem = true)
         capture(a, "caller", "save_failed")
     }
+
+    /** A full-length IPv6 address: wraps with the continuation glyph, never inside a hextet. */
+    @Test fun caller_full_ipv6() = capture(open("fd7a:115c:a1e0:ab12:4843:cd96:6258:2f01"), "caller", "full_ipv6")
 
     @Test fun caller_long_ip_wrap() = capture(open("2001:db8:85a3::8a2e:370:7334"), "caller", "long_ip_wrap")
 

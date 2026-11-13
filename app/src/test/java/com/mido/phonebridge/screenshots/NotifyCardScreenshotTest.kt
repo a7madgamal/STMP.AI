@@ -51,12 +51,13 @@ class NotifyCardScreenshotTest(variant: Variant) : ShotTest(variant) {
         verb: Verb = Verb.READ,
         summary: String = "Search contacts for sara",
         withAi: Boolean = false,
+        requester: String = "Work laptop",
     ): View {
         ShadowSettings.setCanDrawOverlays(true)
         NotifyOverlay.show(
             ctx = Fixtures.app, id = ID, summary = summary, label = "LABEL",
             verb = verb, windowMs = 60_000L, facts = if (withAi) facts else null, needsAi = false,
-            fetchCapMs = 0L, onOutcome = { },
+            fetchCapMs = 0L, requester = requester, onOutcome = { },
         )
         ShadowLooper.idleMainLooper()
         val wm = Fixtures.app.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -98,6 +99,9 @@ class NotifyCardScreenshotTest(variant: Variant) : ShotTest(variant) {
     }
 
     @Test fun no_ai_read() = shoot(show(), "no_ai_read")
+
+    /** A caller the card was not told the name of: just the plugin, no dangling separator. */
+    @Test fun no_requester() = shoot(show(requester = ""), "no_requester")
 
     @Test fun execute_chip() {
         shoot(show(Verb.EXECUTE, "Run uptime on kvm-box"), "execute_chip")

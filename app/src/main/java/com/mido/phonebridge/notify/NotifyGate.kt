@@ -121,6 +121,8 @@ object NotifyGate {
         verb: Verb,
         facts: RequestFacts?,
         needsAi: Boolean,
+        /** Who is asking, by the name the caller registry knows. Blank when unknown. */
+        requester: String = "",
     ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
@@ -136,6 +138,7 @@ object NotifyGate {
             facts = facts,
             needsAi = needsAi,
             fetchCapMs = FETCH_CAP_MS,
+            requester = requester,
         ) { outcome ->
             decided.set(outcome)
             latch.countDown()

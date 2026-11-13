@@ -32,6 +32,9 @@ object GateCopy {
 
     fun windowTitle(requester: String): String = "Approve request from $requester"
 
+    /** Title when the gate has no resolved view to name the requester. */
+    const val FALLBACK_TITLE = "Request details unavailable"
+
     // --- readout ---------------------------------------------------------------------------------
 
     const val READOUT_REQUEST = "Request"
@@ -41,8 +44,14 @@ object GateCopy {
 
     const val AI_LABEL = "AI summary · may be wrong"
     const val AI_UNAVAILABLE = "AI summary · unavailable"
-    const val AI_LOADING_REDUCED = "summarising…"
+    /** Static twin of the animated "thinking…" words, so the two states read the same. */
+    const val AI_LOADING_REDUCED = "thinking…"
+
+    /** Kept for callers that want one line. The gate itself shows the risk on its own line. */
     fun aiReadyLabel(risk: Risk): String = "$AI_LABEL · ${risk.name}"
+
+    /** The AI's risk call, named as what it is so "HIGH" cannot be read as confidence. */
+    fun aiRiskLine(risk: Risk): String = "${risk.name} risk"
     fun aiFailed(detail: String): String = "Could not summarise — $detail. You can still decide."
     fun aiAnnounceReady(description: String): String = "AI summary: $description"
     const val AI_ANNOUNCE_FAILED = "AI summary unavailable"
@@ -82,7 +91,19 @@ object GateCopy {
 
     // --- exception -------------------------------------------------------------------------------
 
-    fun exceptionKey(label: String, on: Boolean): String = if (on) "$label · ON" else label
+    /**
+     * The exception key says what it does (D64). Where a tap approves (TAP, TAP_THEN_BIOMETRIC) it is
+     * "approve + add an exception". On a HOLD gate a tap only arms the exception and the hold
+     * approves (D58), so the key says "also" and shows whether it is armed.
+     */
+    fun exceptionKey(gesture: ApproveGesture, on: Boolean): String = when {
+        gesture != ApproveGesture.HOLD -> EXCEPTION_APPROVE_KEY
+        on -> "$EXCEPTION_ALSO_KEY · ON"
+        else -> EXCEPTION_ALSO_KEY
+    }
+
+    const val EXCEPTION_APPROVE_KEY = "APPROVE + ADD EXCEPTION"
+    const val EXCEPTION_ALSO_KEY = "ALSO ADD EXCEPTION"
 
     /** D21: a plugin is named by its display name, never its id. */
     fun pluginName(id: String): String = PluginRegistry.all().firstOrNull { it.id == id }?.displayName ?: id
