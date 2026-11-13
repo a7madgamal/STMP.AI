@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.5 (build 307)**.
+Current build: **v0.51.7 (build 309)**.
 
 ---
 
@@ -5445,8 +5445,15 @@ devDependencies. `node_modules/` is gitignored.
 - Unlocking is not approving: the fingerprint only releases the key, and the real host and command are then shown for a separate APPROVE.
 - Dead-end vault states (never created, unrecoverable, orphaned) and gate modes with no fingerprint surface refuse with the specific remedy instead of showing a prompt that cannot succeed.
 
-## 0.51.5 (build 307) — 2026-11-12 — CURRENT
+## 0.51.5 (build 307) — 2026-11-12
 - Added an opt-in `-PemuAbi=true` build flag that adds `x86_64` alongside `arm64-v8a`, so an x86_64 emulator can load the native model library. A normal build is unchanged and still arm64 only.
+
+## 0.51.6 (build 308) — 2026-11-12
+- The stamp plays on a hint card again. Its overlay window cannot take focus, so the arming loop never armed and the removal backstop fired first: zero frames, and no impact callback, which is where the sound came from.
+- The stamp lands on the card it approves, sized from the card's own rect rather than the whole display.
+
+## 0.51.7 (build 309) — 2026-11-13 — CURRENT
+- The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
 
 ## Keeping this file honest
 

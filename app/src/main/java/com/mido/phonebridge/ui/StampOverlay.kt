@@ -19,6 +19,29 @@ import com.mido.phonebridge.R
 class StampOverlay(
     context: Context,
     private val scrimAlpha: Int = 0x66,
+    /**
+     * Where on the SCREEN to stamp, in the overlay window's own coordinates.
+     *
+     * Null means the original full-screen behaviour: centred, sized against the whole view.
+     * Non-null makes the mark land ON that rectangle — the hint card — at roughly its own
+     * scale, which is what "stamping on it" means. The rect is a place to press, so the mark
+     * is sized from it and cannot drift to the middle of a screen the card does not occupy.
+     */
+    private val anchor: android.graphics.Rect? = null,
+    /**
+     * Whether this window can ever take focus.
+     *
+     * **A `FLAG_NOT_FOCUSABLE` overlay never reports focus, and that is why the card stamp
+     * vanished.** The arming loop below waits for `hasWindowFocus()` to hold off the clock while
+     * the biometric window dismisses — correct for the modal, which is a normal focusable window.
+     * But [com.mido.phonebridge.notify.NotifyOverlay] adds its stamp with `FLAG_NOT_FOCUSABLE`,
+     * so focus never arrives, the loop sat out its whole `STAMP_ARM_FALLBACK_MS`, and the 2.2s
+     * backstop removed the window first: zero frames, and no impact callback, so no sound.
+     *
+     * A caller that is already sure it is visible passes false and the clock starts on the first
+     * draw. Keeping it a parameter rather than a guess matters: the modal must still WAIT.
+     */
+    private val focusGate: Boolean = true,
 ) : View(context) {
     enum class Verdict(val word: String) { APPROVED("APPROVED"), DENIED("DENIED") }
 
@@ -80,7 +103,10 @@ class StampOverlay(
                 // receipt entirely: after STAMP_ARM_FALLBACK_MS the stamp plays regardless. Without it,
                 // "wait until visible" would mean "never" on an OEM that handles focus oddly.
                 val waited = SystemClock.uptimeMillis() - requestedAt
-                if (!hasWindowFocus() && waited < PaperMotion.STAMP_ARM_FALLBACK_MS) {
+                // A non-focusable window is never going to report focus, so waiting for it is
+                // waiting for the fallback — and on the card path the backstop arrives first.
+                val blocked = focusGate && !hasWindowFocus()
+                if (blocked && waited < PaperMotion.STAMP_ARM_FALLBACK_MS) {
                     postOnAnimation(this)
                     return
                 }
@@ -154,7 +180,8 @@ class StampOverlay(
 
     /** Arm on a draw that happens while nothing is on top of us. */
     private fun armIfVisible() {
-        if (startedAt != 0L || bitmap == null || !hasWindowFocus()) return
+        if (startedAt != 0L || bitmap == null) return
+        if (focusGate && !hasWindowFocus()) return
         startedAt = SystemClock.uptimeMillis()
     }
 
@@ -213,8 +240,26 @@ class StampOverlay(
         if (startedAt == 0L) return
         val elapsed = SystemClock.uptimeMillis() - startedAt
         if (scrimAlpha > 0) canvas.drawColor(scrimAlpha.coerceIn(0, 255) shl 24)
-        val cx = width / 2f
-        val cy = height / 2f
+        // The mark lands on [anchor] when one was given, and is sized FROM it: a stamp that
+        // presses onto a 216dp card should be about that wide, not a sixth of a phone. Without
+        // an anchor the old full-screen geometry applies unchanged.
+        val cx = anchor?.exactCenterX() ?: (width / 2f)
+        val cyBase = anchor?.exactCenterY() ?: (height / 2f)
+        val maxW = anchor?.let { it.width() * ANCHOR_WIDTH_FRACTION } ?: (width * 0.94f)
+        val maxH = anchor?.let { it.height() * ANCHOR_HEIGHT_FRACTION } ?: (height * 0.50f)
+        // **Raised by half its own height when stamping onto a card.**
+        //
+        // Centred on the card, the mark's lower half sat on top of the card's own text and read as
+        // covering the hint rather than pressing onto it. Lifting it by half its height puts the
+        // mark's bottom edge at the card's centre, so it sits over the upper half and leaves the
+        // summary readable underneath.
+        //
+        // The offset is computed from the RESTING height (`scale` = 1), never the animated one.
+        // Keying it to the live frame would make the mark rise and fall as it slams, which reads as
+        // a wobble instead of a single downward press.
+        val restingFit = minOf(maxW / art.width, maxH / art.height)
+        val restingH = art.height * restingFit
+        val cy = if (anchor != null) cyBase - restingH / 2f else cyBase
         val scale = when {
             elapsed < IMPACT_MS -> 2.0f + (1f - 2.0f) * (elapsed / IMPACT_MS.toFloat())
             elapsed < 210L -> 0.985f
@@ -239,7 +284,10 @@ class StampOverlay(
         canvas.concat(matrix)
         canvas.save()
         canvas.rotate(-6f, cx, cy)
-        val fit = minOf(width * 0.94f / art.width, height * 0.50f / art.height) * scale
+        // Both bounds are the RESTING size. `scale` multiplies them, so the overshoot frames are
+        // deliberately larger than the card — that excess is what reads as a slam rather than a
+        // fade. Only where the mark comes to rest is tied to the anchor.
+        val fit = restingFit * scale
         val w = art.width * fit
         val h = art.height * fit
         dst.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
@@ -281,6 +329,12 @@ class StampOverlay(
     internal fun inkBleedProgressForTest(): Float = inkProgress
 
     private companion object {
+        /** How much of the anchor's width the resting mark spans. */
+        const val ANCHOR_WIDTH_FRACTION = 0.92f
+
+        /** How much of the anchor's height it may span before width wins. */
+        const val ANCHOR_HEIGHT_FRACTION = 0.95f
+
         /**
          * The contact frame, in milliseconds from `stamp()`.
          *

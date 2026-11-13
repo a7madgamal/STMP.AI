@@ -1213,9 +1213,28 @@ object NotifyOverlay {
      */
     private fun stampDecision(entry: Entry, approved: Boolean) {
         val ctx = entry.ctx
+        // **The mark lands ON the card, not in the middle of the screen.**
+        //
+        // The stamp used to be a full-screen overlay drawing a centred mark sized against the
+        // whole window, so a 216dp card in a corner got a stamp floating in the middle of the
+        // display — and on a tall screen the mark was a sixth of its intended size relative to
+        // the thing it was approving. [stampAnchor] reads the card's live screen rect so the
+        // mark presses onto the card at the card's own scale.
+        val anchor = stampAnchor(entry)
         // No scrim: the card stays visible underneath for the whole animation, so dimming the
         // screen would just make it go dark for a second.
-        val overlay = com.mido.phonebridge.ui.StampOverlay(ctx, scrimAlpha = 0)
+        //
+        // `focusGate = false` because the window below is `FLAG_NOT_FOCUSABLE` and will NEVER
+        // report window focus. Leaving the gate on made the arming loop wait out its full
+        // 2.5s fallback while the 2.2s backstop removed the window first — zero frames drawn,
+        // `onImpact` never called, so neither the animation NOR the thud played. That is the
+        // reported regression.
+        val overlay = com.mido.phonebridge.ui.StampOverlay(
+            ctx,
+            scrimAlpha = 0,
+            anchor = anchor,
+            focusGate = false,
+        )
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -1288,6 +1307,39 @@ object NotifyOverlay {
 
     private fun wm(ctx: Context): WindowManager =
         ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+    /**
+     * The card's current rectangle in OVERLAY-WINDOW coordinates, or null if it is not laid out.
+     *
+     * Both windows are full-screen `TYPE_APPLICATION_OVERLAY`s anchored to the display origin, so
+     * a window-local point and a screen point are the same numbers. Deriving the rect from the
+     * live layout rather than the stored anchor covers the case the stamp actually meets: the card
+     * has been dragged, and the stored anchor is what it was moved FROM.
+     *
+     * Returns null instead of guessing. A null anchor falls back to the old centred geometry, which
+     * still animates — a stamp in the wrong place beats no receipt at all, and the caller cannot
+     * fix a rect it never had.
+     */
+    private fun stampAnchor(entry: Entry): android.graphics.Rect? {
+        val card = entry.root ?: return null
+        if (card.width <= 0 || card.height <= 0) return null
+        val loc = IntArray(2)
+        card.getLocationOnScreen(loc)
+        // **No window-origin subtraction, and that is deliberate.**
+        //
+        // A view handed straight to `WindowManager.addView` is its own root, so `card.rootView`
+        // IS `card` — and subtracting `card.rootView.getLocationOnScreen()` from
+        // `card.getLocationOnScreen()` subtracts a value from itself and always yields (0,0).
+        // That would put every stamp in the top-left corner. It reads like the careful thing to
+        // do and it is exactly wrong.
+        //
+        // The subtraction is unnecessary anyway: the stamp window is `MATCH_PARENT` with default
+        // (top-start) gravity, so its origin IS the display origin and a screen point is already
+        // a valid window-local point. On a freeform display where those could differ, the stamp
+        // would be off by the window offset — visible, and far better than silently pinning every
+        // mark to the corner.
+        return android.graphics.Rect(loc[0], loc[1], loc[0] + card.width, loc[1] + card.height)
+    }
 
     /**
      * The badge's word. Short on purpose: the card is ~216dp wide and the badge must not
