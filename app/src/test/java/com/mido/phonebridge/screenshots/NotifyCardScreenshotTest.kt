@@ -115,6 +115,15 @@ class NotifyCardScreenshotTest(variant: Variant) : ShotTest(variant) {
         shoot(show(Verb.EXECUTE, "Run journalctl --since today --unit nginx and return every line of the output on kvm-box"), "long_summary")
     }
 
+    /** A Gmail-style summary far past three lines: capped, announced, and the risk row stays on screen. */
+    @Test fun long_gmail_summary_high() {
+        val long = "SEND EMAIL to=[" + (1..12).joinToString(", ") { "person$it@example-company.com" } +
+            "] subject=[" + "Quarterly figures and the urgent wire transfer details ".repeat(6) + "] body=[hello]"
+        val card = show(Verb.EXECUTE, long, withAi = true)
+        NotifyOverlay.showSummaryForTest(ID, RequestSummary("Sends an email to twelve people.", Risk.HIGH, "fixture"))
+        shoot(card, "long_gmail_summary_high")
+    }
+
     @Test fun obscured_line() {
         val card = show()
         val t = SystemClock.uptimeMillis()

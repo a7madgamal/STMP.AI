@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.6 (build 321)**.
+Current build: **v0.52.7 (build 322)**.
 
 ---
 
@@ -5601,7 +5601,7 @@ devDependencies. `node_modules/` is gitignored.
 - The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
 - A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
 
-## 0.52.6 (build 321) — 2026-11-13 — CURRENT
+## 0.52.6 (build 321) — 2026-11-13
 - The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
 - Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
 - The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
@@ -5615,6 +5615,8 @@ devDependencies. `node_modules/` is gitignored.
 - Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
 - A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
 
+## 0.52.7 (build 322) — 2026-11-13 — CURRENT
+- The Don't disturb card shows at most three lines of the action and then says how many more lines there are, so a very long email subject can no longer push the risk word off the screen.
 
 ## Keeping this file honest
 

@@ -439,12 +439,36 @@ object NotifyOverlay {
             text = entry.summary
             Type.apply(this, TypeRole.BODY_STRONG)
             setTextColor(p.ink)
+            // Capped at three lines with NO ellipsis: the summary is caller-controlled and an
+            // unbounded one would push the risk row and drain bar off the screen. What the cap
+            // hides is announced by `moreLine` below, never dropped silently.
+            maxLines = SUMMARY_MAX_LINES
+            ellipsize = null
         }
         column.addView(summaryView, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             topMargin = dp(Dimens.SPACE_XS)
             // The column has no end padding (the header row's ✕ supplies its own), so give the text one.
             marginEnd = dp(Dimens.SPACE_M)
         })
+        val moreLine = TextView(ctx).apply {
+            Type.apply(this, TypeRole.CAPTION)
+            setTextColor(p.cautionText)
+            visibility = GONE
+        }
+        column.addView(moreLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        summaryView.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+            val tv = v as TextView
+            val width = (r - l) - tv.compoundPaddingLeft - tv.compoundPaddingRight
+            if (width <= 0) return@addOnLayoutChangeListener
+            val full = android.text.StaticLayout.Builder
+                .obtain(tv.text, 0, tv.text.length, tv.paint, width).build().lineCount
+            val hidden = (full - SUMMARY_MAX_LINES).coerceAtLeast(0)
+            val label = if (hidden > 0) "+$hidden more ${if (hidden == 1) "line" else "lines"}" else ""
+            if (moreLine.text.toString() != label) {
+                moreLine.text = label
+                moreLine.visibility = if (hidden > 0) VISIBLE else GONE
+            }
+        }
 
         // The AI description line, present from the start so the fetch can fill it in
         // WITHOUT A RELAYOUT SURPRISE. While the fetch runs it reads as a status, not as an
@@ -1405,6 +1429,7 @@ object NotifyOverlay {
 
     /** Space between the pending LED and the "summarising…" line. */
     private const val AI_LED_GAP_DP = 6
+    private const val SUMMARY_MAX_LINES = 3
 
     /**
      * Drag slop. Generous on purpose: a tap is now an APPROVAL, so a small slop would
