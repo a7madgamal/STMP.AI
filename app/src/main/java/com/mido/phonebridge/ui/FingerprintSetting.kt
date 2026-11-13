@@ -71,7 +71,7 @@ object FingerprintSetting {
             return
         }
         try {
-            AuditLog.from(ctx).append(PolicyAudit.record(next.global, next.global, source))
+            AuditLog.from(ctx).append(PolicyAudit.recordFingerprint(next.fingerprintForModals, next.global, source))
         } catch (e: Exception) {
             Debug.log("audit record failed for fingerprint setting: ${e.message}")
         }
@@ -95,7 +95,7 @@ object FingerprintSetting {
         try {
             store.set(next)
             Debug.log("fingerprint for approvals forced OFF: $reason")
-            AuditLog.from(ctx).append(PolicyAudit.record(next.global, next.global, source))
+            AuditLog.from(ctx).append(PolicyAudit.recordFingerprint(next.fingerprintForModals, next.global, source))
         } catch (e: Exception) {
             Debug.log("could not force fingerprint off: ${e.message}")
         }

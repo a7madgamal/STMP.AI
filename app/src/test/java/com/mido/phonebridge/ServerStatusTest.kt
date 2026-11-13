@@ -187,7 +187,7 @@ class ServerStatusTest {
     @Test
     fun `titles carry no bullet because the LED carries it`() {
         assertEquals("Running", ServerStatus.title(ServerStatus.State.RUNNING_HEALTHY))
-        assertEquals("Running — needs attention", ServerStatus.title(ServerStatus.State.RUNNING_ATTENTION))
+        assertEquals("Running — needs action", ServerStatus.title(ServerStatus.State.RUNNING_ATTENTION))
         assertEquals("Stopped", ServerStatus.title(ServerStatus.State.STOPPED))
         assertTrue(ServerStatus.State.entries.none { ServerStatus.title(it).contains("●") })
     }

@@ -22,6 +22,7 @@ import com.mido.phonebridge.ui.showSecure
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.Panel
@@ -152,19 +153,18 @@ class SshActivity : FragmentActivity() {
         val names = try {
             SecretVault.names(this).filter { it.startsWith("ssh-") }
         } catch (e: Exception) {
-            listContainer.addView(StateBlock.create(
-                this, StateBlock.Kind.ERROR, "The vault list can't be read",
-                "Close this screen and open it again. If it keeps happening, reset the vault in Settings.",
+            listContainer.addView(ErrorBlock.create(
+                this, "The vault list can't be read",
+                "If it keeps happening, reset the vault in Settings.",
+                details = e.message ?: e.javaClass.simpleName,
+                recovery = KeyButton.Spec("Try again", "Read the vault list again") { renderList(unlocked) },
             ))
-            listContainer.addView(
-                Readout.create(this, e.message ?: e.javaClass.simpleName, Readout.Kind.BODY).root
-            )
             return
         }
         if (names.isEmpty()) {
             listContainer.addView(StateBlock.create(
                 this, StateBlock.Kind.EMPTY, "No connections yet",
-                "Tap ADD CONNECTION to make a key for a server.",
+                VaultModule.emptyBody(unlocked, "ADD CONNECTION", " to make a key for a server."),
             ))
         }
         for (vaultName in names) listContainer.addView(connectionCard(vaultName, unlocked))
@@ -189,13 +189,13 @@ class SshActivity : FragmentActivity() {
         val conn = try {
             SshConnection.fromJson(SecretVault.get(this, vaultName))
         } catch (e: Exception) {
-            return Panel.create(this, Panel.Tone.CAUTION).apply {
-                addView(Type.text(this@SshActivity, label, TypeRole.ROW_LABEL, p.ink), fullWidth())
-                addView(
-                    Type.text(this@SshActivity, "Can't read this connection: ${e.message}", TypeRole.DETAIL, p.ink),
-                    fullWidth().apply { topMargin = dp(Dimens.SPACE_XS) },
-                )
-            }
+            // Unreadable, but never stuck: the stored entry can still be deleted.
+            return ErrorBlock.create(
+                this, "Can't read the connection '$label'",
+                "Its stored entry is damaged. Delete it and add the connection again.",
+                details = e.message ?: e.javaClass.simpleName,
+                recovery = delete.copy(label = "Delete"),
+            )
         }
 
         val card = Panel.create(this, Panel.Tone.PLAIN)
@@ -349,8 +349,8 @@ class SshActivity : FragmentActivity() {
 
                 if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
                     refuse(
-                        "Name must be lowercase letters, digits, - or _ (1-49 chars). " +
-                            "\"$name\" has something else.",
+                        if (name.isEmpty()) "Name is required." else
+                            "Name must be lowercase letters, digits, - or _ (1-49 chars).",
                         nameField.edit,
                     )
                     return@setOnClickListener
@@ -442,7 +442,10 @@ class SshActivity : FragmentActivity() {
     /** An error stays on the screen until the next action; a toast would be gone before it was read. */
     private fun showError(title: String, detail: String) {
         errorSlot.removeAllViews()
-        errorSlot.addView(StateBlock.create(this, StateBlock.Kind.ERROR, title, detail))
+        errorSlot.addView(ErrorBlock.create(
+            this, title, "That didn't go through.", details = detail,
+            recovery = KeyButton.Spec("Dismiss", "Dismiss this message") { errorSlot.removeAllViews() },
+        ))
         Debug.log("ssh screen: $title: $detail")
         errorSlot.requestFocus()
         errorSlot.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED)

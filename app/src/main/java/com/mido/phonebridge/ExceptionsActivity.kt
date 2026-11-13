@@ -24,6 +24,7 @@ import com.mido.phonebridge.ui.AuditCopy
 import com.mido.phonebridge.ui.PluginLabel
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.kit.ActionRow
+import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.Panel
@@ -119,14 +120,14 @@ class ExceptionsActivity : AppCompatActivity() {
 
     private fun renderUnreadable(content: LinearLayout, e: PolicyException) {
         content.addView(
-            StateBlock.create(
-                this, StateBlock.Kind.ERROR, "Exceptions can't be read",
-                "The policy file is unreadable, so the server will not start until it is fixed or removed.",
-                KeyButton.Spec("Try again", "Read the exceptions again") { render() },
+            ErrorBlock.create(
+                this, "Exceptions can't be read",
+                "The policy file is unreadable, so the bridge will not start until it is fixed or removed.",
+                details = e.message ?: "unknown error",
+                recovery = KeyButton.Spec("Try again", "Read the exceptions again") { render() },
             ),
             full().apply { bottomMargin = dp(Dimens.MODULE_GAP) },
         )
-        content.addView(Readout.create(this, e.message ?: "unknown error", Readout.Kind.BODY).root)
     }
 
     private fun sorted(rules: List<Rule>): List<Rule> =

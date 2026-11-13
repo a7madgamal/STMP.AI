@@ -163,7 +163,7 @@ class LogActivity : AppCompatActivity() {
         val hiddenNoise = all.count { it.noise }
         val shown = all
             .filter { !(hideNoise && it.noise) }
-            .filter { outcomeFilter == null || it.outcome == outcomeFilter }
+            .filter { matchesFilter(it.outcome) }
         val unreadable = store.unreadableCount()
 
         summaryLine.text = SpannableStringBuilder().apply {
@@ -234,11 +234,18 @@ class LogActivity : AppCompatActivity() {
         }
     }
 
+    /** "Denied" covers every refusal (D50), not only the plain DENIED outcome. */
+    private fun matchesFilter(o: AuditOutcome): Boolean = when (outcomeFilter) {
+        null -> true
+        AuditOutcome.DENIED -> AuditCopy.isDenial(o)
+        else -> o == outcomeFilter
+    }
+
     private fun row(h: AuditHeader, clock: String, locale: Locale, p: Palette): View {
         val look = AuditCopy.outcome(h.outcome)
         val verb = Verb.values().firstOrNull { it.name.equals(h.verb, true) }
         val chipVerb = verb.takeIf { look.allowsChip }
-        val summary = if (h.outcome == AuditOutcome.POLICY_CHANGED) AuditCopy.policySummary(h.summary) else h.summary
+        val summary = AuditCopy.summary(h.outcome, h.summary)
         val plugin = PluginLabel.of(h.plugin)
         val detail = listOfNotNull(plugin.takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale))
             .joinToString(" · ")

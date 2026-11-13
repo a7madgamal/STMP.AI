@@ -22,6 +22,7 @@ import com.mido.phonebridge.ui.showSecure
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.Panel
@@ -164,19 +165,18 @@ class SecretsActivity : FragmentActivity() {
         val names = try {
             SecretVault.names(this).filterNot { it.startsWith("ssh-") }
         } catch (e: Exception) {
-            listContainer.addView(StateBlock.create(
-                this, StateBlock.Kind.ERROR, "The vault list can't be read",
-                "Close this screen and open it again. If it keeps happening, reset the vault in Settings.",
+            listContainer.addView(ErrorBlock.create(
+                this, "The vault list can't be read",
+                "If it keeps happening, reset the vault in Settings.",
+                details = e.message ?: e.javaClass.simpleName,
+                recovery = KeyButton.Spec("Try again", "Read the vault list again") { renderList(unlocked) },
             ))
-            listContainer.addView(
-                Readout.create(this, e.message ?: e.javaClass.simpleName, Readout.Kind.BODY).root
-            )
             return
         }
         if (names.isEmpty()) {
             listContainer.addView(StateBlock.create(
                 this, StateBlock.Kind.EMPTY, "No secrets yet",
-                "Tap ADD SECRET to store an API key. SSH keys live on the SSH screen.",
+                VaultModule.emptyBody(unlocked, "ADD SECRET", " to store an API key.") + " SSH keys live on the SSH screen.",
             ))
         }
         for (n in names) listContainer.addView(secretCard(n, unlocked))
@@ -522,7 +522,7 @@ class SecretsActivity : FragmentActivity() {
         StmpDialog.confirmDelete(
             this,
             title = "Delete '$name'?",
-            message = "The secret is removed from the vault and its ciphertext goes with the next write.",
+            message = "The secret is removed from the vault. Agents can no longer use it.",
             deleteLabel = "Delete",
         ) {
             try {
@@ -556,7 +556,10 @@ class SecretsActivity : FragmentActivity() {
     /** An error stays on the screen until the next action; a toast would be gone before it was read. */
     private fun showError(title: String, detail: String) {
         errorSlot.removeAllViews()
-        errorSlot.addView(StateBlock.create(this, StateBlock.Kind.ERROR, title, detail))
+        errorSlot.addView(ErrorBlock.create(
+            this, title, "That didn't go through.", details = detail,
+            recovery = KeyButton.Spec("Dismiss", "Dismiss this message") { errorSlot.removeAllViews() },
+        ))
         // Deliberately never logs the value — only the outcome code.
         Debug.log("secrets screen: $title: $detail")
         errorSlot.requestFocus()

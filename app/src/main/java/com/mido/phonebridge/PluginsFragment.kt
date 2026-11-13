@@ -3,6 +3,8 @@ package com.mido.phonebridge
 import android.content.Context
 import android.content.Intent
 import android.widget.LinearLayout
+import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import com.mido.phonebridge.core.Plugin
@@ -27,7 +29,7 @@ import com.mido.phonebridge.ui.tokens.TypeRole
  * The Plugins screen: every capability the bridge exposes, whether it is on, and why not.
  *
  * Two different "not working" states stay apart, and the distinction is the point of the screen:
- * OFF is "you turned it off" (the switch is the remedy); ACTION NEEDED / NOT SET UP / ERROR is
+ * OFF is "you turned it off" (the switch is the remedy); NEEDS ACTION / NOT SET UP / ERROR is
  * "it is on but cannot serve" (the switch is not the remedy). Rows that need action sort first in
  * their group (D24); Debug, Help, Logs and Probe live in a collapsed Developer group.
  */
@@ -124,7 +126,7 @@ class PluginsFragment : BridgeFragment() {
         if (heading == "SSH") {
             for (name in sshConnectionNames()) {
                 panel.addView(StatusRow.create(
-                    ctx, label = name, value = "SSH", detail = "One connection",
+                    ctx, label = name, value = "", detail = "SSH connection \u00b7 runs commands on this server",
                     onClick = {
                         go(
                             Intent(ctx, PluginDetailActivity::class.java)
@@ -174,7 +176,7 @@ class PluginsFragment : BridgeFragment() {
         return panel
     }
 
-    private fun rowView(item: Item, store: PluginSettingsStore) = PluginRow.create(
+    private fun rowView(item: Item, store: PluginSettingsStore): View = PluginRow.create(
         ctx,
         item.model,
         onOpen = { openDetail(item.plugin.id) },
@@ -186,7 +188,12 @@ class PluginsFragment : BridgeFragment() {
             Debug.log("plugin ${item.plugin.id}: enabled=$want")
             list.post { render() }
         },
-    )
+    ).also { row ->
+        // D70: a plugin this build cannot serve keeps its rocker OFF and cannot be switched.
+        if (PluginRowModel.isNotInBuild(item.model) && row is ViewGroup) {
+            row.getChildAt(row.childCount - 1)?.isEnabled = false
+        }
+    }
 
     private fun emptyState() = StateBlock.create(
         ctx,

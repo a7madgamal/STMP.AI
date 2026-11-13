@@ -193,7 +193,7 @@ class SecretsActivityStateTest {
     fun `one unreadable SSH entry does not hide the others`() {
         Fixtures.sshVault(unlocked = true, brokenEntry = true)
         val t = texts(Robolectric.buildActivity(SshActivity::class.java).setup().get())
-        assertTrue(t.any { it.startsWith("Can't read this connection:") })
+        assertTrue(t.any { it.startsWith("Can't read the connection") })
         assertTrue(t.contains("PINNED"))
     }
 

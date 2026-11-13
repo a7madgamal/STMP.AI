@@ -80,8 +80,9 @@ class GoogleLoginActivity : AppCompatActivity() {
         panel.removeAllViews()
         panel.addView(StateBlock.create(
             this, StateBlock.Kind.ERROR,
-            title = "Google sign-in isn't set up in this build",
-            body = "This build has no Google sign-in. Install the official release to use Gmail, Calendar and Drive.",
+            title = "Not in this build",
+            body = com.mido.phonebridge.ui.PluginCopy.NO_GOOGLE,
+            action = com.mido.phonebridge.ui.kit.KeyButton.Spec("Back", "Go back") { finish() },
         ))
     }
 

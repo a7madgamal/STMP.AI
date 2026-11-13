@@ -66,6 +66,18 @@ object SettingsState {
         else -> VaultRow.LOCKED
     }
 
+    /**
+     * "The file is 328 MB but 328 MB was expected" says nothing: when the rounded sizes agree, the
+     * sentence gives the exact byte counts instead.
+     */
+    fun wrongFile(have: Long, expected: Long, mb: (Long) -> String): String {
+        val a = mb(have)
+        val b = mb(expected)
+        if (a != b) return "The file is $a but $b was expected."
+        return "The file is ${"%,d".format(java.util.Locale.US, have)} bytes but " +
+            "${"%,d".format(java.util.Locale.US, expected)} bytes were expected."
+    }
+
     fun rulesCount(n: Int): String = when (n) {
         0 -> "No exceptions"
         1 -> "1 exception"

@@ -43,6 +43,15 @@ internal object VaultModule {
     private const val ORPHANED_DETAIL =
         "The vault's key was removed when the app was reinstalled, so its secrets are gone."
 
+    /**
+     * The empty-list sentence. The add key is disabled until the vault is open, so the sentence
+     * cannot say "Tap ADD" first (R3): it says what to do to get the key working.
+     */
+    fun emptyBody(unlocked: Boolean, addKey: String, rest: String = ""): String {
+        val lead = if (unlocked) "Tap $addKey" else "Unlock the vault first, then tap $addKey"
+        return (lead + rest).trim()
+    }
+
     /** [state] is `SecretVault.state(ctx)`, [unlocked] is `SecretVault.isUnlocked()`. Unlocked wins. */
     fun model(state: VaultState.State, unlocked: Boolean, forSsh: Boolean): Model {
         if (unlocked) {

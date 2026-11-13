@@ -112,10 +112,16 @@ object ServerStatus {
         Attention.LISTENER_OFF -> "OPEN"
     }
 
+    /** While the rocker has been tapped and the real state has not landed yet (R3: never "Stopped"). */
+    fun pendingTitle(starting: Boolean): String = if (starting) "Starting\u2026" else "Stopping\u2026"
+
+    fun pendingDetail(starting: Boolean): String =
+        if (starting) "Starting the bridge." else "Stopping the bridge."
+
     /** The hero title for a state. */
     fun title(state: State): String = when (state) {
         State.RUNNING_HEALTHY -> "Running"
-        State.RUNNING_ATTENTION -> "Running — needs attention"
+        State.RUNNING_ATTENTION -> "Running — needs action"
         // Deliberately not "Running": that word is the lie this state replaces.
         State.UNRESPONSIVE -> "Not answering"
         State.FAILED -> "Could not start"

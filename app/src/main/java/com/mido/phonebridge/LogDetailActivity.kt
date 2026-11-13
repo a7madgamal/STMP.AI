@@ -104,7 +104,8 @@ class LogDetailActivity : AppCompatActivity() {
             request(content, m)
             response(content, m)
         }
-        m.decision?.let { decision(content, m, it) }
+        // A gate change and an unrouted request never went through the gate: no Decision panel.
+        if (!m.isPolicyChange && m.plugin != null) m.decision?.let { decision(content, m, it) }
 
         content.addView(SectionHeader.create(this, "Raw record"), full())
         content.addView(
@@ -192,10 +193,10 @@ class LogDetailActivity : AppCompatActivity() {
 
     private fun what(content: LinearLayout, m: LogDetailModel) {
         val rows = mutableListOf<View>()
-        val summary = m.summary?.let { if (m.isPolicyChange) AuditCopy.policySummary(it) else it }
+        val summary = m.summary?.let { s -> m.outcome?.let { AuditCopy.summary(it, s) } ?: s }
         summary?.let { rows += keyValue("Summary", it) }
         m.plugin?.let { rows += keyValue("Plugin", PluginLabel.of(it)) }
-        m.verb?.let { rows += keyValue("Action", AuditCopy.verbWords(it).replaceFirstChar { c -> c.uppercase() }) }
+        if (!m.isPolicyChange) m.verb?.let { rows += keyValue("Action", AuditCopy.verbWords(it).replaceFirstChar { c -> c.uppercase() }) }
         m.route?.let { rows += keyValue("Route", it, mono = true) }
         m.label?.let { rows += keyValue("Id", it, mono = true) }
         m.path?.let { rows += keyValue("Path", it, mono = true) }
@@ -251,8 +252,8 @@ class LogDetailActivity : AppCompatActivity() {
         val rows = mutableListOf<View>()
         d.mode?.let { rows += keyValue("Gate mode", AuditCopy.modeWords(it)) }
         d.source?.let { rows += keyValue("Why", AuditCopy.sourceWords(it)) }
-        d.globalMode?.let { rows += keyValue("Switch was", AuditCopy.modeWords(it)) }
-        d.rule?.let { rows += keyValue("Rule", AuditCopy.ruleWords(it)) }
+        d.globalMode?.let { rows += keyValue("Gate mode before", AuditCopy.modeWords(it)) }
+        d.rule?.let { rows += keyValue("Exception", AuditCopy.ruleWords(it)) }
         val decided = d.decidedAt != null
         if (!m.isPolicyChange) {
             if (decided || d.enqueuedAt != null) {

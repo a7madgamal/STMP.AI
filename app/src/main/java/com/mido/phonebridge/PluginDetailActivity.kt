@@ -112,7 +112,7 @@ class PluginDetailActivity : BridgeScreen() {
     private fun render() {
         content.removeAllViews()
         val on = store.isEnabled(plugin)
-        val model = PluginRowModel.of(plugin, on)
+        val model = PluginRowModel.of(plugin, on, insidePlugin = true)
         val connection = secretName
 
         if (connection != null) addConnection(connection)
@@ -151,23 +151,26 @@ class PluginDetailActivity : BridgeScreen() {
         val panel = Panel.create(this, Panel.Tone.PLAIN)
 
         val showsOn = model.showsOn
-        val sentence = PluginDetailCopy.switchSentence(on, showsOn)
+        val notInBuild = PluginRowModel.isNotInBuild(model)
+        val sentence = if (notInBuild) model.detail else PluginDetailCopy.switchSentence(on, showsOn)
         val rocker = Theme.rocker(this, on = showsOn, label = "Enabled") { want ->
             store.setEnabled(plugin, want)
             Debug.log("plugin ${plugin.id}: enabled=$want")
             content.post { render() }
         }
+        // D70: a plugin this build cannot serve has a rocker that is OFF and cannot be moved.
+        if (notInBuild) rocker.isEnabled = false
         val switchRow = StatusRow.create(
-            this, label = if (showsOn) "Enabled" else "Disabled", value = "",
+            this, label = PluginDetailCopy.switchLabel(on, showsOn, notInBuild), value = "",
             detail = sentence, led = model.led, trailing = rocker,
         )
-        if (PluginDetailCopy.isCaution(on, showsOn)) tint(switchRow, sentence, p.cautionText)
+        if (PluginDetailCopy.isCaution(on, showsOn) && !notInBuild) tint(switchRow, sentence, p.cautionText)
         panel.addView(switchRow)
 
-        if (on) {
+        if (on && !notInBuild) {
             panel.addView(StatusRow.create(
                 this, label = "Status", value = model.word, tone = toneOf(model.tone),
-                detail = model.detail, led = model.led, action = signInAction(),
+                detail = model.detail, led = model.led, action = signInAction() ?: addConnectionAction(model),
             ))
         }
         content.addView(panel)
@@ -188,6 +191,14 @@ class PluginDetailActivity : BridgeScreen() {
             } catch (e: Exception) {
                 Debug.log("cannot open Google sign-in: ${e.message}")
             }
+        }
+    }
+
+    /** The SSH plugin with no connection has one way forward: add one. */
+    private fun addConnectionAction(model: PluginRowModel.Model): KeyButton.Spec? {
+        if (plugin.id != "ssh" || !model.detail.startsWith("No connections")) return null
+        return KeyButton.Spec("Add connection", "Add an SSH connection") {
+            startActivity(Intent(this, SshActivity::class.java))
         }
     }
 
@@ -263,7 +274,9 @@ class PluginDetailActivity : BridgeScreen() {
     // --- Settings ----------------------------------------------------------------------------
 
     private fun addSettings() {
-        val settings = plugin.settings()
+        // D70: without Google credentials there is no sign-in to offer, so no action key either.
+        val noGoogle = com.mido.phonebridge.ui.PluginCopy.isGoogle(plugin.id) && AuthManager.clientId.isBlank()
+        val settings = plugin.settings().filterNot { noGoogle && it is PluginSetting.Action }
         if (settings.isEmpty()) return
         content.addView(SectionHeader.create(this, "Settings"))
         val panel = Panel.create(this, Panel.Tone.PLAIN)
@@ -424,7 +437,7 @@ class PluginDetailActivity : BridgeScreen() {
         content.addView(SectionHeader.create(this, "Routes"))
         content.addView(Readout.create(
             this,
-            routes.joinToString("\n") { "${it.method} ${it.path}  \u00b7  ${it.describe}" },
+            routes.joinToString("\n\n") { PluginDetailCopy.routeEntry(it.method, it.path, it.describe) },
             Readout.Kind.LOG,
         ).root)
     }

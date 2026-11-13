@@ -121,8 +121,15 @@ class PluginCopyDisplayTest {
         val e = line(true, err, "Status unavailable: boom", id = "debug")
         assertEquals("On, but it hit an error. Status unavailable: boom.", e.text)
         val n = line(true, unconfigured, "no OAuth client id configured", id = "gmail")
-        assertEquals("On, but not set up yet. This build has no Google sign-in set up.", n.text)
+        assertEquals("On, but not set up yet. " + PluginCopy.NO_GOOGLE, n.text)
         assertEquals(PluginCopy.LineTone.NEUTRAL, n.tone)
+    }
+
+    @Test
+    fun `without a Google client the help line is the D70 sentence`() {
+        val l = PluginCopy.statusLine("gmail", true, PluginStatus("Gmail", ok, "ready"), hasGoogleClient = false)
+        assertEquals(PluginCopy.NO_GOOGLE, l.text)
+        assertEquals(PluginCopy.LineTone.NEUTRAL, l.tone)
     }
 
     @Test
@@ -132,14 +139,14 @@ class PluginCopyDisplayTest {
         assertEquals("1 secret", PluginCopy.humanDetail("secrets", ok, "1 secret(s) · GET /secrets"))
         assertEquals("3 secrets", PluginCopy.humanDetail("secrets", ok, "3 secret(s) · GET /secrets"))
         assertEquals("No connections yet — add one below.", PluginCopy.humanDetail("ssh", unconfigured, "no connections configured"))
-        assertEquals("This build has no Google sign-in set up.", PluginCopy.humanDetail("drive", unconfigured, "no OAuth client id configured"))
+        assertEquals(PluginCopy.NO_GOOGLE, PluginCopy.humanDetail("drive", unconfigured, "no OAuth client id configured"))
         assertEquals("Sign in to your Google account first.", PluginCopy.humanDetail("gmail", attention, "not logged in"))
         assertEquals("Sign in to your Google account first.", PluginCopy.humanDetail("google", attention, "not signed in — Gmail, Calendar and Drive cannot serve until you are"))
         assertEquals("Sign in again to allow Drive access.", PluginCopy.humanDetail("drive", attention, "re-login needed to grant Drive access"))
         assertEquals("The secret list can't be read: bad key", PluginCopy.humanDetail("secrets", err, "index unreadable: bad key"))
         assertEquals("Search your contacts.", PluginCopy.humanDetail("contacts", ok, "GET /contacts?query= — names, numbers and emails, up to 20 people"))
         assertEquals("Tells agents what this phone can do.", PluginCopy.humanDetail("help", ok, "GET /help — 14 plugin(s), contract v4"))
-        assertEquals("a@b.c", PluginCopy.humanDetail("google", ok, "a@b.c"))
+        assertEquals("a\u200B@b.c", PluginCopy.humanDetail("google", ok, "a@b.c"))
         assertEquals("Something unusual", PluginCopy.humanDetail("tts", err, "Something unusual"))
     }
 
