@@ -1,6 +1,7 @@
 package com.mido.phonebridge.gate
 
 import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.ui.UntrustedText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -21,7 +22,7 @@ object GateReceipt {
         by: String,
     ): List<String> = listOf(
         "STMP RECEIPT ········ $id",
-        "$requester  ${verb.name}  $path",
+        "${UntrustedText.escape(requester)}  ${verb.name}  ${UntrustedText.escape(path)}",
         "stamped ${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(decidedAtMs))}",
         "status ${status(approved)}",
         "by this phone · $by",

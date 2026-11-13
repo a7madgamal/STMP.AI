@@ -25,6 +25,7 @@ import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditOutcome
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.ui.AuditCopy
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.LogTime
 import com.mido.phonebridge.ui.PluginLabel
 import com.mido.phonebridge.ui.Theme
@@ -269,7 +270,7 @@ class LogActivity : AppCompatActivity() {
             }
             setOnLongClickListener { copyRaw(h.id); true }
             contentDescription = listOfNotNull(
-                look.word, verb?.let { AuditCopy.verbWords(it) }, summary.takeIf { it.isNotBlank() },
+                look.word, verb?.let { AuditCopy.verbWords(it) }, UntrustedText.escape(summary).takeIf { it.isNotBlank() },
                 plugin.takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale), "at $clock",
             ).joinToString(", ")
             ViewCompat.replaceAccessibilityAction(
@@ -315,7 +316,7 @@ class LogActivity : AppCompatActivity() {
             }
             if (summary.isNotBlank()) {
                 line2.addView(
-                    Type.text(this, summary, TypeRole.BODY, if (h.noise) p.etched else p.ink).apply {
+                    Type.text(this, UntrustedText.mark(summary, p.cautionText), TypeRole.BODY, if (h.noise) p.etched else p.ink).apply {
                         maxLines = 3
                         ellipsize = TextUtils.TruncateAt.END
                     },

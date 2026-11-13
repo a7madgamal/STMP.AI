@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.11 (build 326)**.
+Current build: **v0.52.12 (build 327)**.
 
 ---
 
@@ -5632,10 +5632,17 @@ devDependencies. `node_modules/` is gitignored.
 - The status light on a one-line row sits on the title line instead of floating above it.
 - A freeze report on Home now has a Dismiss row, and it is cleared by an upgrade like a crash report. When both a crash and a freeze are recorded, Home shows the crash and copies the crash.
 
-## 0.52.11 (build 326) — 2026-11-13 — CURRENT
+## 0.52.11 (build 326) — 2026-11-13
 - Field hints are always in the regular face and end in an ellipsis instead of being cut mid-letter; the longest hints in Secrets and Settings are shorter.
 - "Not in this build" on the Plugins list breaks as "Not in / this build" instead of leaving "build" alone on a line.
 - The version in the Home header reads "v0.52.11", not "V0.52.11".
+
+## 0.52.12 (build 327) — 2026-11-13 — CURRENT
+- The approval card, the Don't disturb card and the request log now show every hidden character in a request as a visible `\u{XXXX}` mark in the caution colour (text-direction controls, zero-width characters, soft hyphens, control codes), so the text you approve can no longer be re-ordered or hide something.
+- A `↵` or `↩` that is part of a command is shown as its own mark, so it cannot be mistaken for a line break the app added.
+- Selecting text in a command box offers only Copy and Select all, and a long press no longer drags the selection out, so a wrapped command cannot leave the app with the added line breaks in it.
+- A command that cannot fit the screen is marked with a caution-coloured ellipsis and read out as "Text did not fit" instead of being cut off silently.
+- A Don't disturb card that cuts off part of the request ("+N more lines") no longer approves when its time runs out. It says so on the card, and only a tap approves it.
 
 ## Keeping this file honest
 

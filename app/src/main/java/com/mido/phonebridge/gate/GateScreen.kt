@@ -20,6 +20,7 @@ import com.mido.phonebridge.ApprovalGate.ApproveGesture
 import com.mido.phonebridge.core.executesOrDeletes
 import com.mido.phonebridge.ui.ShellCode
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.kit.CountdownTicks
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.HoldKey
@@ -242,11 +243,11 @@ internal object GateScreen {
         val view = input.view
         val quiet = if (signal) p.ink else p.etched
         val panel = Panel.create(ctx, if (signal) Panel.Tone.SIGNAL else Panel.Tone.PLAIN)
-        panel.addView(Type.text(ctx, view?.requester ?: GateCopy.FALLBACK_TITLE, TypeRole.TITLE, p.ink).apply {
+        panel.addView(Type.text(ctx, UntrustedText.mark(view?.requester ?: GateCopy.FALLBACK_TITLE, p.cautionText), TypeRole.TITLE, p.ink).apply {
             ViewCompat.setAccessibilityHeading(this, true)
         }, matchWrap())
         panel.addView(
-            Type.text(ctx, GateCopy.addressLine(input.remote, view?.account ?: ""), TypeRole.READOUT, quiet),
+            Type.text(ctx, UntrustedText.mark(GateCopy.addressLine(input.remote, view?.account ?: ""), p.cautionText), TypeRole.READOUT, quiet),
             matchWrap().apply { topMargin = Theme.dp(ctx, 3) },
         )
         val ok = input.caller == GateCopy.CallerKind.VERIFIED || input.caller == GateCopy.CallerKind.THIS_PHONE
@@ -258,7 +259,7 @@ internal object GateScreen {
         if (view != null) {
             panel.addView(row(ctx).apply {
                 addView(VerbChip.create(ctx, view.verb), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                addView(Type.text(ctx, view.actionLabel, TypeRole.LABEL, p.ink),
+                addView(Type.text(ctx, UntrustedText.mark(view.actionLabel, p.cautionText), TypeRole.LABEL, p.ink),
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Theme.dp(ctx, Dimens.SPACE_S) })
             }, matchWrap().apply { topMargin = Theme.dp(ctx, 10) })
         }
@@ -542,11 +543,11 @@ internal class GateAiPanel(private val ctx: Context, private val slot: LinearLay
             panel.addView(Type.text(ctx, look.risk, TypeRole.BODY_STRONG, look.riskColor),
                 GateScreen.matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
         }
-        val text = Type.text(ctx, look.text, TypeRole.DETAIL, look.textColor)
+        val text = Type.text(ctx, UntrustedText.mark(look.text, p.cautionText), TypeRole.DETAIL, look.textColor)
         panel.addView(text, GateScreen.matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
         body = text
         if (look.reason.isNotBlank()) {
-            panel.addView(Type.text(ctx, look.reason, TypeRole.DETAIL, p.ink),
+            panel.addView(Type.text(ctx, UntrustedText.mark(look.reason, p.cautionText), TypeRole.DETAIL, p.ink),
                 GateScreen.matchWrap().apply { topMargin = Theme.dp(ctx, Dimens.SPACE_XS) })
         }
         slot.addView(panel)

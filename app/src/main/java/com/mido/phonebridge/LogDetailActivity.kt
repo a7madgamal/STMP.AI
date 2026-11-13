@@ -16,6 +16,7 @@ import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.ui.AuditCopy
 import com.mido.phonebridge.ui.DecisionModel
 import com.mido.phonebridge.ui.JsonCode
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.LogDetail
 import com.mido.phonebridge.ui.LogDetailModel
 import com.mido.phonebridge.ui.LogTime
@@ -285,7 +286,7 @@ class LogDetailActivity : AppCompatActivity() {
 
     /** An etched label with its value, one focus item for a screen reader. Screen-private. */
     private fun keyValue(label: String, value: String, mono: Boolean = false, color: Int = p.ink): View {
-        val valueView = Type.text(this, value, if (mono) TypeRole.MONO_BODY else TypeRole.BODY, color).apply {
+        val valueView = Type.text(this, UntrustedText.mark(value, p.cautionText), if (mono) TypeRole.MONO_BODY else TypeRole.BODY, color).apply {
             setTextIsSelectable(true)
         }
         return LinearLayout(this).apply {
@@ -293,7 +294,7 @@ class LogDetailActivity : AppCompatActivity() {
             addView(Etched.label(this@LogDetailActivity, label), full())
             addView(valueView, full())
             ViewCompat.setScreenReaderFocusable(this, true)
-            contentDescription = "$label, $value"
+            contentDescription = "$label, ${UntrustedText.escape(value)}"
         }
     }
 

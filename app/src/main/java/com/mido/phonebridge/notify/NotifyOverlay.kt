@@ -24,6 +24,7 @@ import com.mido.phonebridge.ai.SummaryProvider
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyQueue.Admission
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.kit.Led
 import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
 import com.mido.phonebridge.ui.kit.PunchView
@@ -155,7 +156,13 @@ object NotifyOverlay {
          * is being approved must not offer to approve it. Distinct from [UNAVAILABLE]
          * (a drawing failure) and from the 503 not-ready gate (no model at all).
          */
-        AI_FAILED
+        AI_FAILED,
+        /**
+         * The window elapsed in silence, but the card hides summary lines ("+N more lines"). Silence
+         * is consent only to what was on screen, so this is NOT an approval: it denies, and the
+         * request needs an explicit tap (FIX4).
+         */
+        HIDDEN_TEXT
     }
 
     /** What actually happened to one prompt. */
@@ -194,6 +201,9 @@ object NotifyOverlay {
 
         /** Stamped when the card is attached, never when [show] was called. */
         var shownAt = 0L
+
+        /** Summary lines the card cuts off, measured at layout; 0 while the whole text is shown. Main thread only. */
+        var hiddenLines = 0
 
         /** Set by [settle]; the tick reads it to know when to start fading out. */
         var settledAt = 0L
@@ -339,7 +349,12 @@ object NotifyOverlay {
         val radius = dp(Dimens.RADIUS_MODULE).toFloat()
         val cardWidthPx = minOf(screenSize(wm).first - 2 * dp(CARD_SIDE_MARGIN_DP), dp(CARD_MAX_WIDTH_DP))
         val pluginName = NotifyCardCopy.pluginName(NotifyCardCopy.pluginId(entry.label, entry.facts?.plugin))
-        val requesterLine = NotifyCardCopy.requesterLine(entry.requester, pluginName)
+        // Requester and summary are what a caller sent: hidden characters are shown as tokens in the
+        // caution colour (FIX4). `shownSummary` is also what the line count below measures.
+        val shownRequester = UntrustedText.mark(entry.requester.ifBlank { NotifyCardCopy.UNKNOWN_REQUESTER }, p.cautionText)
+        val shownSummary = UntrustedText.mark(entry.summary, p.cautionText)
+        val requesterLine = NotifyCardCopy.requesterLine(UntrustedText.escape(entry.requester), pluginName)
+        val plainSummary = UntrustedText.escape(entry.summary)
 
         // Whatever decorates the card must be a BACKGROUND LAYER, never a child view: a
         // MATCH_PARENT child inside a WRAP_CONTENT FrameLayout forces the parent to match ITS
@@ -380,7 +395,7 @@ object NotifyOverlay {
                 setLayerInsetBottom(1, dp(DRAIN_INSET_BOTTOM_DP))
             }
             isClickable = true
-            contentDescription = NotifyCardCopy.description(entry.verb, requesterLine, entry.summary)
+            contentDescription = NotifyCardCopy.description(entry.verb, requesterLine, plainSummary)
         }
         entry.cardBg = cardBg
         entry.cardDrain = entryDrain
@@ -410,7 +425,7 @@ object NotifyOverlay {
         // WHO is asking and WHICH plugin (R1). Wraps, never ellipsizes: silence approves after
         // five seconds, so a name cut short is consent to something half-read.
         val requesterView = TextView(ctx).apply {
-            text = requesterLine
+            text = android.text.SpannableStringBuilder(shownRequester).append(" \u00B7 ").append(pluginName)
             Type.apply(this, TypeRole.DETAIL)
             setTextColor(p.ink)
         }
@@ -425,7 +440,7 @@ object NotifyOverlay {
             setTextColor(p.etched)
             gravity = Gravity.CENTER
             isClickable = true
-            contentDescription = "Deny: ${entry.summary}"
+            contentDescription = "Deny: $plainSummary"
         }
         row.addView(close, LinearLayout.LayoutParams(dp(Dimens.MIN_TARGET), dp(Dimens.MIN_TARGET)))
 
@@ -436,7 +451,7 @@ object NotifyOverlay {
         // target ("Delete the notification from Signal") is never cut mid-word. Named `summaryView`,
         // not `text`: a local called `text` shadows the TextView `text` property in `apply` blocks.
         val summaryView = TextView(ctx).apply {
-            text = entry.summary
+            text = shownSummary
             Type.apply(this, TypeRole.BODY_STRONG)
             setTextColor(p.ink)
             // Capped at three lines with NO ellipsis: the summary is caller-controlled and an
@@ -463,10 +478,16 @@ object NotifyOverlay {
             if (width <= 0) return@addOnLayoutChangeListener
             val full = summaryFullLineCount(tv, width)
             val hidden = (full - SUMMARY_MAX_LINES).coerceAtLeast(0)
-            val label = if (hidden > 0) "+$hidden more ${if (hidden == 1) "line" else "lines"}" else ""
+            val label = if (hidden > 0) NotifyCardCopy.moreLines(hidden) else ""
+            entry.hiddenLines = hidden
             if (moreLine.text.toString() != label) {
                 moreLine.text = label
                 moreLine.visibility = if (hidden > 0) VISIBLE else GONE
+                card.contentDescription = if (hidden > 0) {
+                    NotifyCardCopy.descriptionHidden(entry.verb, requesterLine, plainSummary, hidden)
+                } else {
+                    NotifyCardCopy.description(entry.verb, requesterLine, plainSummary)
+                }
             }
         }
 
@@ -847,10 +868,7 @@ object NotifyOverlay {
                             // Without the vault half, a request that started attended and lost
                             // the screen mid-window would still deny, which would make the rule
                             // depend on WHEN the screen went off rather than on the session.
-                            if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
-                                com.mido.phonebridge.core.SecretVault.isUnlocked()
-                            ) Reason.EXPIRED
-                            else Reason.UNATTENDED
+                            expiryReason(entry)
                         )
                         return
                     }
@@ -882,15 +900,23 @@ object NotifyOverlay {
                     entry,
                     // Same rule as the tick above: the vault session is what permits an
                     // unattended approve. See the note there.
-                    if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
-                        com.mido.phonebridge.core.SecretVault.isUnlocked()
-                    ) Reason.EXPIRED
-                    else Reason.UNATTENDED
+                    expiryReason(entry)
                 )
             }
         }
         entry.timeout = backstop
         main.postDelayed(backstop, entry.fetchCapMs + entry.windowMs + BACKSTOP_SLACK_MS)
+    }
+
+    /**
+     * What a window that ran out means. Silence approves only what the human could read: a card
+     * that cuts summary lines off is denied (FIX4), whoever is present. Otherwise the existing
+     * rule: approve when attended or the vault session is open, else the screen was off.
+     */
+    private fun expiryReason(entry: Entry): Reason = when {
+        entry.hiddenLines > 0 -> Reason.HIDDEN_TEXT
+        com.mido.phonebridge.policy.isAttended(entry.ctx) || com.mido.phonebridge.core.SecretVault.isUnlocked() -> Reason.EXPIRED
+        else -> Reason.UNATTENDED
     }
 
     /**
@@ -961,7 +987,7 @@ object NotifyOverlay {
      */
     private fun applyAi(entry: Entry, result: com.mido.phonebridge.ai.RequestSummary) {
         val line = entry.aiLine ?: return
-        line.text = result.description
+        line.text = UntrustedText.mark(result.description, Theme.palette(entry.ctx).cautionText)
         line.setTextColor(Theme.palette(entry.ctx).ink)
         entry.aiLed?.visibility = View.GONE
         // The risk tints the CARD ITSELF, not a stripe down its edge (Mido, 2026-11-03:

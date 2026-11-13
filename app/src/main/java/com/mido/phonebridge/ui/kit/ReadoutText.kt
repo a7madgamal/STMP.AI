@@ -6,6 +6,10 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.text.Selection
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import android.text.Spanned
 import android.text.SpannableStringBuilder
 import androidx.appcompat.widget.AppCompatTextView
@@ -41,6 +45,26 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
     /** Colour of the continuation glyph. */
     var glyphColor: Int = 0
 
+    /** Colour of the "text did not fit" marker; the caution ink of the readout. */
+    var cautionColor: Int = 0
+
+    /**
+     * True when the text still does not fit after every shrink: a line wider than the view, or a
+     * wrap the platform added by itself. It is never left silent: a marker is drawn and the
+     * accessibility description says so.
+     */
+    internal var didNotFit: Boolean = false
+        private set
+
+    /** The shrink steps tried before giving up; a test lowers it to reach the failure state. */
+    internal var maxShrinks: Int = MAX_SHRINKS
+
+    init {
+        // A selection here can leave only through Copy (which drops the inserted breaks). Share,
+        // Process text, Cut and the rest would hand on the wrapped picture with its `\n`s.
+        customSelectionActionModeCallback = CopyOnlyCallback
+    }
+
     /** Display indices of the `\n` characters this view inserted. */
     internal var insertedAt: IntArray = IntArray(0)
         private set
@@ -75,12 +99,28 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
         // wrap of its own (a line count that is not logical lines + our breaks), the budget shrinks
         // and the text is wrapped again. A silent platform wrap is never left on screen.
         var factor = 1f
-        for (attempt in 0..MAX_SHRINKS) {
+        for (attempt in 0..maxShrinks) {
             rewrap(available, factor)
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-            if (!hasForeignWrap()) return
+            if (!overflows(available)) {
+                setFitFailed(false)
+                return
+            }
             factor *= SHRINK_STEP
         }
+        setFitFailed(true)
+    }
+
+    private fun setFitFailed(failed: Boolean) {
+        if (didNotFit == failed) return
+        didNotFit = failed
+        contentDescription = if (failed) "$DID_NOT_FIT_DESCRIPTION. ${verbatimText()}" else null
+    }
+
+    private fun overflows(availablePx: Int): Boolean {
+        if (hasForeignWrap()) return true
+        val l = layout ?: return false
+        return (0 until l.lineCount).any { l.getLineWidth(it) > availablePx + FIT_TOLERANCE_PX }
     }
 
     private fun hasForeignWrap(): Boolean {
@@ -127,14 +167,57 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
     private companion object {
         const val MAX_SHRINKS = 6
         const val SHRINK_STEP = 0.85f
+        const val FIT_TOLERANCE_PX = 1f
+        const val DID_NOT_FIT_DESCRIPTION = "Text did not fit and may be cut off"
+
+        /** Drawn at the end of the last line when the text did not fit. */
+        const val DID_NOT_FIT_MARK = "\u2026"
+
+        private val ALLOWED_MENU_IDS = setOf(android.R.id.copy, android.R.id.selectAll)
+
+        /** Keeps Copy and Select all, drops every other item (Share, Process text, Cut, Paste, Replace...). */
+        object CopyOnlyCallback : ActionMode.Callback {
+            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean { prune(menu); return true }
+            override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean { prune(menu); return true }
+            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean = false
+            override fun onDestroyActionMode(mode: ActionMode) = Unit
+
+            private fun prune(menu: Menu) {
+                // Several items can share an id (Process text items are all NONE): remove by id from the
+                // front, so the first match is always the item at [i] and nothing is skipped.
+                var i = 0
+                while (i < menu.size()) {
+                    val id = menu.getItem(i).itemId
+                    if (id in ALLOWED_MENU_IDS) i++ else menu.removeItem(id)
+                }
+            }
+        }
     }
 
     /** [text] as it was given, without the breaks this view added. */
     fun verbatimText(): CharSequence = source ?: text
 
+    /**
+     * No drag-and-drop of a selection: it would carry the inserted `\n`s out of the view. The
+     * platform starts that drag from a long press on the selected text (and `startDragAndDrop` is
+     * final), so a long press first drops the selection: it then selects the word under the finger
+     * instead of picking the old selection up.
+     */
+    override fun performLongClick(): Boolean {
+        (text as? android.text.Spannable)?.let { if (hasSelection()) Selection.removeSelection(it) }
+        return super.performLongClick()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val l = layout ?: return
+        if (didNotFit) {
+            glyphPaint.set(paint)
+            glyphPaint.color = cautionColor
+            val markX = (width - totalPaddingRight).toFloat() - glyphPaint.measureText(DID_NOT_FIT_MARK)
+            val markY = totalPaddingTop + l.getLineBaseline(l.lineCount - 1).toFloat()
+            canvas.drawText(DID_NOT_FIT_MARK, markX, markY, glyphPaint)
+        }
         if (insertedAt.isEmpty()) return
         glyphPaint.set(paint)
         glyphPaint.color = glyphColor
@@ -150,6 +233,8 @@ class ReadoutText(ctx: Context) : AppCompatTextView(ctx) {
     }
 
     override fun onTextContextMenuItem(id: Int): Boolean {
+        // Anything but Copy and Select all (Share, Cut, Paste, Process text) would hand on the picture.
+        if (id !in ALLOWED_MENU_IDS) return true
         if (id != android.R.id.copy || insertedAt.isEmpty()) return super.onTextContextMenuItem(id)
         val from = minOf(selectionStart, selectionEnd)
         val to = maxOf(selectionStart, selectionEnd)

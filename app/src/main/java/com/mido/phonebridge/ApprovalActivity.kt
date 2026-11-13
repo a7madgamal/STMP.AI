@@ -177,7 +177,7 @@ class ApprovalActivity : FragmentActivity() {
             checkSelfPermission(android.Manifest.permission.READ_CONTACTS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        title = GateCopy.windowTitle(requesterName)
+        title = GateCopy.windowTitle(com.mido.phonebridge.ui.UntrustedText.escape(requesterName))
         views = GateScreen.build(
             this,
             GateInput(

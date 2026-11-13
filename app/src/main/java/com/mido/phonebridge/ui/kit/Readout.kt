@@ -17,6 +17,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.tokens.Bevel
 import com.mido.phonebridge.ui.tokens.Dimens
 import com.mido.phonebridge.ui.tokens.Type
@@ -78,7 +79,7 @@ object Readout {
         val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         var promptView: TextView? = null
         if (prompt != null) {
-            promptView = Type.text(ctx, prompt, TypeRole.READOUT, p.readoutMuted).apply {
+            promptView = Type.text(ctx, UntrustedText.mark(prompt, p.readoutDanger), TypeRole.READOUT, p.readoutMuted).apply {
                 setTextIsSelectable(false)
             }
             column.addView(promptView, matchWrap())
@@ -90,12 +91,16 @@ object Readout {
             Kind.LOG -> TypeRole.MONO_BODY
         }
         val color = if (kind == Kind.COMMAND) p.readoutCommand else p.readoutText
+        // Text a caller sent is shown as sent: hidden characters become visible tokens, and a source
+        // wrap mark can never pass for one the readout inserted (FIX4).
+        val shown = UntrustedText.mark(content, p.readoutDanger, escapeWrapGlyphs = softWrap)
         val text = ReadoutText(ctx).apply {
             Type.apply(this, role)
             setTextColor(color)
             glyphColor = p.readoutMuted
+            cautionColor = p.readoutDanger
             this.softWrap = softWrap
-            setText(content)
+            setText(shown)
             setTextIsSelectable(true)
             hyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE
             breakStrategy = Layout.BREAK_STRATEGY_SIMPLE

@@ -10,6 +10,7 @@ import com.mido.phonebridge.ApprovalGate.Row
 import com.mido.phonebridge.ui.JsonCode
 import com.mido.phonebridge.ui.ShellCode
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Panel
 import com.mido.phonebridge.ui.kit.Readout
@@ -60,7 +61,7 @@ internal object GateRows {
                     Row.Style.WARN -> TypeRole.MONO_BODY to p.cautionText
                     else -> TypeRole.BODY to p.ink
                 }
-                Type.text(ctx, r.value, role, color).apply {
+                Type.text(ctx, UntrustedText.mark(r.value, p.cautionText), role, color).apply {
                     setTextIsSelectable(true)
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,

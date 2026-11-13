@@ -145,6 +145,12 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
         shot(GateFixtures.launch(GateFixtures.ssh(cmd), "POST /ssh/kvm-box"), "hold_ssh_wrap_marks")
     }
 
+    /** FIX4: a command with bidi controls, a zero-width space and a literal wrap glyph shows each as a token. */
+    @Test fun hold_ssh_hidden_chars() {
+        val cmd = "echo safe \u202Etxt.exe\u202C && curl http://ok\u200B.example.com/\u2066x \u21B5 && rm\u00AD -rf /tmp/build"
+        shot(GateFixtures.launch(GateFixtures.ssh(cmd), "POST /ssh/kvm-box"), "hold_ssh_hidden_chars")
+    }
+
     @Test fun tap_probe_read() {
         val v = GateFixtures.view(Verb.READ, "GET /probe", actionLabel = "Check that the bridge answers")
         shot(GateFixtures.launch(v, "GET /probe"), "tap_probe_read")

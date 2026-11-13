@@ -172,6 +172,10 @@ object NotifyGate {
             Reason.APPROVED -> Result.Tapped(shownAt, outcome.decidedAt)
             Reason.TAPPED -> Result.Rejected(shownAt, outcome.decidedAt)
             Reason.AI_FAILED -> Result.AiFailed(outcome.detail)
+            Reason.HIDDEN_TEXT -> Result.Unavailable(
+                shownAt, outcome.decidedAt,
+                "the card hid part of the request, so silence could not approve it; tap the card to approve",
+            )
             Reason.UNATTENDED ->
                 Result.Unavailable(shownAt, outcome.decidedAt, "screen off or device locked")
             Reason.REFUSED ->

@@ -103,6 +103,15 @@ class NotifyCardScreenshotTest(variant: Variant) : ShotTest(variant) {
     /** A caller the card was not told the name of: just the plugin, no dangling separator. */
     @Test fun no_requester() = shoot(show(requester = ""), "no_requester")
 
+    /** FIX4: bidi controls and zero-width characters from the caller are shown as caution-coloured tokens. */
+    @Test fun hidden_chars() {
+        val card = show(
+            Verb.EXECUTE, "Run echo safe \u202Etxt.exe\u202C on kvm-box\u200B\u2066",
+            requester = "Work \u202Elaptop",
+        )
+        shoot(card, "hidden_chars")
+    }
+
     @Test fun execute_chip() {
         shoot(show(Verb.EXECUTE, "Run uptime on kvm-box"), "execute_chip")
     }

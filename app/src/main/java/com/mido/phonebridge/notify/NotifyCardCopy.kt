@@ -29,6 +29,15 @@ internal object NotifyCardCopy {
     /** The AI's call, spelled out so "HIGH" cannot be read as confidence. */
     fun riskWord(risk: Risk): String = "${risk.name} risk"
 
+    /** Under a summary the card cuts off: names what is hidden and that silence will not approve it. */
+    fun moreLines(hidden: Int): String =
+        "+$hidden more ${if (hidden == 1) "line" else "lines"} \u00B7 silence will not approve this"
+
+    /** The card's spoken description while [hidden] summary lines are cut off. */
+    fun descriptionHidden(verb: Verb, requesterLine: String, summary: String, hidden: Int): String =
+        "${verb.name} request from $requesterLine: $summary. $hidden more ${if (hidden == 1) "line" else "lines"} " +
+            "not shown. Tap to approve now, the ✕ denies, silence denies."
+
     fun description(verb: Verb, requesterLine: String, summary: String): String =
         "${verb.name} request from $requesterLine: $summary. Tap to approve now, the ✕ denies, silence approves."
 }
