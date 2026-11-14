@@ -22,6 +22,7 @@ import com.mido.phonebridge.ui.showSecure
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.Hints
 import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
@@ -378,8 +379,8 @@ class SecretsActivity : FragmentActivity() {
 
     private fun editLinksDialog(name: String, current: SecretVault.SecretMeta) {
         errorSlot.removeAllViews()
-        val docs = Field.create(this, "API DOCS", current.docs, "API docs (https://…)", Field.Kind.URL)
-        val key = Field.create(this, "WHERE TO GET THE KEY", current.key, "Where to get the key (https://…)", Field.Kind.URL)
+        val docs = Field.create(this, "API DOCS", current.docs, Hints.API_DOCS, Field.Kind.URL)
+        val key = Field.create(this, "WHERE TO GET THE KEY", current.key, Hints.KEY_SOURCE, Field.Kind.URL)
         StmpDialog.builder(this)
             .setTitle("Links for '$name'")
             .setView(VaultModule.dialogBody(this, column(docs, key)))
@@ -458,7 +459,7 @@ class SecretsActivity : FragmentActivity() {
             }
             else -> SecretVault.SecretMeta()
         }
-        val nameField = Field.create(this, "NAME", existing ?: template?.name ?: "", "Name (lowercase, e.g. todoist)")
+        val nameField = Field.create(this, "NAME", existing ?: template?.name ?: "", Hints.SECRET_NAME)
         // Editable only when CONFIRMING a name the human typed. A template name is fixed:
         // the name is the plugin id, and the template's docs/hosts were chosen for that one
         // service, so renaming it to something else would attach Todoist's hosts to a secret
@@ -466,17 +467,17 @@ class SecretsActivity : FragmentActivity() {
         nameField.setEnabled(existing == null && template == null)
         // Password-style, autofill off (Field.Kind.SECRET): the keyboard and any autofill
         // service must never learn this.
-        val valueField = Field.create(this, "VALUE", "", "Secret value", Field.Kind.SECRET)
+        val valueField = Field.create(this, "VALUE", "", Hints.SECRET_VALUE, Field.Kind.SECRET)
         // The two links are NOT secret (they are pointers, not credentials), so they are
         // ordinary text fields and they are stored in the plaintext index. Both optional.
-        val docsField = Field.create(this, "API DOCS", existingLinks.docs, "API docs URL (optional)", Field.Kind.URL)
-        val keyField = Field.create(this, "WHERE TO GET THE KEY", existingLinks.key, "Where to get it (optional)", Field.Kind.URL)
+        val docsField = Field.create(this, "API DOCS", existingLinks.docs, Hints.API_DOCS_OPTIONAL, Field.Kind.URL)
+        val keyField = Field.create(this, "WHERE TO GET THE KEY", existingLinks.key, Hints.KEY_SOURCE_OPTIONAL, Field.Kind.URL)
         // Allowed hosts live in the SAME dialog as everything else about the secret: a secret and
         // its domains are one thing. Prefilled from what is stored so a replace does not silently
         // drop the rules.
         val hostsField = Field.create(
             this, "ALLOWED HOSTS", existingLinks.hosts.joinToString(", "),
-            "api.todoist.com, comma-separated",
+            Hints.ALLOWED_HOSTS,
         )
         StmpDialog.builder(this)
             .setTitle(
@@ -545,7 +546,7 @@ class SecretsActivity : FragmentActivity() {
 
     private fun addHostDialog(secret: String) {
         errorSlot.removeAllViews()
-        val host = Field.create(this, "HOST", "", "api.todoist.com or *.todoist.com")
+        val host = Field.create(this, "HOST", "", Hints.HOST_PATTERN)
         StmpDialog.builder(this)
             .setTitle("Allow a host for '$secret'")
             .setView(VaultModule.dialogBody(this, column(host)))

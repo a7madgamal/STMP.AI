@@ -59,6 +59,13 @@ object Field {
                 val fitted = fitHint(ctx, hint, inner, e.paint)
                 if (inner > 0 && e.hint.toString() != fitted.toString()) e.hint = fitted
             }
+            // TalkBack and autofill get the whole hint even when the visible one is cut.
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.hintText = hint
+                }
+            }
             setTextColor(p.ink)
             setHintTextColor(p.etched)
             Type.apply(this, if (kind == Kind.TEXT) TypeRole.BODY else TypeRole.MONO_BODY)

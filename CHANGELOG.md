@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.15 (build 330)**.
+Current build: **v0.52.16 (build 331)**.
 
 ---
 
@@ -5659,10 +5659,15 @@ devDependencies. `node_modules/` is gitignored.
 - Home cards all open with their own heading, and the secondary keys (What is STMP, Check now, Open releases page) are the same small key.
 - A caller in Settings has a status light: green when allowed, hollow when blocked.
 
-## 0.52.15 (build 330) — 2026-11-14 — CURRENT
+## 0.52.15 (build 330) — 2026-11-14
 - The list of hidden characters that get a visible mark is now written out in full for one Unicode version (15.1) instead of being looked up in each phone's own tables. Before, a character such as U+0890 or U+13430 could be marked on one device and shown raw on another. The iOS app reads the same list.
 - The spoken announcement of an AI summary, the Home list of recent requests (shown and read out), the "text did not fit" reading and the plugin name in the request log now show hidden characters as marks too, so TalkBack and the screen cannot be fooled by a summary or request text.
 - The line under the fingerprint prompt stays on one line (a newline or tab shows as `\u{000A}` or `\u{0009}`) and stops at 120 characters with a "(+N chars)" ending, so a long or multi-line path cannot push the real request out of view.
+
+## 0.52.16 (build 331) — 2026-11-14 — CURRENT
+- What a screen reader says for a request-log row now shows hidden characters in the plugin name as `\u{202E}`-style marks, the same as the text drawn on screen; the plugin line on the row also draws them marked. The same applies to the plugin name on an exception row and to a caller's name on the Forget key.
+- In Settings, the debug log's Show log / Hide log key keeps its size and place when the log opens; the Copy log key gets its own half of the row instead of squeezing the first.
+- Field hints that were too long for a narrow field at large text sizes are shorter, so none is cut off any more, and a screen reader or autofill still gets the full hint where one is cut.
 
 ## Keeping this file honest
 

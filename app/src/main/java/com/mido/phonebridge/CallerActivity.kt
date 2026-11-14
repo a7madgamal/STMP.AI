@@ -25,6 +25,7 @@ import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.Hints
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
 import com.mido.phonebridge.ui.kit.Readout
@@ -114,7 +115,7 @@ class CallerActivity : FragmentActivity() {
             fullWidth().apply { topMargin = dp(Dimens.SPACE_S) },
         )
 
-        val field = Field.create(this, "Device name", "", "e.g. Laptop", Field.Kind.TEXT)
+        val field = Field.create(this, "Device name", "", Hints.DEVICE_NAME, Field.Kind.TEXT)
         nameField = field.edit.apply {
             // A machine name, not a password: no masking, and no personalised-learning opt-out —
             // the keyboard learning "Ahmed's laptop" is harmless and helps next time.

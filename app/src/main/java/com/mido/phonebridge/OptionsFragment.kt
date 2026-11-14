@@ -41,6 +41,8 @@ import com.mido.phonebridge.ui.VaultRow
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.UntrustedText
+import com.mido.phonebridge.ui.kit.Hints
 import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.KnobSelector
@@ -470,18 +472,17 @@ class OptionsFragment : BridgeFragment() {
         header("Debug")
         val panel = Panel.create(ctx)
         val open = DebugLogOpen.open
-        val keys = mutableListOf<MaterialButton>(
-            KeyButton.create(ctx, if (open) "Hide log" else "Show log", KeyButton.Kind.PANEL) {
-                DebugLogOpen.open = !DebugLogOpen.open
-                render()
-            }
-        )
-        if (open) {
-            keys += KeyButton.create(
-                ctx, "Copy log", KeyButton.Kind.PANEL, describe = "Copy the debug log to the clipboard",
-            ) { copyLog() }
+        val toggle = KeyButton.create(ctx, if (open) "Hide log" else "Show log", KeyButton.Kind.PANEL) {
+            DebugLogOpen.open = !DebugLogOpen.open
+            render()
         }
-        panel.addView(keyLine(keys))
+        val copy = KeyButton.create(
+            ctx, "Copy log", KeyButton.Kind.PANEL, describe = "Copy the debug log to the clipboard",
+        ) { copyLog() }
+        // The Copy slot is kept while the log is closed (invisible side by side, gone when stacked),
+        // so the Show/Hide key never changes size or position.
+        copy.visibility = if (open) View.VISIBLE else if (keysSideBySide()) View.INVISIBLE else View.GONE
+        panel.addView(keyLine(listOf(toggle, copy), equalSlots = true))
         if (open) {
             val readout = Readout.create(ctx, Debug.dump(), Readout.Kind.LOG)
             readout.root.layoutParams = LinearLayout.LayoutParams(
@@ -500,17 +501,24 @@ class OptionsFragment : BridgeFragment() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) Toasts.show(ctx, "Copied")
     }
 
-    /** Keys on one line when they fit (font scale at most 1.15), else stacked, 8dp apart. */
-    private fun keyLine(keys: List<MaterialButton>): LinearLayout {
-        val sideBySide = keys.size > 1 && ctx.resources.configuration.fontScale <= STACK_ABOVE_SCALE
+    private fun keysSideBySide() = ctx.resources.configuration.fontScale <= STACK_ABOVE_SCALE
+
+    /**
+     * Keys on one line when they fit (font scale at most 1.15), else stacked full width, 8dp apart.
+     * With [equalSlots] each side-by-side key gets half the row, so a hidden second key keeps its
+     * slot and the first key looks the same either way.
+     */
+    private fun keyLine(keys: List<MaterialButton>, equalSlots: Boolean = false): LinearLayout {
+        val sideBySide = keysSideBySide()
         val line = LinearLayout(ctx).apply {
             orientation = if (sideBySide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         }
         keys.forEachIndexed { i, key ->
-            val lp = LinearLayout.LayoutParams(
-                if (sideBySide) LinearLayout.LayoutParams.WRAP_CONTENT else LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
+            val lp = when {
+                sideBySide && equalSlots -> LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                sideBySide -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                else -> LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
             if (i > 0) {
                 if (sideBySide) lp.marginStart = ctx.dp(Dimens.TARGET_GAP) else lp.topMargin = ctx.dp(Dimens.TARGET_GAP)
             }
@@ -543,7 +551,7 @@ class OptionsFragment : BridgeFragment() {
         }
         val panel = Panel.create(ctx)
         for (entry in entries.values.sortedBy { it.ip }) {
-            val title = (entry.state as? CallerState.Verified)?.name ?: entry.ip
+            val title = UntrustedText.escape((entry.state as? CallerState.Verified)?.name ?: entry.ip)
             val detail = when (entry.state) {
                 is CallerState.Verified -> "${entry.ip} · allowed"
                 CallerState.Denied -> "Blocked. Requests from this address are refused without asking."
@@ -805,7 +813,7 @@ class OptionsFragment : BridgeFragment() {
         })
 
         val urlField = Field.create(
-            ctx, "Server URL", url, "http://host:port", Field.Kind.URL,
+            ctx, "Server URL", url, Hints.SERVER_URL, Field.Kind.URL,
             onChange = { draft = draft.copy(url = it); urlError = null },
         )
         urlError?.let { urlField.setError(it) }
@@ -816,7 +824,7 @@ class OptionsFragment : BridgeFragment() {
                 "reach; a tailnet address usually works from anywhere.", p.etched,
         ))
         val tokenField = Field.create(
-            ctx, "Token (optional)", token, "Empty if the server trusts this phone", Field.Kind.SECRET,
+            ctx, "Token (optional)", token, Hints.TOKEN, Field.Kind.SECRET,
             onChange = { draft = draft.copy(token = it) },
         )
         panel.addView(spaced(tokenField.root))

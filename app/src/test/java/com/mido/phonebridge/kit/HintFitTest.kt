@@ -4,6 +4,7 @@ import android.graphics.Paint
 import android.text.TextPaint
 import android.view.View
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.Hints
 import com.mido.phonebridge.ui.tokens.Fonts
 import com.mido.phonebridge.ui.tokens.TypeRole
 import org.junit.Assert.assertEquals
@@ -19,22 +20,16 @@ import org.robolectric.annotation.Config
 @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
 @Config(sdk = [33], qualifiers = "w411dp-h891dp-xhdpi")
 class HintFitTest {
-    /** Every hint string passed to Field.create in the app. */
-    private val appHints = listOf(
-        "API docs (https://…)", "Where to get the key (https://…)", "Name (lowercase, e.g. todoist)",
-        "Secret value", "API docs URL (optional)", "Where to get it (optional)",
-        "api.todoist.com, comma-separated", "api.todoist.com or *.todoist.com", "e.g. Laptop",
-        "http://host:port", "Empty if the server trusts this phone", "name (lowercase, e.g. prod)",
-        "host (e.g. box.example.com)", "port (default 22)", "user (e.g. deploy)",
-    )
-
-    private fun hintWidth(view: android.widget.EditText): Float {
+    /** The original, uncut hint, in the BODY face at the field's own text size. */
+    private fun fullWidth(edit: android.widget.EditText, hint: String): Float {
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Fonts.get(view.context, TypeRole.BODY.face)
-            textSize = view.paint.textSize
+            typeface = Fonts.get(edit.context, TypeRole.BODY.face)
+            textSize = edit.paint.textSize
         }
-        return paint.measureText(view.hint.toString())
+        return paint.measureText(hint)
     }
+
+    private fun hintWidth(view: android.widget.EditText): Float = fullWidth(view, view.hint.toString())
 
     private fun laidOut(hint: String, widthDp: Int): android.widget.EditText {
         val ctx = RuntimeEnvironment.getApplication()
@@ -45,14 +40,35 @@ class HintFitTest {
         return edit
     }
 
-    @Test fun `every hint in the app fits its field at font scale 1_35`() {
+    @Test fun `every hint in the app fits its field uncut at font scale 1_35`() {
         RuntimeEnvironment.setFontScale(1.35f)
+        assertTrue(Hints.all.isNotEmpty())
         // Narrowest field: a dialog on a 360dp phone, less dialog gutters and body padding.
-        for (hint in appHints) {
+        val cut = Hints.all.mapNotNull { hint ->
             val edit = laidOut(hint, 236)
             val inner = edit.width - edit.compoundPaddingLeft - edit.compoundPaddingRight
-            assertTrue("'$hint' is ${hintWidth(edit)} wide in $inner", hintWidth(edit) <= inner)
+            val needed = fullWidth(edit, hint)
+            "'$hint' needs $needed of $inner".takeIf { needed > inner }
         }
+        assertTrue("hints that would be cut: $cut", cut.isEmpty())
+    }
+
+    @Test fun `every Field in the app takes its hint from Hints`() {
+        val src = java.io.File("src/main/java/com/mido/phonebridge")
+        val files = src.walkTopDown().filter { it.extension == "kt" && it.name != "Field.kt" }.toList()
+        val creates = files.sumOf { Regex("""Field\.create\(""").findAll(it.readText()).count() }
+        val used = files.sumOf { Regex("""Hints\.[A-Z_]+""").findAll(it.readText()).count() }
+        assertEquals("every Field.create passes a Hints constant", creates, used)
+    }
+
+    @Test fun `TalkBack gets the whole hint when the visible one is cut`() {
+        RuntimeEnvironment.setFontScale(1.35f)
+        val long = "Where to get the key from, with the full address (https://example.com/keys)"
+        val edit = laidOut(long, 200)
+        assertTrue(edit.hint.toString(), edit.hint.toString().endsWith("…"))
+        val info = android.view.accessibility.AccessibilityNodeInfo()
+        edit.onInitializeAccessibilityNodeInfo(info)
+        assertEquals(long, info.hintText.toString())
     }
 
     @Test fun `a hint that is too long ends in an ellipsis and a short one is untouched`() {

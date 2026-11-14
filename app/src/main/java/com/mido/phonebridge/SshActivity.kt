@@ -22,6 +22,7 @@ import com.mido.phonebridge.ui.showSecure
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.Etched
 import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.Hints
 import com.mido.phonebridge.ui.kit.ErrorBlock
 import com.mido.phonebridge.ui.kit.KeyButton
 import com.mido.phonebridge.ui.kit.Led
@@ -295,10 +296,10 @@ class SshActivity : FragmentActivity() {
             return
         }
         errorSlot.removeAllViews()
-        val nameField = Field.create(this, "NAME", "", "name (lowercase, e.g. prod)")
-        val hostField = Field.create(this, "HOST", "", "host (e.g. box.example.com)")
-        val portField = Field.create(this, "PORT", "22", "port (default 22)", Field.Kind.NUMBER)
-        val userField = Field.create(this, "USER", "", "user (e.g. deploy)")
+        val nameField = Field.create(this, "NAME", "", Hints.SSH_NAME)
+        val hostField = Field.create(this, "HOST", "", Hints.SSH_HOST)
+        val portField = Field.create(this, "PORT", "22", Hints.SSH_PORT, Field.Kind.NUMBER)
+        val userField = Field.create(this, "USER", "", Hints.SSH_USER)
 
         // The reason a failure left the dialog empty, shown INSIDE it.
         val errorLine = Type.text(this, "", TypeRole.CAPTION, Theme.palette(this).cautionText).apply {

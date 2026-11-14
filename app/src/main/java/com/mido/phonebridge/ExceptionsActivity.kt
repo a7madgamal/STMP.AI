@@ -22,6 +22,7 @@ import com.mido.phonebridge.policy.Rule
 import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.ui.AuditCopy
 import com.mido.phonebridge.ui.PluginLabel
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.kit.ActionRow
 import com.mido.phonebridge.ui.kit.ErrorBlock
@@ -184,7 +185,7 @@ class ExceptionsActivity : AppCompatActivity() {
 
     /** One saved exception, with its mode in words and a way to change or remove it. */
     private fun ruleRow(policy: Policy, rule: Rule): View {
-        val title = "${PluginLabel.of(rule.plugin)} · ${AuditCopy.verbWords(rule.verb)}"
+        val title = "${UntrustedText.escape(PluginLabel.of(rule.plugin))} · ${AuditCopy.verbWords(rule.verb)}"
         val detail = when (rule.mode) {
             Mode.PARANOID -> "Paranoid · full prompt, asks for your stamp · same as having no exception"
             Mode.DONT_DISTURB -> "Don't disturb · 5 s card, doing nothing approves it"

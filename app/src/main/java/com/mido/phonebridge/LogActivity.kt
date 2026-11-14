@@ -248,8 +248,13 @@ class LogActivity : AppCompatActivity() {
         val chipVerb = verb.takeIf { look.allowsChip }
         val summary = AuditCopy.summary(h.outcome, h.summary)
         val plugin = PluginLabel.of(h.plugin)
-        val detail = listOfNotNull(UntrustedText.escape(plugin).takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale))
-            .joinToString(" · ")
+        val safePlugin = UntrustedText.escape(plugin)
+        // Drawn with the hidden characters marked in the caution colour (like Tape.row); the spoken
+        // description below uses the plain escaped string.
+        val detail = android.text.SpannableStringBuilder().apply {
+            if (safePlugin.isNotBlank()) append(UntrustedText.mark(plugin, p.cautionText))
+            AuditCopy.duration(h.durationMs, locale)?.let { if (isNotEmpty()) append(" · "); append(it) }
+        }
 
         val row = RuleLinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -271,7 +276,7 @@ class LogActivity : AppCompatActivity() {
             setOnLongClickListener { copyRaw(h.id); true }
             contentDescription = listOfNotNull(
                 look.word, verb?.let { AuditCopy.verbWords(it) }, UntrustedText.escape(summary).takeIf { it.isNotBlank() },
-                plugin.takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale), "at $clock",
+                safePlugin.takeIf { it.isNotBlank() }, AuditCopy.duration(h.durationMs, locale), "at $clock",
             ).joinToString(", ")
             ViewCompat.replaceAccessibilityAction(
                 this, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK,
