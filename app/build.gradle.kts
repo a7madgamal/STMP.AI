@@ -74,7 +74,7 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 312
+        versionCode = 334
         versionName = "0.51.10"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
