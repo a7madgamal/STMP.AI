@@ -5514,10 +5514,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.22 (build 348) — 2026-11-14
 - `changelog-check` refuses a committed merge-conflict marker. The changelog is the release history, so a leftover `<<<<<<<` is both unreadable and a lie about what shipped, and it is cheaper to catch in CI than to notice later.
 
-## 0.51.23 (build 349) — 2026-11-14 — CURRENT
+## 0.51.23 (build 349) — 2026-11-14
 - Notifications wear the app's own mark instead of an Android placeholder. The running notice used `stat_sys_upload_done`, a generic "upload finished" tick, so the bridge being up looked like something had completed; the can't-start notice used `stat_notify_error`, so the app speaking looked like a system fault; the unknown-caller prompt used `ic_dialog_alert`.
 - The icon is the stamp's SILHOUETTE, drawn at 24dp, not the launcher artwork. That artwork is a distressed stamp with the word STMP across it, and both the texture and the lettering are gone at status-bar size — rendered and checked, it arrives as a black rectangle with a smear in it. The launcher's monochrome layer has the same problem. The outline is the one part that survives, so that is what the small icon is.
 - The tray names the app STMP. The running notice said "PhoneBridge running" and the three status notices said "PhoneBridge can't start yet / is waiting for a network / is not running", three weeks after `app_name` became STMP.
+
+## 0.51.24 (build 350) — 2026-11-14 — CURRENT
+- The status-bar icon IS the launcher mark, at five exact density buckets, so the tray shows the same stamp the launcher does. Chosen over a drawn silhouette, and over a vector traced from the artwork: the mark is 2:1 with lettering inside it, and both of those turn to a smudge at 24dp — rendered and looked at rather than assumed. The launcher's own foreground is a bitmap for the same reason, and at the device's density the system scales it 1:1 with no resampling.
 
 ## Keeping this file honest
 

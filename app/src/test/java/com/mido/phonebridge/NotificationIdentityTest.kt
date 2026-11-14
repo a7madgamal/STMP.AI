@@ -54,21 +54,44 @@ class NotificationIdentityTest {
         )
     }
 
+    /**
+     * The status-bar icon is the launcher mark itself, not a redrawn lookalike.
+     *
+     * **Five exact buckets, like the launcher foreground**, because the mark is 2:1 and its
+     * lettering does not survive resampling to 24dp. A vector traced from the artwork renders as a
+     * smudge at the smallest size — checked, not assumed — whereas a raster layer drawn at the
+     * device's own density is scaled 1:1 by the system, which is the same reason the launcher's
+     * foreground is a bitmap rather than a traced path.
+     */
     @Test
-    fun `the status bar icon exists and is white so the system can tint it`() {
-        val f = File("src/main/res/drawable/ic_stat_stmp.xml")
-        assertTrue("the icon drawable is missing", f.isFile)
-        val xml = f.readText()
-        assertTrue("a small icon must be 24dp", xml.contains("android:width=\"24dp\""))
-        // The platform discards colour and keeps only alpha, so a grey or coloured path arrives as
-        // an invisible or half-strength shape. Pure white is the contract.
-        val fills = Regex("""fillColor="(#[0-9A-Fa-f]{8})"""").findAll(xml).map { it.groupValues[1] }.toList()
-        assertTrue("the icon declares no filled shape at all", fills.isNotEmpty())
-        for (c in fills) {
-            assertEquals("a small icon's path must be opaque white, got $c", "#FFFFFFFF", c)
+    fun `the status bar icon exists at every density bucket, derived from the mark`() {
+        val buckets = mapOf("mdpi" to 24, "hdpi" to 36, "xhdpi" to 48, "xxhdpi" to 72, "xxxhdpi" to 96)
+        for ((name, expected) in buckets) {
+            val f = File("src/main/res/drawable-$name/ic_stat_stmp.png")
+            assertTrue("$name bucket is missing: ${f.path}", f.isFile)
+            val img = javaaxImage(f)
+            assertEquals("$name must be a 24dp box ($expected px)", expected, img.first)
+            assertEquals("$name must be square", img.first, img.second)
         }
-        // No hairline strokes: at mdpi a 0.x dp stroke either disappears or breaks the shape up.
-        assertFalse("a stroke-based icon breaks up at mdpi", xml.contains("strokeWidth=\"0."))
+    }
+
+    /** Width and height of a PNG, read from its IHDR header — no image library on the test path. */
+    private fun javaaxImage(f: File): Pair<Int, Int> {
+        val b = f.readBytes()
+        require(b.size > 24 && b[1].toInt() == 'P'.code && b[2].toInt() == 'N'.code) { "not a PNG" }
+        fun i32(at: Int) = ((b[at].toInt() and 0xFF) shl 24) or ((b[at+1].toInt() and 0xFF) shl 16) or
+            ((b[at+2].toInt() and 0xFF) shl 8) or (b[at+3].toInt() and 0xFF)
+        return i32(16) to i32(20)
+    }
+
+    @Test
+    fun `a vector twin does not also exist, because two drawables with one name is a coin toss`() {
+        // Android resolves `ic_stat_stmp` across `drawable/` and the bucket folders. A leftover
+        // `drawable/ic_stat_stmp.xml` would win on some builds and lose on others.
+        assertFalse(
+            "delete the vector: it would shadow or be shadowed by the buckets unpredictably",
+            File("src/main/res/drawable/ic_stat_stmp.xml").exists(),
+        )
     }
 
     @Test
