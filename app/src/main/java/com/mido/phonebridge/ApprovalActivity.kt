@@ -283,7 +283,10 @@ class ApprovalActivity : FragmentActivity() {
                 // what they looked like before this existed.
                 val view = when (r.style) {
                     ApprovalGate.Row.Style.CODE -> TextView(this).apply {
-                        text = ShellCode.render(r.value)
+                        text = ShellCode.render(
+                            r.value,
+                            dangerUnderlinePx = Theme.dp(this@ApprovalActivity, 2).toFloat(),
+                        )
                         textSize = Theme.TEXT_BODY_SP
                         setTextColor(Theme.ON_SURFACE)
                         typeface = ShellCode.typeface(this@ApprovalActivity)

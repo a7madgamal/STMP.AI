@@ -5477,3 +5477,7 @@ devDependencies. `node_modules/` is gitignored.
 - The Don't-disturb card refuses an approve tap if another window covered it at any point during the gesture, not only at the moment the finger lifts. A cover that appeared mid-tap and was pulled away before release could otherwise steer an approval.
 - A partial cover does not veto the tap: a notification shade edge or a gesture bar is ordinary and refusing those taps would make the card unusable.
 
+## 0.51.14 (build 340) — 2026-11-14
+- A command in the approval readout underlines the tokens worth a second look: `sudo`, `doas`, `rm -rf`, a pipe into a shell, a write redirect, `dd of=`, `mkfs`, `shutdown`, `chmod -R`, `kill -9`, `git push -f`, a fork bomb and `eval`. The rule sits under the exact run and adds no characters, so the command still reads as what will run.
+- `2>` and `2>&1` are not underlined: stderr plumbing appears on nearly every command, and marking it would train the eye to ignore the underline.
+

@@ -93,6 +93,14 @@ object ShellCode {
     fun render(
         command: String,
         palette: Map<String, Int> = palette(),
+        /**
+         * Underline thickness for a dangerous token, in pixels.
+         *
+         * Passed in rather than derived here: `render` deliberately takes no Context so it can be
+         * unit-tested without one, and a density read would be the only thing in the function that
+         * needed an Android runtime.
+         */
+        dangerUnderlinePx: Float = 2f,
     ): CharSequence {
         if (command.isEmpty()) return command
 
@@ -122,6 +130,34 @@ object ShellCode {
             val colour = palette[region.styleKey] ?: Theme.ON_SURFACE
             text.setSpan(
                 ForegroundColorSpan(colour),
+                start,
+                end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
+
+        // **Dangerous tokens, underlined in place.**
+        //
+        // Added AFTER the line breaks and through the same [displayOffset] mapping the syntax
+        // colours use, so a `rm -rf` that a break moved lands its underline on the characters
+        // that are actually drawn. Computing a range against the ORIGINAL string and applying it
+        // to the displayed one is the off-by-N this file already documents: it would underline
+        // the wrong characters by exactly the number of breaks before them, which on a long
+        // command is a rule floating mid-word.
+        //
+        // The underline is additive: `DangerTokens.mark` copies the text and adds spans, so the
+        // command a human approves is still character-for-character what will run.
+        for (r in com.mido.phonebridge.ui.DangerTokens.find(command)) {
+            val start = displayOffset(r.first, cuts)
+            val end = displayOffset(r.last + 1, cuts)
+            if (end <= start) continue
+            text.setSpan(
+                com.mido.phonebridge.ui.DangerUnderlineSpan(
+                    color = Theme.DANGER,
+                    thicknessPx = dangerUnderlinePx,
+                    tokenStart = start,
+                    tokenEnd = end,
+                ),
                 start,
                 end,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
