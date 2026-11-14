@@ -16,6 +16,7 @@ import android.widget.Toast
 import com.mido.phonebridge.audit.AuditHeader
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditOutcome
+import com.mido.phonebridge.ui.LogTime
 import com.mido.phonebridge.ui.Theme
 
 /**
@@ -171,8 +172,19 @@ class LogActivity : Activity() {
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
 
-    private fun timeOf(ts: Long): String =
-        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(ts))
+    /**
+     * When this request happened, in the device's own format and zone.
+     *
+     * It used to be `SimpleDateFormat("HH:mm:ss", Locale.US)`, which forces a 24-hour American
+     * shape on a phone set to 12-hour and says nothing about the zone. A log whose job is to say
+     * when something happened should not guess either.
+     */
+    private fun timeOf(ts: Long): String = LogTime.clock(
+        ts,
+        LogTime.zone(),
+        java.util.Locale.getDefault(),
+        LogTime.is24Hour(this),
+    )
 
     private fun glyph(o: AuditOutcome): String = when (o) {
         AuditOutcome.APPROVED -> "✅"

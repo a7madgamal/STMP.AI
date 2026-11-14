@@ -5481,8 +5481,11 @@ devDependencies. `node_modules/` is gitignored.
 - A command in the approval readout underlines the tokens worth a second look: `sudo`, `doas`, `rm -rf`, a pipe into a shell, a write redirect, `dd of=`, `mkfs`, `shutdown`, `chmod -R`, `kill -9`, `git push -f`, a fork bomb and `eval`. The rule sits under the exact run and adds no characters, so the command still reads as what will run.
 - `2>` and `2>&1` are not underlined: stderr plumbing appears on nearly every command, and marking it would train the eye to ignore the underline.
 
-## 0.51.15 (build 341) — 2026-11-14 — CURRENT
+## 0.51.15 (build 341) — 2026-11-14
 - The paper-crease sound that plays as the approval modal arrives is a page turn, matching the sheet that slides in. The decision stamp keeps its own thud, so arrival and verdict still sound like two different moments.
+
+## 0.51.16 (build 342) — 2026-11-14 — CURRENT
+- Request log times follow the device's own clock: 12- or 24-hour as the phone is set, and the locale's field order rather than a hardcoded `HH:mm:ss` in `Locale.US`. `LogTime` also names the zone and provides `Today` / `Yesterday` headings, so a scroll of timestamps reads as sessions instead of a column of numbers.
 
 ## Keeping this file honest
 
