@@ -5458,9 +5458,14 @@ devDependencies. `node_modules/` is gitignored.
 - The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
 - A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
 
-## 0.51.9 (build 311) — 2026-11-13 — CURRENT
+## 0.51.9 (build 311) — 2026-11-13
 - A sudo request can no longer be approved by the exception button. That button carries no password, so one tap approved with an empty field, skipped the password path, and wrote a rule relaxing every SSH command for the plugin/verb pair.
 - The offer is not built for a password request, and the gate refuses any approval of one that does not carry the password, whichever button sent it. DENY still works.
+
+## 0.51.10 (build 312) — 2026-11-14 — CURRENT
+- A Roborazzi screenshot harness records every screen and state in light and dark, at 100% and 135% text, and CI fails when a screen changes without its baseline being re-recorded.
+- Each screen has its own test class, so re-recording one screen cannot silently re-baseline the rest.
+- Baselines cover this build's screens: the Plugins tab and the Plugin help sheet had no surface to capture and are not part of it, and Settings records the Preferences tab it actually lives in.
 
 ## Keeping this file honest
 

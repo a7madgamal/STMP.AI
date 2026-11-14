@@ -567,7 +567,14 @@ object ApprovalGate {
         }
     }
 
-    /** Called by ApprovalActivity once the human decides. */
+    /**
+     * Called by ApprovalActivity once the human decides.
+     *
+     * **Refuses an approval for a request that needs a password.** Such a request may only be
+     * approved through [resolveWithPassword]; approving it here would let the command reach
+     * sudo with nothing on its stdin. Enforced at the gate, not only by the disabled button,
+     * so no UI path can approve around the password. A DENY is always accepted.
+     */
     fun resolve(requestId: Long, approved: Boolean): Boolean {
         val p = current ?: return false
         if (p.requestId != requestId) return false
