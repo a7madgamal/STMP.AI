@@ -39,6 +39,14 @@ object ModelProvisioner {
 
     class Result(val ok: Boolean, val detail: String)
 
+    /** Test seam: puts the live download state in place without a download. */
+    @androidx.annotation.VisibleForTesting
+    internal fun setStateForTest(running: Boolean, progress: Progress?, lastError: String) {
+        this.running = running
+        this.progress = progress
+        this.lastError = lastError
+    }
+
     /**
      * Live progress, for a UI that re-attaches mid-download. Null when nothing is
      * running. Kept here rather than in the Activity because the download outlives

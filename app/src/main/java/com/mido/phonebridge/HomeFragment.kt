@@ -1,528 +1,343 @@
 package com.mido.phonebridge
 
-import android.Manifest
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
+import android.net.Uri
 import android.os.Build
-import android.os.Bundle
+import android.provider.Settings
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
-import androidx.fragment.app.FragmentActivity
-import com.google.android.material.button.MaterialButton
-import com.mido.phonebridge.ui.ServerStatus
+import androidx.core.view.ViewCompat
 import com.mido.phonebridge.audit.AuditHealth
+import com.mido.phonebridge.audit.AuditHeader
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
+import com.mido.phonebridge.core.ApkInstaller
 import com.mido.phonebridge.core.AuthManager
-import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.SecretVault
+import com.mido.phonebridge.core.UpdatePrefs
+import com.mido.phonebridge.core.Updater
+import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.policy.GlobalMode
-import com.mido.phonebridge.policy.blurb
-import com.mido.phonebridge.policy.title
 import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
+import com.mido.phonebridge.policy.blurb
+import com.mido.phonebridge.policy.title
+import com.mido.phonebridge.ui.HomeCopy
+import com.mido.phonebridge.ui.ServerStatus
+import com.mido.phonebridge.ui.FingerprintSetting
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.AuditCopy
+import com.mido.phonebridge.ui.kit.ErrorBlock
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.dp
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Wordmark
+import com.mido.phonebridge.ui.kit.KnobSelector
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.RockerSwitch
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StatusRow
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.kit.Tape
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Palette
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
+/**
+ * Home: the Bridge module, the gate knob, the recent-requests tape and the Updates module.
+ *
+ * Everything is built once in [buildContent]; [render] updates in place, so the 5 s tick never
+ * destroys a control under a finger. The three hosts that are refilled ([bridgeDetailHost],
+ * [gateDetailHost]/[gateExtrasHost], [degradedHost], [tapeHost]) refill only when their own key
+ * changed, for the same reason.
+ */
 class HomeFragment : BridgeFragment(), BridgeControl {
 
     companion object {
         const val REQ_POST_NOTIF = 1001
 
         /**
-         * How often the hero re-renders while the activity is resumed.
-         *
-         * 5s is a compromise: fast enough that a dead server cannot stay green through a
-         * glance at the screen, slow enough that the repaint is invisible. It reads a CACHED
-         * probe result, so the cost is a field read — the real probe runs in the service on its
-         * own 60s schedule, off the main thread.
+         * How often the screen re-renders while resumed. It reads a CACHED probe result, so the
+         * cost is a field read; the real probe runs in the service on its own schedule.
          */
         const val UI_TICK_MS = 5_000L
 
-        /**
-         * How long the knob shows a pending look after a tap.
-         *
-         * Long enough to cover a bind on a slow device, short enough that a start which silently
-         * failed does not leave the knob looking busy forever. After this the knob simply reflects
-         * whatever the service says, including "still down".
-         */
+        /** How long the rocker shows a pending look after a tap. */
         const val PENDING_WINDOW_MS = 3_000L
+
+        /** Extra delay so the repaint that ends the pending look lands after the window closed. */
+        const val PENDING_CLOSE_MARGIN_MS = 100L
+
+        /**
+         * True while a start/stop tap is still settling. Ends when the window closes, when the bridge
+         * reached the asked state, or when a start failed (startBridge clears lastError, so one set
+         * afterwards is new).
+         */
+        internal fun isBridgePending(want: Boolean?, up: Boolean, since: Long, now: Long, lastError: String?): Boolean {
+            if (want == null || since <= 0L || up == want) return false
+            if (now - since >= PENDING_WINDOW_MS) return false
+            return !(want && !lastError.isNullOrBlank())
+        }
+
+        /** Rows on the Recent requests tape. */
+        const val TAPE_ROWS = 3
+
+        /** The knob's order is explicit, never `GlobalMode.values()`. */
+        val GATE_ORDER = listOf(GlobalMode.WHITELIST, GlobalMode.PARANOID, GlobalMode.DONT_DISTURB)
+
+        private const val PERMISSION_ASKS = "permission_asks"
+        private const val RELEASES_URL = "https://github.com/%s/%s/releases"
     }
 
-    /**
-     * The server switch.
-     *
-     * A toggle rather than a button: the old control had to say "START SERVER" or "STOP SERVER"
-     * and be recomputed on every render, so a stale label could claim the server was stopped
-     * while it was running. The knob's POSITION is the state, so it cannot disagree with itself.
-     */
-    private lateinit var serverToggle: com.mido.phonebridge.ui.RuggedToggle
+    /** The bridge switch. Its position is the stored state, never the tap. */
+    private lateinit var serverRocker: RockerSwitch
+    private lateinit var bridgeLed: Led
+    private lateinit var bridgeTitle: TextView
+
+    /** The bridge headline as painted; for tests. */
+    internal val bridgeTitleText: String get() = bridgeTitle.text.toString()
+    private lateinit var bridgeDetailHost: LinearLayout
+
+    /** When the last start/stop tap was made, so the rocker can show a pending look while binding. */
+    @androidx.annotation.VisibleForTesting
+    internal var pendingSince: Long = 0L
+
+    /** The direction the user asked for at tap time (true = start); null when nothing is pending. */
+    @androidx.annotation.VisibleForTesting
+    internal var pendingWant: Boolean? = null
+
+    private lateinit var degradedHost: LinearLayout
+    private lateinit var crashHost: LinearLayout
+    private lateinit var gateKnob: KnobSelector
+    private lateinit var gateDetailHost: LinearLayout
+    private lateinit var gateExtrasHost: LinearLayout
+    private lateinit var fingerprintRule: View
+    private lateinit var fingerprintRow: LinearLayout
+    private lateinit var fingerprintRocker: RockerSwitch
+    private lateinit var fingerprintWhy: TextView
+    private lateinit var tapeHost: LinearLayout
 
     /**
-     * When the last start/stop tap was made, so the knob can show a PENDING look while the
-     * service is still binding.
-     *
-     * The server is a live service, not a stored value: starting takes a moment and can fail. The
-     * knob therefore must not slide on the tap — it would be showing intent, and would slide back
-     * on a failure. It stays where the last known state put it and takes on the pending colour
-     * until `render()` sees the real value.
+     * The update section's container. It is rebuilt ONLY by [refreshUpdateSection], posted, so the
+     * control that was tapped is not destroyed while its own click is still being dispatched.
      */
-    private var pendingSince: Long = 0L
-    private lateinit var auditBanner: TextView
-    private lateinit var problemsHost: LinearLayout
-    private lateinit var pendingHost: LinearLayout
-    private lateinit var recentHost: LinearLayout
-    private lateinit var getStartedHost: LinearLayout
-    private var pendingSignature = ""
-    private var recentSignature = ""
+    private lateinit var updatesHost: LinearLayout
 
-    /**
-     * The update section's container.
-     *
-     * **This exists because the section was built once and never again.** `updateBlock()` was
-     * called from `buildContent()` only, while `render()` updates Home's other views IN PLACE —
-     * so tapping CHECK NOW set `checking = true`, called `render()`, and nothing on screen
-     * changed. The button looked dead because nothing ever redrew it (reported 2026-11-04:
-     * *"clicking check now still does nothing"*).
-     *
-     * A container that `render()` empties and refills is the smallest fix that makes the section
-     * behave like the rest of the screen.
-     */
-    private lateinit var gateCard: LinearLayout
-    private lateinit var gateTitle: TextView
-    private lateinit var gateSub: TextView
-    private lateinit var gateButtons: LinearLayout
+    /** Work to run when this screen comes back to the front (the install-permission round trip). */
+    private var pendingAfterResume: (() -> Unit)? = null
 
-    /**
-     * The column holding the mode row and the rules button.
-     *
-     * A separate field from [gateButtons] because the two are different KINDS of row: the modes
-     * share width equally, the rules button takes a full row of its own. Putting them in one
-     * horizontal parent is what made the modes collapse to nothing.
-     */
-    private lateinit var gateRows: LinearLayout
-    private lateinit var gateFingerprint: com.mido.phonebridge.ui.RuggedToggle
-    private lateinit var gateFingerprintWhy: TextView
-    private lateinit var heroCard: LinearLayout
-    private lateinit var heroTitle: TextView
-    private lateinit var heroSub: TextView
-
-    /**
-     * Guards the load prompt so returning to the app (onResume) never re-prompts on
-     * its own. One prompt per process — which is exactly the session.
-     */
-
-    /**
-     * Drives the while-resumed repaint. See [onResume].
-     *
-     * Main looper because it touches views, and a plain `Handler()` would do — named explicitly
-     * so the threading is obvious to a reader rather than inferred from construction order.
-     */
     private val uiTickHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /**
-     * What the checklist looked like at the last repaint.
-     *
-     * **This field exists because a tap was being eaten.** Reported 2026-11-02: *"nothing changed
-     * no modal"*. The device log had the answer — a tap logged `pointer 0` and NO `pointer 1`,
-     * a gesture cancelled before it could become a click. The cause was `uiTick`: every 5 seconds
-     * `render()` rebuilds rows, so a press
-     * held for longer than the interval had its View destroyed underneath the finger and the click
-     * never fired. Pressing a row is exactly the kind of touch that lasts a second or two, so the
-     * interaction was lost often enough to look like "the button does nothing".
-     *
-     * Worse, the bug is self-concealing: nothing crashed, nothing logged, the screen looked
-     * identical because it had been rebuilt with the same content. Two releases of dialog copy
-     * were written against a tap that never reached them.
-     *
-     * So the tick now repaints ONLY when something it displays actually changed. The rows keep
-     * their identity between ticks, which is what lets a press survive to become a click.
+     * What the screen looked like at the last repaint. The tick repaints ONLY when this changed:
+     * an unconditional rebuild every 5 s destroyed the View under any press that outlasted the
+     * interval and cancelled the click (reported 2026-11-02).
      */
     private var lastRenderSignature: String? = null
 
-    /** Guards the unrecoverable-vault reset dialog so it does not stack. */
+    private var lastDegraded: String? = null
+    private var lastBridgeKey: String? = null
+    private var lastGateKey: String? = null
+    private var lastTapeKey: String? = null
 
     override val tab = Theme.Tab.HOME
 
-    /**
-     * Home's rows: hero, start/stop, the setup checklist, account, tools, audit, debug.
-     *
-     * Called by [BridgeScreen] with the container already inside the bar layout. Everything here
-     * is built once; `render()` updates in place afterwards, which is what keeps a press from
-     * being destroyed underneath the finger by the 5s tick.
-     */
     override fun buildContent(container: LinearLayout) {
-        // --- 1. HERO: the one thing you need to know ---
-        heroCard = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(ctx, 16), Theme.dp(ctx, 14),
-                Theme.dp(ctx, 16), Theme.dp(ctx, 14))
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-        }
-        heroTitle = TextView(ctx).apply {
-            textSize = Theme.TEXT_TITLE_SP
-            typeface = Theme.bodyFont(ctx)
-            setTextColor(Theme.ON_SURFACE)
-        }
-        heroSub = TextView(ctx).apply {
-            textSize = Theme.TEXT_BODY_SP
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
-        }
+        val p = Theme.palette(ctx)
+        container.addView(buildHeader(p))
 
-        // The stamp mark, beside the status rather than above it.
-        //
-        // `WRAP_CONTENT` + `adjustViewBounds`, the same treatment the approval modal gives it:
-        // the mark is roughly 2:1, so forcing it into a square box letterboxes it into a smear.
-        // Height drives the size and the width follows.
-        val mark = android.widget.ImageView(ctx).apply {
-            setImageResource(R.drawable.logo_mark)
-            adjustViewBounds = true
-            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-            contentDescription = "STMP"
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Theme.dp(ctx, 44)
-            ).apply { marginEnd = Theme.dp(ctx, 12) }
-        }
-        val heroText = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(heroTitle)
-            addView(heroSub)
-        }
-        // **The knob sits IN the header row, top right.**
-        //
-        // Mido, 2026-11-04: *"server toggle still in its own row, it should be top right aligned
-        // so the header gets compacted"*. It was below the title in a row of its own, which cost
-        // an entire line of vertical space on the one card that is meant to be read at a glance.
-        //
-        // TOP-aligned rather than centred: the text block is two lines tall, and a centred knob
-        // drifts to the vertical middle of the card, away from the title it belongs to.
-        val heroRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.TOP
-            addView(mark)
-            addView(heroText, LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-            ))
-        }
+        degradedHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(degradedHost, matchWrapParams())
 
-        // --- 2. THE CONTROL: inside the hero, because it is the answer's other half ---
-        //
-        // "Is the server up?" and "turn it up" are one subject. As a separate row below, the
-        // switch read as another item in a list; inside the card it belongs to the status it
-        // changes.
-        //
-        // No "Server" label. Mido, 2026-11-04: *"remove the word server in header, just put the
-        // toggle on the right and make the header shorter by removing the server label"*.
-        //
-        // The word was doing no work: the card already says STMP and whether the bridge is up, so
-        // the switch sitting under that sentence has exactly one possible meaning. A lone knob
-        // hard right also makes the row shorter, which is the point — the hero is meant to be read
-        // at a glance, not parsed.
-        serverToggle = Theme.toggle(
-            ctx,
-            on = BridgeService.serverUp,
-            pending = pendingSince > 0L,
-        ) { want ->
-            // Record the tap and POST everything else.
-            //
-            // **Not `render()` inline.** This handler is inside the hero card, and the panel it
-            // repaints sits in the same card — doing that work during touch dispatch is the same
-            // class of fault that made CHECK NOW dead and the channel switch refuse to flip.
-            // Posting defers it to the next loop, after the press has been released.
-            //
-            // The knob is still NOT flipped here: `render()` moves it once `BridgeService.serverUp`
-            // actually changes, so a failed stop cannot leave it showing a state that is not true.
-            pendingSince = android.os.SystemClock.elapsedRealtime()
-            serverToggle.pending = true
-            uiTickHandler.post {
-                if (want) {
-                    Debug.log("server start requested")
-                    startBridge()
-                } else {
-                    Debug.log("stop requested")
-                    stopBridge()
-                }
-                render()
-            }
-            // The service binds asynchronously; a re-render after a beat picks up the result
-            // without waiting for the 5s tick. The tick covers the case where it takes longer.
-            uiTickHandler.postDelayed({ render() }, 600)
-        }
+        crashHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(crashHost, matchWrapParams())
 
-        serverToggle.setAccessibilityLabel("Bridge server")
-        heroRow.addView(serverToggle, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { marginStart = Theme.dp(ctx, 8) })
-        heroCard.addView(heroRow)
-        container.addView(heroCard)
+        container.addView(buildBridgePanel(p))
 
-        problemsHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(problemsHost)
-
-        // --- GET STARTED ---
-        // It remains one existing entry point, but stops taking up Home once onboarding
-        // has been seen. No second tour state or completion heuristic is introduced.
-        getStartedHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(getStartedHost)
-        getStartedHost.addView(Theme.sectionHeader(ctx, "Get started"))
-        getStartedHost.addView(
-            // **"HOW TO USE THIS" named the door, not the room.** Mido, 2026-11-10: *"getting
-            // started section is not obvious"* — the button promised instructions and delivered
-            // one prompt. It now opens a flow that explains what the app IS first, and the label
-            // says so.
-            Theme.button(ctx, "WHAT IS STMP?", Theme.ButtonStyle.NEUTRAL) {
+        container.addView(SectionHeader.create(ctx, "Get started"))
+        container.addView(
+            KeyButton.create(ctx, "What is STMP?", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) {
                 go(Intent(ctx, OnboardingActivity::class.java))
             },
+            matchWrapParams().apply { bottomMargin = ctx.dp(Dimens.MODULE_GAP) },
         )
 
-        // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
-        // account part to the google plugin"*). Signing in is a precondition the Google plugins
-        // share, so it belongs with them: Plugins → Google account holds the email, the token
-        // state and the sign-in button.
+        container.addView(buildGatePanel(p))
 
-        // --- 3b. GATE SWITCH: the one control that decides whether anything is
-        // asked of a human at all. Above the plugins, below Setup, because it is
-        // the second question after "is it running?" — "is it still asking me?".
-        container.addView(Theme.sectionHeader(ctx, "Approval gate"))
-        gateCard = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12))
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-        }
-        gateTitle = TextView(ctx).apply {
-            textSize = Theme.TEXT_LABEL_SP
-            typeface = Theme.bodyFont(ctx)
-            setTextColor(Theme.ON_SURFACE)
-        }
-        gateSub = TextView(ctx).apply {
-            textSize = Theme.TEXT_DETAIL_SP
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            setPadding(0, Theme.dp(ctx, 4), 0, 0)
-        }
-        // **Vertical, because the modes are radio cards now.**
-        //
-        // Mido, 2026-11-04: *"convert approval gate 3 options into the same radio cards"*. Cards
-        // need height and a full row each, and three across a phone would have been three
-        // unreadable chips — the same problem the mode row already had before it became a row of
-        // three cramped labels.
-        gateButtons = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        // A COLUMN holding the mode cards.
-        //
-        // It used to also hold EDIT RULES on its own row. That button has moved INTO the
-        // whitelist card, where it belongs: only WHITELIST reads the rule table, and being a
-        // child of a card that `renderGate` clears wholesale makes the old "5 EDIT RULES
-        // buttons" stacking bug structurally impossible rather than avoided by care.
-        //
-        // It used to be the horizontal row itself, and the rules button was added to the SAME
-        // row with MATCH_PARENT. In a horizontal LinearLayout that gives the rules button all the
-        // width and shrinks the three weighted modes to zero — so the card showed only WHITELIST
-        // and the other two vanished. Reported 2026-11-04: *"approval gate is fucking empty only
-        // whitelist"*.
-        gateRows = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, Theme.dp(ctx, 10), 0, 0)
-            addView(gateButtons)
-        }
-        gateCard.addView(gateTitle)
-        gateCard.addView(gateSub)
-        gateCard.addView(gateRows)
+        tapeHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(tapeHost, matchWrapParams())
 
-        // The fingerprint toggle lives HERE, beside the mode picker, not in Settings.
-        //
-        // They are one subject: the mode decides WHEN you are asked, this decides HOW you prove
-        // it. Split across two screens, neither half can be reasoned about — you could read
-        // "AUTOMATIC" and never learn that a SECURE request will ask for a fingerprint.
-        val fpRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            // 8dp, not 12: the card already pads its own bottom by 12, so the gap under this row
-            // was 24dp — the "too much bottom padding" reported 2026-11-04. The row only needs
-            // enough to separate the knob from the rules button above it.
-            setPadding(0, Theme.dp(ctx, 8), 0, 0)
-        }
-        // A switch, not a button. Mido, 2026-11-04: *"make fingerprint for modals a toggle not a
-        // button"*. The old control was a button whose LABEL carried the state, so the state had
-        // to be re-rendered into text on every pass and a stale render could claim the wrong
-        // thing. A knob's position cannot go stale.
-        val fpHeader = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        fpHeader.addView(
-            Theme.text(ctx, "Fingerprint for modals", Theme.TEXT_BODY_SP, Theme.ON_SURFACE).apply {
-                typeface = Theme.bodyFont(ctx)
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        gateFingerprint = Theme.toggle(
-            ctx,
-            on = try { PolicyStore.from(requireContext()).get().fingerprintForModals }
-                 catch (e: Exception) { false },
-        ) { want ->
-            // **A fingerprint is required to flip this switch.** Mido, 2026-11-04: *"flipping the
-            // fingerprint toggle should only work after requiring the fingerprint"*.
-            //
-            // Both directions ask. Turning it OFF is the more dangerous change — it removes the
-            // proof of presence from every future approval — so it is not the one direction to
-            // leave unguarded.
-            requestFingerprintChange(want)
-        }
-
-        gateFingerprint.setAccessibilityLabel("Fingerprint for modals")
-        fpHeader.addView(gateFingerprint)
-        fpRow.addView(fpHeader)
-        gateFingerprintWhy = TextView(ctx).apply {
-            textSize = Theme.TEXT_CAPTION_SP
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-            // **No padding and no height until it has something to say.**
-            //
-            // It is empty in the normal case (the description was removed on request), and an
-            // empty TextView that still reserves 6dp of top padding plus a line of height is
-            // invisible space under the toggle. Visibility is driven by `render`, which turns it
-            // GONE when there is no text and the reason otherwise.
-            setPadding(0, 0, 0, 0)
-            visibility = TextView.GONE
-        }
-        fpRow.addView(gateFingerprintWhy)
-        gateCard.addView(fpRow)
-
-        container.addView(gateCard)
-
-        pendingHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(pendingHost)
-        recentHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        container.addView(recentHost)
-
-        // Updates live in Preferences → About & updates. Home stays about live health,
-        // requests and approval behavior rather than app administration.
-
-        // The plugin list used to live here and made Home a wall: twelve status cards between
-        // the server control and the tools, pushing "is the bridge running" off the first
-        // screen. It moved to the Plugins tab, where capability inventory belongs.
-
-        // Tools and Debug moved to Settings (Mido, 2026-11-03: *"rethink each button screen"*).
-        // They are destinations and diagnostics, not live state — and REQUEST LOG / SSH were
-        // sitting on Home purely because there was nowhere else to put them.
-
-        // **The audit banner keeps its home here, and it must be CREATED here.**
-        //
-        // This is the row that crashed 0.43.90 on open: `render()` has always painted it, but
-        // removing the Debug block took the construction with it and left the `lateinit` field
-        // unset. Home is the launch screen, so every open threw
-        // `UninitializedPropertyAccessException` before anything else could run.
-        //
-        // The lesson is narrower than "remember to clean up": a `lateinit` field is a promise the
-        // compiler cannot check. `render()` and `buildContent` are far enough apart that nothing
-        // links them, so deleting one side compiles cleanly and fails on the device.
-        auditBanner = TextView(ctx).apply {
-            textSize = Theme.TEXT_BODY_SP
-            setTextColor(Theme.ON_COLOR)
-            background = Theme.surface(ctx, Theme.DANGER_SURFACE, Theme.RADIUS_CONTROL)
-            setPadding(
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-            )
-            visibility = TextView.GONE
-        }
-        container.addView(auditBanner)
+        container.addView(SectionHeader.create(ctx, "Updates"))
+        updatesHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(updatesHost, matchWrapParams())
+        // Filled at build time: a host that only `refreshUpdateSection` fills shows a bare header
+        // until something is tapped (reported 2026-11-04).
+        updatesHost.addView(updateBlock())
     }
 
+    // --- build helpers -------------------------------------------------------------------------
 
-    /**
-     * Start the bridge on app load if it is not already running.
-     *
-     * Mido, 2026-10-19: *"start server on app load automatically"*. The whole point of the
-     * app is the server, so requiring a tap to reach the normal state is a step that only
-     * ever gets in the way.
-     *
-     * Two rules keep it from becoming a trap:
-     *  - **Once per process.** [autoStartAttempted] means a manual STOP stays stopped; a
-     *    restart on every onResume would make STOP impossible to keep.
-     *  - **Never over a running server.** `serverUp` covers the case where the service was
-     *    already started (or survived), so this cannot double-start or disturb it.
-     *
-     * **And a third: the preference is honoured.** "Auto-start on boot" is ONE toggle meaning
-     * "the server starts itself", so it gates this entry point too. A setting whose OFF state
-     * still started the server every time the app opened would be a toggle that does not mean
-     * what it says. The service still starts on an explicit tap — that is a human asking.
-     */
+    private fun matchWrapParams() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+    )
 
-    /**
-     * The app lock: the load prompt IS the vault unlock (plan D9). One scan does both
-     * jobs, because the prompt carries a CryptoObject bound to the vault key — so the
-     * finger that says "you're you" also unwraps the data key.
-     *
-     * Fails closed: a declined/failed prompt leaves the vault locked. The app still
-     * renders (the bridge is a separate process concern and keeps running), but every
-     * secret operation will answer `secret_locked` until the human unlocks.
-     */
- 
-    /**
-     * The 0.14.x vault is dead (missing wrap IV). Offer a reset, once per process, and
-     * be honest that the stored secrets cannot be recovered — a silent fresh vault would
-     * look like success while quietly discarding a credential.
-     */
- 
+    private fun wrapParams() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+    )
+
+    private fun weightParams() = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+
+    /** Header row: the "STMP" wordmark and the version. A single wordmark child, so WP11 swaps one view. */
+    private fun buildHeader(p: Palette): LinearLayout {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val mark = Wordmark.create(ctx, iconDp = 20, withText = true).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
+        }
+        row.addView(mark, weightParams())
+        row.addView(Etched.label(ctx, "v" + BuildConfig.VERSION_NAME), wrapParams())
+        row.layoutParams = matchWrapParams().apply { bottomMargin = ctx.dp(Dimens.SPACE_M) }
+        return row
+    }
+
+    private fun buildBridgePanel(p: Palette): LinearLayout {
+        val panel = Panel.create(ctx)
+        val rowA = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        bridgeLed = Led(ctx)
+        // Top-aligned so the LED and the rocker track the first line when the title wraps (05-large-text L-01).
+        rowA.addView(bridgeLed, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
+            marginEnd = ctx.dp(10)
+            topMargin = ctx.dp(24)
+        })
+        val text = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        text.addView(Etched.label(ctx, "Bridge"))
+        bridgeTitle = Type.text(ctx, "", TypeRole.TITLE, p.ink)
+        text.addView(bridgeTitle, matchWrapParams())
+        rowA.addView(text, weightParams())
+
+        serverRocker = Theme.rocker(
+            ctx,
+            on = BridgeService.serverUp,
+            label = "Bridge",
+            pending = pendingSince > 0L,
+        ) { want ->
+            // Record the tap and POST the rest: this handler sits inside the panel the render
+            // repaints. The rocker is NOT flipped here; `render()` moves it once
+            // `BridgeService.serverUp` actually changes, so a failed stop cannot show a lie.
+            pendingSince = android.os.SystemClock.elapsedRealtime()
+            pendingWant = want
+            serverRocker.pending = true
+            uiTickHandler.post {
+                if (want) startBridge() else stopBridge()
+                render()
+            }
+            uiTickHandler.postDelayed({ render() }, 600)
+            // The tick only repaints on a changed signature, so close the pending look explicitly.
+            uiTickHandler.postDelayed({ render() }, PENDING_WINDOW_MS + PENDING_CLOSE_MARGIN_MS)
+        }
+        rowA.addView(serverRocker, wrapParams().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
+        panel.addView(rowA, matchWrapParams())
+
+        bridgeDetailHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        panel.addView(bridgeDetailHost, matchWrapParams().apply { topMargin = ctx.dp(10) })
+        return panel
+    }
+
+    private fun buildGatePanel(p: Palette): LinearLayout {
+        val panel = Panel.create(ctx)
+        panel.addView(Etched.label(ctx, "Gate mode"))
+        gateKnob = KnobSelector(ctx, groupLabel = "Gate mode", labels = GATE_ORDER.map { it.title }).apply {
+            onSelect = { i -> requestGate(GATE_ORDER[i]) }
+        }
+        panel.addView(gateKnob, matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) })
+        gateDetailHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        panel.addView(gateDetailHost, matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) })
+        gateExtrasHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        panel.addView(gateExtrasHost, matchWrapParams())
+
+        fingerprintRule = hairline(p)
+        panel.addView(fingerprintRule, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, ctx.dp(1),
+        ).apply { topMargin = ctx.dp(Dimens.SPACE_M) })
+        fingerprintRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ctx.dp(56)
+            setPadding(0, ctx.dp(Dimens.SPACE_M), 0, 0)
+        }
+        fingerprintRow.addView(
+            Type.text(ctx, "Fingerprint for approvals", TypeRole.ROW_LABEL, p.ink), weightParams(),
+        )
+        fingerprintRocker = Theme.rocker(
+            ctx,
+            on = try { PolicyStore.from(requireContext()).get().fingerprintForModals } catch (e: Exception) { false },
+            label = "Fingerprint for approvals",
+        ) { want ->
+            // A fingerprint is required in BOTH directions (turning it off is the more dangerous one).
+            requestFingerprintChange(want)
+        }
+        fingerprintRow.addView(fingerprintRocker, wrapParams().apply { marginStart = ctx.dp(Dimens.SPACE_S) })
+        panel.addView(fingerprintRow, matchWrapParams())
+        fingerprintWhy = Type.text(ctx, "", TypeRole.DETAIL, p.cautionText).apply { visibility = View.GONE }
+        panel.addView(fingerprintWhy, matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_XS) })
+        return panel
+    }
+
+    private fun hairline(p: Palette): View = View(ctx).apply { setBackgroundColor(p.hairline) }
+
+    // --- lifecycle -----------------------------------------------------------------------------
+
     override fun onResume() {
         super.onResume()
         render()
-        // Re-render while visible, so the hero cannot go stale under the human's eyes.
-        //
-        // **This is the other half of the 2026-10-25 bug.** `render()` used to run only on
-        // `onResume` and two one-shot 600ms callbacks, so a server that died while the screen
-        // was open kept its green label until the activity was left and re-entered. A green
-        // label nobody re-checks is how "the app says running" and "callers get refused" were
-        // both true at once.
-        //
-        // The tick reads a CACHED probe result (`isVerifiedAlive`), never a fresh connect — the
-        // service's watchdog owns the probing, because a connect here would be network I/O on
-        // the main thread. So this is cheap: a field read plus a re-render every few seconds.
+        // The update section is not part of `render()` (rebuilding it there could tear a control
+        // down under a press), so coming back asks for it explicitly.
+        if (::updatesHost.isInitialized) refreshUpdateSection()
+
+        // The install-permission dialog promises the install resumes on return. Keep it, posted
+        // so the pending action sees a settled frame.
+        pendingAfterResume?.let { pending ->
+            pendingAfterResume = null
+            uiTickHandler.post(pending)
+        }
+        // Re-render while visible, so a dead server cannot stay green under the human's eyes.
         uiTickHandler.removeCallbacksAndMessages(null)
         uiTickHandler.postDelayed(uiTick, UI_TICK_MS)
-        // `relaunchCurrent` is handled by BridgeFragment.onResume for every screen, so it is
-        // deliberately NOT repeated here: one owner, or a new screen silently loses it.
     }
 
     override fun onPause() {
         super.onPause()
-        // No ticking in the background: it would repaint a screen nobody is looking at, and a
-        // resumed activity re-arms it immediately.
         uiTickHandler.removeCallbacksAndMessages(null)
     }
 
-    /**
-     * A cheap fingerprint of everything the checklist renders.
-     *
-     * Deliberately primitives and short strings only — no view construction, no disk, no network.
-     * It is compared once every 5 seconds, so it must cost less than the repaint it is avoiding.
-     *
-     * `progress?.percent` is included because the model download must visibly advance; without it
-     * a download would freeze at whatever value was on screen when the tick started skipping.
-     */
-    private fun renderSignature(): String = buildString(96) {
+    /** A cheap fingerprint of everything the screen renders: primitives and short strings only. */
+    private fun renderSignature(): String = buildString(128) {
         append(BridgeService.serverUp).append('|')
         append(BridgeService.isVerifiedAlive()).append('|')
         append(BridgeService.lastError).append('|')
         append(BridgeService.bindAddress).append('|')
         append(BridgeService.listenerRef != null).append('|')
         append(hasNotifPermission()).append('|')
-        // `ctx`, NOT `this`: inside buildString the implicit receiver is the
-        // StringBuilder, so a bare `this` would be the wrong object entirely.
         append(runCatching { PolicyStore.from(requireContext()).get().fingerprintForModals }
             .getOrDefault(false)).append('|')
+        append(runCatching { PolicyStore.from(requireContext()).get().let { it.global.name + it.rules.size } }
+            .getOrDefault("unreadable")).append('|')
         append(ApprovalGate.canUseFullScreenIntent(ctx)).append('|')
-        append(android.provider.Settings.canDrawOverlays(ctx)).append('|')
+        append(Settings.canDrawOverlays(ctx)).append('|')
         append(com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)).append('|')
         append(SecretVault.isUnlocked()).append('|')
         append(com.mido.phonebridge.ai.AiGateway.enabled(ctx)).append('|')
@@ -531,32 +346,16 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         append(com.mido.phonebridge.ai.ModelRegistry.readiness(ctx).ready).append('|')
         append(AuthManager.isLoggedIn(ctx)).append('|')
         append(AuthManager.accountEmail ?: "").append('|')
-        append(com.mido.phonebridge.core.OnboardingPrefs.seen(ctx)).append('|')
-        append(AuditLog.from(requireContext()).headers().firstOrNull()?.id ?: "").append('|')
         append(AuditHealth.reason ?: "").append('|')
-        // **The update check is part of what this screen displays.** Without these two, a check
-        // that finished while Home was visible changed nothing the signature could see, so the
-        // tick skipped the repaint and the card stayed on "checking…" until the screen was left
-        // and re-entered. Mido, 2026-11-10: *"the checking status right after updating is stuck
-        // forever"*.
-        //
-        // `lastOutcome?.javaClass` rather than the outcome itself: this only needs to notice that
-        // the value CHANGED, and the class name is a cheap stand-in that does not allocate.
-        append(com.mido.phonebridge.core.Updater.checking).append('|')
-        append(com.mido.phonebridge.core.Updater.lastOutcome?.javaClass?.simpleName ?: "").append('|')
+        append(Crash.last(ctx)?.length ?: -1).append('|')
+        append(Stall.last(ctx)?.length ?: -1).append('|')
+        append(tapeSnapshot().first).append('|')
+        // The update check is part of what this screen displays: without these a check that
+        // finished while Home was visible left the card on "checking…" (reported 2026-11-10).
+        append(Updater.checking).append('|')
+        append(Updater.lastOutcome?.javaClass?.simpleName ?: "").append('|')
     }
 
-    /**
-     * Repaints on a timer while the activity is resumed. See [onResume].
-     *
-     * **Repaints only on a real change.** The unconditional `render()` here rebuilt every row
-     * every 5 seconds, which destroyed the View under any press that outlasted the interval and
-     * cancelled the click (see [lastRenderSignature] for the evidence). A tap on a checklist row
-     * is a 1–2 second gesture, so this ate them routinely while the screen looked unchanged.
-     *
-     * The alternative — keeping the rebuild and shortening the interval — would make it worse.
-     * Skipping unchanged repaints is the only version where a press can complete.
-     */
     private val uiTick = object : Runnable {
         override fun run() {
             val signature = renderSignature()
@@ -568,555 +367,368 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    // --- rendering ---
+    /** Repaint everything, including the update section the shell asks about. */
+    override fun repaint() {
+        render()
+        if (::updatesHost.isInitialized) refreshUpdateSection()
+    }
 
-    /**
-     * Repaint everything, INCLUDING the update section.
-     *
-     * `render()` deliberately does not touch that section — rebuilding it there could tear a
-     * control down under a finger, which is what made CHECK NOW look dead. But that means the
-     * one caller that asks "redraw yourself" (the shell, after a background check completes)
-     * would redraw everything except the news it was asking about.
-     */
-    override fun repaint() = render()
+    // --- rendering -----------------------------------------------------------------------------
 
     private fun render() {
-        // Baseline the tick's fingerprint. Every render() path — tap, permission result, service
-        // callback — re-baselines here, so the 5-second tick cannot immediately undo a repaint
-        // that was explicitly requested.
+        // Every render path re-baselines, so the tick cannot undo an explicitly requested repaint.
         lastRenderSignature = renderSignature()
+        // The update section is NOT rebuilt here, on purpose (see [updatesHost]).
+        renderDegraded()
+        renderCrash()
+        renderBridge()
+        renderGate()
+        renderTape()
+    }
 
-        // **The update section is NOT rebuilt here, on purpose.**
-        //
-        // Every change to it — a check, a channel flip, an install — goes through
-        // `refreshUpdateSection`, which rebuilds it POSTED so the control that was tapped is not
-        // destroyed while its own click is still being dispatched.
-        //
-        // Rebuilding it from `render()` would undo that: `render()` runs on the 5-second tick and
-        // on every server-state change, so a rebuild here could tear the channel switch down
-        // mid-press. That is the tap-eating defect this file documents at length, and it is
-        // exactly what made the switch stop flipping.
+    private fun renderDegraded() {
+        val reason = AuditHealth.reason
+        if (reason == lastDegraded && degradedHost.childCount == (if (reason == null) 0 else 1)) return
+        lastDegraded = reason
+        degradedHost.removeAllViews()
+        if (reason == null) return
+        val panel = ErrorBlock.create(
+            ctx, "Request log is degraded", "Requests are being refused until this is fixed.",
+            details = reason,
+        )
+        panel.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        degradedHost.addView(panel)
+    }
 
-        // --- 1. HERO: one line that answers "is it working?" ---
+    /**
+     * The app's own crash or freeze, on the screen that is always reachable.
+     *
+     * `GET /debug` reports both, but that route needs the bridge running, and these failures are
+     * exactly the ones that stop it serving. Tapping copies the whole trace, so it travels by
+     * paste instead of another round trip.
+     */
+    private fun renderCrash() {
+        crashHost.removeAllViews()
+        val crash = Crash.last(ctx)
+        val stall = Stall.last(ctx)
+        if (crash == null && stall == null) return
+        val isStall = crash == null
+        val detail: String = stall ?: crash ?: return
+        val headline = detail.lineSequence()
+            .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
+            ?.trim() ?: "no detail recorded"
+        val panel = Panel.create(ctx, Panel.Tone.CAUTION)
+        panel.addView(
+            StatusRow.create(
+                ctx,
+                label = if (isStall) "The screen froze" else "The app crashed",
+                value = "Copy trace",
+                tone = StatusRow.Tone.CAUTION,
+                detail = headline,
+                led = Led.State.CAUTION,
+                onClick = {
+                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText(
+                            "STMP ${if (isStall) "stall" else "crash"}", detail,
+                        ),
+                    )
+                    toast("copied — paste it to whoever is fixing this")
+                },
+            ),
+        )
+        crashHost.addView(panel, matchWrapParams())
+    }
+
+    private fun renderBridge() {
+        val p = Theme.palette(ctx)
         val listenerOk = BridgeService.listenerRef != null
         val notifOk = hasNotifPermission()
-        // A failed start is its own state, and it must be checked BEFORE the stopped state.
-        // The precedence lives in `ServerStatus` (pure, unit-tested) rather than here: this
-        // ordering used to be inline, so nothing could fail when it was wrong. The old order
-        // checked `!serverUp` first, which made the reason a start failed unreachable — the
-        // service stops itself when it cannot bind, setting `serverUp=false` while `lastError`
-        // held the cause. Mido, 2026-10-20: *"on server fail user should see clear error"*.
+        // The precedence lives in `ServerStatus` (pure, unit-tested): a failed start must be
+        // checked BEFORE the stopped state.
         val state = ServerStatus.state(
             serverUp = BridgeService.serverUp,
-            // The REAL check, not the flag. `serverUp` only records that start() once
-            // succeeded; this records that a socket connected. See ServerStatus.UNRESPONSIVE.
             alive = BridgeService.isVerifiedAlive(),
             listenerOk = listenerOk,
             notifOk = notifOk,
             lastError = BridgeService.lastError,
         )
-        renderRemedies(state, listenerOk, notifOk)
-        renderPending(ApprovalGate.pendingSnapshots() +
-            com.mido.phonebridge.notify.NotifyOverlay.pendingSnapshots())
-        renderRecent()
-        val failed = state == ServerStatus.State.FAILED ||
-            state == ServerStatus.State.UNRESPONSIVE
 
-        // The state colour is applied ONCE, here. The old code set a background per
-        // branch and then overwrote it two lines later, so the hero card was always
-        // the neutral grey regardless of state.
-        val heroSurface = when (state) {
-            ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS_SURFACE
-            ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING_SURFACE
-            ServerStatus.State.UNRESPONSIVE -> Theme.DANGER_SURFACE
-            ServerStatus.State.FAILED -> Theme.DANGER_SURFACE
-            ServerStatus.State.STOPPED -> Theme.SURFACE
-        }
-        heroTitle.text = ServerStatus.title(state)
-        heroTitle.setTextColor(
-            when (state) {
-                ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS
-                ServerStatus.State.RUNNING_ATTENTION -> Theme.WARNING
-                ServerStatus.State.UNRESPONSIVE -> Theme.DANGER
-                ServerStatus.State.FAILED -> Theme.DANGER
-                ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
-            }
-        )
-        heroCard.background = Theme.surface(ctx, heroSurface, Theme.RADIUS_CARD)
-        // No email here (Mido, 2026-11-03: *"move email from home, it belongs to the google
-        // plugin"*). The hero answers "is the bridge running, and where" -- who is signed in is a
-        // fact about the ACCOUNT, and it lives on the screen that can change it.
-        heroSub.text = ServerStatus.detail(
-            state = state,
-            lastError = BridgeService.lastError,
-            bindAddress = BridgeService.bindAddress,
-            port = BridgeService.PORT,
-        )
-        // The reason is the one thing on this screen that must be read, so it gets the
-        // danger colour rather than the muted body colour it used to share with log lines.
-        heroSub.setTextColor(if (failed) Theme.DANGER else Theme.ON_SURFACE_VARIANT)
-
-        // --- 3. CHECKLIST: compact, each row says what to do when broken ---
-        // Start/Stop colour rule (user's standing rule): grey = idle/stopped,
-        // green = running, and NEVER red for a normal stopped state. The button
-        // is not green just because it is tappable — green means the server is up.
-        // Tint, never `setBackgroundColor`: assigning a background drawable to a
-        // MaterialButton replaces the ripple/state-list machinery. `backgroundTintList`
-        // recolours the same component and keeps the feedback.
-        // The knob renders the STORED state, never the tap. `pendingSince` only suppresses the
-        // "settled" look for a moment so a slow bind does not flick the knob back and forth.
+        // Pending until the real state reaches the direction the user asked for; the timeout covers
+        // a start or stop that never lands. `startForegroundService`/`stopService` are asynchronous,
+        // so right after the tap `up` still shows the old state.
         val up = BridgeService.serverUp
-        // **Settled as soon as the real state matches what was asked for.**
-        //
-        // The old rule was "pending for 3 seconds, then sync". That left the knob showing its
-        // PREVIOUS position — and, because the callback inverts `checked`, still reporting the
-        // previous state — for the whole window. After a stop it kept saying "on" for three
-        // seconds and every tap sent "off" again, which read as the switch being dead (reported
-        // 2026-11-04: *"stopping the server left toggle unresponsive"*).
-        //
-        // So: clear the pending look the moment `serverUp` agrees with the knob, and fall back to
-        // the timeout only for a start that has not landed yet.
-        val settled = serverToggle.checked == up
-        val windowOpen = pendingSince > 0L &&
-            android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        if (windowOpen && !settled) {
-            // Still waiting for the service to answer. The knob stays where the last real state
-            // put it; only the colour says "working".
-            serverToggle.pending = true
+        val want = pendingWant
+        val pending = isBridgePending(
+            want = want,
+            up = up,
+            since = pendingSince,
+            now = android.os.SystemClock.elapsedRealtime(),
+            lastError = BridgeService.lastError,
+        )
+        val starting = want == true
+        if (pending) {
+            serverRocker.pending = true
         } else {
             pendingSince = 0L
-            serverToggle.pending = false
-            if (serverToggle.checked != up) serverToggle.setCheckedAnimated(up)
+            pendingWant = null
+            serverRocker.pending = false
+            if (serverRocker.checked != up) serverRocker.setCheckedAnimated(up)
         }
 
-        // The status checklist moved to Settings > Permissions. Home now answers one question
-        // — is the bridge running — and offers one control. Everything else is a setting.
-
-        renderGate()
-
-        // A gate you cannot audit must be visible without opening the log. This stays on Home
-        // even though the log row moved to Settings: a state where every request is being
-        // REFUSED is not a setting, it is the answer to "why is nothing working".
-        val degraded = AuditHealth.reason
-        if (degraded != null) {
-            auditBanner.visibility = TextView.VISIBLE
-            auditBanner.text = "⚠ AUDIT DEGRADED — requests are being refused\n$degraded"
-        } else {
-            auditBanner.visibility = TextView.GONE
+        bridgeLed.state = if (pending) Led.State.PENDING else when (state) {
+            ServerStatus.State.STOPPED -> Led.State.OFF
+            ServerStatus.State.RUNNING_HEALTHY -> Led.State.OK
+            ServerStatus.State.RUNNING_ATTENTION,
+            ServerStatus.State.UNRESPONSIVE,
+            ServerStatus.State.FAILED -> Led.State.CAUTION
         }
-    }
-
-    /** Read-only pending rows shared by the queue publisher and the normal repaint tick. */
-    internal fun renderPending(pending: List<PendingDecisionSnapshot>) {
-        if (!::pendingHost.isInitialized) return
-        val signature = pending.joinToString("|") { "${it.id}:${it.state}" }
-        if (signature == pendingSignature) return
-        pendingSignature = signature
-        pendingHost.removeAllViews()
-        pendingHost.addView(Theme.sectionHeader(ctx, "Awaiting decision"))
-        if (pending.isEmpty()) {
-            pendingHost.addView(Theme.statusRow(ctx, "Nothing is waiting",
-                "New approval requests appear here and in Activity.",
-                Theme.ON_SURFACE_VARIANT,
-                onClick = { (activity as? MainActivity)?.openTab(Theme.Tab.ACTIVITY) },
-            ))
-        } else {
-            pending.take(2).forEach { item ->
-                pendingHost.addView(Theme.statusRow(ctx, item.action,
-                    "${item.caller} · ${item.verb} · ${item.state}\nOpen Activity for details; decisions stay on the prompt.",
-                    Theme.WARNING,
-                    onClick = { (activity as? MainActivity)?.openTab(Theme.Tab.ACTIVITY) },
-                ))
-            }
-            if (pending.size > 2) pendingHost.addView(Theme.statusRow(ctx,
-                "+${pending.size - 2} more waiting", "See the complete queue in Activity.",
-                Theme.WARNING,
-                onClick = { (activity as? MainActivity)?.openTab(Theme.Tab.ACTIVITY) },
-            ))
-        }
-    }
-
-    private fun renderRecent() {
-        val latest = AuditLog.from(requireContext()).headers().firstOrNull { !it.noise }
-        val signature = latest?.id ?: "empty"
-        if (signature == recentSignature) return
-        recentSignature = signature
-        recentHost.removeAllViews()
-        recentHost.addView(Theme.sectionHeader(ctx, "Recent decision"))
-        recentHost.addView(Theme.statusRow(ctx,
-            latest?.outcome?.name?.replace('_', ' ') ?: "No decisions yet",
-            if (latest == null) "The recorded request history lives in Activity."
-            else "${latest.label} · ${latest.summary}",
-            if (latest == null) Theme.ON_SURFACE_VARIANT else when (latest.outcome) {
-                com.mido.phonebridge.audit.AuditOutcome.APPROVED,
-                com.mido.phonebridge.audit.AuditOutcome.NOTIFY_APPROVED -> Theme.SUCCESS
-                com.mido.phonebridge.audit.AuditOutcome.DENIED,
-                com.mido.phonebridge.audit.AuditOutcome.NOTIFY_REJECTED -> Theme.DANGER
-                else -> Theme.ON_SURFACE_VARIANT
+        bridgeTitle.text = if (pending) ServerStatus.pendingTitle(starting = starting) else ServerStatus.title(state)
+        bridgeTitle.setTextColor(
+            when (state) {
+                ServerStatus.State.STOPPED, ServerStatus.State.RUNNING_HEALTHY -> p.ink
+                else -> p.cautionText
             },
-            onClick = { (activity as? MainActivity)?.openTab(Theme.Tab.ACTIVITY) },
-        ))
-    }
+        )
+        bridgeTitle.accessibilityLiveRegion =
+            if (pendingSince > 0L) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
 
-    private fun renderRemedies(
-        state: ServerStatus.State,
-        listenerOk: Boolean,
-        notifOk: Boolean,
-    ) {
-        getStartedHost.visibility = if (com.mido.phonebridge.core.OnboardingPrefs.seen(ctx)) {
-            android.view.View.GONE
-        } else android.view.View.VISIBLE
-        problemsHost.removeAllViews()
-        val rows = ArrayList<android.view.View>()
-        fun add(title: String, detail: String, colour: Int, action: () -> Unit) {
-            rows.add(Theme.statusRow(ctx, title, detail, colour, onClick = action))
-        }
-        if (state == ServerStatus.State.UNRESPONSIVE || state == ServerStatus.State.FAILED) {
-            add("Bridge needs a retry",
-                "Requests cannot be served. ${BridgeService.lastError.ifBlank { "Retry the listener connection." }}",
-                Theme.DANGER) {
-                pendingSince = android.os.SystemClock.elapsedRealtime()
-                startBridge()
-                render()
-            }
-        }
-        if (state != ServerStatus.State.STOPPED && !listenerOk) {
-            add("Notification access is off",
-                "Notification requests will fail; other capabilities can still run. Grant access.",
-                Theme.WARNING, ::openNotifAccessSettings)
-        }
-        if (!notifOk) {
-            add("App notifications are off",
-                "Approval alerts may not appear. Allow notifications for STMP.",
-                Theme.WARNING, ::requestNotifPermission)
-        }
-        if (!com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx)) {
-            add("Draw-over-apps access is off",
-                "Quiet approval cards cannot appear over other apps. Grant overlay access.",
-                Theme.WARNING) { com.mido.phonebridge.ui.SystemAccess.openOverlaySettings(ctx) }
-        }
-        // **Neither grant means NO approval can be shown at all.**
-        //
-        // With both off, a background Activity launch is illegal and the card cannot replace
-        // another app's window, so every gated request is refused with `prompt_unreachable`
-        // instead of silently timing out (reported 2026-11-11: *"i didn't get the modal!"*).
-        // Stated as its own DANGER row because it is not a warning about a degraded case — it is
-        // the whole gate being unreachable, and it is the one row that must be fixed first.
-        if (PromptSurface.of(
-                fullScreenIntent = ApprovalGate.canUseFullScreenIntent(ctx),
-                overlayGranted = com.mido.phonebridge.ui.SystemAccess.overlayGranted(ctx),
-            ) == null
-        ) {
-            add("Approvals cannot be shown at all",
-                "No prompt can reach the screen, so every request is refused. " +
-                    PromptSurface.remedy(),
-                Theme.DANGER,
-            ) { com.mido.phonebridge.ui.SystemAccess.openFullScreenIntentSettings(ctx) }
-        }
-        if (!com.mido.phonebridge.ui.SystemAccess.batteryExempt(ctx)) {
-            add("Background activity is restricted",
-                "Android may stop the bridge while the screen is off. Allow background use.",
-                Theme.WARNING) { com.mido.phonebridge.ui.SystemAccess.requestBatteryExemption(ctx) }
-        }
-        if (!SecretVault.isUnlocked()) {
-            add("Secret vault is locked",
-                "Secret-backed requests will be refused until you unlock this session.",
-                Theme.WARNING) { VaultUnlock.ensureUnlocked(hostActivity, force = true) { render() } }
-        }
-        // **The app's own crash or freeze, on the screen that is always reachable.**
-        //
-        // `GET /debug` reports both, but that route needs the bridge running — and the failures
-        // these record are exactly the ones that stop it serving (reported 2026-11-11: a hang
-        // with port 8787 refusing). Putting it here means the evidence is readable without a
-        // caller, a laptop or a working server. Tapping copies the whole trace, so it travels
-        // by paste instead of by another round trip.
-        val crash = com.mido.phonebridge.Crash.last(ctx)
-        val stall = com.mido.phonebridge.Stall.last(ctx)
-        if (crash != null || stall != null) {
-            // Smart-cast through a local, never `!!`: the compiler already knows each branch is
-            // non-null, and an unnecessary assertion is a build error under -Werror.
-            val isStall = crash == null
-            val detail: String = stall ?: crash ?: return
-            val what = if (isStall) "The screen froze" else "The app crashed"
-            val headline = detail.lineSequence()
-                .firstOrNull { it.contains("Exception") || it.startsWith("    at ") }
-                ?.trim() ?: "no detail recorded"
-            rows.add(Theme.statusRow(
-                ctx, what,
-                "$headline\nTap to copy the full trace",
-                Theme.DANGER,
-                onClick = {
-                    val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
-                        as android.content.ClipboardManager
-                    clipboard.setPrimaryClip(
-                        android.content.ClipData.newPlainText("STMP ${if (isStall) "stall" else "crash"}", detail)
-                    )
-                    toast("copied — paste it to whoever is fixing this")
-                },
-            ))
-        }
-        if (rows.isEmpty()) return
-        problemsHost.addView(Theme.sectionHeader(ctx, "Fix next"))
-        rows.forEach(problemsHost::addView)
-    }
-
-    /**
-     * The gate switch. `SECURE` is the resting state; `NOTIFY` is the quiet one.
-     *
-     * There is no auto-approve position (removed in 0.12.0), so this screen cannot
-     * show a state where requests run without a human. The switch only chooses how
-     * loudly they ask — never whether they ask at all.
-     */
-    private fun renderGate() {
-        val current = try {
-            PolicyStore.from(requireContext()).get().global
-        } catch (e: PolicyException) {
-            // An unreadable policy is not a quiet fallback to SECURE: say it here, and
-            // BridgeService refuses to serve on the same condition. This screen must
-            // never show a switch position the engine is not actually honouring.
-            gateCard.background = Theme.surface(ctx, Theme.DANGER_SURFACE, Theme.RADIUS_CARD)
-            gateTitle.text = "⚠ POLICY UNREADABLE"
-            gateSub.text = e.message ?: "policy could not be read"
-            gateTitle.setTextColor(Theme.DANGER)
-            gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
-            gateButtons.removeAllViews()
-            // Hidden rather than left showing the last known position: an unreadable policy means
-            // the app does not know what it is enforcing, so a switch position here would be a
-            // claim it cannot support.
-            gateFingerprint.visibility = TextView.GONE
-            gateFingerprintWhy.visibility = TextView.GONE
+        val attention = ServerStatus.attention(listenerOk, notifOk)
+        val key = "$state|${BridgeService.bindAddress}|${BridgeService.PORT}|${BridgeService.lastError}|$attention|$pending"
+        if (key == lastBridgeKey) return
+        lastBridgeKey = key
+        if (pending) {
+            bridgeDetailHost.removeAllViews()
+            bridgeDetailHost.addView(
+                Type.text(ctx, ServerStatus.pendingDetail(starting = starting), TypeRole.DETAIL, p.etched),
+                matchWrapParams(),
+            )
             return
         }
+        fillBridgeDetail(p, state, attention)
+    }
 
-        when (current) {
-            // Only AUTOMATIC reads the rules. The other two force one mode on every
-            // request, and the card says which so the home screen never shows a switch
-            // position without showing what it implies.
-            GlobalMode.WHITELIST -> {
-                gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "WHITELIST"
-                gateSub.text = rulesSummary()
+    private fun fillBridgeDetail(p: Palette, state: ServerStatus.State, attention: List<ServerStatus.Attention>) {
+        val host = bridgeDetailHost
+        host.removeAllViews()
+        val port = BridgeService.PORT
+        val bind = BridgeService.bindAddress
+        when (state) {
+            ServerStatus.State.STOPPED -> host.addView(
+                Type.text(ctx, ServerStatus.detail(state, "", bind, port), TypeRole.DETAIL, p.etched),
+                matchWrapParams(),
+            )
+            ServerStatus.State.RUNNING_HEALTHY, ServerStatus.State.RUNNING_ATTENTION -> {
+                val address = Readout.create(
+                    ctx, ":$port", Readout.Kind.DISPLAY,
+                    prompt = if (bind.isBlank()) "address unknown" else "address $bind",
+                ).root
+                host.addView(address, matchWrapParams().apply { bottomMargin = 0 })
+                for (a in attention) {
+                    host.addView(
+                        StatusRow.create(
+                            ctx,
+                            label = ServerStatus.attentionTitle(a),
+                            value = ServerStatus.attentionAction(a),
+                            tone = StatusRow.Tone.CAUTION,
+                            detail = ServerStatus.attentionDetail(a),
+                            led = Led.State.CAUTION,
+                            onClick = { onAttentionTap(a) },
+                        ),
+                    )
+                }
             }
-            GlobalMode.PARANOID -> {
-                gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "PARANOID"
-                gateSub.text = GlobalMode.PARANOID.blurb
-            }
-            GlobalMode.DONT_DISTURB -> {
-                // Amber, not red: the gate still exists, it is just quiet and fast.
-                // Calling it red would make the real panic switch less loud by
-                // comparison, which is the failure that matters.
-                gateCard.background = Theme.surface(ctx, Theme.WARNING_SURFACE, Theme.RADIUS_CARD)
-                gateTitle.text = "⚠ DON'T DISTURB"
-                gateSub.text = GlobalMode.DONT_DISTURB.blurb
+            ServerStatus.State.UNRESPONSIVE -> host.addView(
+                Type.text(ctx, ServerStatus.detail(state, "", bind, port), TypeRole.DETAIL, p.ink),
+                matchWrapParams(),
+            )
+            ServerStatus.State.FAILED -> {
+                host.addView(
+                    Readout.create(ctx, BridgeService.lastError, Readout.Kind.BODY).root,
+                    matchWrapParams().apply { bottomMargin = 0 },
+                )
+                host.addView(
+                    KeyButton.create(ctx, "Try again", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
+                        startBridge()
+                        render()
+                    },
+                    wrapParams().apply { topMargin = ctx.dp(10) },
+                )
             }
         }
-        gateTitle.setTextColor(Theme.ON_SURFACE)
-        gateSub.setTextColor(Theme.ON_SURFACE_VARIANT)
+    }
 
-        // Rebuilt wholesale on every pass: `removeAllViews` then re-add is consistent, which is
-        // the property the EDIT RULES button lacked when it stacked up. That button is built in
-        // `buildContent` and never touched here.
-        gateButtons.removeAllViews()
-        for (m in GlobalMode.values()) {
-            gateButtons.addView(gateRadioCard(m, m == current))
+    private fun onAttentionTap(a: ServerStatus.Attention) {
+        when (a) {
+            ServerStatus.Attention.LISTENER_OFF -> openNotifAccessSettings()
+            ServerStatus.Attention.NOTIFICATIONS_BLOCKED -> {
+                val prefs = ctx.getSharedPreferences(PERMISSION_ASKS, Context.MODE_PRIVATE)
+                val permission = ScreenHost.POST_NOTIFICATIONS
+                val permanent = prefs.getBoolean("asked:$permission", false) &&
+                    prefs.getBoolean("denied:$permission", false) &&
+                    !shouldShowRequestPermissionRationale(permission)
+                if (permanent) openAppNotificationSettings() else requestNotifPermission()
+            }
         }
+    }
 
-        // **A way into the rule table from the card that shows it.**
-        //
-        // Mido, 2026-11-04: *"approval gate should have a button to edit the rules"*. The card
-        // already SUMMARISES the rules ("3 rules · 2 quiet") but the only route to change one was
-        // Settings → Tools → Exceptions, three taps away from the thing being described. A summary
-        // you cannot act on is a label, not a control.
-        //
-        // **On its own row, not beside the modes.** Mido, 2026-11-04: *"approval gate is too
-        // crowded, move the rules button under"*. In the modes row it took a quarter of the width
-        // from three choices that need to read as one set, which made all four labels cramped.
-        // Underneath, the modes get the full width and the rules button reads as the separate verb
-        // it is.
-        // **Built ONCE, in `buildContent`, and never re-added here.**
-        //
-        // This was inside `renderGate()`, and `renderGate` runs on every repaint while only
-        // `gateButtons` was cleared — so each pass appended another EDIT RULES. Reported
-        // 2026-11-04: *"2 edit rules buttons"*, then *"they keep appearing now 5"*. A view that is
-        // only ever ADDED must be created where the layout is created, not where it is refreshed.
+    private fun openAppNotificationSettings() {
+        try {
+            go(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+        } catch (e: Exception) {
+            Debug.log("cannot open app notification settings: ${e.message}")
+            try {
+                go(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
+            } catch (e2: Exception) {
+                Debug.log("cannot open app details: ${e2.message}")
+            }
+        }
+    }
 
-        // The fingerprint control, rendered from the STORED value rather than from what we
-        // assume: a write that silently failed must not leave the screen claiming otherwise.
+    // --- gate ----------------------------------------------------------------------------------
+
+    private fun renderGate() {
+        val p = Theme.palette(ctx)
         val policy = try {
             PolicyStore.from(requireContext()).get()
         } catch (e: PolicyException) {
-            // Unreachable in practice — the early return above already handled it — but a
-            // second read that throws must not crash a screen the user is looking at.
-            gateFingerprint.visibility = TextView.GONE
-            gateFingerprintWhy.visibility = TextView.GONE
+            renderGateUnreadable(p, e)
             return
         }
-        gateFingerprint.visibility = TextView.VISIBLE
-        // The explanation line is GONE unless it has text: it is normally empty (the description
-        // was removed on request), and a visible empty TextView reserves a line of height under
-        // the toggle — the extra bottom space reported 2026-11-04.
-        gateFingerprintWhy.visibility = TextView.GONE
+        gateKnob.visibility = View.VISIBLE
+        gateKnob.select(GATE_ORDER.indexOf(policy.global), animate = true)
 
-        // **Can this phone even ask for a fingerprint?**
-        //
-        // Mido, 2026-11-04: *"if no fingerprint feature available then it should be disabled and
-        // off stating the reason"*. The check is the same one the modal and the vault use, so the
-        // switch cannot claim a capability the approval screen would refuse.
+        val key = "${policy.global}|${policy.rules.size}"
+        if (key != lastGateKey) {
+            lastGateKey = key
+            fillGateDetail(p, policy)
+        }
+        renderFingerprint(policy, p)
+    }
+
+    private fun fillGateDetail(p: Palette, policy: Policy) {
+        gateDetailHost.removeAllViews()
+        gateExtrasHost.removeAllViews()
+        gateExtrasHost.visibility = View.VISIBLE
+        when (policy.global) {
+            GlobalMode.WHITELIST -> gateDetailHost.addView(
+                Type.text(ctx, rulesSummary(policy), TypeRole.DETAIL, p.etched), matchWrapParams(),
+            )
+            GlobalMode.PARANOID -> gateDetailHost.addView(
+                Type.text(ctx, GlobalMode.PARANOID.blurb, TypeRole.DETAIL, p.etched), matchWrapParams(),
+            )
+            GlobalMode.DONT_DISTURB -> {
+                val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(Led(ctx).apply { state = Led.State.CAUTION }, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
+                    marginEnd = ctx.dp(10)
+                    topMargin = ctx.dp(3)
+                })
+                val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+                col.addView(Type.text(ctx, "Silence approves", TypeRole.ROW_LABEL, p.cautionText), matchWrapParams())
+                col.addView(Type.text(ctx, GlobalMode.DONT_DISTURB.blurb, TypeRole.DETAIL, p.ink), matchWrapParams())
+                row.addView(col, weightParams())
+                gateDetailHost.addView(row, matchWrapParams())
+            }
+        }
+        // Exceptions only apply in Whitelist: in Paranoid and Don't disturb the key would edit
+        // something that is ignored, so it is not offered there (R3).
+        if (policy.global == GlobalMode.WHITELIST) {
+            gateExtrasHost.addView(
+                KeyButton.create(ctx, "Edit exceptions", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
+                    go(Intent(ctx, ExceptionsActivity::class.java))
+                },
+                wrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_M) },
+            )
+        }
+        val caption = when (policy.global) {
+            GlobalMode.WHITELIST -> null
+            GlobalMode.PARANOID -> "Exceptions are ignored in Paranoid mode."
+            GlobalMode.DONT_DISTURB -> "Exceptions are ignored in Don't disturb mode."
+        }
+        if (caption != null) {
+            gateExtrasHost.addView(
+                Type.text(ctx, caption, TypeRole.DETAIL, p.etched),
+                matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_XS) },
+            )
+        }
+    }
+
+    /**
+     * An unreadable policy is not a quiet fallback: say it, and hide the knob, the Edit key and the
+     * fingerprint row, because the app does not know what it is enforcing.
+     */
+    private fun renderGateUnreadable(p: Palette, e: PolicyException) {
+        lastGateKey = "unreadable|${e.message}"
+        gateKnob.visibility = View.GONE
+        gateDetailHost.removeAllViews()
+        gateExtrasHost.removeAllViews()
+        gateExtrasHost.visibility = View.GONE
+        gateDetailHost.addView(
+            ErrorBlock.create(
+                ctx, "Policy unreadable", "STMP refuses requests until this is fixed.",
+                details = e.message ?: "The policy file could not be read.",
+                recovery = KeyButton.Spec("Try again", "Read the policy again") { lastGateKey = null; render() },
+                framed = false,
+            ),
+            matchWrapParams(),
+        )
+        fingerprintRule.visibility = View.GONE
+        fingerprintRow.visibility = View.GONE
+        fingerprintWhy.visibility = View.GONE
+    }
+
+    private fun renderFingerprint(policy: Policy, p: Palette) {
+        fingerprintRule.visibility = View.VISIBLE
+        fingerprintRow.visibility = View.VISIBLE
+        fingerprintWhy.visibility = View.GONE
+        // Can this phone even ask for a fingerprint? Same check the modal and the vault use.
         when (val status = Fingerprint.status(hostActivity)) {
             is Fingerprint.Status.Unusable -> {
-                // Forced OFF, not merely greyed out. With the policy ON and no usable biometric,
-                // `ApprovalActivity` sets `biometricBlocked` and APPROVE never enables — so every
-                // SECURE request would become unapprovable, and the cause would be buried inside
-                // the modal. Writing the policy off keeps SECURE working on a plain tap.
-                forceFingerprintOff(status.reason)
-                gateFingerprint.setCheckedImmediately(false)
-                gateFingerprint.isEnabled = false
-                gateFingerprintWhy.text = status.reason
-                gateFingerprintWhy.setTextColor(Theme.WARNING)
-                gateFingerprintWhy.visibility = TextView.VISIBLE
-                gateFingerprintWhy.setPadding(0, Theme.dp(ctx, 6), 0, 0)
+                // Forced OFF, not merely greyed: with the policy ON and no usable biometric,
+                // APPROVE never enables, so every Paranoid request would become unapprovable.
+                FingerprintSetting.forceOff(requireContext(), status.reason, source = "home")
+                fingerprintRocker.setCheckedImmediately(false)
+                fingerprintRocker.isEnabled = false
+                fingerprintWhy.text = status.reason
+                fingerprintWhy.setTextColor(p.cautionText)
+                fingerprintWhy.visibility = View.VISIBLE
             }
-
             Fingerprint.Status.Usable -> {
-                val fp = policy.fingerprintForModals
-                gateFingerprint.isEnabled = true
-                // `setCheckedAnimated` only moves when the value actually differs, so a repaint
-                // that changed nothing cannot make the knob twitch.
-                if (gateFingerprint.checked != fp) gateFingerprint.setCheckedAnimated(fp)
-                // **No explanatory sentence.**
-                //
-                // Mido, 2026-11-04: *"remove the desc saying A SECURE request...."*. It restated
-                // what the knob beside it already says, in two variants that both began with the
-                // same four words — the kind of text that gets read once and then becomes noise.
-                // A hidden `when` branch keeps the view's visibility logic intact.
-                gateFingerprintWhy.setTextColor(Theme.ON_SURFACE_VARIANT)
-                gateFingerprintWhy.text = ""
+                fingerprintRocker.isEnabled = true
+                val stored = policy.fingerprintForModals
+                if (fingerprintRocker.checked != stored) fingerprintRocker.setCheckedAnimated(stored)
             }
         }
     }
 
-    /**
-     * Flip the fingerprint-for-modals preference.
-     *
-     * Audited as POLICY_CHANGED, exactly as the Settings screen used to do: a fingerprint
-     * requirement DISAPPEARING is the kind of change a later reader wants dated.
-     */
-    /**
-     * Ask for the fingerprint, and only then change the setting.
-     *
-     * The knob does NOT move on the tap. `toggleFingerprintForModals` writes, and the next
-     * `render()` drives the knob from what was written — so a cancelled prompt leaves it exactly
-     * where it was, which is the truth.
-     */
+    /** The fingerprint flow lives in [FingerprintSetting] (D66); Home only repaints afterwards. */
     private fun requestFingerprintChange(want: Boolean) {
-        when (val status = Fingerprint.status(hostActivity)) {
-            is Fingerprint.Status.Unusable -> {
-                // Unreachable through the UI while the knob is disabled, but a stray call must
-                // never write a setting this phone cannot honour.
-                toast(status.reason)
-                render()
-            }
-
-            Fingerprint.Status.Usable -> Fingerprint.confirm(
-                activity = hostActivity,
-                title = if (want) {
-                    "Require fingerprint for modals"
-                } else {
-                    "Stop requiring fingerprint"
-                },
-                subtitle = "Confirm it's you",
-                onConfirmed = { toggleFingerprintForModals(want) },
-                onFailed = { why ->
-                    // Cancelled or failed: nothing changes. Repainting puts the knob back in case
-                    // the press itself moved it.
-                    Debug.log("fingerprint toggle unchanged: $why")
-                    render()
-                },
-            )
-        }
+        FingerprintSetting.request(
+            this, want, source = "home",
+            onError = { showProblemDialog("Couldn't change the setting", it) },
+        ) { render() }
     }
 
     /**
-     * Turn the setting off because this phone cannot honour it.
-     *
-     * **Not cosmetic.** With the policy ON and no usable biometric, `ApprovalActivity` sets
-     * `biometricBlocked` and APPROVE never enables — so every SECURE request becomes
-     * unapprovable, with the cause buried in the modal. Forcing the policy off keeps SECURE
-     * working on a plain tap instead of silently breaking the bridge.
-     */
-    private fun forceFingerprintOff(reason: String) {
-        val store = PolicyStore.from(requireContext())
-        val current = try {
-            store.get()
-        } catch (e: PolicyException) {
-            Debug.log("cannot force fingerprint off: policy unreadable (${e.message})")
-            return
-        }
-        if (!current.fingerprintForModals) return
-        val next = current.withFingerprintForModals(false)
-        try {
-            store.set(next)
-            Debug.log("fingerprint for modals forced OFF: $reason")
-            AuditLog.from(requireContext()).append(
-                com.mido.phonebridge.audit.PolicyAudit.record(next.global, next.global, "home")
-            )
-        } catch (e: Exception) {
-            Debug.log("could not force fingerprint off: ${e.message}")
-        }
-    }
-
-    private fun toggleFingerprintForModals(want: Boolean) {
-        val store = PolicyStore.from(requireContext())
-        val current = try {
-            store.get()
-        } catch (e: PolicyException) {
-            toast("policy unreadable: ${e.message}")
-            return
-        }
-        // The value the human confirmed, not a flip. A flip would fight the render that is trying
-        // to put the knob back after a cancelled prompt.
-        val next = current.withFingerprintForModals(want)
-        try {
-            store.set(next)
-        } catch (e: Exception) {
-            toast("could not save: ${e.message}")
-            return
-        }
-        try {
-            AuditLog.from(requireContext()).append(
-                com.mido.phonebridge.audit.PolicyAudit.record(next.global, next.global, "home")
-            )
-        } catch (e: Exception) {
-            Debug.log("audit record failed for fingerprint toggle: ${e.message}")
-        }
-        render()
-    }
-
-    /**
-     * Apply a switch change. `NOTIFY` gets one confirmation, because it is the only
-     * value where doing nothing approves a request — the single place in the app where
-     * silence means YES, so it gets one sentence saying so.
+     * Apply a knob change. Don't disturb gets one confirmation, because it is the only value where
+     * doing nothing approves a request.
      */
     private fun requestGate(next: GlobalMode) {
         val store = PolicyStore.from(requireContext())
         val current = try {
             store.get().global
         } catch (e: PolicyException) {
-            toast("policy unreadable: ${e.message}")
+            showProblemDialog("Policy can't be read", e.message ?: "The policy file could not be read.")
             return
         }
         if (next == current) return
-
         if (next == GlobalMode.DONT_DISTURB) {
-            // Not a red-alert confirmation: NOTIFY still asks, just quietly. But it is
-            // the value where silence means YES, so it gets one sentence saying so.
             confirm(
-                title = "Use overlay prompts?",
-                message = "Every request shows a small toast for 5 seconds. Doing nothing " +
-                    "approves it. Tap ✕ to reject.\n\nYour custom rules are ignored " +
-                    "while this is selected.",
-                positive = "Use NOTIFY",
+                title = "Switch to Don't disturb?",
+                message = "Every request shows a small overlay for 5 seconds. Doing nothing " +
+                    "approves it. Tap ✕ to deny.\n\nYour exceptions are ignored while this is selected.",
+                positive = "Use Don't disturb",
                 negative = "Cancel",
             ) { applyGate(store, current, next) }
         } else {
@@ -1124,60 +736,24 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    /**
-     * One line of truth about the exception table, for the WHITELIST card.
-     *
-     * **"Per-pair" is gone.** It named the IMPLEMENTATION (a rule is one plugin × verb
-     * pair) instead of the thing the human manages, which is an exception to the
-     * ask-everything default. The screen itself was renamed to EXCEPTIONS on 2026-10-19 for
-     * exactly this reason; these three strings were missed and kept the old vocabulary, so
-     * the card and the button it opens described the same idea with different words.
-     *
-     * The wording now says what the mode DOES: exceptions decide, and with none set every
-     * request asks.
-     */
-    private fun rulesSummary(): String = try {
-        val p = PolicyStore.from(requireContext()).get()
-        val n = p.rules.size
-        when (n) {
-            0 -> "Exceptions decide. None set yet, so everything asks for your stamp."
-            1 -> "Exceptions decide. 1 exception set."
-            else -> "Exceptions decide. $n exceptions set."
-        }
-    } catch (e: PolicyException) {
-        "exceptions unreadable: ${e.message}"
+    /** One line of truth about the exception table, for the Whitelist caption. */
+    private fun rulesSummary(policy: Policy): String = when (val n = policy.rules.size) {
+        0 -> "Exceptions decide. None set yet, so everything asks for your stamp."
+        1 -> "Exceptions decide. 1 exception set."
+        else -> "Exceptions decide. $n exceptions set."
     }
 
-    /**
-     * Start the model download and keep the home screen in step with it.
-     *
-     * The download is owned by [ModelProvisioner], not this Activity: it must survive a
-     * rotation or a trip to another app, and the progress it reports is read back by
-     * [render] so returning to the screen shows the live state rather than a stale one.
-     */
-    /**
-     * Ask before re-fetching a model that is already present and verified.
-     *
-     * A 474 MB download is not something to start on a stray tap, and the model is
-     * already working — so the default is to do nothing and the human has to mean it.
-     */
- 
- 
+    /** The app's only writer of the global mode. */
     private fun applyGate(store: PolicyStore, before: GlobalMode, after: GlobalMode) {
         try {
-            // Carry EVERYTHING across. `Policy(after)` alone would silently delete every
-            // per-pair decision on a switch flip — you would turn NOTIFY back to AUTOMATIC and
-            // find your rules gone, with nothing in the UI saying why. The same trap now applies
-            // to the two preferences, so the wrap is explicit rather than positional: `Policy`
-            // has four fields and a positional call is one edit away from dropping the wrong two.
+            // Carry EVERYTHING across: `Policy(after)` alone would silently delete every exception.
             val existing = store.get()
             store.set(existing.withGlobal(after))
+            BridgeService.refreshForegroundNotice(requireContext(), fromApp = true)
         } catch (e: Exception) {
-            toast("could not save policy: ${e.message}")
+            showProblemDialog("Couldn't save the gate mode", e.message ?: e.javaClass.simpleName)
             return
         }
-        // Audit the change. A policy record that cannot be written is a failure the
-        // home screen must show, not a change that quietly took effect unrecorded.
         try {
             AuditLog.from(requireContext()).append(PolicyAudit.record(before, after, "settings"))
         } catch (e: Exception) {
@@ -1186,36 +762,59 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         render()
     }
 
- 
-    /**
-     * A compact destination chip for the "Tools" row. The four loose nav buttons used to
-     * each be a full-width NEUTRAL button — visually identical to every other button, which
-     * is what made the bottom of the home screen read as "labels mixed together". A tool is
-     * a DESTINATION, not live state, so it lives on the Settings screen with the others
-     * rather than a full-width row of its own.
-     */
-    /** One full-width row in the vertical tools list. */
- 
-    // --- actions ---
+    // --- recent requests -----------------------------------------------------------------------
+
+    /** The key that changes when a new request lands, and the rows to show. */
+    private fun tapeSnapshot(): Pair<String, List<Pair<AuditHeader, Verb>>> {
+        val headers = try {
+            AuditLog.from(requireContext()).headers()
+        } catch (e: Exception) {
+            Debug.log("tape: ${e.message}")
+            emptyList()
+        }
+        val rows = HomeCopy.recent(headers, TAPE_ROWS)
+        val key = (rows.firstOrNull()?.first?.id ?: "") + ":" + headers.count { !it.noise }
+        return key to rows
+    }
+
+    private fun renderTape() {
+        val (key, rows) = tapeSnapshot()
+        if (key == lastTapeKey) return
+        lastTapeKey = key
+        tapeHost.removeAllViews()
+        if (rows.isEmpty()) return
+        val panel = Panel.create(ctx)
+        panel.addView(SectionHeader.create(ctx, "Recent requests", inPanel = true))
+        for ((header, verb) in rows) {
+            val text = AuditCopy.summary(header.outcome, header.summary, header.label)
+            val row = Tape.row(ctx, verb, text, header.ts) {
+                go(Intent(ctx, LogDetailActivity::class.java).putExtra(LogDetailActivity.EXTRA_ID, header.id))
+            }
+            // D50: a gate change has no verb chip. Its column stays empty so the text keeps its left edge.
+            if (!AuditCopy.outcome(header.outcome).allowsChip && row is ViewGroup) {
+                val width = row.getChildAt(0).layoutParams.width
+                row.removeViewAt(0)
+                row.addView(View(ctx), 0, LinearLayout.LayoutParams(width, 1))
+                row.contentDescription = row.contentDescription?.toString()?.substringAfter(", ")
+            }
+            panel.addView(row)
+        }
+        panel.addView(
+            KeyButton.create(ctx, "All requests", KeyButton.Kind.PANEL, KeyButton.Size.SMALL) {
+                go(Intent(ctx, LogActivity::class.java))
+            },
+            wrapParams().apply { topMargin = ctx.dp(10) },
+        )
+        tapeHost.addView(panel, matchWrapParams())
+    }
+
+    // --- actions -------------------------------------------------------------------------------
 
     private fun hasNotifPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return hasPermission(ScreenHost.POST_NOTIFICATIONS)
     }
 
- 
-    /**
-     * Doze and app standby suspend background work; Samsung adds app-sleep on top. This
-     * exemption is what keeps the server reachable when the screen has been off for a
-     * while. It is not a battery-saver bypass — it just says "do not freeze this app".
-     */
- 
-    /**
-     * The system dialog that grants the exemption. The direct request intent is the one
-     * that actually shows a prompt; the settings list is the fallback for OEM builds that
-     * do not honour it (the user then toggles the app manually).
-     */
- 
     private fun openNotifAccessSettings() {
         try {
             go(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
@@ -1225,34 +824,6 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    /**
-     * Ask for READ_CONTACTS.
-     *
-     * Separate from [requestNotifPermission] rather than a generic "request everything" call, and
-     * deliberately NOT asked at launch: a contacts prompt on first open, with no visible reason,
-     * is the kind of thing people deny reflexively — and a denial is sticky enough that the app
-     * then needs Settings to recover. Tapping the row that says "Contacts search" is a request the
-     * human understands.
-     */
-    /** Whether the contacts prompt has EVER been shown, so "not asked" is distinguishable. */
- 
-    /**
-     * App details, where a permanently-denied permission can actually be re-granted.
-     *
-     * Not the "app permissions" deep link: that one varies by OEM and Samsung's S22 build lands
-     * on a page without the contacts toggle in several firmware revisions. App details always
-     * shows Permissions.
-     */
- 
-    /**
-     * The one place that explains the contacts permission, and the only launcher.
-     *
-     * [deniedJustNow] changes the copy from "here is what you need" to "that was declined" — the
-     * outcome has to arrive somewhere the user is already looking, which is this dialog rather
-     * than a Toast that disappears over the row it is describing.
-     */
- 
- 
     private fun requestNotifPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Debug.log("requesting POST_NOTIFICATIONS")
@@ -1263,12 +834,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
     }
 
     /**
-     * **On the `DEPRECATION` suppression.** `Fragment.onRequestPermissionsResult` is deprecated
-     * alongside `requestPermissions`, which [BridgeFragment] documents: the Activity Result API
-     * needs a launcher registered at initialisation, and this screen asks at the moment of the
-     * tap that needs the permission. The deprecated pair still work and still agree with each
-     * other, so suppressing here keeps the ask and the result on the same mechanism rather than
-     * half-migrating. Moving both to Activity Result is its own change.
+     * `Fragment.onRequestPermissionsResult` is deprecated alongside `requestPermissions`
+     * ([BridgeFragment] explains why the pair stays). The result is also recorded in the shared
+     * `permission_asks` file, in the shape `PluginDetailActivity` uses, so both screens agree on
+     * "permanently denied".
      */
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onRequestPermissionsResult(
@@ -1278,27 +847,17 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         if (requestCode == REQ_POST_NOTIF) {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             Debug.log("POST_NOTIFICATIONS result: ${if (granted) "granted" else "DENIED"}")
+            ctx.getSharedPreferences(PERMISSION_ASKS, Context.MODE_PRIVATE).edit()
+                .putBoolean("asked:${ScreenHost.POST_NOTIFICATIONS}", true)
+                .putBoolean("denied:${ScreenHost.POST_NOTIFICATIONS}", !granted)
+                .apply()
             render()
         }
-    }
-
- 
-    private fun startGoogleLogin() {
-        if (BridgeService.GOOGLE_CLIENT_ID.isBlank()) {
-            Debug.log("cannot login: GOOGLE_CLIENT_ID is empty (build not configured)")
-            render()
-            return
-        }
-        Debug.log("login tapped; client id len=${BridgeService.GOOGLE_CLIENT_ID.length}")
-        go(Intent(ctx, GoogleLoginActivity::class.java))
     }
 
     override fun startBridge() {
         Debug.log("server start requested")
-        // Clear the previous failure so a retry cannot display a stale reason: the service
-        // re-sets this on the way out if it fails again, and a successful bind clears it.
-        // Without this, tapping START after fixing the cause would still show the old error
-        // for the ~1s between the tap and the bind.
+        // Clear the previous failure so a retry cannot display a stale reason.
         BridgeService.lastError = ""
         if (!hasNotifPermission()) {
             Debug.log("no POST_NOTIFICATIONS yet — requesting first")
@@ -1316,147 +875,337 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         }
     }
 
-    /**
-     * Stop the service.
-     *
-     * The intent is built here rather than in the screen so the screen never names a concrete
-     * Service class — the same reason [startBridge] wraps `startForegroundService`.
-     */
     override fun stopBridge() {
         Debug.log("stop requested")
         ctx.stopService(Intent(ctx, BridgeService::class.java))
     }
 
-    /**
-     * The update rows.
-     *
-     * **Built from `Updater`'s last OUTCOME, never from a stored flag.** A cached "up to date" is
-     * a claim about a question that was answered once, and it stops being true silently. The row
-     * therefore distinguishes three states — current, available, and could-not-ask — because the
-     * third one is the one that matters while the repository is private.
-     */
-    /**
-     * One gate mode as a large radio card.
-     *
-     * Mido, 2026-11-04: *"convert approval gate 3 options into the same radio cards"* — the same
-     * shape as the AI backend picker, so the two choice screens in this app read identically.
-     *
-     * Each card states what the mode DOES, not just its name. "WHITELIST" alone is a label; the
-     * consequence is what the human is choosing between, and it was previously only visible in the
-     * card title AFTER selection.
-     */
-    private fun gateRadioCard(mode: GlobalMode, selected: Boolean): LinearLayout {
-        // Shared with the onboarding flow, so the two can never describe different tradeoffs.
-        val title = mode.title
-        val blurb = mode.blurb
+    // --- updates -------------------------------------------------------------------------------
 
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 10),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 10),
-            )
-            background = Theme.outlined(
-                ctx,
-                if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
-                Theme.RADIUS_CONTROL,
-                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
-                strokeDp = if (selected) 2 else 1,
-            )
-            isClickable = true
-            isFocusable = true
-            // Tapping anywhere selects it. The tap goes through `requestGate`, so NOTIFY keeps its
-            // confirmation — the card is a bigger target, not a faster path past the warning.
-            if (!selected) setOnClickListener { requestGate(mode) }
-        }
-        card.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = Theme.dp(ctx, 8) }
+    /**
+     * The Updates module, built from `Updater`'s last OUTCOME, never from a stored flag: a cached
+     * "up to date" is a claim about a question answered once.
+     */
+    private fun updateBlock(): View {
+        val p = Theme.palette(ctx)
+        val panel = Panel.create(ctx)
+        val outcome = Updater.lastOutcome
+        val checking = Updater.checking
+        val channel = UpdatePrefs.channel(requireContext())
+        val installing = outcome is Updater.Outcome.Available && Updater.installing && !checking
+        val line = HomeCopy.updateLine(checking, outcome, BuildConfig.VERSION_NAME)
 
-        val row = LinearLayout(ctx).apply {
+        // 1. Status row
+        val status = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            // **TOP, not CENTER_VERTICAL.** Each card is a title plus a two-line blurb;
-            // centring the marker put it level with the blurb's last line, so it read as
-            // belonging to nothing in particular. At the top it sits beside the title, which
-            // is the thing being chosen.
-            gravity = android.view.Gravity.TOP
+            gravity = Gravity.CENTER_VERTICAL
         }
-        row.addView(Theme.radioDot(ctx, selected))
+        status.addView(Led(ctx).apply { state = line.led }, LinearLayout.LayoutParams(ctx.dp(16), ctx.dp(16)).apply {
+            marginEnd = ctx.dp(10)
+        })
+        val statusColor = when (line.tone) {
+            HomeCopy.UpdateTone.OK -> p.okText
+            HomeCopy.UpdateTone.CAUTION -> p.cautionText
+            HomeCopy.UpdateTone.NEUTRAL -> p.ink
+        }
+        status.addView(Type.text(ctx, line.text, TypeRole.ROW_LABEL, statusColor), weightParams())
+        panel.addView(status, matchWrapParams())
 
-        val text = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(
-                Theme.text(
-                    ctx,
-                    if (mode == GlobalMode.DONT_DISTURB) "⚠ $title" else title,
-                    15f,
-                    if (mode == GlobalMode.DONT_DISTURB) Theme.WARNING else Theme.ON_SURFACE,
-                ).apply { typeface = Theme.bodyFont(ctx) }
-            )
-            addView(
-                Theme.text(ctx, blurb, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
-                    .apply { setPadding(0, Theme.dp(ctx, 2), 0, 0) }
-            )
-        }
-        row.addView(
-            text,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+        // 2. Installed: always shown, so the number does not depend on a network call.
+        panel.addView(
+            Type.text(ctx, "Installed v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", TypeRole.DETAIL, p.etched),
+            matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_XS) },
         )
-        card.addView(row)
 
-        // The rule count only makes sense under WHITELIST — the other two ignore the table.
-        if (selected && mode == GlobalMode.WHITELIST) {
-            card.addView(
-                Theme.text(ctx, rulesSummary(), Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
-                    .apply { setPadding(0, Theme.dp(ctx, 6), 0, 0) }
+        // 3. Channel row
+        val beta = channel == UpdatePrefs.Channel.BETA
+        panel.addView(hairline(p), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, ctx.dp(1),
+        ).apply { topMargin = ctx.dp(10) })
+        val channelRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ctx.dp(56)
+            setPadding(0, ctx.dp(10), 0, 0)
+        }
+        val channelText = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        channelText.addView(Type.text(ctx, "Beta channel", TypeRole.ROW_LABEL, p.ink), matchWrapParams())
+        channelText.addView(
+            Type.text(
+                ctx,
+                if (beta) "Every push is offered." else "Only promoted releases are offered.",
+                TypeRole.DETAIL, p.etched,
+            ),
+            matchWrapParams(),
+        )
+        channelRow.addView(channelText, weightParams())
+        channelRow.addView(
+            Theme.rocker(ctx, on = beta, label = "Beta channel") { want ->
+                UpdatePrefs.setChannel(
+                    requireContext(),
+                    if (want) UpdatePrefs.Channel.BETA else UpdatePrefs.Channel.STABLE,
+                )
+                // The channel changes what counts as an update, so the old answer is void.
+                Updater.lastOutcome = null
+                // NOT `render()`: it would tear down this rocker while its click is dispatched.
+                checkForUpdates()
+            },
+            wrapParams().apply { marginStart = ctx.dp(Dimens.SPACE_S) },
+        )
+        panel.addView(channelRow, matchWrapParams())
+
+        // 4. Release notes
+        if (outcome is Updater.Outcome.Available) {
+            val notes = Updater.shortNotes(outcome.notes)
+            if (notes.isNotEmpty()) {
+                panel.addView(
+                    Type.text(ctx, notes, TypeRole.DETAIL, p.etched),
+                    matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) },
+                )
+            }
+        }
+
+        // 5. Primary action
+        val primary = when {
+            checking -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { }
+                .apply { isEnabled = false }
+            installing -> KeyButton.create(ctx, "Cancel", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL) {
+                // Offered while the download is running; once Android's own dialog is up the
+                // system owns the decision and this disappears from the next repaint.
+                Updater.installCancelled = true
+                Updater.installing = false
+                Updater.installingVersion = null
+                Debug.log("update: cancelled by the human")
+                refreshUpdateSection()
+            }
+            outcome is Updater.Outcome.Available -> KeyButton.create(
+                ctx, "Update to v${outcome.version}", KeyButton.Kind.INK, KeyButton.Size.REGULAR,
+            ) { installUpdate(outcome) }
+            else -> KeyButton.create(ctx, "Check now", KeyButton.Kind.PANEL, KeyButton.Size.REGULAR) { checkForUpdates() }
+        }
+        panel.addView(
+            primary,
+            (if (installing) wrapParams() else matchWrapParams()).apply { topMargin = ctx.dp(10) },
+        )
+
+        // 6. Last checked
+        val lastCheck = UpdatePrefs.lastCheckAt(requireContext())
+        if (lastCheck > 0L) {
+            panel.addView(
+                Type.text(ctx, "Last checked ${agoText(lastCheck)}", TypeRole.DETAIL, p.etched),
+                matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) },
             )
         }
 
-        // **The rules door lives INSIDE the whitelist card**, because that is the only mode
-        // that reads the table: PARANOID asks about everything and DON'T DISTURB resolves by
-        // silence, so a rule written under either is inert.
-        //
-        // Greyed rather than hidden when this card is not selected. A control that vanishes
-        // teaches nothing; a greyed one says "select this card and I open". An Android view
-        // with `isEnabled = false` does not consume touch either, so a tap here falls through
-        // to the card's own listener and selects WHITELIST — the useful response, not a dead
-        // zone.
-        //
-        // This also retired a long-standing bug: the button used to be built ONCE in
-        // `buildContent` and re-added on every repaint, which stacked up to five copies. Here
-        // it is a child of a card that `renderGate` clears wholesale, so duplication is
-        // structurally impossible rather than prevented by a comment.
-        if (mode == GlobalMode.WHITELIST) {
-            card.addView(
-                Theme.button(
+        // 7. The unreachable case says what will actually make it work.
+        val failed = outcome is Updater.Outcome.Unavailable
+        if (failed) {
+            panel.addView(
+                Type.text(
                     ctx,
-                    // **"EDIT RULES" was the last "rules" in this card.** The summary above it
-                    // now says "Exceptions decide", and a button that names a different noun
-                    // than the line it sits under is the same confusion the rename set out to
-                    // remove. It opens ExceptionsActivity and it edits exceptions.
-                    "EDIT EXCEPTIONS",
-                    Theme.ButtonStyle.NEUTRAL,
-                    small = true,
-                ) {
-                    go(Intent(ctx, ExceptionsActivity::class.java))
-                }.apply {
-                    isEnabled = selected
-                    // The button's own colours come from the Material theme; dimming at the
-                    // view level keeps the disabled state honest without a second style.
-                    alpha = if (selected) 1f else 0.45f
-                },
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    topMargin = Theme.dp(ctx, 8)
-                    // Aligned with the text column, not the marker: it is a child of the
-                    // card, not of the row.
-                    marginStart = Theme.dp(ctx, 26)
-                },
+                    "This is a network or GitHub-side problem, not a setting. The button below " +
+                        "opens the releases page in your browser, which is the same APK.",
+                    TypeRole.DETAIL, p.ink,
+                ),
+                matchWrapParams().apply { topMargin = ctx.dp(Dimens.SPACE_S) },
             )
         }
-        return card
+
+        // 8. The way out when this mechanism fails: handed to the browser, not fetched.
+        if (!installing) {
+            val releases = if (failed) {
+                KeyButton.create(ctx, "Get it from GitHub", KeyButton.Kind.INK, KeyButton.Size.REGULAR) { openReleasesPage() }
+            } else {
+                KeyButton.create(ctx, "Open releases page", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL) { openReleasesPage() }
+            }
+            panel.addView(
+                releases,
+                (if (failed) matchWrapParams() else wrapParams()).apply { topMargin = ctx.dp(10) },
+            )
+        }
+        return panel
+    }
+
+    private fun openReleasesPage() {
+        val url = RELEASES_URL.format(Updater.REPO_OWNER, Updater.REPO_NAME)
+        try {
+            go(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            // No browser installed: the one case where a dead key would look like the updater failing again.
+            Debug.log("update: cannot open releases page: ${e.message}")
+            showProblemDialog("Can't open the releases page", "No browser is installed on this phone. The address is:\n$url")
+        }
+    }
+
+    /**
+     * Rebuild ONLY the update section, posted off the current call stack: the controls live inside
+     * [updatesHost], so rebuilding from their own click handler would remove the view whose click
+     * is still being dispatched (why the channel switch once refused to flip).
+     */
+    private fun refreshUpdateSection() {
+        val host = updatesHost
+        host.post {
+            if (!::updatesHost.isInitialized) return@post
+            host.removeAllViews()
+            host.addView(updateBlock())
+        }
+    }
+
+    private fun checkForUpdates() {
+        Updater.lastOutcome = null
+        Updater.checking = true
+        refreshUpdateSection()
+
+        // The context is taken HERE, on the main thread: `requireContext()` inside the worker
+        // throws when the fragment is detached around an install, and a throw before `check()`
+        // would leave `checking` stuck at true (reported 2026-11-10).
+        val appContext = requireContext().applicationContext
+
+        Thread({
+            try {
+                val outcome = Updater.check(appContext)
+                Debug.log("update check: ${outcome.javaClass.simpleName}")
+                ui { refreshUpdateSection() }
+            } finally {
+                // If anything above throws before `check()` sets its own `finally`, the flag
+                // must still come down: a spinner that never stops hides the Check key too.
+                Updater.checking = false
+                ui { refreshUpdateSection() }
+            }
+        }, "update-check").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Download, verify, then hand to the installer. Verification is not optional: a digest
+     * mismatch deletes the file and refuses.
+     */
+    private fun installUpdate(update: Updater.Outcome.Available) {
+        // Answered BEFORE the download, not after it (2026-11-04).
+        if (!ApkInstaller.canInstall(requireContext())) {
+            showInstallPermissionDialog { installUpdate(update) }
+            return
+        }
+
+        // Set BEFORE the worker starts, so the loader is on screen at the next frame.
+        Updater.installCancelled = false
+        Updater.installingVersion = update.version
+        Updater.installing = true
+        refreshUpdateSection()
+
+        Thread({
+            try {
+                val got = Updater.download(requireContext().applicationContext, update) { _ -> }
+                // A cancel during the download means the bytes are not wanted.
+                if (Updater.installCancelled) {
+                    got.file.delete()
+                    Debug.log("update: cancelled mid-download; file removed")
+                    return@Thread
+                }
+                val expected = update.sha256
+                if (expected != null) {
+                    val normalized = expected.trim().lowercase().substringAfterLast(" ")
+                    if (!got.sha256.equals(normalized, ignoreCase = true)) {
+                        got.file.delete()
+                        Debug.log("update: digest mismatch, refusing")
+                        ui {
+                            Updater.installing = false
+                            Updater.installingVersion = null
+                            showProblemDialog(
+                                "Download was corrupted",
+                                "The file did not match its published checksum, so it was deleted and nothing was installed. Try again, or use the releases page.",
+                            )
+                            refreshUpdateSection()
+                        }
+                        return@Thread
+                    }
+                    Debug.log("update: digest verified")
+                } else {
+                    Debug.log("update: no published digest; installing unverified")
+                }
+                ui {
+                    ApkInstaller.install(requireContext(), got.file) { result ->
+                        ui {
+                            when (result) {
+                                is ApkInstaller.Result.ConfirmationShown ->
+                                    toast("Confirm the install in the dialog")
+                                // Revoked between the pre-check and the commit, or a managed
+                                // device forbids it: same dialog, the fix is a settings toggle.
+                                is ApkInstaller.Result.NeedsPermission ->
+                                    showInstallPermissionDialog { installUpdate(update) }
+                                is ApkInstaller.Result.Refused -> {
+                                    // No install is happening, so the loader must stop.
+                                    Updater.installing = false
+                                    Updater.installingVersion = null
+                                    showProblemDialog("Update could not be installed", result.reason)
+                                }
+                            }
+                            render()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Debug.log("update: download failed: ${e.message}")
+                ui {
+                    Updater.installing = false
+                    Updater.installingVersion = null
+                    showProblemDialog("Download failed", e.message ?: e.javaClass.simpleName)
+                    refreshUpdateSection()
+                }
+            }
+        }, "update-download").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * The "allow installs for this app" dialog. A dialog, not a toast (2026-11-04): it explains
+     * WHY, names the exact switch, and carries a button that opens that page. `retry` runs after
+     * the human returns, so granting the permission continues the install they already tapped.
+     */
+    private fun showInstallPermissionDialog(retry: () -> Unit) {
+        confirm(
+            title = "Allow STMP to install updates",
+            message = "Android needs your permission once before it will let an app install its " +
+                "own update.\n\n" +
+                "Tap Open settings, then turn on " +
+                "\"Allow from this source\". Come back here and the install carries on " +
+                "by itself.\n\n" +
+                "This does not let anything else install on your phone — the permission is " +
+                "only for STMP.",
+            positive = "Open settings",
+            negative = "Not now",
+        ) {
+            // Remembered BEFORE settings opens: the human may grant it and come straight back.
+            pendingAfterResume = retry
+            if (!ApkInstaller.openInstallSettings(requireContext())) {
+                pendingAfterResume = null
+                showProblemDialog(
+                    "Cannot open settings",
+                    "This build of Android would not open the install-permission page. Go to " +
+                        "Settings → Apps → STMP → Install unknown apps and allow it there.",
+                )
+            } else {
+                Debug.log("update: opened install permission settings")
+            }
+        }
+    }
+
+    /** A plain failure dialog with one key. Long text belongs in a dialog, never a toast. */
+    @androidx.annotation.VisibleForTesting
+    internal fun showProblemDialog(title: String, message: String) {
+        StmpDialog.builder(ctx)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    /** A short, human "how long ago". Coarse on purpose. */
+    private fun agoText(at: Long): String {
+        val minutes = ((System.currentTimeMillis() - at) / 60_000L).coerceAtLeast(0L)
+        return when {
+            minutes < 1L -> "just now"
+            minutes < 60L -> "$minutes min ago"
+            minutes < 60L * 24L -> "${minutes / 60L} h ago"
+            else -> "${minutes / (60L * 24L)} d ago"
+        }
     }
 }

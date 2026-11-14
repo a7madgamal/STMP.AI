@@ -1,54 +1,54 @@
 package com.mido.phonebridge
 
-import android.graphics.Typeface
-import androidx.fragment.app.FragmentActivity
+import android.annotation.SuppressLint
 import android.os.Build
-import android.graphics.drawable.ClipDrawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.EditText
-import android.text.InputType
-import android.view.inputmethod.EditorInfo
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import com.google.android.material.button.MaterialButton
+import androidx.fragment.app.FragmentActivity
+import com.mido.phonebridge.ApprovalGate.ApproveGesture
+import com.mido.phonebridge.callers.CallerState
+import com.mido.phonebridge.callers.CallerStore
 import com.mido.phonebridge.core.SecretVault
-import com.mido.phonebridge.ui.Theme
-import com.mido.phonebridge.ui.ShellCode
-import com.mido.phonebridge.ui.JsonCode
-import com.mido.phonebridge.ui.StampOverlay
-import com.mido.phonebridge.ui.PaperMotion
-import com.mido.phonebridge.ui.PaperEntranceView
-import com.mido.phonebridge.ui.PaperTearView
-import com.mido.phonebridge.ui.OverflowScrollView
-import com.mido.phonebridge.alert.SoundAlerts
+import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.gate.ArmPhase
+import com.mido.phonebridge.gate.GateArming
+import com.mido.phonebridge.gate.GateCallbacks
+import com.mido.phonebridge.gate.GateClock
+import com.mido.phonebridge.gate.GateCopy
+import com.mido.phonebridge.gate.GateInput
+import com.mido.phonebridge.gate.GateReceipt
+import com.mido.phonebridge.gate.GateScreen
+import com.mido.phonebridge.gate.GateViews
+import com.mido.phonebridge.ui.kit.PunchView
+import com.mido.phonebridge.ui.kit.Receipt
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.tokens.HapticEvent
+import com.mido.phonebridge.ui.tokens.Haptics
+import com.mido.phonebridge.ui.tokens.Motion
 
 /**
- * Full-screen approval UI. Shows every detail of the pending request and
- * blocks until the human chooses approve/deny.
+ * Full-screen approval UI. Shows every detail of the pending request and blocks until the human
+ * chooses approve or deny. The views are built by [GateScreen]; this Activity keeps the lifecycle,
+ * the decisions, the biometric, the permission and back.
  */
 class ApprovalActivity : FragmentActivity() {
 
     /**
      * The password field, when this request needs one; null otherwise.
      *
-     * A FIELD rather than a local because [approveNow] is a method and has to read it —
-     * the locals in [onCreate] are not in scope there. Cleared in [onDestroy] so a
-     * finishing Activity does not keep a reference to a view holding a secret.
+     * A FIELD rather than a local because [approveNow] is a method and has to read it. Cleared in
+     * [onDestroy] so a finishing Activity does not keep a reference to a view holding a secret.
      */
-    private var passwordField: EditText? = null
+    private var passwordField: android.widget.EditText? = null
 
     /** Whether this request needs a sudo password. Read once, from the gate's view. */
     private var needsPassword = false
@@ -56,42 +56,45 @@ class ApprovalActivity : FragmentActivity() {
     /**
      * Whether approving this request requires READ_CONTACTS, and it is not granted yet.
      *
-     * **This is the missing half of the contacts feature, and the reason it kept looking broken.**
      * Reported 2026-11-02, with a screenshot of the approval card: *"all i want is when clicking
-     * approve here I give the fucking permission"*. Correct — and every previous attempt fixed the
-     * HOME SCREEN row instead, which is a different surface.
-     *
-     * The flow was: caller asks for contacts → card appears → human taps APPROVE → the request
-     * runs → the plugin finds no permission → <mark><code>503 contacts_unavailable</code></mark>.
-     * The human did exactly what was asked of them and the call still failed, with the fix hidden
-     * on another screen. Approving a contacts request should be the moment the permission is
-     * requested.
-     *
-     * This Activity is the only surface that CAN ask: a route handler has no Activity, and the
-     * permission dialog needs one.
+     * approve here I give the fucking permission"*. Approving used to run the request, the plugin
+     * then found no permission, and the call answered `503 contacts_unavailable` after the human
+     * had done exactly what was asked. This Activity is the only surface that CAN ask: a route
+     * handler has no Activity, and the permission dialog needs one.
      */
     private var needsContactsPermission = false
 
     /** Guard so a second tap cannot stack a second system dialog. */
     private var contactsPromptRunning = false
 
-    /**
-     * The indeterminate fetch indicator, held as a FIELD so the stamp can hide it.
-     *
-     * It was a local until the stamp needed to dismiss it: after a decision the tick used to call
-     * `applyArmed(false)` and bring this bar back, so the animation played over a "loading"
-     * indicator (Mido, 2026-10-27).
-     */
-    private lateinit var armBar: com.google.android.material.progressindicator.LinearProgressIndicator
+    /** How the approve that waits on the contacts prompt was performed, for the receipt. */
+    private var contactsBy = "tap"
+
+    private lateinit var views: GateViews
+    private var gesture = ApproveGesture.HOLD
+    private var requesterName = ""
+    private var verb: Verb = Verb.EXECUTE
+    private var requiresBiometric = false
+    private var bioStatus = BioStatus.Usable
+    private var lastBioCheckMs = 0L
+    private var ticksArmed = false
+    private var exceptionArmed = false
+    private val handler = Handler(Looper.getMainLooper())
 
     /**
-     * The DENY button's draining background: the time left to refuse, drawn on the control that
-     * refuses. Set during build, driven by the tick.
+     * True from the moment a decision is taken until the receipt has finished.
+     *
+     * The 120 ms tick calls `finish()` as soon as `ApprovalGate.isCurrent(id)` is false — which is
+     * the INSTANT a decision resolves the request, before the punch has drawn a single frame
+     * (Mido, 2026-10-27: *"it dismisses too fast to see the animation"*). The tick must not decide
+     * the modal is dead while the punch plays: the punch and the receipt ARE the exit.
      */
-    private var denyDrain: android.graphics.drawable.ClipDrawable? = null
+    private var stamping = false
+
+    /** True once the receipt is on screen, so back can close it early (and never decide twice). */
+    private var receiptShown = false
 
     companion object {
-        private val entranceRegistry = PaperMotion.EntranceRegistry()
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
         const val EXTRA_ENDPOINT = "endpoint"
@@ -104,29 +107,26 @@ class ApprovalActivity : FragmentActivity() {
         /** READ_CONTACTS, asked from the card itself when APPROVE is tapped. */
         const val REQ_CONTACTS = 2001
 
-        /**
-         * Words cycled while the model works, so the wait reads as thinking rather than
-         * hanging (Mido, 2026-10-19: *"add fake loading feeling, claude style some word like
-         * thinking... wondering..."*).
-         *
-         * Deliberately honest about being indeterminate: there is no token stream to measure,
-         * so a percentage would be invented. A rotating word plus a dot cycle shows liveness
-         * and nothing more.
-         */
-        private val LOADING_WORDS = listOf(
-            "thinking", "wondering", "considering", "reading", "summarising", "weighing it up"
-        )
+        private const val TICK_MS = 120L
+        private const val TAG = "ApprovalActivity"
 
-        /** Dots cycle 0→3 then the word advances, so the line visibly moves. */
-        private const val DOTS_MAX = 3
+        /**
+         * Test seam: stands in for `BiometricManager.canAuthenticate` in [bioStatus] only.
+         * Robolectric's shadow models only "available" or "unavailable", so NONE_ENROLLED and the
+         * lockout code cannot be produced otherwise (TESTING 5). Null in production.
+         */
+        @androidx.annotation.VisibleForTesting
+        @Volatile internal var canAuthenticateForTest: Int? = null
     }
+
+    private val requestId: Long get() = intent.getLongExtra(EXTRA_ID, -1L)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Draw over other apps / show over the lockscreen, turn the screen on,
-        // and keep it on while the human decides. This is what makes the modal
-        // appear *immediately* regardless of what is in the foreground.
+        // Draw over other apps / show over the lockscreen, turn the screen on, and keep it on
+        // while the human decides. This is what makes the modal appear *immediately* regardless
+        // of what is in the foreground.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -139,1082 +139,355 @@ class ApprovalActivity : FragmentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // FLAG_SECURE whenever this modal can hold a password: without it the typed
-        // password appears in the recents thumbnail and is capturable by a screen
-        // recorder. Set unconditionally for a password request — the flag cannot be
-        // added later without re-creating the window.
+        // FLAG_SECURE whenever this modal can hold a password: without it the typed password
+        // appears in the recents thumbnail and is capturable by a screen recorder. Set
+        // unconditionally for a password request — the flag cannot be added later without
+        // re-creating the window.
         val wantsPassword = ApprovalGate.currentView()?.needsPassword == true
         if (wantsPassword) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
 
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        val id = requestId
         val remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?"
         val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
         val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?"
         val timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS)
-        val createdAtMs = intent.getLongExtra(EXTRA_CREATED_AT, System.currentTimeMillis())
 
-        // Two sources of truth:
-        //  - view:  the RESOLVED, human-readable WHAT/ON (built by the caller
-        //           from the live notification + resolved action)
-        //  - detail: the raw JSON, shown collapsed under "details"
+        // Two sources of truth: the view is the RESOLVED, human-readable request (built by the
+        // caller from the live data); the detail is the raw JSON, shown collapsed.
         val view = ApprovalGate.currentView()
-        val detail = ApprovalGate.currentDetailJson()
-        // The gate decides whether this request needs a biometric; the UI only renders
-        // that decision (see ApprovalView.requiresBiometric). Read once, here.
-        val requiresBiometric = view?.requiresBiometric == true
-        // The exception offer, or null. Read once, like requiresBiometric: the gate
-        // decided whether the modal may offer it (only under WHITELIST, never with a
-        // password). Dropped here too for a password request: the exception tap carries no
-        // password, so it must never render beside a password field — the gate would refuse
-        // it anyway (ApprovalGate.resolveWithException).
-        val offer = if (view?.needsPassword == true) null else view?.exceptionOffer
-        // The gate decided whether this request cannot proceed without a password.
-        // Read once, like the other two: the UI renders decisions, it does not make them.
+        // The gate decides whether this request needs a biometric, a password and a hold; the UI
+        // only renders those decisions. Read once, here.
+        requiresBiometric = view?.requiresBiometric == true
         needsPassword = view?.needsPassword == true
+        // No view means no verb to judge by: the hold is the safe default.
+        gesture = view?.approveGesture ?: ApproveGesture.HOLD
+        verb = view?.verb ?: Verb.EXECUTE
+        requesterName = view?.requester ?: remote
+        // The exception offer is the gate's (`exceptionOfferFor`, which never offers one on a
+        // password request). Dropped here too for a password request: the exception tap carries
+        // no password, so it must never render beside a password field — the gate would refuse
+        // it anyway (ApprovalGate.resolveWithException).
+        val offer = if (needsPassword) null else view?.exceptionOffer
 
-        // Does approving this request need READ_CONTACTS, and is it missing?
-        //
-        // Derived from the ENDPOINT, because that is what the human is looking at on the card:
-        // `GET /contacts`. The plugin cannot help here — it only runs AFTER approval — so the
-        // decision has to be made from the request itself, on this side of the gate.
+        // Derived from the ENDPOINT, because that is what the human is looking at: `GET /contacts`.
+        // The plugin cannot help — it only runs AFTER approval — so the decision is made here.
         needsContactsPermission = endpoint.contains("/contacts") &&
             checkSelfPermission(android.Manifest.permission.READ_CONTACTS) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        val pad = Theme.dp(this, 24)
-
-        // Scrollable modal body. Long notifications (a big Arabic message, a
-        // multi-line task) previously pushed the buttons off the bottom edge with
-        // no way to reach them — a timed-out approval through no fault of the
-        // user. The whole content scrolls, so every control is always reachable.
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            background = Theme.sheet(Theme.BG)
-        }
-
-        fun label(t: String, size: Float, color: Int = Theme.ON_SURFACE): TextView =
-            Theme.text(this, t, size, color).apply {
-                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
-            }
-
-        // The header is the app icon plus the title, not a lock emoji (Mido, 2026-10-27:
-        // *"replace lock emoji in modal with the icon"*). The icon is the app's own mark, so the
-        // modal is visibly STMP's rather than a generic system prompt.
-        content.addView(
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
-                addView(
-                    android.widget.ImageView(this@ApprovalActivity).apply {
-                        // The real stamp mark, not the old disc-with-letters placeholder.
-                        // Width is WRAP_CONTENT + adjustViewBounds because the mark is 2:1:
-                        // forcing it into a square box letterboxes it into a 40x20 smear.
-                        setImageResource(R.drawable.logo_mark)
-                        adjustViewBounds = true
-                        scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                        layoutParams = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            Theme.dp(this@ApprovalActivity, 40)
-                        ).apply { marginEnd = Theme.dp(this@ApprovalActivity, 12) }
-                    }
-                )
-                addView(Theme.text(this@ApprovalActivity, "awaiting your stamp", Theme.TEXT_TITLE_SP).apply {
-                    typeface = Theme.handFont(this@ApprovalActivity)
-                })
-            }
+        title = GateCopy.windowTitle(requesterName)
+        views = GateScreen.build(
+            this,
+            GateInput(
+                id = id, remote = remote, endpoint = endpoint, summary = summary,
+                detail = ApprovalGate.currentDetailJson(), view = view, timeoutSeconds = timeoutSeconds,
+                offer = offer, gesture = gesture, caller = callerKind(remote), needsPassword = needsPassword,
+            ),
+            GateCallbacks(
+                onDeny = { finishWith(id, approved = false, by = "tap") },
+                onApprove = { by -> onApprove(id, by) },
+                onExceptionTap = { onExceptionTap(id) },
+                onPasswordChanged = { tick.run() },
+            ),
         )
-
-        // --- AI: LIVE, because the summary arrives AFTER this view is built. ---
-        // The modal now appears immediately and the model answers in the background (Mido,
-        // 2026-10-19), so these views cannot be filled from the intent — they are created
-        // empty and driven by the tick below, from ApprovalGate.currentAiState().
-        val aiHeader = Theme.sectionHeader(this, "OPTIONAL MODEL READING")
-        // The summary is the ONE thing the human actually reads, so it is the largest text
-        // on the screen (Mido, 2026-10-19: *"make the ui summary more concise and larger"*).
-        // "Concise" is enforced by BOUNDING it (3 lines, ellipsized) rather than by cutting
-        // the model's sentence — the shape is already one short line, and silently dropping
-        // its tail would hide exactly the detail a summary exists to surface.
-        val aiLine = Theme.text(this, "", Theme.TEXT_BODY_SP, Theme.ON_SURFACE).apply {
-            maxLines = 5
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 10))
-        }
-        // The bucket is no longer painted on this line — it tints the sheet (see
-        // `applyRiskSurface`). What remains here is the REASON, which a background colour
-        // cannot state: "risk: high — sends mail to an external address" is the part a human
-        // actually needs, and it stays readable on every tint because it uses ON_SURFACE_VARIANT.
-        val aiRiskLine = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
-            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 12))
-            visibility = ViewGroup.GONE
-        }
-        // Optional model reading is attached AFTER deterministic request facts below.
-        // Never move this block back above WHO/WHAT: AI is advisory, not the request.
-
-        if (view != null) {
-            // --- WHO ---
-            content.addView(Theme.sectionHeader(this, "WHO"))
-            content.addView(label("Who is asking: ${view.requester}", Theme.TEXT_ROW_TITLE_SP, Theme.WARNING))
-            if (view.account.isNotBlank() && view.account != "—") {
-                content.addView(label("as ${view.account}", Theme.TEXT_BODY_SP, Theme.SUCCESS))
-            }
-
-            // --- WHAT (the resolved action, in words) ---
-            content.addView(Theme.sectionHeader(this, "WHAT"))
-            content.addView(label(view.actionLabel, Theme.TEXT_TITLE_SP))
-            content.addView(label(endpoint, Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT))
-
-            // Render a labelled row: label on its own quiet line, value below in the
-            // style the row asked for. This is the ONE renderer; it knows nothing
-            // about Gmail, Calendar, or notifications — only rows. Never print a
-            // label with nothing under it (an empty row is a defect, not a state).
-            fun row(r: ApprovalGate.Row) {
-                content.addView(Theme.text(this, r.label, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
-                    setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
-                })
-
-                // **CODE and JSON are their own paths, not mono variants.** A command gets
-                // coloured spans and token-boundary line breaks; a JSON body gets pretty-printed
-                // and coloured. Everything else keeps the plain renderer. Falling through to
-                // `Theme.text(mono = true)` would draw either one in a single colour, which is
-                // what they looked like before this existed.
-                val view = when (r.style) {
-                    ApprovalGate.Row.Style.CODE -> TextView(this).apply {
-                        text = ShellCode.render(r.value)
-                        textSize = Theme.TEXT_BODY_SP
-                        setTextColor(Theme.ON_SURFACE)
-                        typeface = ShellCode.typeface(this@ApprovalActivity)
-                        setTextIsSelectable(true)
-                        setLineSpacing(0f, 1.25f) // room for the inserted breaks
-                        setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-                    }
-
-                    ApprovalGate.Row.Style.JSON -> TextView(this).apply {
-                        text = JsonCode.render(r.value)
-                        textSize = Theme.TEXT_BODY_SP
-                        setTextColor(Theme.ON_SURFACE)
-                        typeface = Theme.monoFont(this@ApprovalActivity)
-                        setTextIsSelectable(true)
-                        setLineSpacing(0f, 1.15f)
-                        setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-                    }
-
-                    else -> {
-                        // **Any row whose value is JSON renders as JSON**, without every plugin
-                        // having to tag it. A body does not arrive with a type marker — it is
-                        // just a string — so detection decides. `LONG` prose (a message body, an
-                        // event description) is untouched: it does not start with `{` or `[`,
-                        // and the check is cheap and exact.
-                        //
-                        // **`WARN` is exempt.** Amber on a card means "a consequence you must
-                        // not miss" — a mutated target, an elevation. Recolouring a WARN row
-                        // because its text happens to be JSON would trade that meaning for
-                        // tidiness, and the meaning is why the row is amber.
-                        val asJson = r.style != ApprovalGate.Row.Style.WARN && JsonCode.looksJson(r.value)
-                        if (asJson) {
-                            TextView(this).apply {
-                                text = JsonCode.render(r.value)
-                                textSize = Theme.TEXT_BODY_SP
-                                setTextColor(Theme.ON_SURFACE)
-                                typeface = Theme.monoFont(this@ApprovalActivity)
-                                setTextIsSelectable(true)
-                                setLineSpacing(0f, 1.15f)
-                                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-                            }
-                        } else {
-                            Theme.text(
-                                this,
-                                r.value,
-                                Theme.TEXT_BODY_SP,
-                                if (r.style == ApprovalGate.Row.Style.WARN) Theme.WARNING else Theme.ON_SURFACE,
-                                mono = r.style == ApprovalGate.Row.Style.MONO ||
-                                    r.style == ApprovalGate.Row.Style.WARN
-                            ).apply {
-                                setTextIsSelectable(true)
-                                setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-                            }
-                        }
-                    }
-                }
-                content.addView(view)
-            }
-
-            // Plugin-provided sections (Calendar, Gmail, …). Each section renders
-            // only when it has rows — the component never invents a header.
-            for (sec in view.sections) {
-                val rows = sec.rows.filter { it.value.isNotBlank() }
-                if (rows.isEmpty()) continue
-                content.addView(Theme.sectionHeader(this, sec.title))
-                rows.forEach { row(it) }
-            }
-
-            // Legacy target block (mutating routes) — same renderer, one section.
-            // Styles come from the PLUGIN now, so a command row can ask for CODE instead of
-            // being flattened to WARN and drawn as amber monospace like everything else.
-            if (view.destructive.isNotEmpty()) {
-                view.destructive
-                    .filter { it.value.isNotBlank() }
-                    .forEach { row(it) }
-            }
-            // Scope the read carried (filters). A scoped read must show its scope:
-            // "count=3, package=com.whatsapp", never a bare verb.
-            if (view.filters.isNotEmpty()) {
-                val scope = view.filters.entries.joinToString(", ") { "${it.key}=${it.value}" }
-                content.addView(label("filter: $scope", Theme.TEXT_BODY_SP, Theme.WARNING))
-            }
-            if (!view.replyText.isNullOrBlank()) {
-                content.addView(label("reply: ${view.replyText}", Theme.TEXT_BODY_SP, Theme.SUCCESS))
-            }
-            // Other buttons the same notification offers (options are a menu, the
-            // resolved WHAT is the pick). Show them so the human sees the space.
-            if (view.options.isNotEmpty()) {
-                content.addView(label("other actions: " + view.options.joinToString(" · "), Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
-            }
-
-            // Notification content as ordinary rows — the same renderer as every
-            // plugin. Only rendered when there is a notification behind the request;
-            // a read route has none and gets no section at all.
-            val notifRows = buildList {
-                val head = if (view.notifTitle.isNotBlank()) view.notifTitle
-                else view.appLabel
-                if (head.isNotBlank()) add(ApprovalGate.Row("TITLE", head))
-                if (view.notifSender.isNotBlank()) add(ApprovalGate.Row("FROM", view.notifSender))
-                if (view.notifText.isNotBlank()) add(ApprovalGate.Row("BODY", view.notifText, ApprovalGate.Row.Style.LONG))
-                if (view.messageCount > 1) add(ApprovalGate.Row("", "💬 ${view.messageCount} messages", ApprovalGate.Row.Style.WARN))
-            }
-            if (notifRows.isNotEmpty()) {
-                content.addView(Theme.sectionHeader(this, "ON"))
-                notifRows.forEach { row(it) }
-            }
-        } else {
-            // No structured view (e.g. non-notification routes): keep the old fields.
-            content.addView(label("Source: $remote", Theme.TEXT_CAPTION_SP, Theme.WARNING))
-            content.addView(label("Endpoint: $endpoint", Theme.TEXT_CAPTION_SP, Theme.WARNING))
-            content.addView(label("Summary: $summary", Theme.TEXT_BODY_SP))
-        }
-
-        content.addView(aiHeader)
-        content.addView(aiLine)
-        content.addView(aiRiskLine)
-
-        // --- Details: raw endpoint + full JSON, collapsed by default. ---
-        val detailBody = Theme.text(
-            this, "endpoint: $endpoint\n\n" + (detail ?: "(no detail)"),
-            12f, Theme.ON_SURFACE_VARIANT, mono = true
-        ).apply { setTextIsSelectable(true) }
-        val detailScroll = ScrollView(this).apply {
-            addView(detailBody)
-            visibility = ViewGroup.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Theme.dp(this@ApprovalActivity, 220)
-            )
-        }
-        val detailToggle = Theme.text(this, "▸ details", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
-            setPadding(0, Theme.dp(this@ApprovalActivity, 14), 0, Theme.dp(this@ApprovalActivity, 8))
-            isClickable = true
-            setOnClickListener {
-                val show = detailScroll.visibility != ViewGroup.VISIBLE
-                detailScroll.visibility = if (show) ViewGroup.VISIBLE else ViewGroup.GONE
-                text = if (show) "▾ details" else "▸ details"
-            }
-        }
-
-        // --- The countdown is the DENY button's own fill. ---
-        //
-        // Mido, 2026-11-04, twice: *"replace the countdown in the modal with the rejection button
-        // having a progress-bar-like background"* and *"I FUCKING asked 2 times to remove the
-        // countdown label COMPLETELY from the modal"*.
-        //
-        // So there is no label any more. The bar that drains IS the time left to refuse, and it
-        // sits on the control that refuses — one thing to read instead of a sentence plus a bar.
-        // The `countdown` TextView stays as an invisible accessibility carrier: a screen reader
-        // still needs the remaining seconds spoken, and deleting the view would leave a blind
-        // user with a bar they cannot perceive.
-        val countdown = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.WARNING).apply {
-            visibility = ViewGroup.GONE
-        }
-
-        // --- Queue position: only when others are actually waiting. The queue is
-        // FIFO, so this request is the one on screen and the rest wait their turn.
-        // Never render a "0 waiting" line — an empty statement is noise.
-        val queueLine = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
-            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
-            visibility = ViewGroup.GONE
-        }
-
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-        // Loading-word + dot animation state. Advanced only while the fetch is running.
-        var wordIdx = 0
-        var dotCount = 0
-        // Assigned once the buttons and the bar exist (below). A `var` rather than a local
-        // `fun` so the tick above can call it without a forward reference, and so there is
-        // exactly ONE place that decides whether the controls are live.
-        var applyArmed: (Boolean) -> Unit = {}
-        // The password field is a field on the Activity (see its declaration), not a
-        // local: approveNow() runs from a button callback and reads it from there.
-        /** Whether APPROVE may be tapped. True unless a password is required and empty. */
-        var passwordReady: () -> Boolean = { true }
-        /** The last arm state, so a keystroke can re-evaluate it without guessing. */
-        var lastArmed = false
-
-        /**
-         * Paint APPROVE with a risk colour — assigned once the button exists.
-         *
-         * A holder rather than touching `allow` directly because the tick that DOES the
-         * painting is created ~150 lines before the button is; `applyArmed` solved the same
-         * ordering problem the same way. Null risk = "no assessment", which restores the
-         * resting colour instead of leaving a stale one behind.
-         */
-        var applyRisk: (com.mido.phonebridge.ai.Risk?) -> Unit = {}
-
-        /**
-         * Paint the risk as a background WASH on the whole sheet.
-         *
-         * Rebuilt rather than mutated because the sheet is a `LayerDrawable` (base colour plus
-         * grain); changing its colour means a new drawable, and `setBackgroundDrawable` is the
-         * one call that swaps it without touching layout. Geometry is untouched: the modal is
-         * already measured, and a background cannot change its size — the same rule that made
-         * the NOTIFY card's tint a layer instead of a child view.
-         *
-         * Lives here as a named function rather than inline in the tick so all four AI states
-         * call the SAME thing. Four copy-pasted `content.background = ...` lines is how one of
-         * them ends up forgetting to clear the tint when the state changes.
-         */
-        var lastRiskSurface: Int = Theme.BG
-
-        fun applyRiskSurface(risk: com.mido.phonebridge.ai.Risk?) {
-            val color = Theme.riskSurface(risk)
-            if (lastRiskSurface == color) return
-            lastRiskSurface = color
-            content.background = Theme.sheet(color)
-        }
-
-        val tick = object : Runnable {
-            override fun run() {
-                // The AI block is LIVE: read the gate's current state every tick rather
-                // than trusting a value captured at build time.
-                when (val ai = ApprovalGate.currentAiState()) {
-                    is ApprovalGate.AiState.Loading -> {
-                        aiHeader.text = "OPTIONAL MODEL READING"
-                        // A thinking word + a dot cycle (Mido, 2026-10-19). The words are
-                        // honest about being indeterminate: there is no token stream to
-                        // measure, so a percentage would be invented. The dots loop
-                        // 0,1,2,3 to show the app is alive rather than hung.
-                        val word = LOADING_WORDS[wordIdx % LOADING_WORDS.size]
-                        aiLine.text = word + ".".repeat(dotCount)
-                        aiLine.setTextColor(Theme.ON_SURFACE_VARIANT)
-                        aiRiskLine.visibility = ViewGroup.GONE
-                        applyRiskSurface(null)
-                        // Back to the resting colour while we do not yet know the risk —
-                        // otherwise a previous assessment's colour would linger on the button.
-                        applyRisk(null)
-                        dotCount = (dotCount + 1) % (DOTS_MAX + 1)
-                        if (dotCount == 0) wordIdx++
-                    }
-                    is ApprovalGate.AiState.Ready -> {
-                        aiHeader.text = "OPTIONAL MODEL READING"
-                        aiLine.text = ai.summary.description
-                        aiLine.setTextColor(Theme.ON_SURFACE)
-                        val reason = ai.summary.reason
-                        aiRiskLine.text = if (reason.isNotBlank()) reason else ""
-                        // Tint the sheet itself (Mido, 2026-11-03: *"the level result shouldn't
-                        // be a left border it should affect the bg color with a light tint
-                        // effect"*). One mapping in Theme.riskSurface, shared with anything else
-                        // that wants the wash, so the modal cannot disagree with the card about
-                        // what HIGH looks like — the failure that made a second palette a bad idea.
-                        applyRiskSurface(ai.summary.risk)
-                        aiRiskLine.setTextColor(Theme.ON_SURFACE_VARIANT)
-                        aiRiskLine.visibility =
-                            if (reason.isNotBlank()) ViewGroup.VISIBLE else ViewGroup.GONE
-
-                        // APPROVE carries the risk colour too (Mido, 2026-10-19: *"make the
-                        // approve button color match the risk label color"*). The risk is the
-                        // one thing the human needs before tapping, and putting it on the thing
-                        // they tap is the strongest place it can sit.
-                        //
-                        // DENY stays NEUTRAL, deliberately: two coloured decision buttons would
-                        // make them look like a pair of equal choices, which is exactly the
-                        // confusion the 0.23.0 pass fixed by separating and restyling them. Red
-                        // APPROVE next to grey DENY still reads as "approve, carefully".
-                        applyRisk(ai.summary.risk)
-                    }
-                    is ApprovalGate.AiState.Failed -> {
-                        // Fail LOUDLY but unlock (Mido, 2026-10-19). The human sees the
-                        // error and can still decide — a modal with dead buttons because
-                        // one transient call failed is a dead end, not a safety property.
-                        aiHeader.text = "OPTIONAL MODEL READING"
-                        aiLine.text = "⚠ could not summarise — ${ai.detail}"
-                        aiLine.setTextColor(Theme.DANGER)
-                        aiRiskLine.visibility = ViewGroup.GONE
-                        // No assessment, so no tint: an absent risk is not "safe", and a green
-                        // sheet would say it was.
-                        applyRiskSurface(null)
-                        // No risk was assessed, so the button must not wear a risk colour —
-                        // an absent assessment is not "safe", and painting it green would say
-                        // it was. Resting colour, with the error stated above it.
-                        applyRisk(null)
-                    }
-                    ApprovalGate.AiState.NotNeeded -> {
-                        // The route declares `aiSummary = false`: no summary is expected,
-                        // so the block is removed rather than left saying "loading".
-                        aiHeader.visibility = ViewGroup.GONE
-                        aiLine.visibility = ViewGroup.GONE
-                        aiRiskLine.visibility = ViewGroup.GONE
-                        applyRiskSurface(null)
-                    }
-                }
-
-                // THREE phases, not two. `enabledAtMs` is now an ARM TIME that can sit in the
-                // future (the misclick guard), so "is it stamped" is no longer the same question
-                // as "may the human tap". Conflating them is what would make the guard useless:
-                // a future timestamp still reads as `> 0` and the buttons would go live instantly.
-                val now = System.currentTimeMillis()
-                val enabledAt = ApprovalGate.currentEnabledAtMs()
-                val armed = enabledAt > 0L && ArmGuard.isArmed(enabledAt, now)
-
-                when {
-                    enabledAt == 0L -> {
-                        // No arm time yet: the summary is still being fetched. The bar stays
-                        // EMPTY rather than full, because a full bar would read as "you have
-                        // all the time in the world" when the clock has not started.
-                        denyDrain?.level = 0
-                        countdown.text = "waiting for the summary"
-                    }
-                    !armed -> {
-                        // THE GUARD WINDOW (Mido, 2026-10-21: *"when AI is disabled, we need the
-                        // 3 seconds protection again to avoid misclicking the dialog"*). Say what
-                        // it is — a silent dead modal looks broken, and a human who does not know
-                        // why the button is inert will tap harder, which is the opposite of safe.
-                        //
-                        // Deliberately NOT the auto-deny clock: the 60s window has not started,
-                        // so showing it here would claim time the human has not been given.
-                        val left = ArmGuard.remainingSeconds(enabledAt, now)
-                        // Not the auto-deny clock: the window has not started, so the bar stays
-                        // empty and only the spoken label says what is happening.
-                        denyDrain?.level = 0
-                        countdown.text = "ready in ${left}s"
-                        countdown.contentDescription = "arming in ${left}s"
-                    }
-                    else -> {
-                        // Armed: now the real 60s window, measured from the arm time — so the
-                        // human gets their FULL decision time once the buttons work.
-                        val elapsedSec = (now - enabledAt) / 1000L
-                        val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
-                        val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
-                        // The bar IS the countdown: full when the window opens, empty at zero.
-                        denyDrain?.level = pct.coerceIn(0, 100).toInt() * 100
-                        // The label stays invisible; it exists so `contentDescription` can still
-                        // speak the remaining seconds.
-                        countdown.text = "auto-deny in ${left}s"
-                        countdown.contentDescription = "timeout progress ${pct}%"
-                    }
-                }
-
-                // The gate's live state is the ONLY enable trigger — no timer — and the guard is
-                // part of that state, not a second condition bolted on here.
-                applyArmed(armed)
-
-                // Refresh the queue label from live state every tick, so it appears
-                // the moment a follower queues (never a value sampled once at
-                // enqueue time, which was always 0 for the request that became
-                // head while the follower was still arriving).
-                val behind = ApprovalGate.waitingBehindCurrent()
-                queueLine.visibility = if (behind > 0) ViewGroup.VISIBLE else ViewGroup.GONE
-                if (behind > 0) {
-                    queueLine.text = "≡ $behind waiting behind this one"
-                }
-
-                // Keep ticking while the modal is live. A loading modal has no countdown to
-                // expire on, so the tick — not a timer — is what ends it.
-                // STOP once the stamp starts. The tick's whole job is to keep the modal's
-                // controls honest while a decision is still possible; after the decision it can
-                // only do harm — and it did: `applyArmed(false)` re-showed the progress bar
-                // BEHIND the stamp, so the animation played over a "loading" indicator (Mido,
-                // 2026-10-27: *"don't show loading after clicking the button just the
-                // animation"*).
-                if (!isFinishing && !stamping) {
-                    if (ApprovalGate.isCurrent(id)) {
-                        handler.postDelayed(this, 120L)
-                    } else {
-                        // The gate gave up (window expired) or the request was replaced.
-                        // Close the modal rather than leaving a dead prompt on screen: the
-                        // server has already answered, so a modal still asking is a lie.
-                        //
-                        // NOT while a stamp is playing: a resolved request is exactly what
-                        // starts the stamp, so finishing here would kill the animation on its
-                        // first frame. The overlay finishes the Activity itself via onFinished.
-                        finish()
-                    }
-                }
-            }
-        }
+        passwordField = views.passwordField
+        installTouchGuard(id)
+        bioStatus = if (requiresBiometric) bioStatus() else BioStatus.Usable
+        lastBioCheckMs = SystemClock.uptimeMillis()
+        renderBio()
+        setContentView(views.guard)
         handler.post(tick)
+    }
 
-        val btnRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+    /** D17: touches in a gesture another window fully covers never reach the gate. */
+    private fun installTouchGuard(id: Long) {
+        views.guard.onObscuredTouch = {
+            // The banner says why, and the keys look as dead as they are (D17).
+            views.setObscured(true)
+            Haptics.perform(views.guard, HapticEvent.REJECT)
+            Debug.log("approval[$id] touch ignored: window obscured")
         }
+        views.guard.onClearTouch = { views.setObscured(false) }
+    }
 
-        // The arming indicator. INDETERMINATE on purpose: inference is a blocking call with
-        // no token stream, so any determinate fill would be a number we made up. It is shown
-        // only while the summary is being fetched and hidden the instant the buttons go live
-        // (Mido, 2026-10-19 — the buttons enable on the fetch, not on a fixed timer).
-        armBar = com.google.android.material.progressindicator.LinearProgressIndicator(this).apply {
-            isIndeterminate = true
-            trackThickness = Theme.dp(this@ApprovalActivity, 3)
-            trackCornerRadius = Theme.dp(this@ApprovalActivity, 2)
-            setIndicatorColor(Theme.ACCENT)
-            setTrackColor(Theme.SURFACE_VARIANT)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = Theme.dp(this@ApprovalActivity, 10) }
+    /** What the caller registry knows about [remote]. A registry that cannot be read is "unverified". */
+    private fun callerKind(remote: String): GateCopy.CallerKind {
+        if (GateCopy.isLoopback(remote)) return GateCopy.CallerKind.THIS_PHONE
+        val state = try {
+            CallerStore.from(this).stateOf(remote)
+        } catch (e: Exception) {
+            Log.w(TAG, "caller registry unreadable: ${e.message}")
+            null
         }
+        return when (state) {
+            is CallerState.Verified -> GateCopy.CallerKind.VERIFIED
+            CallerState.Denied -> GateCopy.CallerKind.BLOCKED
+            null -> GateCopy.CallerKind.UNVERIFIED
+        }
+    }
 
-        // Built as a LayerDrawable so the fill can DRAIN: a tint can only recolour, and a
-        // background TINT would leave nothing for `setLevel` to move.
-        val denyTrack = GradientDrawable().apply {
-            setColor(Theme.SURFACE_VARIANT)
-            cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
-        }
-        denyDrain = ClipDrawable(
-            GradientDrawable().apply {
-                setColor(Theme.DANGER)
-                cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
-            },
-            Gravity.START,
-            ClipDrawable.HORIZONTAL,
-        ).apply { level = 0 }
-
-        val deny = Theme.button(this, "DENY", Theme.ButtonStyle.NEUTRAL) {
-            finishWith(id, approved = false)
-        }.apply {
-            isEnabled = false
-            alpha = 0.4f
-            // The drain REPLACES the background, so the ripple goes with it. That is correct:
-            // the bar is a readout, and a pressed state on a disabled control would be a lie.
-            background = LayerDrawable(arrayOf(denyTrack, denyDrain))
-        }
-        // APPROVE on a contacts request asks for the permission FIRST.
-        //
-        // **This is the whole point of the fix** (Mido, 2026-11-02, with a screenshot of this very
-        // card: *"all i want is when clicking approve here I give the fucking permission"*).
-        // Approving used to run the request, the plugin then found no READ_CONTACTS, and the call
-        // answered `503 contacts_unavailable` — after the human had done exactly what was asked.
-        // The remedy lived on a different screen they had no reason to visit.
-        //
-        // The request is left PENDING, not resolved: the human has not approved anything yet, and
-        // resolving first would fire a handler that is guaranteed to fail. The system dialog runs,
-        // and onGranted approves for real. A denial also leaves it pending with the buttons live,
-        // so the human can try again or DENY deliberately.
-        val allow = Theme.button(this, "APPROVE", Theme.ButtonStyle.SUCCESS) {
-            // Mutating routes bind APPROVE to a live biometric: the tap opens the
-            // system prompt and the request fires only on success. A failed or
-            // dismissed prompt leaves the request PENDING with APPROVE still live,
-            // so tapping again gives another attempt — the countdown keeps running
-            // underneath and is the only limit. Reads approve on a plain tap.
-            //
-            // A password request does BOTH, in this order: the fingerprint proves the
-            // human is present, then the chars are read from the field. Order matters —
-            // collecting the password first would leave it held in memory across an
-            // asynchronous prompt that may never complete.
-            // The lambda is `() -> Unit`, so this is an if/else chain rather than an early
-            // return: three mutually exclusive ways to approve, in priority order.
-            if (needsContactsPermission) {
-                requestContactsThenApprove(id)
-            } else if (requiresBiometric) {
-                promptBiometric { approveNow(id) }
+    /**
+     * The modal's heartbeat, every 120 ms. The AI block and the arm phase are LIVE: read from the
+     * gate every tick rather than trusted from build time, because the summary arrives after this
+     * view is built (Mido, 2026-10-19). The gate's live state is the ONLY enable trigger — no
+     * timer — and the misclick guard is part of that state, not a second condition here.
+     */
+    private val tick: Runnable = object : Runnable {
+        override fun run() {
+            handler.removeCallbacks(this)
+            if (isFinishing || stamping || !::views.isInitialized) return
+            val now = GateClock.nowMs()
+            views.ai.render(ApprovalGate.currentAiState(), Motion.reduced(this@ApprovalActivity))
+            applyPhase(GateArming.phase(ApprovalGate.currentEnabledAtMs(), now, timeoutSeconds()), now)
+            recheckBio()
+            // Live every tick, so it appears the moment a follower queues. Never a "0 waiting" line.
+            val behind = ApprovalGate.waitingBehindCurrent()
+            views.queueLine.visibility = if (behind > 0) View.VISIBLE else View.GONE
+            if (behind > 0) views.queueLine.text = GateCopy.queue(behind)
+            if (ApprovalGate.isCurrent(requestId)) {
+                handler.postDelayed(this, TICK_MS)
             } else {
-                approveNow(id)
-            }
-        }.apply {
-            isEnabled = false
-            alpha = 0.4f
-        }
-
-        // The exception button (Mido, 2026-10-19): approve this request AND make its pair
-        // behave this way from now on. Its own full-width row, NOT a third column in the
-        // DENY/APPROVE pair — that pair carries 12dp specifically so the two decisions are
-        // never one fat-finger apart, and wedging a third button between them would undo
-        // that. Secondary style, so a reflexive tap meant for APPROVE cannot land here.
-        //
-        // The offer is null unless the switch is AUTOMATIC (the only mode that reads the
-        // rule table), so the row simply does not exist otherwise — no disabled button
-        // implying a feature that is off.
-        var exceptionButton: MaterialButton? = null
-        val exceptionRow: View? = offer?.let { off ->
-            val btn = Theme.button(this, off.label, Theme.ButtonStyle.NEUTRAL) {
-                // Same biometric gate as APPROVE — and the same ORDERING, which is not
-                // cosmetic. `promptBiometric` is ASYNCHRONOUS: it shows the system prompt
-                // and returns immediately, and the resolve happens later in its callback.
-                //
-                // The first version called `finish()` unconditionally right after starting
-                // the prompt, which destroyed this Activity before the fingerprint could
-                // run. The callback never fired, the request was never resolved, and the
-                // gate re-posted the modal — reported on device as *"I clicked always
-                // notify like 5 times, modal kept coming back, only when I clicked approve
-                // I got a fingerprint"*. The missing prompt was the tell: a prompt that
-                // never appears means the Activity died first.
-                //
-                // APPROVE never had this bug because its resolve+finish lives INSIDE the
-                // callback. This now mirrors it exactly: nothing finishes until the
-                // decision is actually resolved. On a dismissed or failed prompt we do
-                // nothing at all, so the request stays pending and the human can retry —
-                // same behaviour as APPROVE.
-                if (requiresBiometric) {
-                    promptBiometric {
-                        ApprovalGate.resolveWithException(id, off.rule)
-                        finish()
-                    }
-                } else {
-                    ApprovalGate.resolveWithException(id, off.rule)
-                    finish()
-                }
-            }.apply {
-                isEnabled = false
-                alpha = 0.4f
-            }
-            exceptionButton = btn
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(btn)
-                addView(
-                    label(
-                        "approves this request, and sets ${off.rule.plugin} · " +
-                            "${off.rule.verb?.name?.lowercase() ?: "any verb"} to " +
-                            "${off.rule.mode.name.lowercase()} from now on",
-                        Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT
-                    )
-                )
+                // The gate gave up (window expired) or the request was replaced. The server has
+                // already answered, so a modal still asking would be a lie. Not while stamping:
+                // a resolved request is exactly what starts the punch.
+                finish()
             }
         }
-        // Fails closed: if a mutating route needs a biometric that this device cannot
-        // provide, APPROVE must never be tappable — only DENY works, and the reason is stated.
-        //
-        // **`var`, not `val`, because the reason can be FIXED from inside this modal.** The old
-        // code collapsed every cause into one boolean and printed one message — "set up a
-        // fingerprint" — for all of them, so a dead vault key sent the human to Settings for a
-        // problem that was not there, and tapping APPROVE did nothing at all. Both halves of
-        // that are fixed below: the cause is now named, and when the cause is "you need to
-        // authenticate" the modal offers the unlock instead of a dead button.
-        var bioStatus = bioStatus()
-        var biometricBlocked = requiresBiometric && bioStatus != BioStatus.Usable
-
-        // The ONE enable path. No timer any more (Mido, 2026-10-19): the tick above calls
-        // this with the gate's live `enabledAtMs > 0`, so the controls go live exactly when
-        // the summary lands — or when a route needs no summary at all.
-        //
-        // DENY is enabled FIRST and independently: denying is fail-closed, and making someone
-        // wait for a summary they do not need in order to REJECT a request is backwards.
-        // APPROVE waits for the fetch and, when a biometric is required but unusable, never
-        // enables at all (fails closed, stated below).
-        applyArmed = { armed ->
-            // Guarded rather than early-returned: a lambda assigned to a `var` has no label
-            // to `return@` from, and the guard reads the same anyway.
-            if (!isFinishing) {
-                armBar.visibility = if (armed) ViewGroup.GONE else ViewGroup.VISIBLE
-                lastArmed = armed
-                deny.isEnabled = true
-                deny.alpha = 1f
-                if (armed && !biometricBlocked) {
-                    // A password request is not approvable on an empty field: tapping
-                    // APPROVE would then resolve, and sudo would reject seconds later
-                    // with a message about a terminal rather than about the typo.
-                    val ready = passwordReady()
-                    allow.isEnabled = ready
-                    allow.alpha = if (ready) 1f else 0.4f
-                    // The exception button approves a request, so it arms on the SAME
-                    // signal APPROVE does — never earlier, or a tap could land before the
-                    // summary the human is meant to read.
-                    exceptionButton?.let { it.isEnabled = true; it.alpha = 1f }
-                } else if (!armed) {
-                    allow.isEnabled = false
-                    allow.alpha = 0.4f
-                    exceptionButton?.let { it.isEnabled = false; it.alpha = 0.4f }
-                }
-            }
-        }
-        // APPROVE wears the risk colour (Mido, 2026-10-19: *"make the approve button color
-        // match the risk label color"*). The risk is the one fact the human needs before
-        // tapping, and the button is the strongest place it can sit.
-        //
-        // DENY stays NEUTRAL on purpose: two coloured decision buttons would read as a pair of
-        // equal choices, which is what the 0.23.0 pass separated them to avoid. Red APPROVE
-        // beside grey DENY still says "approve, carefully".
-        //
-        // null means no assessment yet (still loading, or the fetch failed). The button then
-        // keeps its resting green rather than implying a safety that was never determined —
-        // an absent assessment is not "safe".
-        applyRisk = { risk ->
-            if (!isFinishing) {
-                val colour = if (risk == null) Theme.SUCCESS else Theme.riskColor(risk)
-                allow.backgroundTintList = android.content.res.ColorStateList.valueOf(colour)
-            }
-        }
-
-        // Start in the loading state: buttons disabled, indicator visible. The tick flips
-        // this the moment the gate reports the request is enabled.
-        applyArmed(false)
-
-        // --- SUDO PASSWORD ---
-        // Only when the gate says this request cannot proceed without one. The field is
-        // REQUIRED to approve, so it lives in the pinned block directly above the buttons
-        // and can never scroll out of reach.
-        val passwordSection: View? = if (needsPassword) {
-            val field = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
-                // **Masking is applied at the END of this block, on purpose.**
-                // `setInputType` internally re-derives the transformation from the type, so an
-                // explicit `transformationMethod` set BEFORE it is silently cleared. That is why
-                // the mask kept disappearing.
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                // Never learn it: the keyboard's personalised dictionary is not a place
-                // a root password may live.
-                imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-                isSingleLine = true
-                hint = "sudo password"
-                // Not saved into instance state: a rotation must not preserve it.
-                setSaveEnabled(false)
-                isSaveFromParentEnabled = false
-                // **NO, not NO_EXCLUDE_DESCENDANTS.** The old value was inverted: that constant
-                // means "this view is unimportant, but do not exclude its descendants", i.e. it
-                // PERMITS autofill. Password managers read it as "go ahead" and offered to save
-                // the root password (Mido, 2026-10-27: *"stop password managers from suggesting to
-                // save it"*). `IMPORTANT_FOR_AUTOFILL_NO` is the one that opts this view out.
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
-                // `autofillHints` is a read-only property on TextView, so it cannot be cleared
-                // here; the flag above is the one the AutofillManager actually consults.
-                setPadding(
-                    Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12),
-                    Theme.dp(this@ApprovalActivity, 12), Theme.dp(this@ApprovalActivity, 12)
-                )
-                background = Theme.sheetDp(this@ApprovalActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-                setTextColor(Theme.ON_SURFACE)
-                // No copy/cut. A long-press menu that can lift the password into the
-                // clipboard is a leak with a friendly face.
-                customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
-                    override fun onCreateActionMode(m: android.view.ActionMode?, menu: android.view.Menu?) = false
-                    override fun onPrepareActionMode(m: android.view.ActionMode?, menu: android.view.Menu?) = false
-                    override fun onActionItemClicked(m: android.view.ActionMode?, item: android.view.MenuItem?) = false
-                    override fun onDestroyActionMode(m: android.view.ActionMode?) {}
-                }
-                // THE MASK, last: nothing above can clear it now.
-                transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
-            }
-            passwordField = field
-            passwordReady = { field.text.isNotEmpty() }
-            field.addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun afterTextChanged(s: android.text.Editable?) {
-                    // Re-evaluate so APPROVE lights up the instant the field is non-empty,
-                    // without needing a second tap or a tick.
-                    applyArmed(lastArmed)
-                }
-            })
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, Theme.dp(this@ApprovalActivity, 10), 0, Theme.dp(this@ApprovalActivity, 10))
-                addView(Theme.sectionHeader(this@ApprovalActivity, "SUDO PASSWORD"))
-                addView(field)
-                addView(
-                    label(
-                        "runs as root — the password goes to sudo's stdin on this device, " +
-                            "not over the network",
-                        Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT
-                    )
-                )
-            }
-        } else null
-        // A gap between the two decisions, so APPROVE and DENY are never one fat-finger
-        // apart (Mido, 2026-10-19: *"add margins between the buttons"*).
-        btnRow.addView(deny, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-            marginEnd = Theme.dp(this@ApprovalActivity, 12)
-        })
-        btnRow.addView(allow, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-        // Scroll the DESCRIPTIVE content only; pin the decision controls (icon,
-        // countdown, details toggle, buttons) to the bottom of the screen so they
-        // are always reachable no matter how long the notification is. Buttons
-        // that scroll away are buttons the user misses -> a timed-out request.
-        val scroll = OverflowScrollView(this, guidance = "Scroll for full request ↓")
-        scroll.setContent(content)
-
-        val pinned = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, 0, pad, pad)
-            background = Theme.sheet(Theme.BG)
-        }
-        pinned.addView(detailToggle)
-        pinned.addView(detailScroll)
-        pinned.addView(queueLine)
-        // Attached so a screen reader can still reach it, but with no height: the countdown
-        // label was removed from the modal's appearance on request, and anything that still
-        // reserved a line for it would leave a gap where a label used to be.
-        pinned.addView(countdown, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0
-        ))
-        // The banner must name the CAUSE, because each one needs a different action and the old
-        // single line sent everyone to Settings — including the two cases where Settings would
-        // not help at all.
-        if (biometricBlocked) {
-            val msg = when (bioStatus) {
-                BioStatus.Usable -> ""
-                BioStatus.NotEnrolled ->
-                    "⚠ APPROVE unavailable — no fingerprint enrolled. Add one in Settings, " +
-                        "then return here."
-                BioStatus.LockedOut ->
-                    "⚠ Biometric locked out after too many attempts. It clears by itself — " +
-                        "this screen re-checks and APPROVE returns without you doing anything."
-                BioStatus.VaultBroken ->
-                    "⚠ APPROVE unavailable — the stored vault key is invalid or was " +
-                        "invalidated (a new fingerprint can do this). Reset the vault in " +
-                        "Options and re-add the secrets."
-            }
-            if (msg.isNotEmpty()) {
-                pinned.addView(label(msg, Theme.TEXT_BODY_SP, Theme.DANGER))
-            }
-        }
-        // The icon moved to the header, so the duplicate row here is gone (Mido, 2026-10-27:
-        // *"and remove it from down"*).
-        pinned.addView(armBar)
-        if (exceptionRow != null) {
-            pinned.addView(
-                exceptionRow,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = Theme.dp(this@ApprovalActivity, 10) }
-            )
-        }
-        if (passwordSection != null) {
-            pinned.addView(
-                passwordSection,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            )
-        }
-        pinned.addView(btnRow)
-
-        val outer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = Theme.sheet(Theme.BG)
-            addView(scroll, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-            ))
-            addView(pinned)
-        }
-        // Keep the modal clear of the system bars (Mido, 2026-10-19: *"add top padding so
-        // that when I get a notification with the modal it doesn't overlap"*). Applied as
-        // WINDOW INSETS, not a fixed dp: the status bar is a different height per device and
-        // orientation, and this modal is drawn over whatever was on screen — so a hardcoded
-        // number would be wrong exactly where it matters. Bottom is included too, so the
-        // buttons never sit under the navigation bar.
-        ViewCompat.setOnApplyWindowInsetsListener(outer) { v, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, bars.top, 0, bars.bottom)
-            insets
-        }
-        val presentation = PaperEntranceView(this)
-        presentation.addView(outer, ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        ))
-        setContentView(presentation)
-        val entrance = PaperMotion.entrance(
-            alreadyPresented = !entranceRegistry.claim(id),
-        )
-        if (entrance.durationMs > 0L) presentation.present()
     }
+
+    private fun timeoutSeconds(): Long = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS)
 
     /**
-     * True from the moment a decision is taken until the stamp has finished.
-     *
-     * The 120ms tick loop calls `finish()` as soon as `ApprovalGate.isCurrent(id)` is false —
-     * which is the INSTANT `finishWith` resolves the request, i.e. before the stamp has drawn a
-     * single frame. So the overlay was added to a window that was already being torn down, and
-     * the animation died after a frame or two (Mido, 2026-10-27: *"it dismisses too fast to see
-     * the animation"*).
-     *
-     * The tick must not decide the modal is dead while a stamp is playing: the stamp IS the exit.
+     * THREE phases, not two. `enabledAtMs` is an ARM TIME that can sit in the future (the misclick
+     * guard), so "is it stamped" is not the same question as "may the human tap". DENY is live in
+     * every phase: denying is fail-closed, and making someone wait to refuse is backwards.
      */
-    private var stamping = false
-    private val forcedExit = android.os.Handler(android.os.Looper.getMainLooper())
-
-    private fun finishWith(id: Long, approved: Boolean) {
-        val resolved = ApprovalGate.resolve(id, approved)
-        if (!resolved) Log.w("ApprovalActivity", "request $id already resolved/expired")
-        // The stamp fires on the human's decision — both approve AND deny — not on
-        // arrival. One firm rubber-stamp thud + the red ink mark, then the request
-        // resolves and the modal leaves. See StampOverlay.
-        showStamp(approved)
-    }
-
-    /**
-     * The full-screen rubber-stamp moment, on every decision.
-     *
-     * [StampOverlay] draws the red ink mark over a dimmed scrim, plays the physical
-     * thud + haptic (via [SoundAlerts.stamp]), and only then finishes the Activity on
-     * its [StampOverlay.onFinished]. The gate is already resolved above, so the only
-     * thing this delays is the modal's disappearance — never the decision itself.
-     */
-    private fun showStamp(approved: Boolean) {
-        // Set BEFORE the overlay is added, so the tick loop cannot finish the Activity between
-        // these two statements — and so the tick stops instead of re-arming the controls.
-        stamping = true
-        // Hide the fetch indicator for good. It belongs to "a decision is still possible"; once
-        // the human has decided, it must not reappear behind the stamp.
-        armBar.visibility = ViewGroup.GONE
-        val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
-        val sheet = root.getChildAt(root.childCount - 1)
-        val overlay = StampOverlay(this).apply {
-            onFinished = {
-                if (!approved) showDenialTear(root, sheet) else finish()
+    private fun applyPhase(phase: ArmPhase, now: Long) {
+        val ticks = views.ticks
+        val secondsUntilArmed = when (phase) {
+            ArmPhase.SummaryPending -> {
+                val deadline = ApprovalGate.currentSummaryDeadlineMs()
+                maxOf(1L, (deadline - now + 999L) / 1000L).toInt()
             }
-            onImpact = {
-                playStampImpact()
-                sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {
-                    sheet.animate().scaleY(1f).setDuration(90L).start()
-                }.start()
-            }
+            is ArmPhase.Guard -> phase.secondsLeft.toInt()
+            is ArmPhase.Armed -> 0
         }
-        // **Above the sheet, or it is invisible.**
-        //
-        // `PaperEntranceView` carries 4dp of elevation for its sheet shadow, and a ViewGroup draws
-        // children in ascending Z order once any child has elevation. The overlay defaulted to
-        // Z=0, so the sheet was painted OVER it on every frame — which is exactly what the device
-        // showed: 37 real paints, nothing visible, and a modal that looked frozen because the
-        // sheet on top received the taps.
-        overlay.elevation = Theme.dp(this, Theme.OVERLAY_ELEVATION_DP).toFloat()
-        // Full-screen, on top of everything in this window (the modal).
-        root.addView(overlay, ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        ))
-        overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
-        // **No timed exit any more.**
-        //
-        // The stamp is dismissed by the human, so a wall-clock backstop would recreate exactly
-        // the failure it was protecting against: closing the Activity while the receipt is still
-        // unread. The overlay owns its own exit now via `onFinished`, and it is the ONLY thing
-        // that closes this screen after a decision.
-        //
-        // `forcedExit` is kept for the arming fallback inside the overlay — not for closing here.
-    }
-
-    private fun showDenialTear(root: android.view.ViewGroup, sheet: View) {
-        val tear = PaperTearView(this)
-        // Same Z-order rule as the stamp: without this the tear is drawn under the sheet and the
-        // denial looks like a frozen modal rather than a torn page.
-        tear.elevation = Theme.dp(this, Theme.OVERLAY_ELEVATION_DP).toFloat()
-        root.addView(tear, ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-        ))
-        tear.onFinished = { finish() }
-        // Capture before hiding the live children. The gate was already resolved; no bitmap or
-        // animation callback participates in its outcome.
-        val captured = tear.tear(sheet)
-        if (captured) {
-            sheet.visibility = View.INVISIBLE
+        if (phase is ArmPhase.Armed) {
+            if (!ticksArmed) {
+                // Set once, on the transition: the ticks are clock-driven from here on.
+                val enabledAt = ApprovalGate.currentEnabledAtMs()
+                ticks.deadlineUptimeMs = SystemClock.uptimeMillis() +
+                    maxOf(0L, enabledAt + timeoutSeconds() * 1000L - now)
+                ticks.armed = true
+                ticksArmed = true
+            }
         } else {
-            // Low memory or no measured surface: fail closed to the ordinary exit, never strand.
-            root.removeView(tear)
-            finish()
+            val text = GateArming.text(phase)
+            if (ticks.unarmedText != text) ticks.unarmedText = text
+            if (ticks.armed) ticks.armed = false
+        }
+        // A password request is not approvable on an empty field: sudo would reject it seconds
+        // later with a message about a terminal rather than about the typo.
+        val passwordReady = !needsPassword || (passwordField?.text?.isNotEmpty() == true)
+        val bioBlocked = gesture == ApproveGesture.TAP_THEN_BIOMETRIC && bioStatus != BioStatus.Usable
+        views.setApproveArmed(phase is ArmPhase.Armed && !bioBlocked && passwordReady, secondsUntilArmed)
+    }
+
+    /** D20: LockedOut clears by itself, so the screen re-checks it and Approve comes back on its own. */
+    private fun recheckBio() {
+        if (bioStatus != BioStatus.LockedOut) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBioCheckMs < GateArming.BIO_RECHECK_MS) return
+        lastBioCheckMs = now
+        val fresh = bioStatus()
+        if (fresh != bioStatus) {
+            bioStatus = fresh
+            renderBio()
         }
     }
 
-    private fun playStampImpact() {
-        // Fired at the visual contact frame, never before it and never used as a completion path.
-        try {
-            SoundAlerts.stamp(this)
-        } catch (e: SoundAlerts.SoundUnavailable) {
-            Log.e("ApprovalActivity", "STAMP SOUND FAILED: ${e.message}", e)
-            android.widget.Toast.makeText(
-                this, "Stamp sound failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-            ).show()
+    /** The banner names the CAUSE, because each one needs a different action. */
+    private fun renderBio() {
+        val show = gesture == ApproveGesture.TAP_THEN_BIOMETRIC && bioStatus != BioStatus.Usable
+        views.setBioShown(show)
+        if (!show) return
+        val (title, body) = when (bioStatus) {
+            BioStatus.Usable -> return
+            BioStatus.NotEnrolled -> GateCopy.BIO_UNAVAILABLE_TITLE to GateCopy.BIO_NOT_ENROLLED
+            BioStatus.LockedOut -> GateCopy.BIO_LOCKED_TITLE to GateCopy.BIO_LOCKED
+            BioStatus.VaultBroken -> GateCopy.BIO_UNAVAILABLE_TITLE to GateCopy.BIO_VAULT_BROKEN
         }
+        views.bioTitle.text = title
+        views.bioBody.text = body
     }
 
     /**
-     * Approve, taking the password path when this request needs one.
-     *
-     * Reads the chars straight out of the `Editable` rather than through
-     * `text.toString()`: a String cannot be wiped, and going through one would leave an
-     * unremovable copy of the password in the heap for no benefit.
+     * Approve. The gesture decides first (D13): when the gate requires the fingerprint, nothing
+     * else runs until it succeeds — not even the contacts permission, whose grant would otherwise
+     * approve on its own. Then [afterGesture] takes over.
      */
+    private fun onApprove(id: Long, by: String) {
+        if (stamping) return
+        if (gesture == ApproveGesture.TAP_THEN_BIOMETRIC) {
+            promptBiometric { afterGesture(id, by) }
+        } else {
+            afterGesture(id, by)
+        }
+    }
+
     /**
-     * Ask for READ_CONTACTS, then approve the request that needed it.
-     *
-     * The human tapped APPROVE on `GET /contacts`, so the two things they meant are "yes, run it"
-     * and "yes, you may read my contacts". Asking here means the answer arrives while they are
-     * still looking at the card that asked the question.
-     *
-     * `contactsPromptRunning` prevents a double tap from stacking two system dialogs, which on
-     * some OEM builds drops the first result entirely.
+     * The approve gesture is complete. In order: the contacts permission (the request stays
+     * PENDING while the system dialog runs, and the grant comes back here), then an armed
+     * exception (HOLD gates, D58), then the plain or password approve.
+     */
+    private fun afterGesture(id: Long, by: String) {
+        if (stamping) return
+        when {
+            needsContactsPermission -> { contactsBy = by; requestContactsThenApprove(id) }
+            exceptionArmed -> approveWithException(id, by)
+            else -> approveNow(id, by)
+        }
+    }
+
+    /**
+     * The exception key. On a HOLD gate a tap only arms the exception and the hold still guards
+     * the approval (D58). Otherwise the tap approves and saves the exception at once, behind the
+     * same fingerprint as APPROVE — and nothing finishes until the decision is actually resolved,
+     * because `promptBiometric` is ASYNCHRONOUS. (An earlier version finished right after starting
+     * the prompt, which destroyed the Activity before the fingerprint ran: *"modal kept coming
+     * back"*.) A dismissed prompt does nothing, so the request stays pending for a retry.
+     */
+    private fun onExceptionTap(id: Long) {
+        if (stamping) return
+        when (gesture) {
+            ApproveGesture.HOLD -> {
+                exceptionArmed = !exceptionArmed
+                views.exception?.toggle()
+                views.exception?.keyView?.let { Haptics.perform(it, HapticEvent.TOGGLE) }
+            }
+            ApproveGesture.TAP_THEN_BIOMETRIC -> promptBiometric { approveWithException(id, "biometric") }
+            ApproveGesture.TAP -> approveWithException(id, "tap")
+        }
+    }
+
+    /** Approve and write the exception in one gesture; every such approval shows the punch (D59). */
+    private fun approveWithException(id: Long, by: String) {
+        val rule = views.exception?.offer?.rule ?: return approveNow(id, by)
+        if (!ApprovalGate.resolveWithException(id, rule)) {
+            Log.w(TAG, "request $id refused the exception, already resolved, or expired")
+            views.holdKey?.reset()
+            return
+        }
+        showStamp(approved = true, by = by)
+    }
+
+    private fun finishWith(id: Long, approved: Boolean, by: String) {
+        val resolved = ApprovalGate.resolve(id, approved)
+        if (!resolved) {
+            Log.w(TAG, "request $id already resolved/expired")
+            // Nothing was decided by this tap, so there is nothing to stamp: an APPROVED punch for
+            // a request that timed out, was denied or was replaced would be a lie. Re-arm the hold
+            // key and let the tick close the Activity once it sees the request is gone.
+            views.holdKey?.reset()
+            return
+        }
+        // The punch fires on the human's decision — approve AND deny — never on arrival.
+        showStamp(approved, by)
+    }
+
+    /**
+     * The punch, then the receipt (D16). The gate is already resolved, so the only thing this
+     * delays is the modal's disappearance — never the decision itself. The thud plays from the
+     * punch at impact; a sound failure is logged there, never substituted and never a toast.
+     */
+    private fun showStamp(approved: Boolean, by: String) {
+        // Set BEFORE the punch is added, so the tick cannot finish the Activity in between — and
+        // so it stops instead of re-arming the controls behind the punch.
+        stamping = true
+        handler.removeCallbacks(tick)
+        val decidedAtMs = GateClock.nowMs()
+        views.ticks.armed = false
+        views.ticks.deadlineUptimeMs = 0L
+        views.ticks.visibility = View.INVISIBLE
+        views.disableKeys()
+        val root = findViewById<ViewGroup>(android.R.id.content)
+        val id = requestId
+        val punch = PunchView(this, scrimAlpha = 0x66).apply {
+            meta = GateCopy.punchMeta(id, decidedAtMs)
+            holdAfterSettle = true
+            joltTarget = views.outer
+            onFinished = { showReceipt(root, approved, by, decidedAtMs) }
+        }
+        root.addView(punch, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        punch.stamp(if (approved) PunchView.Verdict.APPROVED else PunchView.Verdict.DENIED)
+    }
+
+    private fun showReceipt(root: ViewGroup, approved: Boolean, by: String, decidedAtMs: Long) {
+        if (isFinishing) return
+        val id = requestId
+        val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
+        val receipt = Receipt(
+            this,
+            GateReceipt.lines(id, requesterName, verb, GateReceipt.pathOf(endpoint), decidedAtMs, approved, by),
+            entryNo = id.toString(),
+            status = GateReceipt.status(approved),
+        ).apply { onDone = { finish() } }
+        root.addView(receipt)
+        receiptShown = true
+        receipt.feed()
+    }
+
+    /**
+     * Ask for READ_CONTACTS, then approve the request that needed it. The human tapped APPROVE on
+     * `GET /contacts`, so they meant "run it" and "you may read my contacts"; asking here means the
+     * answer arrives while they are still looking at the card that asked. `contactsPromptRunning`
+     * stops a double tap stacking two system dialogs, which on some OEM builds drops the first result.
      */
     private fun requestContactsThenApprove(id: Long) {
         if (contactsPromptRunning) {
-            Log.i("ApprovalActivity", "contacts prompt already running; ignoring second tap")
+            Log.i(TAG, "contacts prompt already running; ignoring second tap")
             return
         }
         contactsPromptRunning = true
-        Log.i("ApprovalActivity", "APPROVE: requesting READ_CONTACTS before resolving $id")
+        Log.i(TAG, "APPROVE: requesting READ_CONTACTS before resolving $id")
         requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), REQ_CONTACTS)
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_CONTACTS) return
-        contactsPromptRunning = false
-
-        val granted = grantResults.isNotEmpty() &&
-            grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
-        Log.i(
-            "ApprovalActivity",
-            "READ_CONTACTS from card: ${if (granted) "granted" else "DENIED"}"
-        )
-        if (granted) {
-            // Now the approval means what it says: the handler will find the permission.
-            approveNow(id)
+        // Only a result for a prompt this screen asked for, after the gesture, can approve.
+        if (!contactsPromptRunning) {
+            Log.w(TAG, "READ_CONTACTS result with no prompt running; ignored")
             return
         }
-
+        contactsPromptRunning = false
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+        Log.i(TAG, "READ_CONTACTS from card: ${if (granted) "granted" else "DENIED"}")
+        if (granted) {
+            // Now the approval means what it says: the handler will find the permission. The
+            // gesture (and the fingerprint, when required) already ran before the prompt, so this
+            // continues where it left off, an armed exception included.
+            needsContactsPermission = false
+            afterGesture(requestId, contactsBy)
+            return
+        }
         // Declined: leave the request PENDING and say so ON THE CARD. A 503 the human never sees
         // is how this looked like a dead button for four releases.
         needsContactsPermission = false
         showPermissionDeniedNotice()
     }
 
-    /**
-     * Tell the human, on this card, that the request cannot run without the permission.
-     *
-     * Not a Toast: a Toast can vanish before it is read, and this is the message that was missing
-     * for the entire life of the feature.
-     */
+    /** Tell the human, on this card, that the request cannot run without the permission. */
     private fun showPermissionDeniedNotice() {
-        val canAsk = shouldShowRequestPermissionRationale(
-            android.Manifest.permission.READ_CONTACTS
-        )
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Contacts permission needed")
-            .setMessage(
-                if (canAsk) {
-                    "Without it this request cannot run — contacts search answers " +
-                        "contacts_unavailable.\n\nTap APPROVE to be asked again."
-                } else {
-                    "Android will not show that prompt again.\n\nEnable Contacts in " +
-                        "Settings > Permissions, then approve this request again."
-                }
-            )
-            .setPositiveButton(
-                if (canAsk) "OK" else "Open Settings"
-            ) { _, _ ->
+        val canAsk = shouldShowRequestPermissionRationale(android.Manifest.permission.READ_CONTACTS)
+        StmpDialog.builder(this)
+            .setTitle(GateCopy.CONTACTS_TITLE)
+            .setMessage(if (canAsk) GateCopy.CONTACTS_CAN_ASK else GateCopy.CONTACTS_CANNOT_ASK)
+            .setPositiveButton(if (canAsk) GateCopy.CONTACTS_OK else GateCopy.CONTACTS_OPEN_SETTINGS) { _, _ ->
                 if (!canAsk) {
                     try {
                         startActivity(
@@ -1224,39 +497,37 @@ class ApprovalActivity : FragmentActivity() {
                             )
                         )
                     } catch (e: Exception) {
-                        Log.w("ApprovalActivity", "cannot open settings: ${e.message}")
+                        Log.w(TAG, "cannot open settings: ${e.message}")
                     }
                 }
-                // Re-arm the button so a retry is possible without leaving the card.
+                // Re-arm so a retry is possible without leaving the card.
                 needsContactsPermission = true
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(GateCopy.CONTACTS_CANCEL, null)
             .show()
     }
 
-    private fun approveNow(id: Long) {
+    /**
+     * Approve, taking the password path when this request needs one. Reads the chars straight out
+     * of the `Editable` rather than through `text.toString()`: a String cannot be wiped.
+     */
+    private fun approveNow(id: Long, by: String) {
         val field = passwordField
         if (!needsPassword || field == null) {
-            finishWith(id, approved = true)
+            finishWith(id, approved = true, by = by)
             return
         }
         val chars = CharArray(field.length())
         field.text.getChars(0, field.length(), chars, 0)
-        finishWithPassword(id, chars)
+        finishWithPassword(id, chars, by)
     }
 
     /**
-     * Approve a request that needed a password, handing the chars to the gate.
-     *
-     * **The caller's array is wiped immediately after the hand-off.** The gate keeps its
-     * own copy, so this one has no reason to survive — and an Activity that is finishing
-     * is exactly the kind of object whose memory sits around afterwards.
-     *
-     * The chars are read straight out of the `Editable` rather than through
-     * `text.toString()`: a String cannot be wiped, and going through one would leave an
-     * unremovable copy of the password in the heap for no benefit.
+     * Approve a request that needed a password, handing the chars to the gate. **The caller's
+     * array is wiped immediately after the hand-off**: the gate keeps its own copy, and a
+     * finishing Activity is exactly the kind of object whose memory sits around afterwards.
      */
-    private fun finishWithPassword(id: Long, password: CharArray) {
+    private fun finishWithPassword(id: Long, password: CharArray, by: String) {
         val resolved = try {
             ApprovalGate.resolveWithPassword(id, password)
         } finally {
@@ -1264,63 +535,49 @@ class ApprovalActivity : FragmentActivity() {
             password.fill('\u0000')
         }
         if (!resolved) {
-            Log.w("ApprovalActivity", "request $id does not need a password, or expired")
+            Log.w(TAG, "request $id does not need a password, or expired")
             // Nothing was approved, so there is no decision to stamp. Leave the modal up so the
             // human can retry rather than dismissing on a silent failure.
+            views.holdKey?.reset()
             return
         }
-        // **The stamp fires here too.** This path used to call `finish()` directly, which is why
-        // the sudo modal dismissed instantly with no stamp and no sound — the password approve
-        // was the ONLY decision that skipped the animation entirely (Mido, 2026-10-27: *"no
-        // fucking stamp sound and immediately dismissed"*). Every other approve/deny goes through
-        // `finishWith`, which stamps; this one has to match.
-        showStamp(approved = true)
+        // **The punch fires here too.** This path once called `finish()` directly, so the sudo
+        // modal dismissed with no stamp (Mido, 2026-10-27: *"no fucking stamp sound and
+        // immediately dismissed"*).
+        showStamp(approved = true, by = by)
     }
 
     /**
-     * Bind a mutating APPROVE to a live biometric.
+     * Bind APPROVE to a live biometric.
      *
-     * When a vault exists the prompt carries the vault's `CryptoObject` (decision A:
-     * every scan is crypto-bound). Two things fall out of that: the approval is
-     * unforgeable — no plugin, bug or stray callback can approve without a live finger on
-     * a hardware key — and if the vault happens to be locked, the SAME authorised cipher
-     * unwraps it, so one modal both unlocks and approves. Fingerprint-only, by platform
-     * rule: a crypto-bound prompt cannot accept `DEVICE_CREDENTIAL`.
+     * When a vault exists the prompt carries the vault's `CryptoObject` (decision A: every scan is
+     * crypto-bound). The approval is then unforgeable — no plugin, bug or stray callback can
+     * approve without a live finger on a hardware key — and if the vault is locked, the SAME
+     * authorised cipher unwraps it, so one modal both unlocks and approves. Fingerprint-only, by
+     * platform rule: a crypto-bound prompt cannot accept `DEVICE_CREDENTIAL`.
      *
-     * Before the vault exists there is nothing to bind to, so the prompt falls back to
-     * the plain form (STRONG or device credential). That is not a weakening: there is no
-     * secret on the device yet, and keeping the PIN escape hatch until setup is done is
-     * strictly more usable.
+     * Before the vault exists there is nothing to bind to, so the prompt falls back to the plain
+     * form (STRONG or device credential). There is no secret on the device yet.
      *
-     * On success [onApproved] fires and the request resolves. On failure/dismiss we do
-     * NOTHING to the request: it stays pending on its own countdown, APPROVE stays
-     * live, and tapping it again re-prompts — the window is the only limit. Reads never
-     * reach here (see [ApprovalView.requiresBiometric]).
+     * On success [onApproved] fires and the request resolves. On failure or dismiss we do NOTHING
+     * to the request: it stays pending on its own countdown, APPROVE stays live, and tapping it
+     * again re-prompts — the window is the only limit.
      */
     private fun promptBiometric(onApproved: () -> Unit) {
-        // Prepare the vault cipher FIRST: when a vault exists the prompt must carry it
-        // (decision A — every scan is crypto-bound), and if the key was invalidated there
-        // is no prompt worth showing. Failing closed here is the whole point.
+        // Prepare the vault cipher FIRST: if the key was invalidated there is no prompt worth
+        // showing. Failing closed here is the whole point.
         val cipher = try {
             if (SecretVault.exists(this)) SecretVault.prepareUnlockCipher(this) else null
         } catch (e: Exception) {
-            Log.w("ApprovalActivity", "vault cipher unavailable (${e.message}); not approving")
+            Log.w(TAG, "vault cipher unavailable (${e.message}); not approving")
             return
         }
-        val authenticators = if (cipher != null) {
-            // Crypto-bound: the platform forbids DEVICE_CREDENTIAL alongside a
-            // CryptoObject, so a bound prompt is fingerprint-only by construction.
-            BiometricManager.Authenticators.BIOMETRIC_STRONG
-        } else {
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        }
-        val manager = BiometricManager.from(this)
-        val can = manager.canAuthenticate(authenticators)
+        val authenticators = authenticatorsFor(hasVault = cipher != null)
+        val can = BiometricManager.from(this).canAuthenticate(authenticators)
         if (can != BiometricManager.BIOMETRIC_SUCCESS) {
-            // Fails closed: no prompt, no approval. The caller disables APPROVE and
-            // states the reason; this guard exists so a stray tap can never approve.
-            Log.w("ApprovalActivity", "biometric unavailable (code=$can); not approving")
+            // Fails closed: no prompt, no approval. The banner states the reason; this guard
+            // exists so a stray tap can never approve.
+            Log.w(TAG, "biometric unavailable (code=$can); not approving")
             return
         }
         val prompt = BiometricPrompt(
@@ -1331,38 +588,34 @@ class ApprovalActivity : FragmentActivity() {
                     if (cipher != null) {
                         val authorised = result.cryptoObject?.cipher
                         if (authorised == null) {
-                            // Impossible in principle: we passed a CryptoObject. Refuse
-                            // rather than treat "authenticated" as sufficient.
-                            Log.w("ApprovalActivity", "no authorised cipher returned; not approving")
+                            // Impossible in principle: we passed a CryptoObject. Refuse rather
+                            // than treat "authenticated" as sufficient.
+                            Log.w(TAG, "no authorised cipher returned; not approving")
                             return
                         }
                         if (!SecretVault.isUnlocked()) {
                             try {
-                                // One modal does both (decision A): the finger that
-                                // approves also opens the vault, so a SECURE call on a
-                                // locked vault is not a dead end.
+                                // One modal does both (decision A): the finger that approves also
+                                // opens the vault, so a SECURE call on a locked vault is not a dead end.
                                 SecretVault.unlock(this@ApprovalActivity, authorised)
-                                Log.i("ApprovalActivity", "vault unlocked by the approval prompt")
+                                Log.i(TAG, "vault unlocked by the approval prompt")
                             } catch (e: Exception) {
-                                Log.w("ApprovalActivity", "vault unlock failed: ${e.message}")
+                                Log.w(TAG, "vault unlock failed: ${e.message}")
                                 return
                             }
                         }
                     }
-                    // Success wins the race: the request is approved even if the
-                    // countdown was about to expire. resolve() is idempotent — if the
-                    // window DID close first, it is a no-op and logged, never a wrong
-                    // approval (resolve only applies while the request is still pending).
+                    // Success wins the race: resolve() is idempotent — if the window DID close
+                    // first, it is a no-op and logged, never a wrong approval.
                     onApproved()
                 }
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    // Dismissed / locked out: leave the request pending. APPROVE stays
-                    // live so the human can try again within the window (point 7).
-                    Log.i("ApprovalActivity", "biometric error $errorCode: $errString")
+                    // Dismissed / locked out: leave the request pending; APPROVE stays live.
+                    Log.i(TAG, "biometric error $errorCode: $errString")
                 }
                 override fun onAuthenticationFailed() {
                     // A single bad read: the prompt stays up for a retry; nothing to do.
-                    Log.i("ApprovalActivity", "biometric failed (retryable)")
+                    Log.i(TAG, "biometric failed (retryable)")
                 }
             }
         )
@@ -1370,9 +623,8 @@ class ApprovalActivity : FragmentActivity() {
             .setTitle(if (cipher != null) "Unlock and approve" else "Approve request")
             .setSubtitle(endpointLabel())
             .setAllowedAuthenticators(authenticators)
-        // A STRONG-only prompt REQUIRES a negative button (the platform throws without
-        // one). With device credential allowed the system supplies its own, so adding
-        // one there would be an error — hence the branch.
+        // A STRONG-only prompt REQUIRES a negative button (the platform throws without one). With
+        // device credential allowed the system supplies its own, so adding one would be an error.
         if (cipher != null) info.setNegativeButtonText("Cancel")
         if (cipher != null) {
             prompt.authenticate(info.build(), BiometricPrompt.CryptoObject(cipher))
@@ -1381,27 +633,25 @@ class ApprovalActivity : FragmentActivity() {
         }
     }
 
+    /** Crypto-bound when a vault exists: the platform forbids DEVICE_CREDENTIAL with a CryptoObject. */
+    private fun authenticatorsFor(hasVault: Boolean): Int =
+        if (hasVault) BiometricManager.Authenticators.BIOMETRIC_STRONG
+        else BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+
     private fun endpointLabel(): String =
-        intent.getStringExtra(EXTRA_ENDPOINT) ?: "PhoneBridge"
+        intent.getStringExtra(EXTRA_ENDPOINT) ?: GateCopy.BIO_SUBTITLE_FALLBACK
 
     /**
-     * Why approval is or is not possible right now.
-     *
-     * **A boolean was not enough, and the modal lied because of it.** The old check collapsed
-     * every failure into `false` and the UI printed one line — "set up a fingerprint/PIN
-     * (strong) to approve" — for all of them. So a vault key invalidated by a new fingerprint
-     * sent the human into Settings to add a fingerprint they already had, and a temporary
-     * lockout read as "your device cannot do this". Both are wrong, and both leave APPROVE dead
-     * with no way forward.
-     *
-     * Naming the cause is what lets the screen offer the right action: re-authenticate, or go to
-     * Settings, or nothing at all because a retry will work.
+     * Why approval is or is not possible right now. **A boolean was not enough, and the modal
+     * lied because of it**: one line for every cause sent a human with an invalidated vault key
+     * to Settings to add a fingerprint they already had. Naming the cause is what lets the screen
+     * say the right thing.
      */
     private enum class BioStatus {
         /** The prompt will work if the human passes it. */
         Usable,
 
-        /** Nothing is enrolled: the device genuinely cannot satisfy it until Settings is used. */
+        /** Nothing is enrolled: the device cannot satisfy it until Settings is used. */
         NotEnrolled,
 
         /** Temporarily locked out (too many attempts). A wait fixes it; nothing to configure. */
@@ -1419,62 +669,46 @@ class ApprovalActivity : FragmentActivity() {
         val hasVault = SecretVault.exists(this)
         if (hasVault) {
             try {
-                // Preparing the cipher is the real test: an invalidated key throws here, and a
-                // prompt carrying it could never succeed.
+                // Preparing the cipher is the real test: an invalidated key throws here.
                 SecretVault.prepareUnlockCipher(this)
             } catch (e: Exception) {
-                Log.w("ApprovalActivity", "vault cipher unavailable: ${e.message}")
+                Log.w(TAG, "vault cipher unavailable: ${e.message}")
                 return BioStatus.VaultBroken
             }
         }
-        val authenticators = if (hasVault) {
-            // Crypto-bound: the platform forbids DEVICE_CREDENTIAL alongside a CryptoObject.
-            BiometricManager.Authenticators.BIOMETRIC_STRONG
-        } else {
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        }
-        return when (BiometricManager.from(this).canAuthenticate(authenticators)) {
+        val code = canAuthenticateForTest ?: BiometricManager.from(this).canAuthenticate(authenticatorsFor(hasVault))
+        return when (code) {
             BiometricManager.BIOMETRIC_SUCCESS -> BioStatus.Usable
-            // A locked vault is not a device problem: the prompt itself unlocks it, which is
-            // exactly the "one scan does both jobs" decision this app already made.
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BioStatus.NotEnrolled
             // 7 == BIOMETRIC_ERROR_LOCKOUT: too many attempts, clears by itself.
             7 -> BioStatus.LockedOut
-            // A hardware fault is NOT a lockout: nothing the human does on this screen fixes it,
-            // and telling them to wait would be a lie.
-            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BioStatus.VaultBroken
+            // A hardware fault is NOT a lockout: nothing the human does here fixes it, and telling
+            // them to wait would be a lie.
             else -> BioStatus.VaultBroken
         }
     }
 
     @Deprecated("Deprecated in the platform; kept for back-compat behavior on older devices.")
+    @SuppressLint("MissingSuperCall")
     override fun onBackPressed() {
-        // Back == deny. Never leave a request dangling open by accident.
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
-        finishWith(id, approved = false)
-        // **Do NOT tear the Activity down while the stamp is playing.**
-        //
-        // `finishWith` starts the stamp, and `super.onBackPressed()` finishes the Activity — so
-        // pressing back used to show the receipt and destroy the window in the same frame. The
-        // stamp now owns the exit (it waits for a tap), so back must resolve the request and then
-        // leave the screen alone.
-        if (stamping) return
-        @Suppress("DEPRECATION")
-        super.onBackPressed()
+        // During the punch the decision is already made: back may close the receipt early, and
+        // can never resolve a second time or start a second punch (D20).
+        if (stamping) {
+            if (receiptShown) finish()
+            return
+        }
+        // Back == deny. Never leave a request dangling open by accident. No `super`: it would
+        // finish the Activity at once and the DENIED punch and receipt would never show (D16).
+        // The receipt's `onDone` finishes, exactly as for a DENY tap.
+        finishWith(requestId, approved = false, by = "back")
     }
 
     /**
-     * Drop the reference to the password field, and wipe whatever it still holds.
-     *
-     * A finishing Activity is exactly the kind of object whose memory sits around
-     * afterwards, and this one may be holding a root password. Clearing the `Editable`
-     * first means the chars are gone even if a view reference survives somewhere; dropping
-     * the field then removes the last easy path to them.
+     * Drop the reference to the password field, and wipe whatever it still holds. Clearing the
+     * `Editable` first means the chars are gone even if a view reference survives somewhere.
      */
     override fun onDestroy() {
-        forcedExit.removeCallbacksAndMessages(null)
-
+        handler.removeCallbacks(tick)
         passwordField?.text?.clear()
         passwordField = null
         super.onDestroy()

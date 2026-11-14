@@ -39,7 +39,7 @@ object VaultGate {
             onFailed("could not prepare the vault cipher: ${e.message}")
             return
         }
-        prompt(activity, cipher, "Unlock PhoneBridge", "Confirm it's you", { authorised ->
+        prompt(activity, cipher, "Unlock STMP", "Confirm it's you", { authorised ->
             try {
                 SecretVault.unlock(activity, authorised)
                 onUnlocked()

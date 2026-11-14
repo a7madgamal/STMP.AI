@@ -105,7 +105,7 @@ object JsonCode {
         val sb = SpannableStringBuilder(text)
         for (span in tokenize(text)) {
             if (span.end <= span.start) continue
-            val colour = palette[span.kind] ?: Theme.ON_SURFACE
+            val colour = palette[span.kind] ?: Theme.current().ink
             sb.setSpan(
                 ForegroundColorSpan(colour),
                 span.start,
@@ -118,11 +118,20 @@ object JsonCode {
 
     /** Key colours for the app's paper world: keys carry, values inform, punctuation recedes. */
     fun ink(): Map<JsonKind, Int> = mapOf(
-        JsonKind.KEY to Theme.ACCENT,
-        JsonKind.STRING to Theme.WARNING,
-        JsonKind.NUMBER to Theme.SUCCESS,
-        JsonKind.LITERAL to Theme.SUCCESS,
-        JsonKind.PUNCT to Theme.ON_SURFACE_VARIANT,
+        JsonKind.KEY to Theme.current().ink,
+        JsonKind.STRING to Theme.current().cautionText,
+        JsonKind.NUMBER to Theme.current().okText,
+        JsonKind.LITERAL to Theme.current().okText,
+        JsonKind.PUNCT to Theme.current().etched,
+    )
+
+    /** Kind colours for the gate's dark readout (TOKENS 3.4): values bright, structure muted. */
+    fun readoutInk(p: com.mido.phonebridge.ui.tokens.Palette): Map<JsonKind, Int> = mapOf(
+        JsonKind.KEY to p.readoutMuted,
+        JsonKind.STRING to p.readoutString,
+        JsonKind.NUMBER to p.readoutCommand,
+        JsonKind.LITERAL to p.readoutCommand,
+        JsonKind.PUNCT to p.readoutMuted,
     )
 
     /**

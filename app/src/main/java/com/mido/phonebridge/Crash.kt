@@ -51,7 +51,7 @@ object Crash {
                 Debug.log("CRASH ${error.javaClass.name}: ${error.message}")
             } catch (t: Throwable) {
                 // Never let bookkeeping replace the real failure.
-                android.util.Log.e("PhoneBridge", "could not record crash: ${t.message}")
+                android.util.Log.e("Crash", "could not record crash: ${t.message}")
             }
             previous?.uncaughtException(thread, error)
         }
@@ -108,7 +108,7 @@ internal object Evidence {
         }
         if (writtenAt != null && installedAt > 0L && writtenAt < installedAt) {
             android.util.Log.i(
-                "PhoneBridge",
+                "Crash",
                 "$name predates this install (${writtenAt} < $installedAt); discarding",
             )
             file.delete()

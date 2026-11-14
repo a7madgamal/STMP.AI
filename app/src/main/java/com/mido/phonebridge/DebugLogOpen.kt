@@ -16,6 +16,7 @@ package com.mido.phonebridge
  * need the fragment to restore it before the first render, which is more machinery than a
  * developer-only debug toggle justifies.
  */
+/** Settings shows this log in a Readout (WP07); the flag only decides whether it is open. */
 object DebugLogOpen {
     @Volatile
     var open: Boolean = false

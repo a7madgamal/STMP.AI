@@ -1,10 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The two colours the XML layer needs (theme window background + primary).
-  Everything else lives in `ui/Theme.kt`; these exist only because a theme style
-  cannot reference a Kotlin constant. Keep them in sync with Theme.BG / Theme.ACCENT.
+  The single source of every colour role (TOKENS 3.1). Light values here, dark values in
+  values-night/colors.xml. Kotlin reads them through ui/tokens/Palettes; nothing else holds a copy.
 -->
 <resources>
-    <color name="pb_bg">#FFF5EEDF</color>
-    <color name="pb_accent">#FFB23A2F</color>
+    <color name="stmp_body">#E4E2DD</color>
+    <color name="stmp_panel">#F3F2EE</color>
+    <color name="stmp_sunken">#DCD9D2</color>
+    <color name="stmp_readout">#17171A</color>
+    <color name="stmp_hairline">#D2CFC7</color>
+    <color name="stmp_outline">#77746D</color>
+    <color name="stmp_ink">#151518</color>
+    <color name="stmp_etched">#625F59</color>
+    <color name="stmp_on_ink">#FFFFFF</color>
+    <color name="stmp_signal">#FF4F1A</color>
+    <color name="stmp_on_signal">#151518</color>
+    <color name="stmp_readout_text">#E7ECE4</color>
+    <color name="stmp_readout_command">#F1F4EF</color>
+    <color name="stmp_readout_muted">#79827B</color>
+    <color name="stmp_readout_danger">#FFB79F</color>
+    <color name="stmp_readout_string">#E8D9A8</color>
+    <color name="stmp_ok_text">#146D41</color>
+    <color name="stmp_caution_text">#805500</color>
+    <color name="stmp_signal_text">#B32900</color>
+    <color name="stmp_ok_glyph">#1A9257</color>
+    <color name="stmp_caution_glyph">#AE7300</color>
+    <color name="stmp_signal_glyph">#F33800</color>
+    <color name="stmp_ok_surface">#D5E9DC</color>
+    <color name="stmp_caution_surface">#F2E6CD</color>
+    <color name="stmp_signal_surface">#F5DBD0</color>
+    <color name="stmp_led_ok">#20B26A</color>
+    <color name="stmp_led_caution">#E99A00</color>
+    <color name="stmp_led_signal">#FF4F1A</color>
+    <color name="stmp_led_off">#BDBAB2</color>
+    <color name="stmp_bevel_highlight">#FFFFFFFF</color>
+    <color name="stmp_bevel_shade">#12000000</color>
+    <color name="stmp_ink_highlight">#33FFFFFF</color>
+    <color name="stmp_key_lip">#C9C6BE</color>
+    <color name="stmp_key_lip_ink">#000000</color>
+    <color name="stmp_key_lip_signal">#C23A10</color>
+    <color name="stmp_readout_shadow">#8C000000</color>
+    <color name="stmp_rocker_track">#D3D0C8</color>
+    <color name="stmp_rocker_cap_off">#F7F6F2</color>
+    <color name="stmp_rocker_off_text">#625F59</color>
+    <color name="stmp_hold_track">#CFCCC4</color>
+    <color name="stmp_tape_paper">#FBFAF6</color>
+    <color name="stmp_scrim">#73000000</color>
+    <color name="stmp_focus">#151518</color>
+    <color name="stmp_ripple">#1F151518</color>
+    <color name="stmp_nav_bar">#FF000000</color>
+    <!-- Launcher icon (WP11 3.7). Not night-qualified: the icon looks the same in either mode.
+         Each equals a light-palette role; LauncherColorsTest keeps them equal. -->
+    <color name="stmp_launcher_bg">#FFE4E2DD</color>
+    <color name="stmp_launcher_key">#FF151518</color>
+    <color name="stmp_launcher_key_lip">#FF000000</color>
+    <color name="stmp_launcher_key_hi">#33FFFFFF</color>
+    <color name="stmp_launcher_led">#FF20B26A</color>
+    <color name="stmp_launcher_led_ring">#FF146D41</color>
+    <color name="stmp_launcher_led_halo">#6620B26A</color>
+    <color name="stmp_launcher_glyph">#FFE7ECE4</color>
+    <color name="stmp_launcher_mono">#FFFFFFFF</color>
 </resources>

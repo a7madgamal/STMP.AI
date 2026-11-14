@@ -9,4 +9,6 @@ plugins {
     // Same version as the Android plugin above: two Kotlin versions in one build is a
     // classpath conflict waiting to happen.
     id("org.jetbrains.kotlin.jvm") version "2.4.21" apply false
+    // Screenshot tests on Robolectric (WP00). Same version as the two test libraries in :app.
+    id("io.github.takahirom.roborazzi") version "1.77.0" apply false
 }

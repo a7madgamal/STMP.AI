@@ -71,7 +71,7 @@ object Stall {
                 } catch (e: InterruptedException) {
                     return@Thread
                 } catch (t: Throwable) {
-                    android.util.Log.e("PhoneBridge", "stall watch failed: ${t.message}")
+                    android.util.Log.e("Stall", "stall watch failed: ${t.message}")
                 }
             }
         }, "stall-watch").apply { isDaemon = true }.start()
@@ -102,7 +102,7 @@ object Stall {
             // harmless: it is a synchronized deque, not a UI call.
             Debug.log("STALL main thread frozen ${STALL_MS}ms — stack recorded")
         } catch (t: Throwable) {
-            android.util.Log.e("PhoneBridge", "could not record stall: ${t.message}")
+            android.util.Log.e("Stall", "could not record stall: ${t.message}")
         }
     }
 
@@ -118,7 +118,7 @@ object Stall {
         try {
             File(ctx.applicationContext.filesDir, FILE).delete()
         } catch (e: Exception) {
-            android.util.Log.w("PhoneBridge", "could not clear stall record: ${e.message}")
+            android.util.Log.w("Stall", "could not clear stall record: ${e.message}")
         }
     }
 }

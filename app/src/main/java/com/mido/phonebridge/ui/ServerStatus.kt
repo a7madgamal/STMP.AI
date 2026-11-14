@@ -85,14 +85,47 @@ object ServerStatus {
         else -> State.STOPPED
     }
 
+    /** Why [State.RUNNING_ATTENTION]. Order is display order. */
+    enum class Attention { NOTIFICATIONS_BLOCKED, LISTENER_OFF }
+
+    /** Why RUNNING_ATTENTION. Empty exactly when [listenerOk] and [notifOk]. */
+    fun attention(listenerOk: Boolean, notifOk: Boolean): List<Attention> = buildList {
+        if (!notifOk) add(Attention.NOTIFICATIONS_BLOCKED)
+        if (!listenerOk) add(Attention.LISTENER_OFF)
+    }
+
+    fun attentionTitle(a: Attention): String = when (a) {
+        Attention.NOTIFICATIONS_BLOCKED -> "Notifications are blocked"
+        Attention.LISTENER_OFF -> "Notification access is off"
+    }
+
+    fun attentionDetail(a: Attention): String = when (a) {
+        Attention.NOTIFICATIONS_BLOCKED ->
+            "STMP can't show its status or reminders until you allow notifications."
+        Attention.LISTENER_OFF ->
+            "The Notifications plugin can't read your phone's notifications until you turn this on."
+    }
+
+    /** The trailing link word of the attention row. */
+    fun attentionAction(a: Attention): String = when (a) {
+        Attention.NOTIFICATIONS_BLOCKED -> "ALLOW"
+        Attention.LISTENER_OFF -> "OPEN"
+    }
+
+    /** While the rocker has been tapped and the real state has not landed yet (R3: never "Stopped"). */
+    fun pendingTitle(starting: Boolean): String = if (starting) "Starting\u2026" else "Stopping\u2026"
+
+    fun pendingDetail(starting: Boolean): String =
+        if (starting) "Starting the bridge." else "Stopping the bridge."
+
     /** The hero title for a state. */
     fun title(state: State): String = when (state) {
-        State.RUNNING_HEALTHY -> "● Running"
-        State.RUNNING_ATTENTION -> "● Running — needs attention"
+        State.RUNNING_HEALTHY -> "Running"
+        State.RUNNING_ATTENTION -> "Running — needs action"
         // Deliberately not "Running": that word is the lie this state replaces.
-        State.UNRESPONSIVE -> "● Not answering"
-        State.FAILED -> "● Could not start"
-        State.STOPPED -> "● Stopped"
+        State.UNRESPONSIVE -> "Not answering"
+        State.FAILED -> "Could not start"
+        State.STOPPED -> "Stopped"
     }
 
     /**
@@ -124,8 +157,8 @@ object ServerStatus {
             // change it.
             if (lastError.isNotBlank()) lastError
             else "${bindAddress.ifBlank { "?" }}:$port"
-        // No button by that name exists: the control is a switch now.
-        State.STOPPED -> "Switch the server on to begin"
+        // No button by that name exists: the control is the Bridge rocker.
+        State.STOPPED -> "Switch the bridge on to begin."
     }
 
     /** One-line summary for the Setup checklist row, kept in step with the hero. */

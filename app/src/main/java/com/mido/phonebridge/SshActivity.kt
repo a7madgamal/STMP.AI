@@ -1,23 +1,42 @@
 package com.mido.phonebridge
 
-import android.app.Activity
-import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
-import android.text.InputType
+import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
+import androidx.fragment.app.FragmentActivity
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.plugins.ssh.SshConnection
 import com.mido.phonebridge.plugins.ssh.SshKeygen
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.VaultModule
+import com.mido.phonebridge.ui.showSecure
+import com.mido.phonebridge.ui.kit.ActionRow
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.ErrorBlock
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StateBlock
+import com.mido.phonebridge.ui.kit.StatusRow
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.kit.Toasts
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.HapticEvent
+import com.mido.phonebridge.ui.tokens.Haptics
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * SSH connections: one row per host, with its public key ready to copy.
@@ -31,58 +50,56 @@ import com.mido.phonebridge.ui.Theme
  * vault at creation and is never read back for display; only the public half is shown. The Secrets
  * screen refuses to reveal `kind = SSH` entries for the same reason.
  */
-class SshActivity : Activity() {
+class SshActivity : FragmentActivity() {
 
+    private lateinit var vaultSlot: FrameLayout
+    private lateinit var errorSlot: LinearLayout
     private lateinit var listContainer: LinearLayout
-    private lateinit var header: TextView
+    private lateinit var addKey: View
+
+    /** Why the last unlock or create attempt on this screen failed. Cleared on success and on leaving. */
+    private var vaultError: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A public key is not a secret, but the screen sits next to one and a screenshot of a
         // half-built connection dialog is not worth the risk.
         window.setFlags(
-            android.view.WindowManager.LayoutParams.FLAG_SECURE,
-            android.view.WindowManager.LayoutParams.FLAG_SECURE
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        val pad = Theme.dp(this, 20)
-        val root = LinearLayout(this).apply {
+        val frame = VaultModule.frame(this, "SSH connections")
+        val content = frame.content
+
+        vaultSlot = FrameLayout(this)
+        content.addView(vaultSlot, fullWidth())
+        errorSlot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-            background = Theme.sheet(Theme.BG)
+            isFocusable = true
         }
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(content)
+        content.addView(errorSlot, fullWidth())
 
-        header = TextView(this).apply {
-            textSize = Theme.TEXT_DETAIL_SP
-            setTextColor(Theme.ON_SURFACE_VARIANT)
-        }
-        content.addView(header)
-
-        content.addView(Theme.sectionHeader(this, "SSH connections"))
+        content.addView(SectionHeader.create(this, "SSH connections"))
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(listContainer)
+        content.addView(listContainer, fullWidth())
 
-        val addBtn = Theme.button(this, "ADD CONNECTION", Theme.ButtonStyle.SUCCESS) { addDialog() }
-        addBtn.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = Theme.dp(this@SshActivity, 12) }
-        content.addView(addBtn)
+        addKey = KeyButton.create(
+            this, "ADD CONNECTION", KeyButton.Kind.INK, KeyButton.Size.REGULAR, describe = "Add an SSH connection",
+        ) { addDialog() }
+        content.addView(addKey, fullWidth().apply { topMargin = dp(Dimens.SPACE_M) })
 
         content.addView(
-            Theme.text(
+            Type.text(
                 this,
                 "Each connection generates its own ed25519 key on this phone. Paste the public key " +
-                    "into the server's ~/.ssh/authorized_keys once — the private half never leaves " +
+                    "into the server's ~/.ssh/authorized_keys once. The private half never leaves " +
                     "the vault.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@SshActivity, 14), 0, 0) }
+                TypeRole.CAPTION, Theme.palette(this).etched,
+            ),
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_L) },
         )
 
-        root.addView(scroll)
-        setContentView(Theme.inset(root))
         render()
     }
 
@@ -91,122 +108,150 @@ class SshActivity : Activity() {
         render()
     }
 
-    private fun render() {
-        val unlocked = SecretVault.isUnlocked()
-        header.text = if (unlocked) {
-            "Vault unlocked for this session."
-        } else {
-            "Vault locked — reopen the app and scan your fingerprint."
-        }
+    override fun onPause() {
+        super.onPause()
+        vaultError = null
+    }
 
+    /** Shows the card as it looks after a failed unlock or creation. Tests only. */
+    @androidx.annotation.VisibleForTesting
+    internal fun setVaultErrorForTest(reason: String?) {
+        vaultError = reason
+        render()
+    }
+
+    private fun fullWidth() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+
+    private fun dp(v: Int) = Theme.dp(this, v)
+
+    // --- render ---
+
+    private fun render() {
+        errorSlot.removeAllViews()
+        val unlocked = SecretVault.isUnlocked()
+        vaultSlot.removeAllViews()
+        val model = VaultModule.model(SecretVault.state(this), unlocked, forSsh = true)
+        vaultSlot.addView(VaultModule.create(this, model, vaultError, ::onVaultAction))
+        VaultModule.setEnabled(addKey, unlocked)
+        renderList(unlocked)
+    }
+
+    private fun onVaultAction(a: VaultModule.Action) {
+        val ok = { vaultError = null; render() }
+        val failed = { reason: String -> vaultError = reason; render() }
+        when (a) {
+            VaultModule.Action.UNLOCK -> VaultGate.unlock(this, ok, failed)
+            VaultModule.Action.CREATE -> VaultGate.initialize(this, ok, failed)
+            VaultModule.Action.RESET -> VaultUnlock.ensureUnlocked(this, force = true) { vaultError = null; render() }
+        }
+    }
+
+    private fun renderList(unlocked: Boolean) {
         listContainer.removeAllViews()
         val names = try {
             SecretVault.names(this).filter { it.startsWith("ssh-") }
         } catch (e: Exception) {
-            listContainer.addView(row("vault unreadable", e.message ?: "", Theme.DANGER_SURFACE))
-            emptyList()
+            listContainer.addView(ErrorBlock.create(
+                this, "The vault list can't be read",
+                "If it keeps happening, reset the vault in Settings.",
+                details = e.message ?: e.javaClass.simpleName,
+                recovery = KeyButton.Spec("Try again", "Read the vault list again") { renderList(unlocked) },
+            ))
+            return
         }
         if (names.isEmpty()) {
-            listContainer.addView(row("no connections yet", "tap ADD CONNECTION", Theme.SURFACE))
+            listContainer.addView(StateBlock.create(
+                this, StateBlock.Kind.EMPTY, "No connections yet",
+                VaultModule.emptyBody(unlocked, "ADD CONNECTION", " to make a key for a server."),
+            ))
+        }
+        for (vaultName in names) listContainer.addView(connectionCard(vaultName, unlocked))
+    }
+
+    private fun connectionCard(vaultName: String, unlocked: Boolean): View {
+        val p = Theme.palette(this)
+        val label = vaultName.removePrefix("ssh-")
+        val delete = KeyButton.Spec("DELETE", "Delete $label") { confirmDelete(label, vaultName) }
+
+        // Entries are encrypted: without the session they cannot be decoded, and calling
+        // `SecretVault.get` would only report "locked" for every one of them. List the names.
+        if (!unlocked) {
+            return Panel.create(this, Panel.Tone.PLAIN).apply {
+                addView(
+                    ActionRow(this@SshActivity, label, "Unlock the vault to see this connection.", emptyList(), delete),
+                    fullWidth(),
+                )
+            }
         }
 
-        for (vaultName in names) {
-            val label = vaultName.removePrefix("ssh-")
-            val conn = try {
-                SshConnection.fromJson(SecretVault.get(this, vaultName))
-            } catch (e: Exception) {
-                listContainer.addView(
-                    row(label, "unreadable: ${e.message}", Theme.DANGER_SURFACE)
-                )
-                continue
-            }
-
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(
-                    Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12),
-                    Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12)
-                )
-                background = Theme.outlined(this@SshActivity, Theme.SURFACE, Theme.RADIUS_CARD)
-            }
-            card.layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = Theme.dp(this@SshActivity, 10) }
-
-            card.addView(Theme.text(this, label, 16f))
-            card.addView(
-                Theme.text(
-                    this, "${conn.user}@${conn.host}:${conn.port}", 13f, Theme.ON_SURFACE_VARIANT
-                )
+        val conn = try {
+            SshConnection.fromJson(SecretVault.get(this, vaultName))
+        } catch (e: Exception) {
+            // Unreadable, but never stuck: the stored entry can still be deleted.
+            return ErrorBlock.create(
+                this, "Can't read the connection '$label'",
+                "Its stored entry is damaged. Delete it and add the connection again.",
+                details = e.message ?: e.javaClass.simpleName,
+                recovery = delete.copy(label = "Delete"),
+                destructiveRecovery = true,
             )
-
-            // The key type is worth stating: it is the thing a server's authorized_keys cares
-            // about, and an unexpected type is a clue something is wrong before a call fails.
-            SshKeygen.keyTypeOf(conn.privateKey)?.let {
-                card.addView(Theme.text(this, it, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
-            }
-
-            // HOST KEY state. A connection with no pin has never been confirmed, and the next call
-            // will refuse and report the fingerprint rather than running — saying so here means
-            // that refusal is expected rather than surprising.
-            val pinned = conn.hostKeyFingerprint
-            card.addView(
-                Theme.text(
-                    this,
-                    if (pinned == null) "host key: not yet trusted — the first call will report it"
-                    else "host key: $pinned",
-                    12f,
-                    if (pinned == null) Theme.WARNING else Theme.SUCCESS
-                ).apply { setPadding(0, Theme.dp(this@SshActivity, 6), 0, 0) }
-            )
-
-            // --- the key's own identity, on the card ---
-            //
-            // "SSH needs more details when opened" (Mido, 2026-11-04). The card used to name the
-            // key type and then offer a button whose only output was a dialog. That meant the two
-            // things you actually check against a server — the public key line and its
-            // fingerprint — were one tap deep, and the fingerprint was not shown anywhere at all.
-            //
-            // Both are public by construction: the private half never leaves the vault.
-            val pub = SshKeygen.publicKeyOf(conn.privateKey, comment = "phonebridge-$label")
-            val fingerprint = pub?.let { SshKeygen.fingerprintOf(it) }
-            if (fingerprint != null) {
-                card.addView(
-                    Theme.text(this, "key fingerprint", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
-                        .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
-                )
-                card.addView(
-                    Theme.text(this, fingerprint, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
-                        typeface = Theme.monoFont(this@SshActivity)
-                        setTextIsSelectable(true)
-                    }
-                )
-            }
-            if (pub != null) {
-                card.addView(
-                    Theme.text(this, "public key", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
-                        .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
-                )
-                card.addView(
-                    Theme.text(this, pub, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE).apply {
-                        typeface = Theme.monoFont(this@SshActivity)
-                        setTextIsSelectable(true)
-                    }
-                )
-            }
-            // The vault entry name, so a duplicate label on two hosts is tellable apart.
-            card.addView(
-                Theme.text(this, "vault entry: $vaultName", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT)
-                    .apply { setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0) }
-            )
-
-            val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            buttons.addView(small("copy public key") { copyPublicKey(label, conn) })
-            buttons.addView(small("delete") { confirmDelete(label, vaultName) })
-            card.addView(buttons)
-
-            listContainer.addView(card)
         }
+
+        val card = Panel.create(this, Panel.Tone.PLAIN)
+        card.addView(
+            ActionRow(
+                this, label, "${conn.user}@${conn.host}:${conn.port}",
+                listOf(KeyButton.Spec("PUBLIC KEY", "Show the public key of $label") { copyPublicKey(label, conn) }),
+                delete,
+            ),
+            fullWidth(),
+        )
+
+        // The key type is worth stating: it is the thing a server's authorized_keys cares
+        // about, and an unexpected type is a clue something is wrong before a call fails.
+        SshKeygen.keyTypeOf(conn.privateKey)?.let { addValue(card, "KEY TYPE", it) }
+
+        // HOST KEY state. A connection with no pin has never been confirmed, and the next call
+        // will refuse and report the fingerprint rather than running — saying so here means
+        // that refusal is expected rather than surprising.
+        val pinned = conn.hostKeyFingerprint
+        card.addView(
+            if (pinned == null) {
+                StatusRow.create(
+                    this, "Host key", "NOT TRUSTED YET", StatusRow.Tone.CAUTION,
+                    "The first call will report the key and ask you before anything runs.", Led.State.CAUTION,
+                )
+            } else {
+                StatusRow.create(this, "Host key", "PINNED", StatusRow.Tone.OK, "The server's key is trusted.", Led.State.OK)
+            },
+            fullWidth(),
+        )
+        if (pinned != null) addReadout(card, "HOST KEY FINGERPRINT", pinned)
+
+        // --- the key's own identity, on the card ---
+        //
+        // "SSH needs more details when opened" (Mido, 2026-11-04): the public key line and its
+        // fingerprint are the two things you check against a server, so they are on the card, not
+        // one tap deep. Both are public by construction: the private half never leaves the vault.
+        val pub = SshKeygen.publicKeyOf(conn.privateKey, comment = "stmp-$label")
+        val fingerprint = pub?.let { SshKeygen.fingerprintOf(it) }
+        if (fingerprint != null) addReadout(card, "KEY FINGERPRINT", fingerprint)
+        if (pub != null) addReadout(card, "PUBLIC KEY", pub)
+        // The vault entry name, so a duplicate label on two hosts is tellable apart.
+        addValue(card, "VAULT ENTRY", vaultName)
+        return card
+    }
+
+    private fun addValue(card: LinearLayout, label: String, value: String) {
+        card.addView(Etched.label(this, label).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M) })
+        card.addView(Type.text(this, value, TypeRole.BODY, Theme.palette(this).ink), fullWidth())
+    }
+
+    private fun addReadout(card: LinearLayout, label: String, value: String) {
+        card.addView(Etched.label(this, label).apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(Dimens.SPACE_M) })
+        card.addView(Readout.create(this, value, Readout.Kind.BODY).root)
     }
 
     /**
@@ -217,33 +262,23 @@ class SshActivity : Activity() {
      * server by hand. The dialog has its own copy button for when that is what you want.
      */
     private fun copyPublicKey(label: String, conn: SshConnection) {
-        val pub = SshKeygen.publicKeyOf(conn.privateKey, comment = "phonebridge-$label")
+        errorSlot.removeAllViews()
+        val pub = SshKeygen.publicKeyOf(conn.privateKey, comment = "stmp-$label")
         if (pub == null) {
-            toast("could not read the public key for '$label'")
+            showError("Couldn't read the key", "No public key could be derived for '$label'.")
             return
         }
-        val box = TextView(this).apply {
-            text = pub
-            textSize = Theme.TEXT_CAPTION_SP
-            typeface = Theme.monoFont(this@SshActivity)
-            setTextIsSelectable(true)
-            setTextColor(Theme.ON_SURFACE)
-            setPadding(
-                Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10),
-                Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
-            )
-        }
-        AlertDialog.Builder(this)
+        StmpDialog.builder(this)
             .setTitle("Public key — $label")
             .setMessage("Add this line to ~/.ssh/authorized_keys on ${conn.host}.")
-            .setView(box)
-            .setPositiveButton("copy") { _, _ ->
+            .setView(VaultModule.dialogBody(this, Readout.create(this, pub, Readout.Kind.BODY).root))
+            .setPositiveButton("Copy") { _, _ ->
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("ssh public key", pub))
-                toast("public key copied")
+                cm.setPrimaryClip(ClipData.newPlainText("STMP ssh public key", pub))
+                Toasts.show(this, "Public key copied")
             }
-            .setNegativeButton("close", null)
-            .show()
+            .setNegativeButton("Close", null)
+            .showSecure()
     }
 
     /**
@@ -256,36 +291,27 @@ class SshActivity : Activity() {
      */
     private fun addDialog() {
         if (!SecretVault.isUnlocked()) {
-            toast("vault locked — unlock the app first")
+            Debug.log("ssh screen: add refused, vault locked")
             return
         }
-        val nameField = field("name (lowercase, e.g. prod)")
-        val hostField = field("host (e.g. box.example.com)")
-        val portField = field("port (default 22)").apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText("22")
-        }
-        val userField = field("user (e.g. deploy)")
+        errorSlot.removeAllViews()
+        val nameField = Field.create(this, "NAME", "", "name (lowercase, e.g. prod)")
+        val hostField = Field.create(this, "HOST", "", "host (e.g. box.example.com)")
+        val portField = Field.create(this, "PORT", "22", "port (default 22)", Field.Kind.NUMBER)
+        val userField = Field.create(this, "USER", "", "user (e.g. deploy)")
 
         // The reason a failure left the dialog empty, shown INSIDE it.
-        val errorLine = TextView(this).apply {
-            textSize = Theme.TEXT_CAPTION_SP
-            setTextColor(Theme.DANGER)
-            visibility = android.view.View.GONE
-            setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0)
+        val errorLine = Type.text(this, "", TypeRole.CAPTION, Theme.palette(this).cautionText).apply {
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
 
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@SshActivity, 16), Theme.dp(this@SshActivity, 8),
-                Theme.dp(this@SshActivity, 16), 0
-            )
-            addView(nameField)
-            addView(hostField)
-            addView(portField)
-            addView(userField)
-            addView(errorLine)
+            for (f in listOf(nameField, hostField, portField, userField)) {
+                addView(f.root, fullWidth().apply { bottomMargin = dp(Dimens.SPACE_S) })
+            }
+            addView(errorLine, fullWidth().apply { topMargin = dp(Dimens.SPACE_S) })
         }
 
         // **A REAL dialog, not `setPositiveButton`.**
@@ -293,63 +319,63 @@ class SshActivity : Activity() {
         // Mido, 2026-11-04: *"the problem is the dialog is lost, a failed attempt should keep the
         // dialog and its data for easy fix"*.
         //
-        // `setPositiveButton` ALWAYS dismisses when tapped — that is the contract. So the old
-        // `return@setPositiveButton` on a validation failure returned from a dialog Android had
-        // already decided to close. The name rule is the one people hit (it demands lowercase
-        // `[a-z0-9_-]`), and the result was: hint unreadable as a toast, all four fields gone,
-        // retype from scratch. A validation failure must cost a keystroke, not the form.
+        // `setPositiveButton` ALWAYS dismisses when tapped — that is the contract. So a
+        // `return` on a validation failure returned from a dialog Android had already decided to
+        // close, and the name rule (lowercase `[a-z0-9_-]`) is the one people hit: all four fields
+        // gone, retype from scratch. A validation failure must cost a keystroke, not the form.
         //
         // So the button is wired manually and the dialog closes ONLY on success. The error is
         // reported IN the dialog, where the fields it refers to still are.
-        val dialog = AlertDialog.Builder(this)
+        val dialog = StmpDialog.builder(this)
             .setTitle("Add SSH connection")
-            .setView(box)
-            .setNegativeButton("cancel", null)
-            .setPositiveButton("generate key", null)
+            .setView(VaultModule.dialogBody(this, box))
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Generate key", null)
             .create()
 
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val name = nameField.text.toString().trim().lowercase()
-                val host = hostField.text.toString().trim()
-                val user = userField.text.toString().trim()
-                val port = portField.text.toString().trim().toIntOrNull() ?: 22
+                val name = nameField.edit.text.toString().trim().lowercase()
+                val host = hostField.edit.text.toString().trim()
+                val user = userField.edit.text.toString().trim()
+                val port = portField.edit.text.toString().trim().toIntOrNull() ?: DEFAULT_PORT
 
                 fun refuse(message: String, focus: android.widget.EditText) {
                     errorLine.text = message
-                    errorLine.visibility = android.view.View.VISIBLE
+                    errorLine.visibility = View.VISIBLE
                     focus.requestFocus()
+                    Haptics.perform(focus, HapticEvent.REJECT)
                     Debug.log("ssh: add refused: $message")
                 }
 
                 if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
                     refuse(
-                        "Name must be lowercase letters, digits, - or _ (1-49 chars). " +
-                            "\"$name\" has something else.",
-                        nameField,
+                        if (name.isEmpty()) "Name is required." else
+                            "Name must be lowercase letters, digits, - or _ (1-49 chars).",
+                        nameField.edit,
                     )
                     return@setOnClickListener
                 }
                 if (host.isBlank()) {
-                    refuse("Host is required.", hostField)
+                    refuse("Host is required.", hostField.edit)
                     return@setOnClickListener
                 }
                 if (user.isBlank()) {
-                    refuse("User is required.", userField)
+                    refuse("User is required.", userField.edit)
                     return@setOnClickListener
                 }
-                if (port !in 1..65535) {
-                    refuse("Port must be between 1 and 65535.", portField)
+                if (port !in 1..MAX_PORT) {
+                    refuse("Port must be between 1 and 65535.", portField.edit)
                     return@setOnClickListener
                 }
                 if (SecretVault.has(this, "ssh-$name")) {
-                    refuse("A connection named \"$name\" already exists. Pick another name.", nameField)
+                    refuse("A connection named \"$name\" already exists. Pick another name.", nameField.edit)
                     return@setOnClickListener
                 }
 
-                errorLine.visibility = android.view.View.GONE
+                errorLine.visibility = View.GONE
                 try {
-                    val key = SshKeygen.generate(comment = "phonebridge-$name")
+                    val key = SshKeygen.generate(comment = "stmp-$name")
                     val conn = SshConnection(
                         host = host,
                         port = port,
@@ -373,7 +399,7 @@ class SshActivity : Activity() {
                     // Logged as well as shown: this is the one path whose failure the human
                     // reports as "it just doesn't work".
                     Debug.log("ssh: create '$name' failed: ${e.code}: ${e.message}")
-                    refuse("${e.code}: ${e.message}", nameField)
+                    refuse("${e.code}: ${e.message}", nameField.edit)
                 } catch (e: Throwable) {
                     // **Throwable, not Exception.** The 0.40.3 failure was a
                     // `NoClassDefFoundError` from inside JSch — an `Error`, which an `Exception`
@@ -381,74 +407,54 @@ class SshActivity : Activity() {
                     // because this is a UI boundary: the process must not die and the reason must
                     // reach the log.
                     Debug.log("ssh: create '$name' CRASHED: ${e.javaClass.name}: ${e.message}")
-                    refuse("Could not create key: ${e.javaClass.simpleName}: ${e.message}", nameField)
+                    refuse("Could not create key: ${e.javaClass.simpleName}: ${e.message}", nameField.edit)
                 }
             }
         }
-        dialog.show()
-    }
-
-    /** A text field styled to match the paper palette. */
-    private fun field(hintText: String) = EditText(this).apply {
-        // Explicit colours: the platform default is white-on-cream here, and with a DayNight
-        // parent it went the other way on a dark-mode phone — the mismatch Mido reported.
-        setTextColor(Theme.ON_SURFACE)
-        setHintTextColor(Theme.ON_SURFACE_VARIANT)
-        highlightColor = Theme.ACCENT
-        // A drawn background, so the field is a paper block rather than a Material underline
-        // that carries its own theme colours.
-        background = Theme.outlined(this@SshActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-        setPadding(
-            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10),
-            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
-        )
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@SshActivity, 8) }
-        hint = hintText
-        inputType = InputType.TYPE_CLASS_TEXT
-        importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+        dialog.showSecure()
     }
 
     private fun confirmDelete(label: String, vaultName: String) {
-        AlertDialog.Builder(this)
-            .setTitle("Delete '$label'?")
-            .setMessage(
-                "This removes the connection and its private key from the vault. The public key " +
-                    "stays in authorized_keys on the server — remove that line there too if you " +
-                    "want to revoke it."
-            )
-            .setPositiveButton("delete") { _, _ ->
-                try {
-                    SecretVault.delete(this, vaultName)
-                    render()
-                    toast("deleted '$label'")
-                } catch (e: Exception) {
-                    toast("could not delete: ${e.message}")
-                }
+        errorSlot.removeAllViews()
+        // Deleting rewrites the encrypted blob, so it needs the open session even though the key
+        // stays tappable while locked (the names are listed, so the way out has to be visible).
+        if (!SecretVault.isUnlocked()) {
+            showError("Can't delete $label", "Unlock the vault first. Deleting rewrites the stored secrets.")
+            return
+        }
+        StmpDialog.confirmDelete(
+            this,
+            title = "Delete '$label'?",
+            message = "This removes the connection and its private key from the vault. The public key " +
+                "stays in authorized_keys on the server — remove that line there too if you " +
+                "want to revoke it.",
+            deleteLabel = "Delete",
+        ) {
+            try {
+                SecretVault.delete(this, vaultName)
+                render()
+                Toasts.show(this, "Deleted ${label.take(NAME_IN_TOAST)}")
+            } catch (e: Exception) {
+                showError("Couldn't delete $label", e.message ?: e.javaClass.simpleName)
             }
-            .setNegativeButton("cancel", null)
-            .show()
+        }.showSecure()
     }
 
-    private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
-        text = "$title\n$detail"
-        textSize = Theme.TEXT_BODY_SP
-        setTextColor(Theme.ON_SURFACE)
-        setPadding(
-            Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12),
-            Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12)
-        )
-        background = Theme.surface(this@SshActivity, color, Theme.RADIUS_CARD)
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@SshActivity, 10) }
+    /** An error stays on the screen until the next action; a toast would be gone before it was read. */
+    private fun showError(title: String, detail: String) {
+        errorSlot.removeAllViews()
+        errorSlot.addView(ErrorBlock.create(
+            this, title, "That didn't go through.", details = detail,
+            recovery = KeyButton.Spec("Dismiss", "Dismiss this message") { errorSlot.removeAllViews() },
+        ))
+        Debug.log("ssh screen: $title: $detail")
+        errorSlot.requestFocus()
+        errorSlot.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED)
     }
 
-    private fun small(label: String, onClick: () -> Unit) =
-        Theme.button(this, label, Theme.ButtonStyle.NEUTRAL, small = true, onClick = onClick)
-
-    private fun toast(msg: String) {
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    private companion object {
+        const val DEFAULT_PORT = 22
+        const val MAX_PORT = 65535
+        const val NAME_IN_TOAST = 24
     }
 }

@@ -1,6 +1,6 @@
 package com.mido.phonebridge.ui
 
-import android.graphics.Typeface
+import android.content.res.Resources
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -8,6 +8,7 @@ import io.github.a7madgamal.shellhl.highlight.Highlight
 import io.github.a7madgamal.shellhl.highlight.Region
 import io.github.a7madgamal.shellhl.highlight.StyleKey
 import io.github.a7madgamal.shellhl.highlight.lineBreakOffsets
+import com.mido.phonebridge.ui.tokens.Palette
 
 /**
  * A shell command rendered for the approval card: coloured by token role, broken at
@@ -29,59 +30,59 @@ object ShellCode {
      * The default ink palette, mapping zsh style keys to this app's colours.
      *
      * Keys are zsh-syntax-highlighting's names verbatim, so an upstream theme file maps onto
-     * this one entry for entry. Unlisted keys fall back to [Theme.ON_SURFACE] — an unknown
+     * this one entry for entry. Unlisted keys fall back to [Palette.ink] — an unknown
      * key must still render legibly rather than disappear.
      */
     fun palette(): Map<String, Int> = mapOf(
         // Command position: the thing being run.
-        StyleKey.COMMAND to Theme.SUCCESS,
-        StyleKey.BUILTIN to Theme.SUCCESS,
-        StyleKey.FUNCTION to Theme.SUCCESS,
-        StyleKey.ALIAS to Theme.SUCCESS,
+        StyleKey.COMMAND to Theme.current().okText,
+        StyleKey.BUILTIN to Theme.current().okText,
+        StyleKey.FUNCTION to Theme.current().okText,
+        StyleKey.ALIAS to Theme.current().okText,
         // `sudo` is a command in the slot, but not the command. Accent, because "this runs
         // elevated" is the fact most worth noticing before a tap.
-        StyleKey.PRECOMMAND to Theme.ACCENT,
+        StyleKey.PRECOMMAND to Theme.current().ink,
 
         // Arguments and options: quiet. Options slightly stronger than plain arguments.
-        StyleKey.DEFAULT to Theme.ON_SURFACE,
-        StyleKey.SINGLE_HYPHEN_OPTION to Theme.ON_SURFACE,
-        StyleKey.DOUBLE_HYPHEN_OPTION to Theme.ON_SURFACE,
+        StyleKey.DEFAULT to Theme.current().ink,
+        StyleKey.SINGLE_HYPHEN_OPTION to Theme.current().ink,
+        StyleKey.DOUBLE_HYPHEN_OPTION to Theme.current().ink,
 
         // Quoting: a different material from bare text.
-        StyleKey.SINGLE_QUOTED to Theme.WARNING,
-        StyleKey.DOUBLE_QUOTED to Theme.WARNING,
-        StyleKey.DOLLAR_QUOTED to Theme.WARNING,
-        StyleKey.BACKQUOTED to Theme.WARNING,
+        StyleKey.SINGLE_QUOTED to Theme.current().cautionText,
+        StyleKey.DOUBLE_QUOTED to Theme.current().cautionText,
+        StyleKey.DOLLAR_QUOTED to Theme.current().cautionText,
+        StyleKey.BACKQUOTED to Theme.current().cautionText,
         // An unclosed quote is the one syntax error worth seeing on a half-typed command.
-        StyleKey.SINGLE_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.DOUBLE_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.DOLLAR_QUOTED_UNCLOSED to Theme.DANGER,
-        StyleKey.BACKQUOTED_UNCLOSED to Theme.DANGER,
+        StyleKey.SINGLE_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.DOUBLE_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.DOLLAR_QUOTED_UNCLOSED to Theme.current().cautionText,
+        StyleKey.BACKQUOTED_UNCLOSED to Theme.current().cautionText,
 
         // Structure: separators and redirects are where one operation becomes two.
-        StyleKey.COMMANDSEPARATOR to Theme.ACCENT,
-        StyleKey.REDIRECTION to Theme.ACCENT,
+        StyleKey.COMMANDSEPARATOR to Theme.current().ink,
+        StyleKey.REDIRECTION to Theme.current().ink,
 
         // Expansions. A `$(…)` is a command nested inside this one — worth seeing as its
         // own thing, because "this line also runs something else" is exactly the fact a
         // human must not miss before approving.
-        StyleKey.CMD_SUBST_UNQUOTED to Theme.WARNING,
-        StyleKey.CMD_SUBST_QUOTED to Theme.WARNING,
-        StyleKey.CMD_SUBST_DELIM_UNQUOTED to Theme.ON_SURFACE_VARIANT,
-        StyleKey.CMD_SUBST_DELIM_QUOTED to Theme.ON_SURFACE_VARIANT,
-        StyleKey.ARITHMETIC_EXPANSION to Theme.ON_SURFACE_VARIANT,
-        StyleKey.PROCESS_SUBSTITUTION to Theme.WARNING,
-        StyleKey.PROCESS_SUBSTITUTION_DELIM to Theme.ON_SURFACE_VARIANT,
+        StyleKey.CMD_SUBST_UNQUOTED to Theme.current().cautionText,
+        StyleKey.CMD_SUBST_QUOTED to Theme.current().cautionText,
+        StyleKey.CMD_SUBST_DELIM_UNQUOTED to Theme.current().etched,
+        StyleKey.CMD_SUBST_DELIM_QUOTED to Theme.current().etched,
+        StyleKey.ARITHMETIC_EXPANSION to Theme.current().etched,
+        StyleKey.PROCESS_SUBSTITUTION to Theme.current().cautionText,
+        StyleKey.PROCESS_SUBSTITUTION_DELIM to Theme.current().etched,
 
         // Facts about the call.
-        StyleKey.ASSIGN to Theme.ON_SURFACE_VARIANT,
-        StyleKey.NUMERIC_FD to Theme.ON_SURFACE_VARIANT,
-        StyleKey.GLOBBING to Theme.ON_SURFACE_VARIANT,
-        StyleKey.COMMENT to Theme.ON_SURFACE_VARIANT,
-        StyleKey.RESERVED_WORD to Theme.ACCENT,
+        StyleKey.ASSIGN to Theme.current().etched,
+        StyleKey.NUMERIC_FD to Theme.current().etched,
+        StyleKey.GLOBBING to Theme.current().etched,
+        StyleKey.COMMENT to Theme.current().etched,
+        StyleKey.RESERVED_WORD to Theme.current().ink,
 
         // A command the resolver positively said does not exist.
-        StyleKey.UNKNOWN_TOKEN to Theme.DANGER,
+        StyleKey.UNKNOWN_TOKEN to Theme.current().cautionText,
     )
 
     /**
@@ -93,12 +94,14 @@ object ShellCode {
     fun render(
         command: String,
         palette: Map<String, Int> = palette(),
+        fallback: Int? = null,
+        breakAtSeparators: Boolean = true,
     ): CharSequence {
         if (command.isEmpty()) return command
 
         // Breaks are resolved from the SAME tokens the colours come from, so "where a line
         // ends" and "what colour it is" can never disagree.
-        val cuts = lineBreakOffsets(command)
+        val cuts = if (breakAtSeparators) lineBreakOffsets(command) else emptyList()
 
         // Insert the breaks first, then colour against display offsets. Colouring first and
         // inserting after would shift every span by the number of newlines before it — the
@@ -119,7 +122,7 @@ object ShellCode {
             val start = displayOffset(region.start - 1, cuts)
             val end = displayOffset(region.end, cuts)
             if (end <= start) continue
-            val colour = palette[region.styleKey] ?: Theme.ON_SURFACE
+            val colour = palette[region.styleKey] ?: fallback ?: Theme.current().ink
             text.setSpan(
                 ForegroundColorSpan(colour),
                 start,
@@ -133,8 +136,85 @@ object ShellCode {
         return text
     }
 
-    /** Monospace face that cannot be substituted by the handwritten default. */
-    fun typeface(context: android.content.Context): Typeface = Theme.monoFont(context)
+    /**
+     * The same style keys as [palette], mapped onto the gate's dark readout (TOKENS 3.4): the
+     * command in readoutText, its arguments in readoutCommand, strings in readoutString, syntax
+     * errors in readoutDanger and structure in readoutMuted.
+     */
+    fun readoutPalette(p: Palette): Map<String, Int> = mapOf(
+        StyleKey.DEFAULT to p.readoutCommand,
+        StyleKey.SINGLE_HYPHEN_OPTION to p.readoutCommand,
+        StyleKey.DOUBLE_HYPHEN_OPTION to p.readoutCommand,
+
+        StyleKey.COMMAND to p.readoutText,
+        StyleKey.BUILTIN to p.readoutText,
+        StyleKey.FUNCTION to p.readoutText,
+        StyleKey.ALIAS to p.readoutText,
+        StyleKey.PRECOMMAND to p.readoutText,
+        StyleKey.RESERVED_WORD to p.readoutText,
+        StyleKey.COMMANDSEPARATOR to p.readoutText,
+        StyleKey.REDIRECTION to p.readoutText,
+
+        StyleKey.SINGLE_QUOTED to p.readoutString,
+        StyleKey.DOUBLE_QUOTED to p.readoutString,
+        StyleKey.DOLLAR_QUOTED to p.readoutString,
+        StyleKey.BACKQUOTED to p.readoutString,
+        StyleKey.CMD_SUBST_UNQUOTED to p.readoutString,
+        StyleKey.CMD_SUBST_QUOTED to p.readoutString,
+        StyleKey.PROCESS_SUBSTITUTION to p.readoutString,
+
+        StyleKey.SINGLE_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.DOUBLE_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.DOLLAR_QUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.BACKQUOTED_UNCLOSED to p.readoutDanger,
+        StyleKey.UNKNOWN_TOKEN to p.readoutDanger,
+
+        StyleKey.CMD_SUBST_DELIM_UNQUOTED to p.readoutMuted,
+        StyleKey.CMD_SUBST_DELIM_QUOTED to p.readoutMuted,
+        StyleKey.PROCESS_SUBSTITUTION_DELIM to p.readoutMuted,
+        StyleKey.ARITHMETIC_EXPANSION to p.readoutMuted,
+        StyleKey.ASSIGN to p.readoutMuted,
+        StyleKey.NUMERIC_FD to p.readoutMuted,
+        StyleKey.GLOBBING to p.readoutMuted,
+        StyleKey.COMMENT to p.readoutMuted,
+    )
+
+    /** Style keys whose region is quoted text: a dangerous token inside one is not underlined. */
+    private val QUOTED_KEYS = setOf(
+        StyleKey.SINGLE_QUOTED, StyleKey.DOUBLE_QUOTED, StyleKey.DOLLAR_QUOTED, StyleKey.BACKQUOTED,
+    )
+
+    /**
+     * [command] for the gate's readout: [render] with [readoutPalette], plus the D11 underline on
+     * every dangerous token that is not entirely inside a quoted string. Characters are only ever
+     * inserted (none today: the readout form adds no separator breaks); nothing is removed or reordered.
+     */
+    fun renderForReadout(command: String, p: Palette): CharSequence {
+        // No separator breaks here: the readout shows the command as it was sent. Long lines wrap
+        // at whitespace with a visible continuation glyph (ReadoutText), never at a "prettier" place.
+        val rendered = render(command, readoutPalette(p), fallback = p.readoutCommand, breakAtSeparators = false)
+        if (command.isEmpty()) return rendered
+        val text = rendered as? android.text.Spannable ?: android.text.SpannableString(rendered)
+        val cuts = emptyList<Int>()
+        // Regions are 1-based and inclusive; as half-open zero-based ranges they are [start-1, end).
+        val quoted = Highlight.highlight(command)
+            .filter { it.styleKey in QUOTED_KEYS }
+            .map { (it.start - 1) until it.end }
+        val thickness = DangerTokens.UNDERLINE_DP * Resources.getSystem().displayMetrics.density
+        for (r in DangerTokens.find(command)) {
+            val start = r.first
+            val endExclusive = r.last + 1
+            if (quoted.any { q -> start >= q.first && endExclusive <= q.last + 1 }) continue
+            DangerTokens.addSpans(text, displayStart(start, cuts), displayEnd(endExclusive, cuts), p, thickness)
+        }
+        return text
+    }
+
+    /** Display index of the character at original index [i]: a cut at or before it moved it. */
+    private fun displayStart(i: Int, cuts: List<Int>) = i + cuts.count { it <= i }
+
+    /** Display index of an exclusive end at original index [i]: only cuts strictly before it count. */
+    private fun displayEnd(i: Int, cuts: List<Int>) = i + cuts.count { it < i }
 
     /**
      * Where an original offset lands once newlines are inserted.

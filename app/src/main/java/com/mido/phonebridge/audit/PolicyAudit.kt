@@ -26,6 +26,10 @@ object PolicyAudit {
     fun record(before: GlobalMode, after: GlobalMode, source: String): AuditRecord =
         build("switch: ${before.name} → ${after.name} ($source)", after.name)
 
+    /** The "Fingerprint for approvals" setting was turned [on] or off; the gate mode did not move. */
+    fun recordFingerprint(on: Boolean, global: GlobalMode, source: String): AuditRecord =
+        build("fingerprint: ${if (on) "on" else "off"} ($source)", global.name)
+
     /**
      * A rule was added, replaced or removed.
      *

@@ -26,15 +26,17 @@ class Policy(
      * location: this field defaults rather than throwing, so a garbled value can never stop
      * the bridge the way a garbled `global` does.
      *
-     * **Default OFF** (Mido, 2026-10-20). A fresh install approves a `SECURE` modal with a
-     * plain tap. The vault is unaffected — its key is `setUserAuthenticationRequired(true)`, so
+     * **Default ON** (D66). A fresh install, or a file without this key, requires the
+     * fingerprint after the approve tap in Paranoid mode; a stored `false` is kept, and a phone
+     * with no usable fingerprint is forced back off. (Before D66 a fresh install approved a
+     * `SECURE` modal with a plain tap.) The vault is unaffected — its key is `setUserAuthenticationRequired(true)`, so
      * no setting can remove its fingerprint, and `lockOnLoad` still unlocks it at app start. The
      * only thing this switches is whether the MODAL binds APPROVE to a biometric.
      *
      * `NOTIFY` already works this way and always has: it never touched biometrics or the vault,
      * which is why this needs no new consent model invented for it.
      */
-    val fingerprintForModals: Boolean = false,
+    val fingerprintForModals: Boolean = true,
     /**
      * Which summariser to use, if any.
      *
@@ -526,7 +528,7 @@ class Policy(
                         "exactly one rule, and last-wins would make the file order-dependent"
                 )
             }
-            val fingerprint = lenientFlag(o, "fingerprintForModals", false, warnings)
+            val fingerprint = lenientFlag(o, "fingerprintForModals", true, warnings)
             val backend = lenientBackend(o, "aiBackend", AiBackend.OFF, warnings)
             val externalUrl = lenientString(o, "aiExternalUrl", warnings)
             val externalToken = lenientString(o, "aiExternalToken", warnings)

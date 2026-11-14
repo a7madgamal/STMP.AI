@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.7 (build 309)**.
+Current build: **v0.52.9 (build 324)**.
 
 ---
 
@@ -5383,6 +5383,109 @@ devDependencies. `node_modules/` is gitignored.
 - The bridge starts on Android 12 and 13 again. Below API 34 the service now posts its foreground notification with no type, because asking for `dataSync` against a manifest that declares `specialUse` fails the type-subset check and throws out of `startForeground`.
 - No behaviour change on Android 14+, which still starts as `specialUse` and keeps the no-6h-cap property.
 
+## 0.48.17 (build 293) — 2026-11-11
+- The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
+- A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
+
+## 0.48.18 (build 294) — 2026-11-11
+- A sudo request no longer shows ALWAYS NOTIFY / ALWAYS ASK. That button approved without the password: one tap ran the command with an empty sudo password, skipped the password path, and wrote a rule relaxing every SSH command.
+- The gate now builds no exception offer for a request that needs a password, and the modal drops one if it arrives anyway.
+- The gate refuses any approval of a password request that does not carry the password, whichever button sent it. DENY still works.
+
+## 0.48.19 (build 295) — 2026-11-11
+- Every screen and state is captured as a reference screenshot in light and dark at normal and large text, and CI fails when one changes unintentionally.
+- Unit tests run with a fixed English locale, so number formatting no longer depends on the machine.
+
+## 0.49.0 (build 296) — 2026-11-11
+- Dark mode follows the system on every screen, dialog, the approval modal and the floating notify card, all drawn from one palette.
+- Text is set in Geist and Geist Mono, bundled with the app; the handwritten face, paper grain and torn edges are gone.
+- The primary colour is ink; the old stamp red is removed, and error states use amber instead of red.
+
+## 0.49.1 (build 297) — 2026-11-11
+- Every dialog uses the app's own look in light and dark, including the ones that were stock white system dialogs.
+- The new controls for the redesign (rocker switch, mode knob, hold key, readout, LEDs, punch) are built and tested; screens adopt them in the next releases.
+- The hold key can no longer approve after it is disabled or disarmed mid-hold; it returns to idle and ignores keyboard holds while disabled.
+
+## 0.49.2 (build 298) — 2026-11-12
+- The approval screen leads with the exact command or payload on a dark readout, with risky shell tokens such as sudo, rm -rf and | sh underlined; the AI summary sits below it, marked as possibly wrong.
+- Requests that run or delete something, and sudo commands, are approved by holding the key for 1.2 seconds; deny is always one tap.
+- After you decide, a punch and a short receipt confirm what happened, and pressing back shows the DENIED punch and receipt like a DENY tap.
+- When approving needs the fingerprint, a contacts request asks for the fingerprint first; granting the contacts permission can no longer approve without it.
+- A hold can no longer approve after another app covers the screen or the screen loses focus mid-hold; the key returns to idle.
+
+## 0.49.3 (build 299) — 2026-11-12
+- The floating Don't-disturb card uses the new look in light and dark: a clear verb chip, a larger ✕ target and a thin countdown bar; tapping, the ✕ and silence still behave exactly as before.
+- Decisions on the card show the new punch, and neither the card nor the new-device screen accepts taps while another app is drawn over them.
+
+## 0.49.4 (build 300) — 2026-11-12
+- The Don't-disturb card now refuses an approve tap if another app covered it at any point during the tap, not only when the finger lifted. A cover pulled away just before release could otherwise steer an approval.
+
+## 0.49.5 (build 301) — 2026-11-12
+- Small keys keep their side padding, so their labels no longer touch the outline.
+- An approval that arrives after a request expired no longer shows APPROVED.
+
+## 0.49.6 (build 302) — 2026-11-12
+- Two-line labels on small keys stay inside the key face instead of touching the outline.
+
+## 0.49.7 (build 303) — 2026-11-12
+- Settings is redrawn in the new look in light and dark, with the page and every label named Settings.
+- Settings → Permissions now lists Notification access, the permission behind "needs attention", and says what each permission affects.
+- The AI section shows what is wrong in words for every model state, and the re-download dialog quotes the real model size.
+- Fingerprint for approvals is now on by default for new installs, and it can be changed in Settings → Approvals as well as on Home. A phone without a fingerprint keeps it off.
+- The debug log is a mono readout with a copy button, and forgetting a caller asks first and sits clear of the caller's name.
+- In the remote model server form, Save and Refresh models now use the address and token you typed, not the ones from before you started typing.
+- Switching the AI knob away from "On this phone" while the model downloads no longer repaints the page four times a second, so the remote server form keeps its focus and keyboard.
+
+## 0.49.8 (build 304) — 2026-11-12
+- Home is rebuilt as a control panel: the bridge switch with its address on a dark display, the gate mode as a three-position knob, and the latest requests listed underneath.
+- When the bridge says "needs attention" it now names the reason and links straight to the setting that fixes it.
+- The bottom tab bar is taller, has icons, and no longer shrinks its labels at large text sizes; switching tabs slides and plays the tab sound again.
+- Update problems appear in a dialog you can read instead of a toast that vanishes.
+
+## 0.49.9 (build 305) — 2026-11-12
+- The request log, request detail and Exceptions screens are redrawn with a back arrow, wrapping filter chips and no emoji; a gate change no longer looks like an error.
+- Request detail shows times in your time zone with the zone named, and no longer prints "null", raw millisecond counts or a trailing dash.
+- Exceptions names plugins and modes the way the rest of the app does (Whitelist, Paranoid, Don't disturb), keeps Remove clear of the mode button, and its add-exception dialogs match the app.
+
+## 0.49.10 (build 306) — 2026-11-12
+- Exceptions keeps its top bar when you tap Remove, Set, Save or Try again, so the back arrow stays clear of the status bar and the list keeps its gesture-bar padding.
+
+## 0.49.11 (build 307) — 2026-11-12
+- Plugins that need action now sort to the top of their group, and Debug, Help, Logs and Probe are tucked into a collapsed Developer group.
+- The plugin help dialog now tells you the real state of the plugin; it used to say "On, and ready" even when the plugin was not set up or needed a permission.
+- Plugin rows no longer break at large text sizes, the help bulb is a full-size tap target, and the technical route and error text under each plugin name is replaced with plain words.
+- In a build without Google sign-in, the Google, Gmail, Calendar and Drive rows say so instead of pretending to be set up.
+
+## 0.49.12 (build 308) — 2026-11-12
+- The plugin screen has a back arrow and a clear layout: switch, permissions, system access, settings and routes each sit in their own panel, with plain GRANTED, OPTIONAL and NEEDED labels.
+- System access rows now say why each one is needed, and editing a text setting shows an error in the dialog instead of silently not saving.
+- A plugin that is not registered now shows a message instead of closing the screen, and the Google sign-in screen has the same back arrow and readable error messages.
+
+## 0.49.13 (build 309) — 2026-11-12
+- The Secrets and SSH screens are redrawn with a back key, and a vault card at the top that says whether the vault is locked, not created or needs a reset, with a key that fixes it and the real reason when unlocking fails.
+- Secret and SSH cards, every dialog and the new-device screen use the new look; errors show on the screen instead of in a toast that disappears.
+
+## 0.49.14 (build 310) — 2026-11-12
+- The introduction is redrawn: the permission rows show their live state with a light and a word, the footer no longer covers the last line at large text, and the commands and the agent prompt are in a readout you can select and copy.
+- The introduction's wording is fixed: it points to the bulb on the Plugins tab and to Settings for permissions, and the agent prompt is no longer broken into short lines.
+
+## 0.49.15 (build 311) — 2026-11-12
+- The running notification now shows the address, port and gate mode, and has Open and Stop bridge buttons; the lock screen shows only that STMP is running.
+- The problem and new-device notifications say STMP, use the new icon and tell you the next step.
+- New launcher icon with a themed (monochrome) version, a new notification icon, and a new in-app logo; notifications, prompts and copied labels now say STMP.
+
+## 0.49.16 (build 312) — 2026-11-12
+- The last of the paper look is removed: the handwritten font, the stamp images and the old logo bitmap no longer ship, which also makes the app smaller.
+- Every control is at least 48dp with room between neighbours, every heading and switch is named for screen readers, and all text meets its contrast minimum in light and dark.
+- The new-device screen opens with the name field focused, the Exceptions screen applies each change to the policy as stored now instead of an older copy, and the request log filters keep screen reader focus when you tap one.
+- Google sign-in keeps the "Already signed in" note on screen while the account picker opens, and the fingerprint-unavailable messages use the name of the setting, "Fingerprint for approvals".
+
+## 0.49.17 (build 313) — 2026-11-12
+- Stopping the bridge no longer leaves a "starting" notice behind, even when a network check was still running as it stopped.
+
+## 0.49.18 (build 314) — 2026-11-12
+- On the Gmail, Calendar and Drive screens, tap the "Sign in" status to sign in with Google.
+
 ## 0.49.0 (build 293) — 2026-11-11
 - The Refined Paper foundation bundles Atkinson Hyperlegible Next for readable UI text and JetBrains Mono NL for exact payloads, while Handlee remains the display and stamp face.
 - Semantic text and control colours meet the agreed contrast floor; the stamp accent and destructive danger are now distinct.
@@ -5454,13 +5557,75 @@ devDependencies. `node_modules/` is gitignored.
 
 ## 0.51.7 (build 309) — 2026-11-13
 - The card stamp sits half its own height higher, so its lower edge meets the card's centre and the summary stays readable. The offset uses the resting height, keeping the slam one downward press rather than a wobble.
-## 0.51.8 (build 310) — 2026-11-13
-- The secret vault can be created on phones without StrongBox. The TEE fallback reused the StrongBox attempt's key spec, still asked for StrongBox, and failed with "could not create the vault key", which left Secrets and SSH locked.
-- A vault key that cannot be created now reports the real Keystore exception of each attempt instead of a generic message.
 
-## 0.51.9 (build 311) — 2026-11-13 — CURRENT
-- A sudo request can no longer be approved by the exception button. That button carries no password, so one tap approved with an empty field, skipped the password path, and wrote a rule relaxing every SSH command for the plugin/verb pair.
-- The offer is not built for a password request, and the gate refuses any approval of one that does not carry the password, whichever button sent it. DENY still works.
+## 0.52.0 (build 315) — 2026-11-13
+- This build includes everything from upstream 0.49.0 through 0.51.7, brought into the new look.
+- STMP now asks for your fingerprint when a request needs a locked vault, then carries on with the request.
+- Crashes are recorded, and a frozen main thread is detected; the last crash shows on Home.
+- Plugin groups no longer fail to draw on first open, and preference taps no longer freeze.
+- A request that cannot be shown on screen is refused instead of waiting.
+- Setup docs install the Hermes plugin by its catalog name.
+- Added an opt-in emulator ABI build flag.
+- The hint card stamp fixes from upstream 0.51.6 and 0.51.7 are not needed: the new punch already plays on the card.
+
+## 0.52.1 (build 316) — 2026-11-13
+- A status row with a long value, such as "Not connected", now puts that value under its title so the text keeps its width at large font sizes; the status light sits on the first line and the action key is at the end of the row.
+- The gate selector labels have room on each side and no longer run together.
+- In dark mode the switch OFF cap and label, and the outlines of the small keys and read chips, are clearly visible.
+- The download key keeps its label readable over the progress fill, and disabled keys and fields now look disabled.
+- Switches and rows show their pressed and focus states, and the focus ring is drawn clear of the control and inside its own edges, so all four sides show.
+- The recent-request rows line their text up in one column whatever the verb.
+- Deleting a caller, secret, SSH connection or the vault asks with a Keep key first and an outlined delete key set apart below it; the Exceptions mode picker has large rows with a radio mark and shows the current mode.
+
+## 0.52.2 (build 317) — 2026-11-13
+- Crash recording and frozen main thread detection are now really switched on at start-up, so the last crash and stall show up on Home and in the debug commands.
+- Setup docs now really install the Hermes plugin by its catalog name.
+- Removed the unused paper-look fonts from the app again.
+
+## 0.52.3 (build 318) — 2026-11-13
+- Updates: an update is offered only when its build number is higher than the installed one, and never when it would be a downgrade (a release with no build number falls back to comparing the version name). Release notes show as plain bullets without the heading line or Markdown marks.
+- Plugins: a plugin that is not in this build (the Google ones without sign-in) shows its switch OFF and locked, is not counted as on, offers no Sign in key and says "This build has no Google sign-in. Install the official release to use it." everywhere, including the Google sign-in screen, which now has a Back key.
+- Plugin screen: a plugin that is switched on but cannot serve reads "Can't serve" instead of "Disabled", never says "Open this plugin" from inside the plugin, the SSH plugin has an Add connection key, routes list one per entry with the description on its own indented line in sentence case, and the Google account email only wraps before the "@".
+- Request log: Home and the log show the same summary text. Turning "Fingerprint for approvals" on or off reads "Fingerprint for approvals: on" or "off", a settings save that kept the gate mode no longer reads "WHITELIST to WHITELIST", a gate change has no verb chip, "Denied, phone unattended" is grey and counts under Denied, and a gate change or an unknown path has no Decision panel. "Rule" reads "Exception" and "Switch was" reads "Gate mode before".
+- Errors: one error card everywhere. Raw error text sits behind a "Details" key inside the card, with a way to try again (policy, exceptions, callers, vault lists, model download, request log) or to delete a damaged SSH connection. Messages after a failed secret or SSH action can be dismissed.
+- Home: the bridge card says "Starting..." or "Stopping..." while the switch settles instead of "Stopped", "Edit exceptions" only shows in Whitelist mode where exceptions apply, the log warning no longer sits against the bridge card, and the Updates key no longer repeats "Checking".
+- Copy: "Needs action" is the one word for something that needs you, onboarding step 4 no longer says STMP can only ask more, permission states read Granted, Needed or Optional on every screen, the Secret vault sits outside Permissions, a wrong model file with equal rounded sizes shows exact bytes, empty secret and SSH lists say to unlock the vault first when it is locked, and "GitHub" keeps its capitals.
+- Onboarding: step 1 is left out once the bridge is on, and Copy prompt and Copy commands are off while the address is still a placeholder.
+
+## 0.52.4 (build 319) — 2026-11-13
+- Settings: the Notification access row no longer shows "Not connected" when nothing is granted; it reads "Needed" like a fresh install.
+- SSH: a damaged connection offers an outlined Delete key, like every other delete key, instead of a filled one.
+
+## 0.52.5 (build 320) — 2026-11-13
+- This build includes upstream 0.51.8 and 0.51.9, kept in the new look.
+- The secret vault can be created on phones without StrongBox. A vault key that cannot be created now reports the real Keystore error of each attempt.
+- A sudo request can no longer be approved by the exception button or by any approval that does not carry the password. DENY still works.
+
+## 0.52.6 (build 321) — 2026-11-13
+- Home: while the bridge switch settles, the card now says "Starting..." after you turn it on and "Stopping..." after you turn it off. It had the two the wrong way round.
+
+## 0.52.7 (build 322) — 2026-11-13
+- Home: "Starting..." and "Stopping..." now actually show after you flip the bridge switch, and stay until the bridge reaches the state you asked for.
+
+## 0.52.8 (build 323) — 2026-11-13
+- Home: if the bridge fails to start or stop, the card no longer stays on "Starting..." or "Stopping...". It shows the failure as soon as it happens, or when the wait runs out.
+
+## 0.52.9 (build 324) — 2026-11-13 — CURRENT
+- The approval card shows the whole command. A long command wraps only at spaces, every wrapped line ends in a visible arrow so a wrap is never read as a space, and a command taller than its box says how many lines are still hidden.
+- Dangerous words such as "rm -rf" and "| sh" are never split across two lines, and the underline stops at the word instead of running under the space after it. IPv6 addresses wrap after a colon, so a block of digits is never cut in half.
+- The Don't disturb card spans the screen, names who is asking and which plugin, shows the whole action without cutting it short, and spells out the risk (HIGH, MEDIUM, LOW). A HIGH risk card is outlined and its label is inverted, so it cannot be mistaken for MEDIUM.
+- The key that approves and saves an exception now says so: "Approve + add exception" (or "Also add exception" where you hold to approve).
+- While another app covers the approval screen or the new-device screen, the keys look disabled instead of only ignoring your touch.
+- The approval screen keeps room for the request when the fingerprint notice, the cover warning and the password field are all showing: the notices share one panel and the lower block scrolls on its own. A line above the keys and a fade show that the content scrolls.
+- The "To approve" caption under the hold key stays on one line, the countdown and the request number no longer run together, and the AI summary shows its risk on its own line.
+- The approved and denied stamp grows with its text and shrinks to fit the screen, and the receipt slip is as tall as its lines instead of a fixed height, and sits clear of the keys.
+- The new-device screen explains a cancelled fingerprint check in its own words and in amber instead of showing the system's wording.
+- The Don't disturb card now really names who is asking: the caller's name from your registry appears next to the plugin, and "unknown requester" is shown if a name is ever missing, instead of leaving it out.
+- Long commands and addresses wrap by their real drawn width, so Arabic, Chinese, emoji and tab characters can no longer make the phone wrap a line silently. Every wrapped line ends in the arrow, even on a very narrow screen or at the largest text size, and an IPv6 address is only cut with the arrow.
+- A wrapped command that contains Arabic or other right-to-left text keeps its left-to-right order on every line, and the wrap arrow always sits clear of the text at the line end.
+- The Don't disturb card shows at most three lines of the action and then says how many more lines there are, so a very long email subject can no longer push the risk word off the screen.
+- The Don't disturb card counts the hidden lines of a long action the same way it draws them, so "+N more lines" can no longer be missing when the fourth line is cut off.
+- On an approval card, a line that is cut in the middle of a word or address now ends in a different arrow than a line that wraps at a space, so a wrap can no longer be read as a space or as part of the word before it.
 
 ## Keeping this file honest
 

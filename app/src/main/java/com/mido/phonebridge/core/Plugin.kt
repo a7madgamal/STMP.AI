@@ -189,6 +189,13 @@ data class Route(
      *    it impossible to read the log as one list of requests.
      */
     val gateExempt: Boolean = false,
+    /**
+     * Whether approving this route skips the hold-to-approve key (D12) even though its verb would
+     * require one. Only for a route where a hold adds friction and no safety: today
+     * `POST /notifications/{id}/dismiss`, which removes a notification and nothing else.
+     * A route that can run, send or delete must never set this.
+     */
+    val holdExempt: Boolean = false,
     val handler: suspend (Req) -> Resp
 ) {
     /**
