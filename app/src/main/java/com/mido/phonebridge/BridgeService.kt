@@ -221,6 +221,21 @@ class BridgeService : Service() {
      *  lifetimes (retries end at bind, the watchdog runs for as long as the service does). */
     private val watchdogHandler = Handler(Looper.getMainLooper())
 
+    /**
+     * True from `onCreate` to `onDestroy`.
+     *
+     * **The watchdog race this exists for.** `watchdogTick` probes on a background thread, and the
+     * probe can take up to [PROBE_TIMEOUT_MS]. `onDestroy` clears the handler's callbacks, but a
+     * probe already in flight returns AFTER that clear and calls `postDelayed(watchdogTick, …)` —
+     * re-arming a watchdog inside a service that no longer exists. Every stop was a coin flip on
+     * whether a dead service kept waking up every 60 s to probe a server it had already closed.
+     *
+     * Kotlin's `object : Runnable` keeps reading this field after teardown, so a volatile flag is
+     * the thing that stops it; clearing callbacks alone cannot, because it happens before the
+     * callback finishes running.
+     */
+    @Volatile private var destroyed = false
+
     /** Set once the server is bound, so a stale retry cannot fire after a successful start. */
     private var retryAttempt = 0
 
@@ -241,6 +256,9 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Set BEFORE anything can schedule work: a recreated service is alive again, and the flag
+        // has to agree or the first watchdog tick would return immediately.
+        destroyed = false
         createChannel()
         Debug.log("service onCreate")
         // Decode the stamp sample NOW, so the first decision after a cold start already has it.
@@ -607,17 +625,36 @@ class BridgeService : Service() {
     // itself and gives up with "recursive problem".
     private val watchdogTick: Runnable = object : Runnable {
         override fun run() {
-            Thread({
-                val ok = probe()
-                lastProbeOk = ok
-                lastProbeAtMs = System.currentTimeMillis()
-                if (!ok && server != null) {
-                    Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
-                    watchdogHandler.post { rebind() }
-                }
-                watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
-            }, "bridge-probe").apply { isDaemon = true }.start()
+            if (destroyed) return
+            Thread({ finishWatchdogProbe(probe()) }, "bridge-probe").apply { isDaemon = true }.start()
         }
+    }
+
+    /**
+     * What the probe thread does with its result.
+     *
+     * **The second half of the race, and the one that mattered.** The probe outlives `onDestroy`
+     * by up to [PROBE_TIMEOUT_MS], so the teardown's `removeCallbacksAndMessages` can run while a
+     * probe is still in flight. Checking [destroyed] again HERE is what stops that probe from
+     * rescheduling the watchdog into a dead service — the clear cannot do it, because the
+     * `postDelayed` has not happened yet when the clear runs.
+     *
+     * Internal rather than private so a test can drive one tick without a real socket.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun isDestroyedForTest(): Boolean = destroyed
+
+    internal fun finishWatchdogProbe(ok: Boolean) {
+        if (destroyed) return
+        lastProbeOk = ok
+        lastProbeAtMs = System.currentTimeMillis()
+        if (!ok && server != null) {
+            Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
+            watchdogHandler.post { rebind() }
+        }
+        // Re-checked after the rebind post: a stop arriving in between must not re-arm anything.
+        if (destroyed) return
+        watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
     }
 
     /**
@@ -695,6 +732,9 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // FIRST, before any cleanup: this is what tells an in-flight probe to abandon its result
+        // instead of rescheduling itself into the service being torn down.
+        destroyed = true
         // A pending retry must not outlive the service: it would start a new instance after a
         // deliberate STOP, which is the same bug `maybeAutoStartServer` guards against on the
         // app side. The watchdog likewise has nothing left to watch.

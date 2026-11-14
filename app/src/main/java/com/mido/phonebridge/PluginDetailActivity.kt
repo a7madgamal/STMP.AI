@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginRegistry
@@ -190,6 +191,7 @@ class PluginDetailActivity : BridgeScreen() {
                 )
                 setPadding(0, Theme.dp(this@PluginDetailActivity, 6), 0, 0)
             })
+            signInRow()?.let { content.addView(it) }
         }
 
         // --- 2. PERMISSIONS ---
@@ -228,6 +230,44 @@ class PluginDetailActivity : BridgeScreen() {
                 11f,
                 mono = true,
             ).apply { setTextColor(Theme.ON_SURFACE_VARIANT) })
+        }
+    }
+
+    /**
+     * The one way forward when a Google-backed plugin cannot serve because nobody is signed in.
+     *
+     * **Why this screen needed it.** `GooglePlugin.status()` reports `NEEDS_ATTENTION` with
+     * "not signed in — Gmail, Calendar and Drive cannot serve until you are", and that sentence
+     * was a dead end: the only route to the sign-in screen was Home → the Google account row. The
+     * screen that names the problem offered no way to fix it.
+     *
+     * Decided from the sign-in state itself, never from the status WORDS — a plugin can be
+     * unhealthy for a reason sign-in cannot fix, and offering the button then would be a
+     * suggestion that does nothing. A build with no OAuth client has nothing to offer, so it gets
+     * no row rather than a button that cannot work.
+     */
+    private fun signInRow(): android.view.View? {
+        if (plugin.id !in GOOGLE_BACKED_IDS) return null
+        if (AuthManager.clientId.isBlank()) return null
+        if (AuthManager.isLoggedIn(this)) return null
+        return Theme.statusRow(
+            this,
+            "Google sign-in",
+            "Not signed in — tap to sign in. Gmail, Calendar and Drive are refused until you do.",
+            Theme.WARNING,
+            onClick = { openSignIn() },
+        )
+    }
+
+    private fun openSignIn() {
+        try {
+            startActivity(Intent(this, GoogleLoginActivity::class.java))
+        } catch (e: Exception) {
+            // A start that throws must still say something: the sentence above promised a way in.
+            Debug.log("cannot open Google sign-in: ${e.javaClass.simpleName}: ${e.message}")
+            android.widget.Toast.makeText(
+                this, "could not open sign-in — see the debug log", android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -530,5 +570,12 @@ class PluginDetailActivity : BridgeScreen() {
          */
         const val EXTRA_SECRET_NAME = "secret_name"
         private const val REQ_PERMISSION = 3001
+
+        /**
+         * The plugins that cannot serve without a Google account. Named rather than derived
+         * because "which plugins need the account" is a fact about the product, not a property the
+         * registry exposes — and a wrong guess would offer sign-in on SSH.
+         */
+        private val GOOGLE_BACKED_IDS = setOf("gmail", "calendar", "drive")
     }
 }
