@@ -1,12 +1,13 @@
 package com.mido.phonebridge
 
-import android.app.Activity
-import android.app.AlertDialog
 import android.os.Bundle
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
@@ -18,238 +19,306 @@ import com.mido.phonebridge.policy.Policy
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.policy.Rule
+import com.mido.phonebridge.policy.title
+import com.mido.phonebridge.ui.AuditCopy
+import com.mido.phonebridge.ui.PluginLabel
+import com.mido.phonebridge.ui.UntrustedText
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.ActionRow
+import com.mido.phonebridge.ui.kit.ErrorBlock
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.Panel
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.kit.SectionHeader
+import com.mido.phonebridge.ui.kit.StateBlock
+import com.mido.phonebridge.ui.kit.StmpDialog
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
- * Where EXCEPTIONS are authored. The only place, deliberately.
+ * Where EXCEPTIONS are authored, the only place. An exception is one `plugin x verb` pair that
+ * behaves differently from the default, and the default is "ask for your stamp". Exceptions only
+ * count in Whitelist mode; in the other gate modes they are paused, not deleted.
  *
- * An exception is one `plugin × verb` pair that behaves differently from the default,
- * and the default is "ask": `AUTOMATIC` with no rule resolves to `SECURE`. So the list
- * is every rule — each one an exception to the ask-everything default. (The screen was
- * called "PER-PAIR RULES" until 2026-10-19; the name described the implementation
- * instead of the intent, and Mido asked for it changed.)
- *
- * `AUTOMATIC` is a switch position that does nothing until a rule exists, so this
- * screen and `AUTOMATIC` ship together — a switch value whose whole point is the
- * rule table, with no way to fill that table, is the exact defect that got `NOTIFY`
- * cut from R2 in the first place.
- *
- * Rules are exact `plugin × verb` pairs, and a verb may be ANY. The picker offers
- * `default | notify | secure`: `default` deletes the rule. ANY is one axis, two
- * levels — an exact rule wins over the plugin's ANY rule (see `policy.resolve`).
+ * Exceptions are exact `plugin x verb` pairs, and a verb may be any action. An exact exception wins
+ * over the plugin's any-action exception (see `policy.resolve`). The picker offers
+ * `Default | Don't disturb | Paranoid`: Default deletes the exception.
  */
-class ExceptionsActivity : Activity() {
+class ExceptionsActivity : AppCompatActivity() {
 
-    private lateinit var container: LinearLayout
+    private var scroll: ScrollView? = null
+    private var content: LinearLayout? = null
+    private var addKey: View? = null
+    private var currentPolicy: Policy? = null
+    private var saveError: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val scroll = ScrollView(this)
-        container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 16),
-                Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 32))
-            background = Theme.sheet(Theme.BG)
-        }
-        scroll.addView(container)
-        setContentView(Theme.inset(scroll))
-
+        // The frame (top bar, scroll, insets) is built once; render() only refills `content`.
+        // Rebuilding it would attach new views after the window already sent its insets.
+        val key = KeyButton.create(
+            this, "Add exception", KeyButton.Kind.OUTLINE, KeyButton.Size.SMALL, describe = "Add an exception",
+        ) { currentPolicy?.let { pickPlugin(it) } }
+        val screen = subScreen("Exceptions", key)
+        addKey = key
+        scroll = screen.scroll
+        content = screen.content
         render()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The banner and rows show what is stored now, not what was stored when the screen last drew.
+        render()
+    }
+
+    private fun dp(v: Int) = Theme.dp(this, v)
+
+    private fun full() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+    )
+
+    /** Refills the content column; the top bar's Add key is shown only while the policy reads. */
     private fun render() {
-        container.removeAllViews()
-
-        container.addView(Theme.text(this, "EXCEPTIONS", 20f).apply {
-            typeface = Theme.bodyFont(this@ExceptionsActivity)
-        })
-
+        val content = content ?: return
+        val keepY = scroll?.scrollY ?: 0
+        content.removeAllViews()
         val policy = try {
             PolicyStore.from(applicationContext).get()
         } catch (e: PolicyException) {
-            container.addView(
-                Theme.text(
-                    this,
-                    "⚠ policy unreadable: ${e.message}\n\nThe server will not start until " +
-                        "this file is fixed or removed.",
-                    12f, Theme.DANGER
-                )
-            )
+            currentPolicy = null
+            addKey?.visibility = View.GONE
+            renderUnreadable(content, e)
             return
         }
+        currentPolicy = policy
+        addKey?.visibility = View.VISIBLE
+        val screenScroll = scroll
 
-        container.addView(
-            Theme.text(
-                this,
-                when (policy.global) {
-                    GlobalMode.WHITELIST ->
-                        "The switch is AUTOMATIC, so these rules are in force. " +
-                            "A pair with no rule asks you first."
-                    else ->
-                        "Rules are ignored while the switch is ${policy.global.name}. " +
-                            "Set the switch to AUTOMATIC to use them."
-                },
-                12f, Theme.ON_SURFACE_VARIANT
-            )
-        )
-        container.addView(Theme.spacer(this, 8))
+        content.addView(banner(policy), full().apply { bottomMargin = dp(Dimens.MODULE_GAP) })
+        saveError?.let { content.addView(saveFailed(it), full().apply { bottomMargin = dp(Dimens.MODULE_GAP) }) }
 
-        // --- existing rules ---
         if (policy.rules.isEmpty()) {
-            container.addView(Theme.text(this, "No rules yet. Every pair asks you first.", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT))
+            content.addView(
+                StateBlock.create(
+                    this, StateBlock.Kind.EMPTY, "No exceptions yet",
+                    "Every plugin action asks for your stamp first. Add an exception to make one quieter.",
+                ),
+                full().apply { bottomMargin = dp(Dimens.MODULE_GAP) },
+            )
         } else {
-            for (rule in policy.rules) container.addView(ruleRow(policy, rule))
+            content.addView(SectionHeader.create(this, "Saved exceptions"), full())
+            // Padded: ActionRow has no horizontal padding of its own.
+            val panel = Panel.create(this)
+            for (rule in sorted(policy.rules)) panel.addView(ruleRow(policy, rule), full())
+            content.addView(panel, full().apply { bottomMargin = dp(Dimens.MODULE_GAP) })
         }
+        explainer(content)
+        screenScroll?.post { screenScroll.scrollTo(0, keepY) }
+    }
 
-        container.addView(Theme.spacer(this, 12))
-        container.addView(
-            Theme.button(this, "+ ADD RULE", Theme.ButtonStyle.SUCCESS) { pickPlugin(policy) },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
-
-        container.addView(Theme.spacer(this, 20))
-        container.addView(
-            Theme.text(
-                this,
-                "NOTIFY shows a small overlay for 5 seconds. Doing nothing approves it; " +
-                    "tap ✕ to reject. SECURE opens the full-screen prompt with a fingerprint.\n\n" +
-                    "There is no auto-approve option — not here and not on the switch. The " +
-                    "quietest a request can be is the 5s overlay, so every request reaches " +
-                    "a human first.",
-                12f, Theme.ON_SURFACE_VARIANT
-            )
+    private fun renderUnreadable(content: LinearLayout, e: PolicyException) {
+        content.addView(
+            ErrorBlock.create(
+                this, "Exceptions can't be read",
+                "The policy file is unreadable, so the bridge will not start until it is fixed or removed.",
+                details = e.message ?: "unknown error",
+                recovery = KeyButton.Spec("Try again", "Read the exceptions again") { render() },
+            ),
+            full().apply { bottomMargin = dp(Dimens.MODULE_GAP) },
         )
     }
 
-    /**
-     * One configured pair, with its current mode and a way to change it.
-     *
-     * [rule.verb] null is an ANY rule and is rendered as "any" — the label has to say
-     * what the rule actually covers, or a broad rule reads as a narrow one.
-     */
-    private fun ruleRow(policy: Policy, rule: Rule): LinearLayout {
+    private fun sorted(rules: List<Rule>): List<Rule> =
+        rules.sortedWith(compareBy({ PluginLabel.of(it.plugin).lowercase() }, { it.verb?.ordinal ?: -1 }))
+
+    // --- banner and rows -----------------------------------------------------------------------
+
+    private fun banner(policy: Policy): View {
+        val p = Theme.palette(this)
+        val inForce = policy.global == GlobalMode.WHITELIST
+        val title = if (inForce) "Whitelist mode: these exceptions are in force" else "Exceptions are paused"
+        val body = if (inForce) {
+            "A plugin action with no exception asks for your stamp first."
+        } else {
+            "The gate mode is ${policy.global.title}, so these exceptions are ignored. " +
+                "Switch to Whitelist on Home to use them."
+        }
+        val panel = Panel.create(this, if (inForce) Panel.Tone.PLAIN else Panel.Tone.CAUTION)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(Theme.dp(this@ExceptionsActivity, 12), Theme.dp(this@ExceptionsActivity, 10),
-                Theme.dp(this@ExceptionsActivity, 12), Theme.dp(this@ExceptionsActivity, 10))
-            background = Theme.outlined(this@ExceptionsActivity, Theme.SURFACE, Theme.RADIUS_CONTROL)
+            gravity = Gravity.TOP
         }
-        val label = Theme.text(
-            this,
-            // `secure (default)` because a stored SECURE and no rule behave
-            // identically. Saying so stops anyone hunting for a difference
-            // that does not exist.
-            "${rule.plugin} · ${rule.verb?.name?.lowercase() ?: "any"} — " +
-                rule.mode.name.lowercase() +
-                if (rule.mode == Mode.PARANOID) " (default)" else "",
-            13f
+        row.addView(Led(this).apply {
+            state = if (inForce) Led.State.OK else Led.State.CAUTION
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(16), dp(16)).apply { topMargin = dp(2) })
+        val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        text.addView(Type.text(this, title, TypeRole.ROW_LABEL, if (inForce) p.ink else p.cautionText), full())
+        text.addView(
+            Type.text(this, body, TypeRole.DETAIL, if (inForce) p.etched else p.ink),
+            full().apply { topMargin = dp(2) },
         )
-        row.addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(10)
+        })
+        panel.addView(row, full())
+        panel.contentDescription = "$title. $body"
+        ViewCompat.setScreenReaderFocusable(panel, true)
+        return panel
+    }
 
-        row.addView(
-            Theme.button(this, if (rule.mode == Mode.DONT_DISTURB) "→ secure" else "→ notify",
-                Theme.ButtonStyle.NEUTRAL, small = true) {
-                setRule(policy, Rule(rule.plugin, rule.verb, toggle(rule.mode)), "settings")
-            }
+    private fun saveFailed(message: String): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(
+            StateBlock.create(
+                this, StateBlock.Kind.ERROR, "Could not save the exception",
+                "The exception was not changed. The list shows what is stored now.",
+            ),
+            full(),
         )
-        row.addView(
-            Theme.button(this, "remove", Theme.ButtonStyle.NEUTRAL, small = true) {
-                clearRule(policy, rule.plugin, rule.verb, "settings")
-            }
-        )
-        // Same gap as every other list (Theme.ROW_GAP_DP). Set here because these rows are
-        // built by this screen rather than by Theme.statusRow.
-        row.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@ExceptionsActivity, Theme.ROW_GAP_DP) }
-        return row
+        box.addView(Readout.create(this, message, Readout.Kind.BODY).root)
+        return box
+    }
+
+    /** One saved exception, with its mode in words and a way to change or remove it. */
+    private fun ruleRow(policy: Policy, rule: Rule): View {
+        val title = "${UntrustedText.escape(PluginLabel.of(rule.plugin))} · ${AuditCopy.verbWords(rule.verb)}"
+        val detail = when (rule.mode) {
+            Mode.PARANOID -> "Paranoid · full prompt, asks for your stamp · same as having no exception"
+            Mode.DONT_DISTURB -> "Don't disturb · 5 s card, doing nothing approves it"
+        }
+        val next = toggle(rule.mode)
+        val nextName = if (next == Mode.PARANOID) "Paranoid" else "Don't disturb"
+        val change = KeyButton.Spec(
+            if (next == Mode.PARANOID) "Set Paranoid" else "Set Don't disturb",
+            "Change $title to $nextName",
+        ) { setRule(Rule(rule.plugin, rule.verb, next), "settings") }
+        // Removing an exception can only make the pair ask again, the safe direction: no confirm (D62).
+        val remove = KeyButton.Spec("Remove", "Remove the exception for $title") {
+            clearRule(rule.plugin, rule.verb, "settings")
+        }
+        return ActionRow(this, title, detail, listOf(change), remove)
     }
 
     private fun toggle(mode: Mode): Mode =
         if (mode == Mode.DONT_DISTURB) Mode.PARANOID else Mode.DONT_DISTURB
 
-    // --- authoring flow: plugin, then verb, then mode ---
+    private fun explainer(content: LinearLayout) {
+        val p = Theme.palette(this)
+        content.addView(SectionHeader.create(this, "How an exception asks"), full())
+        val panel = Panel.create(this)
+        panel.addView(
+            Type.text(
+                this, "Don't disturb shows a small card for 5 seconds. Doing nothing approves it; tap ✕ to deny.",
+                TypeRole.BODY, p.ink,
+            ),
+            full(),
+        )
+        panel.addView(
+            Type.text(this, "Paranoid opens the full-screen prompt and asks for your stamp.", TypeRole.BODY, p.ink),
+            full().apply { topMargin = dp(Dimens.SPACE_S) },
+        )
+        panel.addView(
+            Type.text(
+                this,
+                "There is no auto-approve option, not here and not in the gate modes. The quietest a request " +
+                    "can be is the 5-second card, so every request reaches you first.",
+                TypeRole.DETAIL, p.etched,
+            ),
+            full().apply { topMargin = dp(Dimens.SPACE_S) },
+        )
+        content.addView(panel, full())
+    }
+
+    // --- authoring flow: plugin, then action, then mode ----------------------------------------
 
     private fun pickPlugin(policy: Policy) {
-        val plugins = PluginRegistry.all().map { it.id }.ifEmpty {
-            // The registry is populated when the service starts. If nothing is
-            // registered there is nothing to author a rule for, and inventing names
-            // here would create rules that can never match a real request.
-            listOf("gmail", "calendar", "notifications")
-        }
-        AlertDialog.Builder(this)
+        // The registry is filled when the service starts. With nothing registered, offer the
+        // plugins every install has rather than inventing names that can never match a request.
+        val ids = PluginRegistry.all().map { it.id }.ifEmpty { listOf("gmail", "calendar", "notifications") }
+        StmpDialog.builder(this)
             .setTitle("Which plugin?")
-            .setItems(plugins.toTypedArray()) { _, which -> pickVerb(policy, plugins[which]) }
+            .setItems(ids.map { PluginLabel.of(it) }.toTypedArray()) { _, which -> pickVerb(policy, ids[which]) }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun pickVerb(policy: Policy, plugin: String) {
-        // ANY first, then the real verbs. Order matters for a picker: the broad rule is
-        // the one you reach for when you do not want to enumerate, so it leads.
-        val options = listOf(Rule.ANY) + Verb.values().map { it.name }
-        AlertDialog.Builder(this)
-            .setTitle("$plugin — which verb?")
-            .setItems(options.toTypedArray()) { _, which ->
-                val verb = if (which == 0) null else Verb.values()[which - 1]
-                pickMode(policy, plugin, verb)
-            }
+        // Any action first: the broad exception is the one to reach for when you do not want to enumerate.
+        val options = listOf<Verb?>(null) + Verb.values().toList()
+        StmpDialog.builder(this)
+            .setTitle("${PluginLabel.of(plugin)} · which action?")
+            .setItems(options.map { verbLabel(it) }.toTypedArray()) { _, which -> pickMode(policy, plugin, options[which]) }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
+    private fun verbLabel(v: Verb?): String =
+        if (v == null) "Any action" else AuditCopy.verbWords(v).replaceFirstChar { it.uppercase() }
+
     private fun pickMode(policy: Policy, plugin: String, verb: Verb?) {
-        val labels = arrayOf(
-            "default — ask me (removes any rule)",
-            "notify — 5s overlay, silence approves",
-            "secure — full-screen + fingerprint"
+        // The current setting is marked: "Default" when no exception exists for this plugin+action.
+        val current = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }?.mode
+        val choices = listOf(
+            StmpDialog.Choice("Default", "Ask for your stamp. Removes any exception.", current == null),
+            StmpDialog.Choice("Don't disturb", "5 s card. Silence approves.", current == Mode.DONT_DISTURB),
+            StmpDialog.Choice("Paranoid", "Full prompt. Asks for your stamp.", current == Mode.PARANOID),
         )
-        AlertDialog.Builder(this)
-            .setTitle("$plugin · ${verb?.name?.lowercase() ?: "any verb"}")
-            .setItems(labels) { _, which ->
-                when (which) {
-                    0 -> clearRule(policy, plugin, verb, "settings")
-                    1 -> setRule(policy, Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
-                    else -> setRule(policy, Rule(plugin, verb, Mode.PARANOID), "settings")
-                }
+        StmpDialog.choose(this, "${PluginLabel.of(plugin)} · ${AuditCopy.verbWords(verb)}", choices) { which ->
+            when (which) {
+                0 -> clearRule(plugin, verb, "settings")
+                1 -> setRule(Rule(plugin, verb, Mode.DONT_DISTURB), "settings")
+                else -> setRule(Rule(plugin, verb, Mode.PARANOID), "settings")
             }
-            .show()
+        }.show()
     }
 
     /**
-     * Write one rule. The rule change is audited separately from a switch change:
-     * "switch SECURE → SECURE" would say nothing happened at the one moment
-     * something did.
+     * Write one exception. The change is audited separately from a gate-mode change: "switch
+     * Paranoid to Paranoid" would say nothing happened at the one moment something did.
      */
-    private fun setRule(policy: Policy, rule: Rule, source: String) {
+    private fun setRule(rule: Rule, source: String) {
+        val policy = freshPolicy() ?: return
         val before = policy.rules.firstOrNull { it.key == rule.key }
         save(policy.withRule(rule), PolicyAudit.recordRule(before, rule, policy.global, source))
     }
 
-    private fun clearRule(policy: Policy, plugin: String, verb: Verb?, source: String) {
+    private fun clearRule(plugin: String, verb: Verb?, source: String) {
+        val policy = freshPolicy() ?: return
         val before = policy.rules.firstOrNull { it.plugin == plugin && it.verb == verb }
-        save(
-            policy.withoutRule(plugin, verb),
-            PolicyAudit.recordRule(before, null, policy.global, source)
-        )
+        save(policy.withoutRule(plugin, verb), PolicyAudit.recordRule(before, null, policy.global, source))
+    }
+
+    /**
+     * The policy as stored NOW, not the copy this screen last drew: the approval modal and Home
+     * write the same file, and applying a change to a stale copy would silently undo theirs
+     * (including the gate mode) and audit the wrong global mode. Null after showing the fault.
+     */
+    private fun freshPolicy(): Policy? = try {
+        PolicyStore.from(applicationContext).get()
+    } catch (e: PolicyException) {
+        saveError = e.message ?: e.javaClass.simpleName
+        render()
+        null
     }
 
     private fun save(next: Policy, record: com.mido.phonebridge.audit.AuditRecord) {
         try {
             PolicyStore.from(applicationContext).set(next)
         } catch (e: Exception) {
-            Toast.makeText(this, "could not save: ${e.message}", Toast.LENGTH_LONG).show()
+            saveError = e.message ?: e.javaClass.simpleName
+            render()
             return
         }
+        saveError = null
         try {
             AuditLog.from(applicationContext).append(record)
         } catch (e: Exception) {
-            // A rule that took effect unrecorded is the same class of failure as an
-            // unrecorded switch flip: surface it rather than pretending it is fine.
+            // An exception that took effect unrecorded is the same class of failure as an unrecorded
+            // gate change: surface it rather than pretending it is fine.
             AuditHealth.markDegraded("rule change not recorded: ${e.message}")
         }
         render()

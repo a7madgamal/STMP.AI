@@ -110,6 +110,7 @@ object SecretVault {
      * an uninstall while the Keystore (which is always wiped) does not. See [VaultState].
      */
     fun state(ctx: Context): VaultState.State {
+        stateForTest?.let { return it }
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wrapped = p.getString(F_DK_WRAPPED, null) != null
         val iv = p.getString(F_DK_IV, null) != null
@@ -387,6 +388,37 @@ object SecretVault {
         session = null
         dataKey = null
         Log.i(TAG, "vault locked")
+    }
+
+    // --- test seam (additive; no production path sets any of this) --------------------------
+
+    /** When non-null, [state] returns it. Set only by tests. */
+    @androidx.annotation.VisibleForTesting
+    internal var stateForTest: VaultState.State? = null
+
+    /** Writes the plaintext index and opens (or closes) a session holding [values]. Tests only. */
+    @androidx.annotation.VisibleForTesting
+    @Synchronized
+    internal fun seedForTest(
+        ctx: Context,
+        entries: Map<String, SecretMeta>,
+        unlocked: Boolean,
+        values: Map<String, String> = emptyMap(),
+    ) {
+        writeMeta(ctx, entries)
+        if (unlocked) {
+            dataKey = javax.crypto.spec.SecretKeySpec(ByteArray(DK_BYTES), "AES")
+            session = values.toMutableMap()
+        } else {
+            dataKey = null
+            session = null
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun resetForTest() {
+        stateForTest = null
+        lock()
     }
 
     // --- reads/writes (require an open session) -------------------------------

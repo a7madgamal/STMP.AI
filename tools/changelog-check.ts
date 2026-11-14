@@ -135,6 +135,10 @@ function main(): void {
     }
   }
 
+  // A committed merge-conflict marker means a merge was never finished by hand.
+  const conflict = /^(<{7}|\|{7}|={7}|>{7})(\s|$)/m.exec(text);
+  if (conflict !== null) fail(`leftover merge-conflict marker in CHANGELOG.md: ${conflict[0]}`);
+
   process.stdout.write(
     `changelog-check: ok — ${String(entries.length)} entries, ` +
       `current ${nameValue} / build ${String(entryBuild)}\n`,

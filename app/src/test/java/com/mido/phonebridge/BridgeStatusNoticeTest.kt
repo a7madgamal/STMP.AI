@@ -78,4 +78,20 @@ class BridgeStatusNoticeTest {
         val text = BridgeStatusNotice.text(Kind.STOPPED, 0, 4)
         assertTrue("must name a network to check, got: $text", text.contains("Wi-Fi"))
     }
+
+    @Test
+    fun `every title starts with STMP and nothing says PhoneBridge`() {
+        for (k in Kind.entries) {
+            assertTrue(BridgeStatusNotice.title(k).startsWith("STMP"))
+            assertFalse(BridgeStatusNotice.title(k).contains("PhoneBridge"))
+            assertFalse(BridgeStatusNotice.text(k, 1, 4).contains("PhoneBridge"))
+        }
+    }
+
+    @Test
+    fun `the stopped copy is true for a bind failure and still names Wi-Fi`() {
+        val t = BridgeStatusNotice.text(Kind.STOPPED, 0, 4)
+        assertTrue(t.contains("STMP couldn't start"))
+        assertTrue(t.contains("Wi-Fi"))
+    }
 }

@@ -88,6 +88,32 @@ object SystemAccess {
         }, "app notification settings")
     }
 
+    /** Notification access (the listener behind the Notifications plugin) is switched on for STMP. */
+    fun notificationAccessGranted(ctx: Context): Boolean =
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+
+    fun openNotificationAccessSettings(ctx: Context) {
+        launch(ctx, Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"), "notification-access")
+    }
+
+    fun openAppNotificationSettings(ctx: Context) {
+        launch(ctx, Intent("android.settings.APP_NOTIFICATION_SETTINGS").apply {
+            putExtra("android.provider.extra.APP_PACKAGE", ctx.packageName)
+        }, "app notification settings")
+    }
+
+    /** Android Do Not Disturb is silencing something. Reading the filter needs no permission. */
+    fun phoneDndOn(ctx: Context): Boolean {
+        val nm = ctx.getSystemService(android.app.NotificationManager::class.java) ?: return false
+        val filter = nm.currentInterruptionFilter
+        return filter != android.app.NotificationManager.INTERRUPTION_FILTER_ALL &&
+            filter != android.app.NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+    }
+
+    fun openDndSettings(ctx: Context) {
+        launch(ctx, Intent("android.settings.ZEN_MODE_PRIORITY_SETTINGS"), "do-not-disturb")
+    }
+
     /**
      * One launch path, so every failure is reported the same way.
      *

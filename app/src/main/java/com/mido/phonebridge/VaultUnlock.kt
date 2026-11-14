@@ -25,6 +25,10 @@ import com.mido.phonebridge.core.SecretVault
  */
 object VaultUnlock {
 
+    /** Why the last unlock or create attempt failed, or null. Shown by Settings. */
+    @Volatile
+    var lastFailure: String? = null
+
     /**
      * Prompt to unlock (or create) the vault, once.
      *
@@ -52,15 +56,15 @@ object VaultUnlock {
         if (VaultGate.hasVault(activity)) {
             VaultGate.unlock(
                 activity,
-                onUnlocked = { Debug.log("vault unlocked (session open)"); onChanged() },
-                onFailed = { Debug.log("vault unlock not completed: $it"); onChanged() },
+                onUnlocked = { lastFailure = null; Debug.log("vault unlocked (session open)"); onChanged() },
+                onFailed = { lastFailure = it; Debug.log("vault unlock not completed: $it"); onChanged() },
             )
         } else {
             // First run: the same prompt authorises creating the vault.
             VaultGate.initialize(
                 activity,
-                onReady = { Debug.log("vault created (session open)"); onChanged() },
-                onFailed = { Debug.log("vault creation not completed: $it"); onChanged() },
+                onReady = { lastFailure = null; Debug.log("vault created (session open)"); onChanged() },
+                onFailed = { lastFailure = it; Debug.log("vault creation not completed: $it"); onChanged() },
             )
         }
     }
@@ -101,23 +105,25 @@ object VaultUnlock {
         } else {
             "Your config was kept across the reinstall, but the vault's encryption key could not " +
                 "come with it — Android deletes app keys on uninstall, always.\n\n" +
-                "So the secrets themselves are gone. Your gate rules, audit log and account are " +
+                "So the secrets themselves are gone. Your exceptions, request log and account are " +
                 "all intact. Resetting clears the dead vault so you can create a fresh one and " +
                 "re-add your secrets; nothing else is touched."
         }
 
-        android.app.AlertDialog.Builder(activity)
-            .setTitle("Secret vault needs a reset")
-            .setMessage(message)
-            .setPositiveButton("reset vault") { _, _ ->
-                SecretVault.destroy(activity)
-                Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
-                PromptGuard.attempted = false
-                ResetGuard.offered = false
-                ensureUnlocked(activity, force = true, onChanged = onChanged)
-            }
-            .setNegativeButton("not now", null)
-            .show()
+        com.mido.phonebridge.ui.kit.StmpDialog.confirmDelete(
+            activity,
+            title = "Secret vault needs a reset",
+            message = message,
+            deleteLabel = "Reset vault",
+            keepLabel = "Not now",
+        ) {
+            SecretVault.destroy(activity)
+            Debug.log("vault reset (${if (iVMissing) "0.14.x" else "orphaned keystore"})")
+            lastFailure = null
+            PromptGuard.attempted = false
+            ResetGuard.offered = false
+            ensureUnlocked(activity, force = true, onChanged = onChanged)
+        }.show()
     }
 
     private object ResetGuard {

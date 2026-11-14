@@ -17,6 +17,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import com.mido.phonebridge.audit.AuditClassify
+import com.mido.phonebridge.core.StmpNotifications
 import com.mido.phonebridge.audit.AuditDraft
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditOutcome
@@ -67,6 +68,45 @@ class BridgeService : Service() {
 
     companion object {
         const val PORT = 8787
+
+        @Volatile private var lastForegroundKey = ""
+
+        /**
+         * True from `onCreate` to `onDestroy`. [refreshForegroundNotice] posts nothing outside that
+         * window, so a late probe or an app-side call can never leave a notice with no service behind it.
+         */
+        @Volatile var serviceAlive = false
+
+        /**
+         * D51: rebuild and re-post the running notification. Called by the service on bind, rebind and the
+         * 60 s watchdog tick, and by the app right after it changes the gate mode (HomeFragment.applyGate).
+         * It is a no-op while the service is not running (any caller), and from the app also while the
+         * bridge is not up, so it never posts a notification for a service that is not there.
+         */
+        fun refreshForegroundNotice(ctx: Context, forceStarting: Boolean = false, fromApp: Boolean = false) {
+            if (!serviceAlive) return
+            if (fromApp && !serverUp) return
+            val app = ctx.applicationContext
+            val address = if (forceStarting || !serverUp) null else bindAddress.takeIf { it.isNotBlank() }
+            val mode = try { PolicyStore.from(app).get().global } catch (e: Exception) { null }
+            val key = "$address|$mode"
+            if (key == lastForegroundKey) return
+            lastForegroundKey = key
+            val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            try { nm.notify(NOTIF_ID, buildRunningNotification(app, address, mode)) }
+            catch (e: Exception) { Debug.log("foreground notice refresh failed: ${e.javaClass.simpleName}: ${e.message}") }
+        }
+
+        private fun buildRunningNotification(ctx: Context, address: String?, mode: GlobalMode?): Notification {
+            val open = PendingIntent.getActivity(
+                ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            )
+            val stop = PendingIntent.getService(
+                ctx, 3, Intent(ctx, BridgeService::class.java).setAction(StmpNotifications.ACTION_STOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            return StmpNotifications.running(ctx, address, PORT, mode, open, stop)
+        }
 
         /**
          * The one wording for "there is nothing to bind to".
@@ -241,6 +281,8 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        destroyed = false
+        serviceAlive = true
         createChannel()
         Debug.log("service onCreate")
         // Decode the stamp sample NOW, so the first decision after a cold start already has it.
@@ -288,6 +330,13 @@ class BridgeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Debug.log("service onStartCommand startId=$startId")
+        if (StmpNotifications.isStop(intent)) {
+            Debug.log("stop requested from the notification")
+            cancelStatusNotification()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         try {
             startForegroundCompat()
             Debug.log("startForeground() ok")
@@ -361,6 +410,7 @@ class BridgeService : Service() {
         stopWaiting()
         cancelStatusNotification()
         markRunning(true)
+        refreshForegroundNotice(this)
         lastProbeOk = true
         lastProbeAtMs = System.currentTimeMillis()
         startWatchdog()
@@ -521,9 +571,9 @@ class BridgeService : Service() {
     private fun postStatusNotification(kind: BridgeStatusNotice.Kind, attempt: Int) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = NotificationChannel(
-            STATUS_CHANNEL_ID, "Bridge status", NotificationManager.IMPORTANCE_DEFAULT
+            STATUS_CHANNEL_ID, "STMP problems", NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
-            description = "Tells you when the bridge could not start."
+            description = "Tells you when STMP could not start."
         }
         nm.createNotificationChannel(ch)
 
@@ -531,17 +581,7 @@ class BridgeService : Service() {
             this, 1, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notif = Notification.Builder(this, STATUS_CHANNEL_ID)
-            .setContentTitle(BridgeStatusNotice.title(kind))
-            .setContentText(
-                BridgeStatusNotice.text(kind, attempt, StartupRetry.maxAttempts())
-            )
-            .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setCategory(Notification.CATEGORY_ERROR)
-            .setContentIntent(pi)
-            .setOngoing(BridgeStatusNotice.ongoing(kind))
-            .setAutoCancel(BridgeStatusNotice.autoCancel(kind))
-            .build()
+        val notif = StmpNotifications.status(this, kind, attempt, StartupRetry.maxAttempts(), pi)
         try {
             nm.notify(NOTIF_ID_STATUS, notif)
         } catch (e: Exception) {
@@ -607,17 +647,28 @@ class BridgeService : Service() {
     // itself and gives up with "recursive problem".
     private val watchdogTick: Runnable = object : Runnable {
         override fun run() {
-            Thread({
-                val ok = probe()
-                lastProbeOk = ok
-                lastProbeAtMs = System.currentTimeMillis()
-                if (!ok && server != null) {
-                    Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
-                    watchdogHandler.post { rebind() }
-                }
-                watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
-            }, "bridge-probe").apply { isDaemon = true }.start()
+            if (destroyed) return
+            Thread({ finishWatchdogProbe(probe()) }, "bridge-probe").apply { isDaemon = true }.start()
         }
+    }
+
+    @Volatile private var destroyed = false
+
+    /**
+     * What the probe thread does with its result. The probe can outlive `onDestroy` by up to
+     * PROBE_TIMEOUT_MS, so a torn-down service returns without touching the notice or the schedule.
+     */
+    internal fun finishWatchdogProbe(ok: Boolean) {
+        if (destroyed) return
+        lastProbeOk = ok
+        lastProbeAtMs = System.currentTimeMillis()
+        if (!ok && server != null) {
+            Debug.log("watchdog: server not answering on $bindAddress:$PORT — rebinding")
+            watchdogHandler.post { rebind() }
+        }
+        refreshForegroundNotice(this)
+        if (destroyed) return
+        watchdogHandler.postDelayed(watchdogTick, WATCHDOG_INTERVAL_MS)
     }
 
     /**
@@ -651,6 +702,7 @@ class BridgeService : Service() {
             lastProbeAtMs = System.currentTimeMillis()
             cancelStatusNotification()
             markRunning(true)
+            refreshForegroundNotice(this)
             Debug.log("watchdog: rebound on $bind:$PORT")
         } catch (e: Exception) {
             lastError = "Could not bind port $PORT: ${e.message ?: e.javaClass.simpleName}".trim()
@@ -695,6 +747,9 @@ class BridgeService : Service() {
 
     override fun onDestroy() {
         Debug.log("service onDestroy")
+        // First, so a probe thread that finishes from here on posts and schedules nothing.
+        destroyed = true
+        serviceAlive = false
         // A pending retry must not outlive the service: it would start a new instance after a
         // deliberate STOP, which is the same bug `maybeAutoStartServer` guards against on the
         // app side. The watchdog likewise has nothing left to watch.
@@ -879,17 +934,8 @@ class BridgeService : Service() {
     }
 
     private fun startForegroundCompat() {
-        val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        val notif = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("PhoneBridge running")
-            .setContentText("HTTP server on port $PORT")
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentIntent(pi)
-            .setOngoing(true)
-            .build()
+        // The first post happens before the server is bound, so it reads "starting".
+        val notif = buildRunningNotification(this, null, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // specialUse, not dataSync: dataSync is capped at 6h/24h on Android 15+ and the
             // system kills the process when the cap is hit.
@@ -903,13 +949,14 @@ class BridgeService : Service() {
             startForeground(NOTIF_ID, notif)
         }
         Debug.log("foreground notification posted")
+        refreshForegroundNotice(this, forceStarting = true)
     }
 
     private fun createChannel() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val ch = NotificationChannel(
-            CHANNEL_ID, "Bridge service", NotificationManager.IMPORTANCE_LOW
-        )
+            CHANNEL_ID, "STMP running", NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Shows that STMP is open for requests." }
         nm.createNotificationChannel(ch)
     }
 }
@@ -1413,7 +1460,9 @@ class HttpServer(
                                     )
                                 else null,
                                 needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary),
-                                callerLabel = callerLabelFor(remote),
+                                // Who is asking, by the registry name (falls back to the address),
+                                // so the human who stays silent still saw who asked.
+                                requester = callerLabelFor(remote),
                             )
                             when (decision) {
                                 is NotifyGate.Result.Approved -> {
@@ -1521,7 +1570,8 @@ class HttpServer(
                                 ),
                                 // The gate needs this to render the field and to refuse a
                                 // resolve that arrives without one.
-                                needsPassword = needsPassword
+                                needsPassword = needsPassword,
+                                effectiveVerb = verb,
                             ),
                             // **THE GATE'S OWN COPY, not just the view's.** The view above only
                             // decides what the modal DRAWS; `await` decides whether
@@ -1765,8 +1815,11 @@ class HttpServer(
          * from the REQUEST (`SudoCommand.invokes(command)`) and this function only sees
          * the body as a JSONObject it should not be re-deriving policy from.
          */
-        needsPassword: Boolean = false
+        needsPassword: Boolean = false,
+        /** Route.effectiveVerb(req): picks the approve gesture (D12). */
+        effectiveVerb: Verb
     ): ApprovalGate.ApprovalView {
+        val routeKey = "${route.method} ${route.path}"
         val routePath = route.path
 
         // /notifications/{id}/action -> resolve the action against live data.
@@ -1817,7 +1870,10 @@ class HttpServer(
                 destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
-                needsPassword = needsPassword
+                needsPassword = needsPassword,
+                verb = effectiveVerb,
+                routeKey = routeKey,
+                holdExempt = route.holdExempt,
             )
         }
 
@@ -1844,7 +1900,10 @@ class HttpServer(
                 destructive = rows.toGateRows(),
                 requiresBiometric = requiresBiometric,
                 exceptionOffer = exceptionOffer,
-                needsPassword = needsPassword
+                needsPassword = needsPassword,
+                verb = effectiveVerb,
+                routeKey = routeKey,
+                holdExempt = route.holdExempt,
             )
         }
 
@@ -1885,7 +1944,10 @@ class HttpServer(
             // feature that is absent on exactly the routes that use this path (calendar,
             // gmail). Every `return ApprovalView(...)` in this function must pass it.
             exceptionOffer = exceptionOffer,
-            needsPassword = needsPassword
+            needsPassword = needsPassword,
+            verb = effectiveVerb,
+            routeKey = routeKey,
+            holdExempt = route.holdExempt,
         )
     }
 

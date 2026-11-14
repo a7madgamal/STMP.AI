@@ -1,30 +1,84 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!--
-      Material 3 base. Required by MaterialButton: a Material component inflates
-      against a Theme.Material3 theme and throws at runtime on an AppCompat-only
-      parent. Everything else (colours, metrics) is owned by `ui/Theme.kt`, so this
-      file stays a thin wrapper — one place to change the base, not two.
-    -->
-    <!--
-      **Light, not DayNight.** This app is one hard-coded palette: cream paper, brown ink.
-
-      `DayNight` made Material widgets follow the PHONE's night setting, so on a dark-mode phone
-      every dialog, EditText and button drew dark grey against a cream sheet — the "dark mode /
-      light mode mismatch" reported 2026-11-04. There is no dark palette to switch to, so the
-      correct parent is the one that cannot switch: Light.
-
-      If a real dark theme is ever wanted, it needs a full palette in `ui/Theme.kt` first — at
-      which point this line becomes DayNight again and both branches must exist.
-    -->
-    <style name="Theme.STMP" parent="Theme.Material3.Light.NoActionBar">
-        <item name="android:windowBackground">@color/pb_bg</item>
-        <item name="colorPrimary">@color/pb_accent</item>
+    <!-- DayNight (D3, D9). Every colour comes from @color/stmp_*, which is night-qualified, and
+         every view sets its colours explicitly from Theme.palette(ctx); the 2026-11-04 mismatch
+         came from a Light-only palette under a DayNight parent and cannot recur. -->
+    <style name="Theme.STMP" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/stmp_body</item>
+        <item name="android:colorBackground">@color/stmp_body</item>
+        <item name="colorPrimary">@color/stmp_ink</item>
+        <item name="colorOnPrimary">@color/stmp_on_ink</item>
+        <item name="colorSecondary">@color/stmp_ink</item>
+        <item name="colorOnSecondary">@color/stmp_on_ink</item>
+        <item name="colorSurface">@color/stmp_panel</item>
+        <item name="colorOnSurface">@color/stmp_ink</item>
+        <item name="colorOnSurfaceVariant">@color/stmp_etched</item>
+        <item name="colorOutline">@color/stmp_outline</item>
+        <item name="colorError">@color/stmp_caution_text</item>
+        <item name="colorControlNormal">@color/stmp_outline</item>
+        <item name="colorControlActivated">@color/stmp_ink</item>
+        <item name="android:textColorPrimary">@color/stmp_ink</item>
+        <item name="android:textColorSecondary">@color/stmp_etched</item>
+        <item name="android:textColorHint">@color/stmp_etched</item>
+        <item name="android:fontFamily">@font/geist_regular</item>
+        <item name="fontFamily">@font/geist_regular</item>
+        <item name="android:statusBarColor">@color/stmp_body</item>
+        <item name="android:windowLightStatusBar">@bool/stmp_light_bars</item>
+        <item name="android:navigationBarColor">@color/stmp_nav_bar</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/stmp_light_bars</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.STMP.Dialog</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.STMP.Dialog</item>
     </style>
 
-    <style name="Theme.STMP.Approval" parent="Theme.Material3.Light.NoActionBar">
+    <style name="Theme.STMP.Approval">
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:backgroundDimEnabled">true</item>
-        <item name="android:windowBackground">@color/pb_bg</item>
-        <item name="colorPrimary">@color/pb_accent</item>
+    </style>
+
+    <style name="ThemeOverlay.STMP.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/stmp_panel</item>
+        <item name="colorSurfaceContainerHigh">@color/stmp_panel</item>
+        <item name="colorOnSurface">@color/stmp_ink</item>
+        <item name="colorOnSurfaceVariant">@color/stmp_etched</item>
+        <item name="colorPrimary">@color/stmp_ink</item>
+        <item name="android:backgroundDimAmount">0.45</item>
+        <!-- One width for every dialog: the minimum is the whole available width, so a short message
+             and a four-field form are the same size. -->
+        <item name="android:windowMinWidthMajor">100%</item>
+        <item name="android:windowMinWidthMinor">100%</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.STMP.Dialog</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/MaterialAlertDialog.STMP.Title.Text</item>
+        <item name="materialAlertDialogBodyTextStyle">@style/MaterialAlertDialog.STMP.Body.Text</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.STMP.DialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.STMP.DialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.STMP.DialogButton</item>
+    </style>
+
+    <style name="ShapeAppearance.STMP.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
+    <style name="MaterialAlertDialog.STMP.Title.Text" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:fontFamily">@font/geist_semibold</item>
+        <item name="fontFamily">@font/geist_semibold</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:textColor">@color/stmp_ink</item>
+    </style>
+
+    <style name="MaterialAlertDialog.STMP.Body.Text" parent="MaterialAlertDialog.Material3.Body.Text">
+        <item name="android:fontFamily">@font/geist_regular</item>
+        <item name="fontFamily">@font/geist_regular</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/stmp_ink</item>
+    </style>
+
+    <style name="Widget.STMP.DialogButton" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:fontFamily">@font/geist_mono_semibold</item>
+        <item name="fontFamily">@font/geist_mono_semibold</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0.12</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">@color/stmp_ink</item>
+        <item name="android:minHeight">48dp</item>
     </style>
 </resources>

@@ -3,7 +3,6 @@ package com.mido.phonebridge.notify
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.Point
-import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -21,10 +20,21 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.mido.phonebridge.ArmGuard
 import com.mido.phonebridge.ai.RequestFacts
-import com.mido.phonebridge.ai.Risk
 import com.mido.phonebridge.ai.SummaryProvider
 import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.notify.NotifyQueue.Admission
+import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
+import com.mido.phonebridge.ui.kit.Led
+import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
+import com.mido.phonebridge.ui.kit.PunchView
+import com.mido.phonebridge.ui.kit.VerbChip
+import com.mido.phonebridge.ui.tokens.Colors
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.HapticEvent
+import com.mido.phonebridge.ui.tokens.Haptics
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -146,7 +156,13 @@ object NotifyOverlay {
          * is being approved must not offer to approve it. Distinct from [UNAVAILABLE]
          * (a drawing failure) and from the 503 not-ready gate (no model at all).
          */
-        AI_FAILED
+        AI_FAILED,
+        /**
+         * The window elapsed in silence, but the card hides summary lines ("+N more lines"). Silence
+         * is consent only to what was on screen, so this is NOT an approval: it denies, and the
+         * request needs an explicit tap (FIX4).
+         */
+        HIDDEN_TEXT
     }
 
     /** What actually happened to one prompt. */
@@ -163,8 +179,7 @@ object NotifyOverlay {
         val id: Long,
         val summary: String,
         val label: String,
-        val callerLabel: String,
-        /** What the request would DO. Drives the coloured badge, nothing else. */
+        /** What the request would DO. Drives the verb chip, nothing else. */
         val verb: Verb,
         val windowMs: Long,
         /** Facts for the AI summary, or null to skip inference entirely. */
@@ -177,14 +192,18 @@ object NotifyOverlay {
         val needsAi: Boolean,
         /** How long the fetch may take before the clock starts regardless. */
         val fetchCapMs: Long,
-        val onOutcome: (Outcome) -> Unit,
-        val enqueuedAt: Long = System.currentTimeMillis(),
+        /** Who is asking, as the caller registry names them; blank when the caller did not say. */
+        val requester: String,
+        val onOutcome: (Outcome) -> Unit
     ) {
         /** True once a result has been reported. Guards the tap-versus-timer race. */
         var settled = false
 
         /** Stamped when the card is attached, never when [show] was called. */
         var shownAt = 0L
+
+        /** Summary lines the card cuts off, measured at layout; 0 while the whole text is shown. Main thread only. */
+        var hiddenLines = 0
 
         /** Set by [settle]; the tick reads it to know when to start fading out. */
         var settledAt = 0L
@@ -224,35 +243,21 @@ object NotifyOverlay {
         /** The AI description line, created up front so the fetch can fill it in. */
         var aiLine: TextView? = null
 
+        /** The pending light beside [aiLine]; hidden once the summary has arrived. */
+        var aiLed: Led? = null
+
+        /** The AI's risk call as a word ("HIGH risk"); hidden until the summary has arrived. */
+        var riskLabel: TextView? = null
+
+        /** "Another app is covering this screen", shown when an approve tap was obscured (D17). */
+        var obscuredLine: TextView? = null
+
         /** The card's background layer, restroked with the risk colour on arrival. */
         var cardBg: GradientDrawable? = null
 
-        /** The drain behind the reject control. Null until the card is built. */
+        /** The countdown bar along the card's bottom edge. Null until the card is built. */
         var cardDrain: ClipDrawable? = null
-
-
     }
-
-    private fun publishPending() {
-        com.mido.phonebridge.PendingDecisionChanges.publish(
-            com.mido.phonebridge.ApprovalGate.pendingSnapshots() + pendingSnapshots()
-        )
-    }
-
-    /** Immutable display-only copies; no Entry or outcome callback escapes. */
-    fun pendingSnapshots(): List<com.mido.phonebridge.PendingDecisionSnapshot> =
-        queue.snapshot { entry, onScreen ->
-            com.mido.phonebridge.PendingDecisionSnapshot(
-                id = "notify-${entry.id}",
-                caller = entry.callerLabel,
-                action = entry.summary,
-                endpoint = entry.facts?.routeLabel ?: entry.label,
-                verb = entry.verb.name,
-                state = if (onScreen) "On the hint card" else "Waiting in line",
-                enqueuedAtMs = entry.enqueuedAt,
-                awaitingSinceMs = entry.enqueuedAt,
-            )
-        }
 
     /**
      * Where the card sits, remembered across cards so a drag sticks: y is measured UP
@@ -285,13 +290,13 @@ object NotifyOverlay {
         facts: RequestFacts?,
         needsAi: Boolean,
         fetchCapMs: Long,
-        callerLabel: String = "Caller",
+        requester: String,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
             val entry = Entry(
-                ctx.applicationContext, id, summary, label, callerLabel, verb, windowMs, facts, needsAi,
-                fetchCapMs, onOutcome
+                ctx.applicationContext, id, summary, label, verb, windowMs, facts, needsAi,
+                fetchCapMs, requester, onOutcome
             )
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
@@ -303,7 +308,6 @@ object NotifyOverlay {
                     "line full: ${admission.ahead} prompt(s) ahead; refused without showing"
                 )
             }
-            publishPending()
         }
     }
 
@@ -335,28 +339,39 @@ object NotifyOverlay {
         // stranded window cannot sit under a fresh one and swallow its touches.
         sweepStranded()
         val ctx = entry.ctx
+        // One palette read per card (TOKENS 2.3): it resolves light/dark from the configuration,
+        // which works from this overlay's application context as well as from an Activity.
+        val p = Theme.palette(ctx)
         val wm = wm(ctx)
         val density = ctx.resources.displayMetrics.density
         fun dp(v: Int): Int = (v * density).roundToInt()
 
-        val radius = dp(CORNER_DP).toFloat()
+        val radius = dp(Dimens.RADIUS_MODULE).toFloat()
+        val cardWidthPx = minOf(screenSize(wm).first - 2 * dp(CARD_SIDE_MARGIN_DP), dp(CARD_MAX_WIDTH_DP))
+        val pluginName = NotifyCardCopy.pluginName(NotifyCardCopy.pluginId(entry.label, entry.facts?.plugin))
+        // Requester and summary are what a caller sent: hidden characters are shown as tokens in the
+        // caution colour (FIX4). `shownSummary` is also what the line count below measures.
+        val shownRequester = UntrustedText.mark(entry.requester.ifBlank { NotifyCardCopy.UNKNOWN_REQUESTER }, p.cautionText)
+        val shownSummary = UntrustedText.mark(entry.summary, p.cautionText)
+        val requesterLine = NotifyCardCopy.requesterLine(UntrustedText.escape(entry.requester), pluginName)
+        val plainSummary = UntrustedText.escape(entry.summary)
 
         // Whatever decorates the card must be a BACKGROUND LAYER, never a child view: a
         // MATCH_PARENT child inside a WRAP_CONTENT FrameLayout forces the parent to match ITS
         // parent — the full window — which is why 0.6.1 drew a full-screen-height card.
         //
-        // The countdown used to be such a layer here. It now lives on the reject button instead
-        // (see `cardDrain` below), which is still a background and so still cannot affect the
-        // card's measured height.
+        // The countdown is such a layer: a thin bar along the bottom edge (layer 1 below), so it
+        // still cannot affect the card's measured height.
         val cardBg = GradientDrawable().apply {
-            setColor(BG)
+            setColor(Colors.withAlpha(p.panel, PANEL_ALPHA))
             cornerRadius = radius
+            setStroke(dp(1), p.hairline)
         }
 
         val entryDrain = ClipDrawable(
             GradientDrawable().apply {
-                setColor(ACCENT_FILL)
-                cornerRadius = radius
+                setColor(p.ink)
+                cornerRadius = dp(2).toFloat()
             },
             Gravity.START,
             ClipDrawable.HORIZONTAL,
@@ -370,25 +385,26 @@ object NotifyOverlay {
             // clips to NOTHING. A card that is invisible for its whole window is not
             // cosmetic: silence means APPROVE in this mode, so a prompt nobody can see
             // approves the very request it was meant to ask about.
-            // The card's own wash, full width: the hint's window, as it always was. Putting it
-            // on the 30dp ✕ made a chip against the right edge instead of a bar.
-            background = LayerDrawable(
-                arrayOf(
-                    cardBg,
-                    entryDrain,
-                    // Grain on the NOTIFY card too. Without this the one surface a user actually
-                    // touches in AUTOMATIC mode was the only untextured thing on screen.
-                    com.mido.phonebridge.ui.GrainOverlay(radius)
-                )
-            )
+            // Two layers: the panel (which the AI risk re-tints) and the countdown bar, a 3dp
+            // strip inset 12dp from the sides and 6dp from the bottom. No grain (D5).
+            background = LayerDrawable(arrayOf(cardBg, entryDrain)).apply {
+                setLayerGravity(1, Gravity.BOTTOM or Gravity.FILL_HORIZONTAL)
+                setLayerHeight(1, dp(DRAIN_HEIGHT_DP))
+                setLayerInsetLeft(1, dp(Dimens.SPACE_M))
+                setLayerInsetRight(1, dp(Dimens.SPACE_M))
+                setLayerInsetBottom(1, dp(DRAIN_INSET_BOTTOM_DP))
+            }
             isClickable = true
+            contentDescription = NotifyCardCopy.description(entry.verb, requesterLine, plainSummary)
         }
         entry.cardBg = cardBg
         entry.cardDrain = entryDrain
 
         val column = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(6), dp(4), dp(6))
+            // No end padding: the 48dp ✕ supplies its own space. The bottom 12dp leaves room
+            // for the countdown bar.
+            setPadding(dp(Dimens.SPACE_M), dp(Dimens.SPACE_S), 0, dp(Dimens.SPACE_M))
         }
 
         val row = LinearLayout(ctx).apply {
@@ -396,90 +412,144 @@ object NotifyOverlay {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        // The verb badge, first so the eye reads WHAT this is before reading the text.
-        // Coloured by consequence, not by name: reads are green because nothing changes,
-        // deletes are red because something does, and writes sit between. Deliberately
-        // WRAP_CONTENT so it hugs its own text — a stretched badge would look like a
-        // header bar and pull weight away from the summary.
-        val badge = TextView(ctx).apply {
-            text = verbShort(entry.verb)
-            // Was 9sp: unreadable on a phone at arm's length, and this badge carries the ONE
-            // word that says what the request does. 12sp is the app's floor.
-            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
-            setTextColor(BADGE_TEXT)
-            setTypeface(com.mido.phonebridge.ui.Theme.bodyFont(ctx))
-            gravity = Gravity.CENTER
-            background = com.mido.phonebridge.ui.Theme.sheetDp(ctx, verbColor(entry.verb), 4)
-            setPadding(dp(5), dp(1), dp(5), dp(1))
-        }
+        // The verb chip, first so the eye reads WHAT this is before reading the text. Signal
+        // orange only for EXECUTE and DELETE (D1, D6); every other verb sits on the sunken fill.
+        val badge = VerbChip.create(ctx, entry.verb)
         row.addView(
             badge,
             LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
-                marginEnd = dp(6)
+                marginEnd = dp(Dimens.SPACE_S)
             }
         )
 
-        // Named `summaryView`, not `text`: a local called `text` shadows the TextView
-        // `text` property inside the `apply` blocks below and the assignment silently
-        // targets the local instead.
-        val summaryView = TextView(ctx).apply {
-            text = entry.summary
-            textSize = com.mido.phonebridge.ui.Theme.TEXT_DETAIL_SP
-            setTextColor(TEXT)
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setTypeface(com.mido.phonebridge.ui.Theme.bodyFont(ctx))
+        // WHO is asking and WHICH plugin (R1). Wraps, never ellipsizes: silence approves after
+        // five seconds, so a name cut short is consent to something half-read.
+        val requesterView = TextView(ctx).apply {
+            text = android.text.SpannableStringBuilder(shownRequester).append(" \u00B7 ").append(pluginName)
+            Type.apply(this, TypeRole.DETAIL)
+            setTextColor(p.ink)
         }
-        row.addView(summaryView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        row.addView(requesterView, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
 
-        // A 30dp touch box so the target is real without looking like a button — a
-        // visible button here would pull the eye off the text.
-        //
-        // **The ✕ is plain again.**
-        //
-        // I put the countdown drain here by mistake: "the modal" in the request meant the APPROVAL
-        // modal, and this is the hint card. The result was a 44dp fill squeezed against the right
-        // edge — reported as *"hints loading is pushed to the right, not full hint width"*.
-        //
-        // The countdown now lives where it was asked for, on the modal's DENY button. This card
-        // keeps the full-card drain it already had.
+        // The deny control: a plain glyph in a 48dp box (D20 touch target), so the target is real
+        // without a visible button pulling the eye off the text. It is described by the summary,
+        // never by the plugin id (D21).
         val close = TextView(ctx).apply {
             text = "✕"
-            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
-            setTextColor(MUTED)
+            Type.apply(this, TypeRole.ROW_LABEL)
+            setTextColor(p.etched)
             gravity = Gravity.CENTER
             isClickable = true
-            contentDescription = "Reject: ${entry.label}"
+            contentDescription = "Deny: $plainSummary"
         }
-        // 30dp square: a touch target, not a bar.
-        row.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
+        row.addView(close, LinearLayout.LayoutParams(dp(Dimens.MIN_TARGET), dp(Dimens.MIN_TARGET)))
 
         column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // The action, on the full card width and all of it: this is the card's summary, not the
+        // verbatim command (D10 applies to the gate). No line cap and no ellipsis (R1), so a long
+        // target ("Delete the notification from Signal") is never cut mid-word. Named `summaryView`,
+        // not `text`: a local called `text` shadows the TextView `text` property in `apply` blocks.
+        val summaryView = TextView(ctx).apply {
+            text = shownSummary
+            Type.apply(this, TypeRole.BODY_STRONG)
+            setTextColor(p.ink)
+            // Capped at three lines with NO ellipsis: the summary is caller-controlled and an
+            // unbounded one would push the risk row and drain bar off the screen. What the cap
+            // hides is announced by `moreLine` below, never dropped silently.
+            maxLines = SUMMARY_MAX_LINES
+            ellipsize = null
+            pinSummaryBreaking(this)
+        }
+        column.addView(summaryView, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+            topMargin = dp(Dimens.SPACE_XS)
+            // The column has no end padding (the header row's ✕ supplies its own), so give the text one.
+            marginEnd = dp(Dimens.SPACE_M)
+        })
+        val moreLine = TextView(ctx).apply {
+            Type.apply(this, TypeRole.CAPTION)
+            setTextColor(p.cautionText)
+            visibility = GONE
+        }
+        column.addView(moreLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        summaryView.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+            val tv = v as TextView
+            val width = (r - l) - tv.compoundPaddingLeft - tv.compoundPaddingRight
+            if (width <= 0) return@addOnLayoutChangeListener
+            val full = summaryFullLineCount(tv, width)
+            val hidden = (full - SUMMARY_MAX_LINES).coerceAtLeast(0)
+            val label = if (hidden > 0) NotifyCardCopy.moreLines(hidden) else ""
+            entry.hiddenLines = hidden
+            if (moreLine.text.toString() != label) {
+                moreLine.text = label
+                moreLine.visibility = if (hidden > 0) VISIBLE else GONE
+                card.contentDescription = if (hidden > 0) {
+                    NotifyCardCopy.descriptionHidden(entry.verb, requesterLine, plainSummary, hidden)
+                } else {
+                    NotifyCardCopy.description(entry.verb, requesterLine, plainSummary)
+                }
+            }
+        }
 
         // The AI description line, present from the start so the fetch can fill it in
         // WITHOUT A RELAYOUT SURPRISE. While the fetch runs it reads as a status, not as an
         // empty row (never print a label with nothing under it). Its row exists from the
         // first frame, capped at two lines, so the arriving summary rewrites text in a
         // box that is already there — it can never add height the card did not have.
-        val aiLine = TextView(ctx).apply {
-            text = if (entry.facts != null) "◌ summarising…" else ""
-            // Was 10sp for the same reason; 12sp is the floor.
-            textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
-            setTextColor(MUTED)
-            maxLines = 2
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(0, dp(4), 0, 0)
+        //
+        // A pending LED carries the "still working" signal; the line beside it holds the text.
+        val aiRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(Dimens.SPACE_XS), 0, 0)
             visibility = if (entry.facts != null) VISIBLE else GONE
         }
+        val aiLed = Led(ctx).apply { state = Led.State.PENDING }
+        aiRow.addView(aiLed, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        val aiLine = TextView(ctx).apply {
+            text = if (entry.facts != null) "summarising…" else ""
+            Type.apply(this, TypeRole.DETAIL)
+            setTextColor(p.etched)
+        }
+        // The AI's risk call, as a word on its own line above the description (R1). Hidden until
+        // the summary arrives; HIGH is inverted, so it cannot be mistaken for MEDIUM.
+        val riskLabel = TextView(ctx).apply {
+            Type.apply(this, TypeRole.ROW_LABEL)
+            visibility = GONE
+        }
+        val aiText = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(riskLabel, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+            addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        aiRow.addView(
+            aiText,
+            LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = dp(AI_LED_GAP_DP) }
+        )
+        entry.riskLabel = riskLabel
         entry.aiLine = aiLine
-        column.addView(aiLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        entry.aiLed = aiLed
+        column.addView(aiRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // Shown only after an approve tap that another window fully covered (D17, D60). It is a
+        // child of the column, never of the card, so the card keeps its single child.
+        val obscuredLine = TextView(ctx).apply {
+            text = ObscuredTouchGuard.BANNER_TEXT
+            Type.apply(this, TypeRole.CAPTION)
+            setTextColor(p.cautionText)
+            setPadding(0, dp(Dimens.SPACE_XS), 0, 0)
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            visibility = GONE
+        }
+        entry.obscuredLine = obscuredLine
+        column.addView(obscuredLine, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         card.addView(column, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         // **The column is the card's ONLY child, and it must stay that way.** The card is
         // WRAP_CONTENT, so any second child participating in layout can decide the card's
         // size — and a MATCH_PARENT one makes it the full window. That is the 0.6.2 and
         // 0.25.1 bug, twice. Decoration that must not affect size belongs in the background
-        // LayerDrawable (tint, grain); `NotifyCardLayoutTest` enforces this.
+        // LayerDrawable (tint, countdown bar); `NotifyCardLayoutTest` enforces this.
 
         val size = screenSize(wm)
         val minEdge = dp(EDGE_DP)
@@ -497,11 +567,11 @@ object NotifyOverlay {
         if (anchorX == Int.MIN_VALUE || anchorOrientation != orientation) {
             val stored = CardAnchorStore.load(ctx, orientation)
             val restored = CardAnchor.clamp(
-                x = stored?.x ?: minEdge,
+                x = stored?.x ?: dp(CARD_SIDE_MARGIN_DP),
                 y = stored?.y ?: minEdge,
                 screenWidth = size.first,
                 screenHeight = size.second,
-                cardWidth = dp(CARD_WIDTH_DP),
+                cardWidth = cardWidthPx,
                 cardHeight = 0,
                 minEdge = minEdge,
             )
@@ -511,7 +581,7 @@ object NotifyOverlay {
         }
 
         val params = WindowManager.LayoutParams(
-            dp(CARD_WIDTH_DP),
+            cardWidthPx,
             WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // NOT_FOCUSABLE: never takes focus or the keyboard.
@@ -544,6 +614,9 @@ object NotifyOverlay {
         var originX = 0
         var originY = 0
         var dragging = false
+        // Latched for the whole gesture: a cover that was there at the press or at any move
+        // counts, even if it is gone by the release (D17).
+        var isGestureObscured = false
         card.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -552,10 +625,12 @@ object NotifyOverlay {
                     originX = params.x
                     originY = params.y
                     dragging = false
+                    isGestureObscured = ObscuredTouchGuard.isObscured(ev)
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
+                    if (ObscuredTouchGuard.isObscured(ev)) isGestureObscured = true
                     val dx = ev.rawX - downX
                     val dy = ev.rawY - downY
                     if (!dragging && (abs(dx) > slop || abs(dy) > slop)) dragging = true
@@ -567,7 +642,7 @@ object NotifyOverlay {
                             y = (originY - dy).roundToInt(),
                             screenWidth = size.first,
                             screenHeight = size.second,
-                            cardWidth = dp(CARD_WIDTH_DP),
+                            cardWidth = cardWidthPx,
                             cardHeight = card.height,
                             minEdge = minEdge,
                         )
@@ -607,13 +682,30 @@ object NotifyOverlay {
                         // device 2026-10-26: "I can still dismiss in cool down"). Painting here
                         // closes the gap in the only direction that matters: the picture is
                         // brought up to date before the decision it gates is taken.
-                        undim(entry)
-                        if (ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
-                            settle(entry, Reason.APPROVED)
-                        } else {
+                        //
+                        // **An obscured tap decides nothing (D17).** Another window fully covering
+                        // the card could have steered the finger here, so the approve is refused
+                        // and the card says why. Only the approve is filtered: the ✕ denies, which
+                        // is the safe direction, and it always works (D55). Partial cover is
+                        // allowed, the platform's own rule (D60). The check covers the whole
+                        // gesture, not only the release: a cover can be pulled away just before
+                        // the finger lifts.
+                        if (isGestureObscured || ObscuredTouchGuard.isObscured(ev)) {
+                            entry.obscuredLine?.visibility = View.VISIBLE
+                            Haptics.perform(card, HapticEvent.REJECT)
                             com.mido.phonebridge.Debug.log(
-                                "notify[${entry.id}] tap ignored: still in the misclick guard"
+                                "notify[${entry.id}] approve tap ignored: window obscured"
                             )
+                        } else {
+                            entry.obscuredLine?.visibility = View.GONE
+                            undim(entry)
+                            if (ArmGuard.decisionsAllowed(entry.shownAt, System.currentTimeMillis())) {
+                                settle(entry, Reason.APPROVED)
+                            } else {
+                                com.mido.phonebridge.Debug.log(
+                                    "notify[${entry.id}] tap ignored: still in the misclick guard"
+                                )
+                            }
                         }
                     }
                     true
@@ -667,7 +759,6 @@ object NotifyOverlay {
             Log.w(TAG, "overlay refused for id=${entry.id}: ${e.message}")
             queue.retire(entry.id)
             reply(entry, Reason.UNAVAILABLE, e.message ?: "overlay unavailable")
-            publishPending()
             promoteNext()
             return
         }
@@ -685,7 +776,7 @@ object NotifyOverlay {
                     y = anchorY,
                     screenWidth = size.first,
                     screenHeight = size.second,
-                    cardWidth = dp(CARD_WIDTH_DP),
+                    cardWidth = cardWidthPx,
                     cardHeight = h,
                     minEdge = minEdge,
                 )
@@ -704,7 +795,7 @@ object NotifyOverlay {
         entry.shownAt = System.currentTimeMillis()
 
         com.mido.phonebridge.Debug.log(
-            "notify[${entry.id}] attached w=${dp(CARD_WIDTH_DP)} h=WRAP anchored x=$anchorX y=$anchorY"
+            "notify[${entry.id}] attached w=${cardWidthPx} h=WRAP anchored x=$anchorX y=$anchorY"
         )
 
         // The subtle alert. Enforced inside SoundAlerts: it plays only while the
@@ -740,7 +831,7 @@ object NotifyOverlay {
                     // Still fetching: the bar waits at full and the clock has not begun.
                     entry.cardDrain?.level = LEVEL_FULL
                     // **BUT NOT FOREVER.** This branch used to have no deadline at all: it held
-                    // the card at "◌ summarising…" and relied on a separate backstop Runnable
+                    // the card at "summarising…" and relied on a separate backstop Runnable
                     // to end it. When that backstop was missed — a posted callback that never
                     // ran, a card re-attached, a window service hiccup — the card sat on
                     // "summarising…" with a full bar and a clock that had never started, and
@@ -777,10 +868,7 @@ object NotifyOverlay {
                             // Without the vault half, a request that started attended and lost
                             // the screen mid-window would still deny, which would make the rule
                             // depend on WHEN the screen went off rather than on the session.
-                            if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
-                                com.mido.phonebridge.core.SecretVault.isUnlocked()
-                            ) Reason.EXPIRED
-                            else Reason.UNATTENDED
+                            expiryReason(entry)
                         )
                         return
                     }
@@ -812,15 +900,23 @@ object NotifyOverlay {
                     entry,
                     // Same rule as the tick above: the vault session is what permits an
                     // unattended approve. See the note there.
-                    if (com.mido.phonebridge.policy.isAttended(entry.ctx) ||
-                        com.mido.phonebridge.core.SecretVault.isUnlocked()
-                    ) Reason.EXPIRED
-                    else Reason.UNATTENDED
+                    expiryReason(entry)
                 )
             }
         }
         entry.timeout = backstop
         main.postDelayed(backstop, entry.fetchCapMs + entry.windowMs + BACKSTOP_SLACK_MS)
+    }
+
+    /**
+     * What a window that ran out means. Silence approves only what the human could read: a card
+     * that cuts summary lines off is denied (FIX4), whoever is present. Otherwise the existing
+     * rule: approve when attended or the vault session is open, else the screen was off.
+     */
+    private fun expiryReason(entry: Entry): Reason = when {
+        entry.hiddenLines > 0 -> Reason.HIDDEN_TEXT
+        com.mido.phonebridge.policy.isAttended(entry.ctx) || com.mido.phonebridge.core.SecretVault.isUnlocked() -> Reason.EXPIRED
+        else -> Reason.UNATTENDED
     }
 
     /**
@@ -891,14 +987,55 @@ object NotifyOverlay {
      */
     private fun applyAi(entry: Entry, result: com.mido.phonebridge.ai.RequestSummary) {
         val line = entry.aiLine ?: return
-        line.text = result.description
-        line.visibility = View.VISIBLE
-        line.setTextColor(TEXT)
+        line.text = UntrustedText.mark(result.description, Theme.palette(entry.ctx).cautionText)
+        line.setTextColor(Theme.palette(entry.ctx).ink)
+        entry.aiLed?.visibility = View.GONE
         // The risk tints the CARD ITSELF, not a stripe down its edge (Mido, 2026-11-03:
         // *"remove left green border"* ... *"the hint bg to match the level"*). `cardBg` is a
         // GradientDrawable already in the card's LayerDrawable, so recolouring it repaints
         // without touching geometry — the same property that made the old band safe, kept.
-        entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(result.risk))
+        // LOW gives okSurface, MEDIUM and HIGH cautionSurface; never signal (D6, D36).
+        entry.cardBg?.setColor(com.mido.phonebridge.ui.Theme.riskSurface(Theme.palette(entry.ctx), result.risk))
+        applyRisk(entry, result.risk)
+    }
+
+    /**
+     * Name the risk as a word, and make HIGH look different from MEDIUM (R1). D36 keeps the two on
+     * the same amber, so the difference is the word and the weight: HIGH is an inverted chip on a
+     * card with a heavy outline, MEDIUM is amber text on a plain card, LOW is green text.
+     */
+    private fun applyRisk(entry: Entry, risk: com.mido.phonebridge.ai.Risk) {
+        val label = entry.riskLabel ?: return
+        val p = Theme.palette(entry.ctx)
+        val density = entry.ctx.resources.displayMetrics.density
+        label.text = NotifyCardCopy.riskWord(risk)
+        label.visibility = View.VISIBLE
+        val high = risk == com.mido.phonebridge.ai.Risk.HIGH
+        if (high) {
+            label.setTextColor(p.onInk)
+            label.background = GradientDrawable().apply {
+                setColor(p.ink)
+                cornerRadius = 4 * density
+            }
+            val padX = (8 * density).roundToInt()
+            val padY = (2 * density).roundToInt()
+            label.setPadding(padX, padY, padX, padY)
+            entry.cardBg?.setStroke((HIGH_RISK_STROKE_DP * density).roundToInt(), p.cautionText)
+        } else {
+            label.setTextColor(if (risk == com.mido.phonebridge.ai.Risk.LOW) p.okText else p.cautionText)
+            label.background = null
+            label.setPadding(0, 0, 0, 0)
+        }
+    }
+
+    /**
+     * Screenshot fixture only (TESTING 5): paints [summary] onto the card on screen with [id],
+     * exactly as a finished fetch would, without starting or changing any clock.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun showSummaryForTest(id: Long, summary: com.mido.phonebridge.ai.RequestSummary) {
+        val entry = queue.currentItem()?.takeIf { it.id == id } ?: return
+        applyAi(entry, summary)
     }
 
     /**
@@ -953,7 +1090,6 @@ object NotifyOverlay {
 
         // Retire now so ordering is correct even while the fade-out runs.
         queue.retire(entry.id)
-        publishPending()
 
         // A card that never attached has no view to fade or remove.
         val card = entry.root
@@ -973,18 +1109,18 @@ object NotifyOverlay {
             // Mido, 2026-11-03: *"all the notification cards are stuck on summarizing after I
             // touched to accept them"*.
             //
-            // This branch returns early and leaves removal to `stampDecision`'s `onFinished`,
-            // which fires from an animator listener. That is not a guarantee: `StampOverlay`
-            // starts its animation from `onSizeChanged`, so a stamp whose window is added but
-            // never laid out never starts, never ends, and never calls back — and the card sits
-            // there reading "◌ summarising…" with every control inert, because `settled` is
-            // already true. `teardown` is idempotent, so a second caller is harmless.
+            // This branch returns early and leaves removal to `stampDecision`'s `onFinished`.
+            // That is not a guarantee: the punch is clock-driven but starts on the first frame
+            // after it has a size, so a punch whose window is added but never laid out never
+            // starts and never calls back — and the card would sit there with every control
+            // inert, because `settled` is already true. `teardown` is idempotent, so a second
+            // caller is harmless.
             main.postDelayed({ teardown(entry) }, STAMP_BACKSTOP_MS)
             stampDecision(entry, approved = reason == Reason.APPROVED)
-            // The stamp is ~1.1s (slam + bleed + settle + fade) and the card's own fade-out is
-            // 200ms — so tearing the card down on its normal schedule left the stamp drawing over
-            // empty space for most of its life, and on a fast device it looked like nothing
-            // happened at all. The card stays put until the stamp reports it is done.
+            // The punch is ~0.88s (720ms to settle + 160ms fade) and the card's own fade-out is
+            // 200ms — so tearing the card down on its normal schedule would leave the punch drawing
+            // over empty space for most of its life, and on a fast device it would look like
+            // nothing happened at all. The card stays put until the punch reports it is done.
             //
             // The backstop and the fade are SKIPPED for these two reasons; `stampDecision`
             // schedules the teardown from `onFinished`, and `dismissAll`/service shutdown still
@@ -1161,7 +1297,6 @@ object NotifyOverlay {
         // for the head of the queue would otherwise re-present a card that is already attached —
         // which attaches a SECOND window and orphans the first. The guard in `present` stops the
         // damage; this stops the attempt, so the log stays honest about what happened.
-        publishPending()
         if (next.root != null) return
         present(next)
     }
@@ -1174,7 +1309,6 @@ object NotifyOverlay {
     fun dismissAll() {
         main.post {
             for (entry in queue.clear()) {
-                publishPending()
                 entry.tick?.let(main::removeCallbacks)
                 entry.timeout?.let(main::removeCallbacks)
                 if (!entry.settled) {
@@ -1213,28 +1347,13 @@ object NotifyOverlay {
      */
     private fun stampDecision(entry: Entry, approved: Boolean) {
         val ctx = entry.ctx
-        // **The mark lands ON the card, not in the middle of the screen.**
-        //
-        // The stamp used to be a full-screen overlay drawing a centred mark sized against the
-        // whole window, so a 216dp card in a corner got a stamp floating in the middle of the
-        // display — and on a tall screen the mark was a sixth of its intended size relative to
-        // the thing it was approving. [stampAnchor] reads the card's live screen rect so the
-        // mark presses onto the card at the card's own scale.
-        val anchor = stampAnchor(entry)
-        // No scrim: the card stays visible underneath for the whole animation, so dimming the
+        // No scrim: the card stays visible underneath for the whole punch, so dimming the
         // screen would just make it go dark for a second.
-        //
-        // `focusGate = false` because the window below is `FLAG_NOT_FOCUSABLE` and will NEVER
-        // report window focus. Leaving the gate on made the arming loop wait out its full
-        // 2.5s fallback while the 2.2s backstop removed the window first — zero frames drawn,
-        // `onImpact` never called, so neither the animation NOR the thud played. That is the
-        // reported regression.
-        val overlay = com.mido.phonebridge.ui.StampOverlay(
-            ctx,
-            scrimAlpha = 0,
-            anchor = anchor,
-            focusGate = false,
-        )
+        val overlay = PunchView(ctx, scrimAlpha = 0)
+        // Not held: the punch fades out by itself, and no receipt follows on the card (D16 is the
+        // gate's). No meta line: the card is its own context.
+        overlay.holdAfterSettle = false
+        overlay.meta = ""
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -1245,14 +1364,15 @@ object NotifyOverlay {
         )
         // **THE STAMP MUST FINISH EXACTLY ONCE, AND MUST ALWAYS FINISH.**
         //
-        // `onFinished` is driven by an animator listener, and the animation only starts from
-        // `onSizeChanged` — so a stamp whose window is added but never laid out never starts,
-        // never ends, and never calls back. That is not hypothetical: it is the same shape that
-        // left cards frozen at "◌ summarising…" (Mido, 2026-11-03). An overlay is a full-screen
-        // window, so a stamp that never finishes is worse than a card that does not.
+        // The punch is clock-driven, ~0.88s (720ms settle + 160ms fade). It starts on the first
+        // frame after it has a size and calls `onFinished` exactly once — so a punch whose window
+        // is added but never laid out never starts and never calls back. That is not
+        // hypothetical: it is the same shape that left cards frozen at "summarising…" (Mido,
+        // 2026-11-03). An overlay is a full-screen window, so a punch that never finishes is
+        // worse than a card that does not.
         //
-        // `finished` makes it idempotent in both directions: the animator calling back twice,
-        // the deadline firing first, and a throw inside the animator all converge on one removal.
+        // `finished` makes it idempotent in both directions: the punch calling back, the deadline
+        // firing first, and a throw while adding the window all converge on one removal.
         val finished = java.util.concurrent.atomic.AtomicBoolean(false)
         val finish = {
             if (finished.compareAndSet(false, true)) {
@@ -1271,16 +1391,9 @@ object NotifyOverlay {
             }
         }
         overlay.onFinished = { finish() }
-        overlay.onImpact = {
-            try {
-                com.mido.phonebridge.alert.SoundAlerts.stamp(ctx)
-            } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
-                Log.e(TAG, "STAMP SOUND FAILED: ${e.message}", e)
-            }
-        }
         // The deadline, posted before the window is even added so no ordering can skip it.
-        // Longer than the stamp's own ~740ms sequence, short enough that a stamp which failed to
-        // start does not sit over the screen.
+        // Longer than the punch's own ~0.88s, short enough that a punch which never laid out does
+        // not sit over the screen.
         main.postDelayed({
             if (!finished.get()) {
                 Log.w(TAG, "stamp for id=${entry.id} never reported finished; forcing removal")
@@ -1289,12 +1402,8 @@ object NotifyOverlay {
         }, STAMP_BACKSTOP_MS)
         try {
             wm(ctx).addView(overlay, lp)
-            // The impact callback owns the synchronized sound. Firing it here as well would
-            // play the same thud twice: once before contact and once on contact.
-            overlay.stamp(
-                if (approved) com.mido.phonebridge.ui.StampOverlay.Verdict.APPROVED
-                else com.mido.phonebridge.ui.StampOverlay.Verdict.DENIED
-            )
+            // The punch plays the stamp thud itself, at impact (COMPONENTS 21.3).
+            overlay.stamp(if (approved) PunchView.Verdict.APPROVED else PunchView.Verdict.DENIED)
         } catch (e: Exception) {
             // The decision is already recorded. A stamp that cannot be drawn must never fail the
             // request or leave the card stranded — so tear the card down now, since the normal
@@ -1307,73 +1416,6 @@ object NotifyOverlay {
 
     private fun wm(ctx: Context): WindowManager =
         ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-    /**
-     * The card's current rectangle in OVERLAY-WINDOW coordinates, or null if it is not laid out.
-     *
-     * Both windows are full-screen `TYPE_APPLICATION_OVERLAY`s anchored to the display origin, so
-     * a window-local point and a screen point are the same numbers. Deriving the rect from the
-     * live layout rather than the stored anchor covers the case the stamp actually meets: the card
-     * has been dragged, and the stored anchor is what it was moved FROM.
-     *
-     * Returns null instead of guessing. A null anchor falls back to the old centred geometry, which
-     * still animates — a stamp in the wrong place beats no receipt at all, and the caller cannot
-     * fix a rect it never had.
-     */
-    private fun stampAnchor(entry: Entry): android.graphics.Rect? {
-        val card = entry.root ?: return null
-        if (card.width <= 0 || card.height <= 0) return null
-        val loc = IntArray(2)
-        card.getLocationOnScreen(loc)
-        // **No window-origin subtraction, and that is deliberate.**
-        //
-        // A view handed straight to `WindowManager.addView` is its own root, so `card.rootView`
-        // IS `card` — and subtracting `card.rootView.getLocationOnScreen()` from
-        // `card.getLocationOnScreen()` subtracts a value from itself and always yields (0,0).
-        // That would put every stamp in the top-left corner. It reads like the careful thing to
-        // do and it is exactly wrong.
-        //
-        // The subtraction is unnecessary anyway: the stamp window is `MATCH_PARENT` with default
-        // (top-start) gravity, so its origin IS the display origin and a screen point is already
-        // a valid window-local point. On a freeform display where those could differ, the stamp
-        // would be off by the window offset — visible, and far better than silently pinning every
-        // mark to the corner.
-        return android.graphics.Rect(loc[0], loc[1], loc[0] + card.width, loc[1] + card.height)
-    }
-
-    /**
-     * The badge's word. Short on purpose: the card is ~216dp wide and the badge must not
-     * compete with the summary for room.
-     */
-    private fun verbShort(v: Verb): String = when (v) {
-        Verb.READ -> "read"
-        Verb.WRITE -> "write"
-        Verb.EDIT -> "edit"
-        Verb.DELETE -> "del"
-        Verb.EXECUTE -> "exec"
-    }
-
-    /**
-     * The badge's colour, chosen by CONSEQUENCE rather than by verb name: green means
-     * nothing changes, red means something is destroyed, amber is the middle. `EXECUTE`
-     * takes amber because it covers both "send a message" and "act on a notification" —
-     * guessing red would cry wolf, guessing green would understate it.
-     */
-    private fun verbColor(v: Verb): Int = when (v) {
-        Verb.READ -> VERB_READ
-        Verb.DELETE -> VERB_DEL
-        else -> VERB_WRITE
-    }
-
-    /**
-     * The risk strip's colour. Display-only; it never changes what the card does.
-     *
-     * Delegates to [com.mido.phonebridge.ui.Theme.riskColor] so the card, the modal's risk
-     * line and the modal's APPROVE button cannot drift apart. They previously had separate
-     * palettes — the card used its own softer hues while the modal used the semantic ones —
-     * which meant "HIGH" was literally two different reds depending on where you looked.
-     */
-    private fun riskColor(r: Risk): Int = com.mido.phonebridge.ui.Theme.riskColor(r)
 
     /**
      * Real screen size, for clamping drags. `currentWindowMetrics` needs API 30; below
@@ -1390,26 +1432,52 @@ object NotifyOverlay {
             point.x to point.y
         }
 
-    // Muted on purpose: this must never look like an alarm. The ✕ and the draining
-    // background carry the interaction; the text carries the fact.
-    private const val BG = 0xF5F5EEDF.toInt()
+    /**
+     * 240dp, so the `EXECUTE` chip, two lines of summary and the 48dp ✕ fit side by side at a
+     * 1.35 font scale. Every clamp reads this same value.
+     */
+    /** The card spans the screen minus this margin on each side (R1: was a fixed 240 dp). */
+    private const val CARD_SIDE_MARGIN_DP = 20
 
-    /** ~30% alpha: clearly visible as motion, still quiet as a colour. */
-    private const val ACCENT_FILL = 0x4DB23A2F.toInt()
-    private const val TEXT = 0xFF2B2318.toInt()
-    private const val MUTED = 0xFF7A6B52.toInt()
+    /** On a wide screen (tablet, landscape) the card stops growing here. */
+    private const val CARD_MAX_WIDTH_DP = 560
 
-    // Badge palette. Light fills with near-black text, because the card is dark: a dark
-    // badge on a dark card is unreadable, which defeats the point of colour-coding.
-    private const val VERB_READ = 0xFFDCEBD7.toInt()
-    private const val VERB_WRITE = 0xFFF0E4C8.toInt()
-    private const val VERB_DEL = 0xFFF1D9D0.toInt()
-    private const val BADGE_TEXT = 0xFF2B2318.toInt()
-
-
-    private const val CARD_WIDTH_DP = 216
-    private const val CORNER_DP = 14
+    /** The HIGH-risk card is outlined this thick, so it differs from MEDIUM at a glance. */
+    private const val HIGH_RISK_STROKE_DP = 3
     private const val EDGE_DP = 14
+
+    /** The panel's alpha on the card: nearly opaque, so the app below never shows through text. */
+    private const val PANEL_ALPHA = 0xF5
+
+    /** The countdown bar: 3dp tall, 6dp above the card's bottom edge. */
+    private const val DRAIN_HEIGHT_DP = 3
+    private const val DRAIN_INSET_BOTTOM_DP = 6
+
+    /** Space between the pending LED and the "summarising…" line. */
+    private const val AI_LED_GAP_DP = 6
+    private const val SUMMARY_MAX_LINES = 3
+
+    /**
+     * Greedy breaking and no hyphenation, as Readout pins them: the TextView and the line count
+     * below then break the text identically, so "+N more lines" can never read lower than what
+     * the view really lays out.
+     */
+    internal fun pinSummaryBreaking(tv: TextView) {
+        tv.apply {
+            breakStrategy = android.text.Layout.BREAK_STRATEGY_SIMPLE
+            hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
+        }
+    }
+
+    /** Uncapped line count of [tv]'s text at [width], with the view's own break settings. */
+    internal fun summaryFullLineCount(tv: TextView, width: Int): Int =
+        android.text.StaticLayout.Builder
+            .obtain(tv.text, 0, tv.text.length, tv.paint, width)
+            .setBreakStrategy(tv.breakStrategy)
+            .setHyphenationFrequency(tv.hyphenationFrequency)
+            .setIncludePad(tv.includeFontPadding)
+            .setLineSpacing(tv.lineSpacingExtra, tv.lineSpacingMultiplier)
+            .build().lineCount
 
     /**
      * Drag slop. Generous on purpose: a tap is now an APPROVAL, so a small slop would
@@ -1433,9 +1501,10 @@ object NotifyOverlay {
     /**
      * How long the stamp may hold the card before its removal is forced.
      *
-     * The stamp's own sequence sums to ~1.1s (150 + 45 + 220 + 260 + 260 + 180ms, chained).
-     * This is that plus a second of slack — long enough never to cut a working stamp short,
-     * short enough that a stamp which failed to start still releases the card quickly.
+     * The punch is clock-driven and lasts ~0.88s (720ms to settle + 160ms fade), starting on the
+     * first frame after it has a size. This is that plus well over a second of slack — long
+     * enough never to cut a working punch short, short enough that a punch which never laid out
+     * still releases the card quickly.
      */
     private const val STAMP_BACKSTOP_MS = 2_200L
 

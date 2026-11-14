@@ -121,7 +121,8 @@ object NotifyGate {
         verb: Verb,
         facts: RequestFacts?,
         needsAi: Boolean,
-        callerLabel: String = "Caller",
+        /** Who is asking, by the name the caller registry knows. The card shows "unknown requester" when blank. */
+        requester: String,
     ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
@@ -137,7 +138,7 @@ object NotifyGate {
             facts = facts,
             needsAi = needsAi,
             fetchCapMs = FETCH_CAP_MS,
-            callerLabel = callerLabel,
+            requester = requester,
         ) { outcome ->
             decided.set(outcome)
             latch.countDown()
@@ -171,6 +172,10 @@ object NotifyGate {
             Reason.APPROVED -> Result.Tapped(shownAt, outcome.decidedAt)
             Reason.TAPPED -> Result.Rejected(shownAt, outcome.decidedAt)
             Reason.AI_FAILED -> Result.AiFailed(outcome.detail)
+            Reason.HIDDEN_TEXT -> Result.Unavailable(
+                shownAt, outcome.decidedAt,
+                "the card hid part of the request, so silence could not approve it; tap the card to approve",
+            )
             Reason.UNATTENDED ->
                 Result.Unavailable(shownAt, outcome.decidedAt, "screen off or device locked")
             Reason.REFUSED ->

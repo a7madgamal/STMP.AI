@@ -38,11 +38,11 @@ val GlobalMode.title: String
 val GlobalMode.blurb: String
     get() = when (this) {
         GlobalMode.WHITELIST ->
-            "Rules decide. Anything without a rule asks for your stamp."
+            "Exceptions decide. Anything without one asks for your stamp."
         GlobalMode.PARANOID ->
             "Every request needs your stamp. Nothing is quiet."
         GlobalMode.DONT_DISTURB ->
-            "Small overlay. Doing nothing approves it. Tap \u2715 to reject."
+            "Small overlay. Doing nothing approves it. Tap \u2715 to deny."
     }
 
 /**

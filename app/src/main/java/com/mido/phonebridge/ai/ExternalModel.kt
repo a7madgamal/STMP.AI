@@ -123,7 +123,7 @@ object ExternalModel : SummaryModel {
      */
     private fun requireDialect(ctx: Context): com.mido.phonebridge.policy.ExternalDialect =
         dialect(ctx) ?: throw IllegalStateException(
-            "no model server protocol selected; press refresh in Options → AI"
+            "no model server protocol selected; press refresh in Settings → AI"
         )
 
     /**
@@ -215,9 +215,9 @@ object ExternalModel : SummaryModel {
      * a server to ask.
      */
     private fun configureProblem(ctx: Context): String? = when {
-        baseUrl(ctx).isEmpty() -> "no model server address; set it in Options → AI"
-        dialect(ctx) == null -> "the server has never been listed; press refresh in Options → AI"
-        model(ctx).isEmpty() -> "no model selected; press refresh and pick one in Options → AI"
+        baseUrl(ctx).isEmpty() -> "no model server address; set it in Settings → AI"
+        dialect(ctx) == null -> "the server has never been listed; press refresh in Settings → AI"
+        model(ctx).isEmpty() -> "no model selected; press refresh and pick one in Settings → AI"
         else -> null
     }
 

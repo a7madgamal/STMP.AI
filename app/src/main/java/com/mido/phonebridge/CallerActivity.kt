@@ -3,11 +3,16 @@ package com.mido.phonebridge
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.annotation.VisibleForTesting
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 import com.mido.phonebridge.callers.CallerPrompt
 import com.mido.phonebridge.callers.CallerState
@@ -15,7 +20,20 @@ import com.mido.phonebridge.callers.CallerStore
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import com.mido.phonebridge.ui.CallerCopy
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.UntrustedText
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.Field
+import com.mido.phonebridge.ui.kit.Hints
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.kit.ObscuredTouchGuard
+import com.mido.phonebridge.ui.kit.Readout
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
+import com.mido.phonebridge.ui.tokens.HapticEvent
+import com.mido.phonebridge.ui.tokens.Haptics
 import java.util.concurrent.Executor
 
 /**
@@ -40,8 +58,6 @@ import java.util.concurrent.Executor
 class CallerActivity : FragmentActivity() {
 
     private lateinit var nameField: EditText
-    private lateinit var approve: android.widget.Button
-    private lateinit var deny: android.widget.Button
     private lateinit var status: TextView
     private lateinit var ip: String
 
@@ -58,119 +74,157 @@ class CallerActivity : FragmentActivity() {
             finish()
             return
         }
+        title = "New device"
 
+        val p = Theme.palette(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@CallerActivity, 20), Theme.dp(this@CallerActivity, 24),
-                Theme.dp(this@CallerActivity, 20), Theme.dp(this@CallerActivity, 24)
-            )
-            background = Theme.sheet(Theme.BG)
+            setBackgroundColor(p.body)
             gravity = Gravity.CENTER_VERTICAL
+            setPadding(
+                Theme.dp(this@CallerActivity, Dimens.GUTTER), Theme.dp(this@CallerActivity, Dimens.SPACE_XL),
+                Theme.dp(this@CallerActivity, Dimens.GUTTER), Theme.dp(this@CallerActivity, Dimens.SPACE_XL),
+            )
         }
 
+        root.addView(Etched.label(this, "NEW DEVICE").also { ViewCompat.setAccessibilityHeading(it, true) })
         root.addView(
-            Theme.text(this, "NEW DEVICE", 20f).apply {
-                typeface = Theme.bodyFont(this@CallerActivity)
-            }
-        )
-        root.addView(
-            Theme.text(this, ip, Theme.TEXT_BODY_SP, Theme.WARNING, mono = true).apply {
-                setPadding(0, Theme.dp(this@CallerActivity, 8), 0, 0)
-            }
+            // Wrapped with a continuation glyph, so a long IPv6 address never breaks inside a hextet.
+            Readout.create(this, ip, Readout.Kind.DISPLAY, prompt = "first request from", softWrap = true).root,
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_S) },
         )
 
         // **What this screen is FOR, in plain words.** The previous copy said "this address has
         // never reached this phone before" and jumped straight to a submit button — it stated a
         // fact and left the human to work out why they were being asked.
         root.addView(
-            Theme.text(
+            Type.text(
                 this,
                 "A computer just tried to talk to this phone, and it has not done that before. " +
-                    "Give it a name you will recognise and it can connect from now on — or block " +
-                    "it.",
-                13f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@CallerActivity, 10), 0, 0) }
+                    "Give it a name you will recognise and it can connect from now on, or block it.",
+                TypeRole.BODY, p.ink,
+            ),
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_M) },
         )
         root.addView(
-            Theme.text(
+            Type.text(
                 this,
-                "Nothing is allowed until you choose, and this is asked once per computer, " +
-                    "not once per request.",
-                12f, Theme.ON_SURFACE_VARIANT
-            ).apply { setPadding(0, Theme.dp(this@CallerActivity, 6), 0, 0) }
+                "Nothing is allowed until you choose. This is asked once per computer, not once per request.",
+                TypeRole.DETAIL, p.etched,
+            ),
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_S) },
         )
 
-        nameField = EditText(this).apply {
-                // Explicit colours: the platform default is white-on-cream here.
-                setTextColor(Theme.ON_SURFACE)
-                setHintTextColor(Theme.ON_SURFACE_VARIANT)
-                highlightColor = Theme.ACCENT
+        val field = Field.create(this, "Device name", "", Hints.DEVICE_NAME, Field.Kind.TEXT)
+        nameField = field.edit.apply {
             // A machine name, not a password: no masking, and no personalised-learning opt-out —
             // the keyboard learning "Ahmed's laptop" is harmless and helps next time.
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_NORMAL
             imeOptions = EditorInfo.IME_ACTION_DONE
-            isSingleLine = true
-            hint = "name this device, e.g. Laptop"
-            setSaveEnabled(false)
+            // Single-line already (Field); setting it again would reset the 48dp minimum height.
+            isSaveEnabled = false
         }
+        root.addView(field.root, fullWidth().apply { topMargin = dp(Dimens.GUTTER) })
+
+        status = Type.text(this, "", TypeRole.DETAIL, p.etched).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            visibility = View.GONE
+        }
+        root.addView(status, fullWidth().apply { topMargin = dp(Dimens.SPACE_M) })
+
+        // Three full-width keys, stacked: robust at 1.35 text where a row of three does not fit,
+        // and the consequential ones are separated by distance rather than by hoping for aim.
+        // BLOCK is last and 24dp from NOT NOW; none of them is the default-focused key.
+        // The tapjacking banner sits right above the keys, where the approval gate puts it (R1).
+        val banner = ObscuredTouchGuard.banner(this)
+        root.addView(banner, fullWidth().apply { topMargin = dp(Dimens.GUTTER) })
         root.addView(
-            nameField,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = Theme.dp(this@CallerActivity, 18) }
+            KeyButton.create(
+                this, "ALLOW", KeyButton.Kind.INK, KeyButton.Size.LARGE, describe = "Allow this device",
+            ) { decide(allow = true) },
+            fullWidth().apply { topMargin = dp(Dimens.GUTTER) },
         )
-
-        status = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
-            setPadding(0, Theme.dp(this@CallerActivity, 10), 0, 0)
-        }
-        root.addView(status)
-
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, Theme.dp(this@CallerActivity, 20), 0, 0)
-        }
-
         // **A way out that decides nothing.** Without it the only two choices were allow and
         // block, so a human who was not ready had to press Back — and Back reads as "I broke
-        // this" rather than "not now". Cancel resolves the waiting request as unavailable, which
+        // this" rather than "not now". It resolves the waiting request as unavailable, which
         // is retryable, and writes nothing: the next knock asks again.
-        val cancel = Theme.button(this, "not now", Theme.ButtonStyle.GHOST, small = true) {
-            if (decided) return@button
-            decided = true
-            CallerPrompt.resolve(CallerPrompt.Result.Unavailable)
-            finish()
-        }
-        buttons.addView(cancel)
-
-        // Spacer: the two consequential buttons sit at the right edge, away from the dismissive
-        // one. Approving by reflex should take aim, not luck.
-        buttons.addView(android.view.View(this), LinearLayout.LayoutParams(0, 1, 1f))
-
-        deny = Theme.button(this, "block", Theme.ButtonStyle.DANGER) { decide(allow = false) }
-        approve = Theme.button(this, "allow", Theme.ButtonStyle.SUCCESS) { decide(allow = true) }
-        buttons.addView(deny)
-        buttons.addView(
-            approve,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = Theme.dp(this@CallerActivity, 10) }
+        root.addView(
+            KeyButton.create(
+                this, "NOT NOW", KeyButton.Kind.OUTLINE, KeyButton.Size.REGULAR,
+                describe = "Not now. Decide nothing",
+            ) {
+                if (decided) return@create
+                decided = true
+                CallerPrompt.resolve(CallerPrompt.Result.Unavailable)
+                finish()
+            },
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_S) },
         )
-        root.addView(buttons)
+        root.addView(
+            KeyButton.create(
+                this, "BLOCK", KeyButton.Kind.OUTLINE, KeyButton.Size.REGULAR, describe = "Block this device",
+            ) { decide(allow = false) },
+            fullWidth().apply { topMargin = dp(Dimens.SPACE_XL) },
+        )
 
-        setContentView(Theme.inset(ScrollView(this).apply { addView(root) }))
+        // Tapjacking (D17): while another window fully covers this screen, no touch reaches
+        // allow, block, not now or the name field, and the banner says why. Partial cover is
+        // allowed (D60). System back still works; it resolves Unavailable, which is safe.
+        val guard = ObscuredTouchGuard(this)
+        // The keys look as dead as they are while covered: dimmed, like the approval gate's.
+        val keys = (0 until root.childCount).map(root::getChildAt).filterIsInstance<com.google.android.material.button.MaterialButton>()
+        fun setObscured(obscured: Boolean) {
+            banner.visibility = if (obscured) View.VISIBLE else View.GONE
+            keys.forEach { it.alpha = if (obscured) OBSCURED_KEY_ALPHA else 1f }
+        }
+        guard.onObscuredTouch = {
+            setObscured(true)
+            Haptics.perform(guard, HapticEvent.REJECT)
+        }
+        guard.onClearTouch = { setObscured(false) }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        // System bars and the keyboard, so the name field stays above the keyboard at any text size.
+        ViewCompat.setOnApplyWindowInsetsListener(scroll) { v, insets ->
+            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+            v.setPadding(0, b.top, 0, b.bottom)
+            insets
+        }
+        guard.addView(scroll)
+        setContentView(guard)
+        // Spec 3.4.2: the name field has the first focus. Since API 28 a view gets no initial focus in
+        // touch mode, so it is asked for here; ALLOW, NOT NOW and BLOCK are never the default.
+        nameField.requestFocus()
     }
+
+    private fun fullWidth() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+
+    private fun dp(v: Int) = Theme.dp(this, v)
+
+    /** Sets the status line. A problem is caution-coloured (errors are never signal orange, D6). */
+    private fun showStatus(text: String, isProblem: Boolean) {
+        val p = Theme.palette(this)
+        status.text = text
+        status.setTextColor(if (isProblem) p.cautionText else p.etched)
+        status.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    @VisibleForTesting
+    internal fun showStatusForTest(text: String, isProblem: Boolean) = showStatus(text, isProblem)
 
     private fun decide(allow: Boolean) {
         if (decided) return
         val name = nameField.text.toString().trim()
         if (allow && name.isEmpty()) {
             // Fail hard rather than storing a verified row with no name: the name IS the record.
-            status.text = "A name is required to allow this device."
-            status.setTextColor(Theme.DANGER)
+            showStatus("A name is required to allow this device.", isProblem = true)
+            Haptics.perform(nameField, HapticEvent.REJECT)
+            nameField.requestFocus()
             return
         }
         promptFingerprint(allow, name)
@@ -190,8 +244,7 @@ class CallerActivity : FragmentActivity() {
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
         val can = BiometricManager.from(this).canAuthenticate(authenticators)
         if (can != BiometricManager.BIOMETRIC_SUCCESS) {
-            status.text = "Cannot confirm it is you (code $can), so nothing was decided."
-            status.setTextColor(Theme.DANGER)
+            showStatus(CallerCopy.cannotConfirm(can), isProblem = true)
             return
         }
         val executor: Executor = ContextCompat.getMainExecutor(this)
@@ -204,15 +257,16 @@ class CallerActivity : FragmentActivity() {
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     // Nothing is written. The waiting request stays unverified and can retry.
-                    status.text = "Not confirmed: $errString"
-                    status.setTextColor(Theme.ON_SURFACE_VARIANT)
+                    // The platform's string is not shown: CallerCopy maps the code to our words, and
+                    // it is caution-coloured because the human still has a decision to make.
+                    showStatus(CallerCopy.notConfirmed(errorCode), isProblem = true)
                 }
             }
         )
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle(if (allow) "Allow $ip?" else "Block $ip?")
-                .setSubtitle(if (allow) "Named: $name" else "This address will be refused silently")
+                .setSubtitle(if (allow) UntrustedText.escapeForSystemSurface("Named: $name") else "This address will be refused silently")
                 .setAllowedAuthenticators(authenticators)
                 .build()
         )
@@ -232,8 +286,7 @@ class CallerActivity : FragmentActivity() {
         } catch (e: Exception) {
             // The write is the decision. If it failed, nothing was decided — do not tell the
             // caller it was allowed, and do not pretend it was blocked.
-            status.text = "Could not save: ${e.message}"
-            status.setTextColor(Theme.DANGER)
+            showStatus("Could not save: ${e.message}", isProblem = true)
             decided = false
             return
         }
@@ -255,5 +308,8 @@ class CallerActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_IP = "ip"
+
+        /** Alpha of the keys while another window covers the screen (same as the approval gate). */
+        private const val OBSCURED_KEY_ALPHA = 0.38f
     }
 }

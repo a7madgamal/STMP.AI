@@ -57,11 +57,7 @@ class GooglePlugin(private val ctx: Context) : Plugin {
                 "scopes, which is what to do if one plugin says it is missing a permission.",
             run = { c ->
                 try {
-                    c.startActivity(Intent(c, GoogleLoginActivity::class.java).apply {
-                        // The plugin may be given an application context by a caller that is not
-                        // an Activity, and a background start without this flag throws.
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
+                    c.startActivity(signInIntent(c))
                 } catch (e: Exception) {
                     Debug.log("cannot open Google sign-in: ${e.message}")
                 }
@@ -124,4 +120,14 @@ class GooglePlugin(private val ctx: Context) : Plugin {
         // on every glance at the card.
         return PluginStatus("Google account", PluginStatus.State.OK, email)
     }
+}
+
+/**
+ * The intent that opens Google sign-in. Shared by the Google account plugin's "Sign in" action and
+ * the sign-in row on the Gmail, Calendar and Drive screens, so both start the same screen.
+ */
+fun signInIntent(c: Context): Intent = Intent(c, GoogleLoginActivity::class.java).apply {
+    // The plugin may be given an application context by a caller that is not an Activity, and a
+    // background start without this flag throws.
+    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 }

@@ -71,6 +71,17 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --console=plain
 
+      - name: Verify screenshots
+        run: ./gradlew :app:verifyRoborazziDebug --console=plain
+
+      - name: Upload screenshot diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roborazzi-diffs
+          path: app/build/outputs/roborazzi
+          if-no-files-found: ignore
+
       # A test job that greps for "BUILD SUCCESSFUL" can pass having run zero
       # tests. Read the XML reports and assert a real run happened.
       - name: Assert tests actually ran

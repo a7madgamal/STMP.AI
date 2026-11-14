@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.core.executesOrDeletes
 import com.mido.phonebridge.policy.GlobalMode
 import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.Rule
@@ -202,10 +203,10 @@ object ApprovalGate {
     /**
      * The exception the modal may offer for this request, or null when it must not.
      *
-     * **Only under `WHITELIST`.** `resolve()` reads the rule table in that mode alone, so
-     * under a forced `PARANOID`/`DONT_DISTURB` a written rule is inert — offering the button
-     * there would be offering a tap that changes nothing. Rather than flip the switch behind
-     * the human's back (Mido's call, 2026-10-19: *"it should work with automatic and that's
+     * **Only under `AUTOMATIC`.** `resolve()` reads the rule table in that mode alone, so
+     * under a forced `SECURE`/`NOTIFY` a written rule is inert — offering the button there
+     * would be offering a tap that changes nothing. Rather than flip the switch behind the
+     * human's back (Mido's call, 2026-10-19: *"it should work with automatic and that's
      * it"*), the offer is simply absent and the button does not render.
      *
      * **Never for a request that needs a password.** The exception button approves through
@@ -213,9 +214,6 @@ object ApprovalGate {
      * tap approve with an empty field, skipping the password path entirely, and write a rule
      * that relaxes the whole plugin/verb pair from a prompt the human opened for one sudo
      * command. A password request is approvable only through APPROVE + the typed password.
-     *
-     * Lives here rather than in the dispatcher so the password rule and the mode rule cannot
-     * drift apart: this is the single place that decides whether the button may exist.
      *
      * The mode is the OTHER one — see [exceptionModeFor] — so the label always names the
      * behaviour the tap will produce.
@@ -300,13 +298,54 @@ object ApprovalGate {
          * there and a five-second silence cannot type a password.
          */
         val needsPassword: Boolean = false,
+        /** Route.effectiveVerb(req). Required: a view with no verb cannot pick its gesture. */
+        val verb: Verb,
+        /** "METHOD /template", e.g. "POST /ssh/{name}". Selects the readout headline (GateReadout). */
+        val routeKey: String,
+        /** Route.holdExempt. */
+        val holdExempt: Boolean = false,
         /** Seconds until auto-deny, for the countdown UI. */
         val timeoutSeconds: Long = TIMEOUT_SECONDS
         // NOTE: there are no AI fields here any more. The summary arrives AFTER this view is
         // built (Mido, 2026-10-19), so it cannot be part of it — a field that is always blank
         // by construction is a field that lies about what the view knows. The modal renders
         // the AI live from ApprovalGate.currentAiState() instead.
-    )
+    ) {
+        /** The one answer to "how is this approved". Derived, so it cannot disagree with its inputs. */
+        val approveGesture: ApproveGesture
+            get() = approveGesture(verb, needsPassword, holdExempt, requiresBiometric)
+    }
+
+    /** How APPROVE is performed for one request. Decided here; ApprovalActivity only renders it. */
+    enum class ApproveGesture {
+        /** One tap on an INK key. */
+        TAP,
+        /** Hold the HoldKey for Motion.HOLD_TO_APPROVE_MS (1.2 s). */
+        HOLD,
+        /** One tap, then the fingerprint prompt. The fingerprint replaces the hold (D13). */
+        TAP_THEN_BIOMETRIC,
+    }
+
+    /**
+     * D12. True when the request's EFFECTIVE verb executes or deletes, or it needs sudo.
+     * [verb] must be `Route.effectiveVerb(req)`, so a secrets call is judged by its OUTBOUND
+     * method (a DELETE call holds, a GET call does not). [holdExempt] is `Route.holdExempt`.
+     * The AI `Risk` is deliberately not a parameter: it never decides anything.
+     */
+    fun requiresHold(verb: Verb, needsPassword: Boolean, holdExempt: Boolean): Boolean =
+        !holdExempt && (verb.executesOrDeletes() || needsPassword)
+
+    /** D13: when the fingerprint is already required, approve is tap + fingerprint, never a hold. */
+    fun approveGesture(
+        verb: Verb,
+        needsPassword: Boolean,
+        holdExempt: Boolean,
+        requiresBiometric: Boolean,
+    ): ApproveGesture = when {
+        requiresBiometric -> ApproveGesture.TAP_THEN_BIOMETRIC
+        requiresHold(verb, needsPassword, holdExempt) -> ApproveGesture.HOLD
+        else -> ApproveGesture.TAP
+    }
 
     private val seq = AtomicLong(1000)
 
@@ -397,8 +436,8 @@ object ApprovalGate {
          *
          * **The guard term is load-bearing, not padding.** The decision clock starts at
          * `enabledAtMs`, which is now at least `shownAtMs + MISCLICK_GUARD_MS`. Without adding
-         * the guard here, a no-AI request would arm at +3s and then be given 60s of countdown —
-         * 63s of legitimate life against a 60s latch. The caller would see a timeout at the exact
+         * the guard here, a no-AI request would arm at +1s and then be given 60s of countdown —
+         * 61s of legitimate life against a 60s latch. The caller would see a timeout at the exact
          * moment the human still had the guard left to decide, and the UI would show a window that
          * the server had already given up on.
          */
@@ -440,36 +479,6 @@ object ApprovalGate {
      * the label never appeared).
      */
     fun waitingBehindCurrent(): Int = synchronized(this) { (queue.size - 1).coerceAtLeast(0) }
-
-    /** Notify after membership settles. Never called under the gate lock. */
-    private fun publishPending() {
-        PendingDecisionChanges.publish(pendingSnapshots() +
-            com.mido.phonebridge.notify.NotifyOverlay.pendingSnapshots())
-    }
-
-    /** Display-only copies, FIFO. Never exposes a Pending, latch or resolver. */
-    fun pendingSnapshots(): List<PendingDecisionSnapshot> = synchronized(this) {
-        queue.map { pending ->
-            PendingDecisionSnapshot(
-                id = "secure-${pending.requestId}",
-                caller = pending.view?.requester?.ifBlank { pending.remote } ?: pending.remote,
-                action = pending.view?.actionLabel?.ifBlank { pending.summary } ?: pending.summary,
-                endpoint = pending.endpoint,
-                verb = endpointVerb(pending.endpoint),
-                state = if (current?.requestId == pending.requestId) "On the approval sheet" else "Waiting in line",
-                enqueuedAtMs = pending.createdAtMs,
-                awaitingSinceMs = pending.createdAtMs,
-            )
-        }
-    }
-
-    private fun endpointVerb(endpoint: String): String = when {
-        endpoint.startsWith("GET ") -> "Read"
-        endpoint.startsWith("DELETE ") -> "Delete"
-        endpoint.startsWith("POST ") || endpoint.startsWith("PUT ") ||
-            endpoint.startsWith("PATCH ") -> "Write"
-        else -> "Request"
-    }
 
     /** How many requests are waiting behind the one on screen (0 when none). */
     private fun waitingBehind(): Int = waitingBehindCurrent()
@@ -530,6 +539,12 @@ object ApprovalGate {
     /** When the on-screen request's buttons went live, or 0 while still loading. */
     fun currentEnabledAtMs(): Long = current?.enabledAtMs ?: 0L
 
+    /** When the on-screen summary fetch is declared failed (fetch start + cap + slack), or 0. */
+    fun currentSummaryDeadlineMs(): Long {
+        val p = current ?: return 0L
+        return if (p.fetchStartedAtMs > 0L) p.fetchStartedAtMs + p.aiFetchCapMs + AI_DEADLINE_SLACK_MS else 0L
+    }
+
     /**
      * Is [requestId] still the request on screen and undecided?
      *
@@ -567,14 +582,17 @@ object ApprovalGate {
         }
     }
 
-    /** Called by ApprovalActivity once the human decides. */
+    /**
+     * Called by ApprovalActivity once the human decides.
+     *
+     * **Refuses an approval for a request that needs a password.** Such a request may only be
+     * approved through [resolveWithPassword]; approving it here would let the command reach
+     * sudo with nothing on its stdin. Enforced at the gate, not only by the disabled button,
+     * so no UI path can approve around the password. A DENY is always accepted.
+     */
     fun resolve(requestId: Long, approved: Boolean): Boolean {
         val p = current ?: return false
         if (p.requestId != requestId) return false
-        // **Refuses an approval for a request that needs a password.** Such a request may only
-        // be approved through [resolveWithPassword]; approving it here would let the command
-        // reach sudo with nothing on its stdin. Enforced at the gate, not only by the disabled
-        // button, so no UI path can approve around the password. A DENY is always accepted.
         if (approved && p.needsPassword) return false
         p.approved = approved
         p.decidedAtMs = System.currentTimeMillis()
@@ -714,7 +732,6 @@ object ApprovalGate {
             }
         }
         // Only the request that became head posts. Everyone waits on their latch.
-        publishPending()
         try {
             if (shouldPost) {
                 postApprovalNotification(ctx, pending)
@@ -776,8 +793,7 @@ object ApprovalGate {
             if (next != null) {
                 postApprovalNotification(ctx, next)
             }
-            publishPending()
-        }
+            }
     }
 
     private fun postApprovalNotification(
@@ -823,7 +839,7 @@ object ApprovalGate {
         if (p.aiFacts == null) {
             p.aiState = AiState.NotNeeded
             // THE MISCLICK GUARD (Mido, 2026-10-21: *"when AI is disabled, we need the 3 seconds
-            // protection again to avoid misclicking the dialog"*). With no summary to wait for,
+            // protection again to avoid misclicking the dialog"* (now 1 s, ArmGuard.MISCLICK_GUARD_MS)). With no summary to wait for,
             // this used to arm at `shownAtMs` — the instant the modal appeared. A tap already in
             // flight when the card arrives would land on APPROVE.
             //
@@ -896,9 +912,10 @@ object ApprovalGate {
             // debugging session at the wrong subsystem.
             val failureDetail = if (result == null) com.mido.phonebridge.ai.SummaryFailure.take() else ""
             p.aiState = if (result != null) AiState.Ready(result) else AiState.Failed(failureDetail)
-            // Same guard, applied to the moment the summary landed. A summary takes ~1.2s, so the
-            // floor usually wins and the guard costs ~1.8s; a slow one is unaffected because
-            // `armAt` only ever pushes the time LATER, never earlier.
+            // Same guard, applied to the moment the summary landed. A summary takes ~1.2s, past the
+            // 1s guard, so the summary usually binds and the guard costs nothing; a fast one is
+            // pushed to the 1s floor. A slow one is unaffected because `armAt` only ever pushes the
+            // time LATER, never earlier.
             val readyAt = System.currentTimeMillis()
             p.enabledAtMs = ArmGuard.armAt(p.shownAtMs, readyAt)
             com.mido.phonebridge.Debug.log(

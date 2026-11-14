@@ -8,9 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.Toast
+import android.widget.ScrollView
 import androidx.fragment.app.Fragment
-import com.mido.phonebridge.ui.OverflowScrollView
 import com.mido.phonebridge.ui.Theme
 
 /**
@@ -90,7 +89,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
             body = LinearLayout(ctx)
             center = body
         } else {
-            val scroll = OverflowScrollView(ctx)
+            val scroll = ScrollView(ctx).apply { isFillViewport = true }
             body = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(
@@ -100,7 +99,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
                     Theme.dp(ctx, 24),
                 )
             }
-            scroll.setContent(body)
+            scroll.addView(body)
             center = scroll
         }
 
@@ -133,7 +132,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
     override fun go(intent: Intent) = startActivity(intent)
 
     override fun toast(message: String, duration: Int) =
-        Toast.makeText(ctx, message, duration).show()
+        com.mido.phonebridge.ui.kit.Toasts.show(ctx, message, duration)
 
     override fun ui(block: () -> Unit) = requireActivity().runOnUiThread(block)
 
@@ -145,7 +144,7 @@ abstract class BridgeFragment : Fragment(), ScreenHost {
         onNegative: (() -> Unit)?,
         onPositive: () -> Unit,
     ) {
-        android.app.AlertDialog.Builder(ctx)
+        com.mido.phonebridge.ui.kit.StmpDialog.builder(ctx)
             .setTitle(title)
             .setMessage(message)
             .setNegativeButton(negative) { _, _ -> onNegative?.invoke() }

@@ -207,14 +207,16 @@ object Updater {
             val tag = rel.optString("tag_name").trim()
             if (tag.isBlank()) continue
             val version = tag.removePrefix("v")
-            if (compareVersions(version, BuildConfig.VERSION_NAME) <= 0) continue
+            val notes = rel.optString("body").trim()
+            val code = releaseBuildCode(notes)
+            if (!isOffered(version, code, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)) continue
 
             val apk = findApk(rel) ?: continue
 
             val candidate = Outcome.Available(
                 version = version,
-                versionCode = 0,
-                notes = rel.optString("body").trim(),
+                versionCode = code ?: 0,
+                notes = notes,
                 apkUrl = apk.first,
                 sha256 = apk.second,
                 sizeBytes = apk.third,
@@ -224,6 +226,26 @@ object Updater {
         }
 
         return best ?: Outcome.UpToDate(System.currentTimeMillis())
+    }
+
+    private val BUILD_CODE = Regex("""\(build (\d+)\)""")
+
+    /**
+     * The versionCode a release carries, read from its notes heading ("## 0.51.5 (build 307) ...").
+     * Null when the notes carry none.
+     */
+    fun releaseBuildCode(notes: String): Int? =
+        BUILD_CODE.find(notes)?.groupValues?.get(1)?.toIntOrNull()
+
+    /**
+     * Whether a release is an update for this install. Android refuses a lower versionCode, so a
+     * release that carries one is offered only when it is HIGHER than [currentCode] (and never when
+     * its name is older). A release with no code falls back to the name comparison.
+     */
+    fun isOffered(version: String, releaseCode: Int?, currentName: String, currentCode: Int): Boolean {
+        val byName = compareVersions(version, currentName)
+        if (releaseCode == null) return byName > 0
+        return releaseCode > currentCode && byName >= 0
     }
 
     /**
@@ -332,8 +354,26 @@ object Updater {
 
     /** Trim the release notes to something a phone screen can show without a scroll marathon. */
     fun shortNotes(notes: String, maxLines: Int = 6): String =
+        plainNotes(notes).lineSequence().take(maxLines).joinToString("\n")
+
+    private val HEADING_LINE = Regex("""^\s*#{1,6}\s""")
+    private val LIST_MARKER = Regex("""^\s*[-*+]\s+""")
+
+    /**
+     * Release notes as plain-text bullets: the "## <version>" heading line goes, and Markdown
+     * markers (code ticks, bold, links) are stripped. Each remaining line is one "\u2022" bullet.
+     */
+    fun plainNotes(notes: String): String =
         notes.lineSequence()
-            .filter { it.isNotBlank() }
-            .take(maxLines)
-            .joinToString("\n")
+            .filter { it.isNotBlank() && !HEADING_LINE.containsMatchIn(it) }
+            .map { line ->
+                line.replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
+                    .replace("`", "")
+                    .replace("**", "")
+                    .replace("__", "")
+                    .replace(LIST_MARKER, "")
+                    .trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n") { "\u2022 $it" }
 }
