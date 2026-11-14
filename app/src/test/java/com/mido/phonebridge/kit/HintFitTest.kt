@@ -29,7 +29,9 @@ class HintFitTest {
         return paint.measureText(hint)
     }
 
-    private fun hintWidth(view: android.widget.EditText): Float = fullWidth(view, view.hint.toString())
+    private fun shown(view: android.widget.EditText): String = (view as com.mido.phonebridge.ui.kit.FieldEditText).drawnHint.toString()
+
+    private fun hintWidth(view: android.widget.EditText): Float = fullWidth(view, shown(view))
 
     private fun laidOut(hint: String, widthDp: Int): android.widget.EditText {
         val ctx = RuntimeEnvironment.getApplication()
@@ -61,22 +63,29 @@ class HintFitTest {
         assertEquals("every Field.create passes a Hints constant", creates, used)
     }
 
-    @Test fun `TalkBack gets the whole hint when the visible one is cut`() {
+    @Test fun `TalkBack and events get the whole hint when the visible one is cut`() {
         RuntimeEnvironment.setFontScale(1.35f)
         val long = "Where to get the key from, with the full address (https://example.com/keys)"
         val edit = laidOut(long, 200)
-        assertTrue(edit.hint.toString(), edit.hint.toString().endsWith("…"))
+        assertTrue(shown(edit), shown(edit).endsWith("…"))
+        assertEquals(long, edit.hint.toString())
         val info = android.view.accessibility.AccessibilityNodeInfo()
         edit.onInitializeAccessibilityNodeInfo(info)
         assertEquals(long, info.hintText.toString())
+        // An empty field also reports its hint as info.text (showingHintText): that is the whole hint too.
+        assertEquals(long, info.text.toString())
+        val event = android.view.accessibility.AccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_FOCUSED)
+        edit.onInitializeAccessibilityEvent(event)
+        edit.onPopulateAccessibilityEvent(event)
+        assertTrue(event.text.toString(), event.text.any { it.toString() == long })
     }
 
     @Test fun `a hint that is too long ends in an ellipsis and a short one is untouched`() {
         RuntimeEnvironment.setFontScale(1.35f)
         val long = laidOut("Where to get the key from, with the full address (https://example.com/keys)", 200)
-        assertTrue(long.hint.toString(), long.hint.toString().endsWith("…"))
+        assertTrue(shown(long), shown(long).endsWith("…"))
         val inner = long.width - long.compoundPaddingLeft - long.compoundPaddingRight
         assertTrue(hintWidth(long) <= inner)
-        assertEquals("Secret value", laidOut("Secret value", 300).hint.toString())
+        assertEquals("Secret value", shown(laidOut("Secret value", 300)))
     }
 }

@@ -27,6 +27,11 @@ class PluginLabelTest {
         assertEquals("Gmail", PluginLabel.of("gmail"))
         assertEquals("", PluginLabel.of(" "))
     }
+
+    @Test fun `an unregistered id with hidden characters is escaped, never raw`() {
+        val label = PluginLabel.of("evil\u202Eplug\u200Bin")
+        assertEquals("Evil\\u{202E}plug\\u{200B}in", label)
+    }
 }
 
 /** A plugin with a fixed display name, for screens that print plugin names. */

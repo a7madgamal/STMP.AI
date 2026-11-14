@@ -46,28 +46,16 @@ object Field {
     ): Handle {
         val p = Theme.palette(ctx)
         val labelView = Etched.label(ctx, label)
-        val edit = EditText(ctx).apply {
+        val edit = FieldEditText(ctx).apply {
             id = View.generateViewId()
             setText(value)
-            // The hint is always the sans face, even in a mono (URL, secret) field. An EditText has a
-            // key listener, so TextView.ellipsize never applies to it: the hint is cut with an ellipsis
-            // here, against the inner width, every time the box is laid out.
-            this.hint = sansHint(ctx, hint)
-            addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
-                val e = v as EditText
-                val inner = (r - l) - e.compoundPaddingLeft - e.compoundPaddingRight
-                val fitted = fitHint(ctx, hint, inner, e.paint)
-                if (inner > 0 && e.hint.toString() != fitted.toString()) e.hint = fitted
-            }
-            // TalkBack and autofill get the whole hint even when the visible one is cut.
-            accessibilityDelegate = object : View.AccessibilityDelegate() {
-                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
-                    super.onInitializeAccessibilityNodeInfo(host, info)
-                    info.hintText = hint
-                }
-            }
+            // The EditText keeps the FULL hint, so TalkBack, accessibility events and autofill all get
+            // it. An EditText has a key listener, so TextView.ellipsize never applies; the cut is made
+            // when the hint is drawn (see FieldEditText), never in the hint itself.
+            this.hint = hint
+            hintDrawColor = p.etched
             setTextColor(p.ink)
-            setHintTextColor(p.etched)
+            setHintTextColor(android.graphics.Color.TRANSPARENT)
             Type.apply(this, if (kind == Kind.TEXT) TypeRole.BODY else TypeRole.MONO_BODY)
             setHorizontallyScrolling(false)
             setSingleLine(true)
@@ -148,6 +136,40 @@ object Field {
             })
         }
         return handle
+    }
+}
+
+/**
+ * An EditText whose empty-state hint is drawn here, cut with a real ellipsis to the inner width and in
+ * the sans face. The inherited hint is kept whole but painted transparent, so it is never replaced.
+ */
+internal class FieldEditText(ctx: Context) : androidx.appcompat.widget.AppCompatEditText(ctx) {
+    var hintDrawColor: Int = 0
+
+    /** What is drawn while the field is empty: the hint, cut to fit. */
+    var drawnHint: CharSequence = ""
+        private set
+
+    private val hintPaint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        val full = hint?.toString().orEmpty()
+        val inner = w - compoundPaddingLeft - compoundPaddingRight
+        drawnHint = if (inner > 0) fitHint(context, full, inner, paint).toString() else full
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        super.onDraw(canvas)
+        if (!text.isNullOrEmpty() || drawnHint.isEmpty()) return
+        hintPaint.set(paint)
+        hintPaint.typeface = com.mido.phonebridge.ui.tokens.Fonts.get(context, TypeRole.BODY.face)
+        hintPaint.color = hintDrawColor
+        val baseline = getLineBounds(0, null)
+        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val x = if (rtl) (width - compoundPaddingRight).toFloat() else compoundPaddingLeft.toFloat()
+        hintPaint.textAlign = if (rtl) android.graphics.Paint.Align.RIGHT else android.graphics.Paint.Align.LEFT
+        canvas.drawText(drawnHint.toString(), x + scrollX, baseline.toFloat(), hintPaint)
     }
 }
 

@@ -553,7 +553,7 @@ class OptionsFragment : BridgeFragment() {
         for (entry in entries.values.sortedBy { it.ip }) {
             val title = UntrustedText.escape((entry.state as? CallerState.Verified)?.name ?: entry.ip)
             val detail = when (entry.state) {
-                is CallerState.Verified -> "${entry.ip} · allowed"
+                is CallerState.Verified -> "${UntrustedText.escape(entry.ip)} · allowed"
                 CallerState.Denied -> "Blocked. Requests from this address are refused without asking."
             }
             panel.addView(ActionRow(
