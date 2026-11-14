@@ -5462,10 +5462,16 @@ devDependencies. `node_modules/` is gitignored.
 - A sudo request can no longer be approved by the exception button. That button carries no password, so one tap approved with an empty field, skipped the password path, and wrote a rule relaxing every SSH command for the plugin/verb pair.
 - The offer is not built for a password request, and the gate refuses any approval of one that does not carry the password, whichever button sent it. DENY still works.
 
-## 0.51.10 (build 334) — 2026-11-14 — CURRENT
+## 0.51.10 (build 334) — 2026-11-14
 - A Roborazzi screenshot harness records every screen and state in light and dark, at 100% and 135% text, and CI fails when a screen changes without its baseline being re-recorded.
 - Each screen has its own test class, so re-recording one screen cannot silently re-baseline the rest.
 - Baselines cover this build's screens: the Plugins tab and the Plugin help sheet had no surface to capture and are not part of it, and Settings records the Preferences tab it actually lives in.
+
+## 0.51.12 (build 338) — 2026-11-14 — CURRENT
+- Colour, type, motion, dimension and haptic values now live in `ui/tokens` as roles, so a screen is written against `signal` and `etched` rather than a hex literal. `Theme` reads them through the same names it always had, so no call site changed.
+- The palette is the original paper one: warm cream `#F5EEDF`, ink `#2B2318`, stamp red `#B23A2F`, and the torn edge and grain are unchanged. The Instrument kit's structure is kept; its grey and orange colours are not.
+- Faces are Handlee for the stamp and display roles, Atkinson Hyperlegible for anything read, JetBrains Mono NL for anything copied exactly.
+- There is one palette and it is light. Paper has no night mode, so the app no longer follows the system theme.
 
 ## Keeping this file honest
 

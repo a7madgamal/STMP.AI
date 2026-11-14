@@ -56,17 +56,42 @@ object Theme {
     // but are re-tinted as ink analogues (green ink, amber ink, red ink) so the risk
     // semantics the approval flow depends on survive unchanged.
 
+    /**
+     * The palette every role below reads from.
+     *
+     * The values live in `ui/tokens/Palette.kt`, so a screen can be written against roles
+     * (`signal`, `etched`) instead of literals. These names stay as getters because a dozen
+     * screens already use them; the point of the layer is that changing the palette is one file,
+     * not that every call site had to be rewritten in the same change.
+     *
+     * It resolves from the application context, so services and overlay windows — which have no
+     * Activity to read a configuration from — get the same palette the screens do.
+     */
+    @Volatile private var app: android.app.Application? = null
+
+    /** Called once by [com.mido.phonebridge.StmpApp]. */
+    fun install(application: android.app.Application) {
+        app = application
+    }
+
+    private fun paper(): com.mido.phonebridge.ui.tokens.Palette =
+        com.mido.phonebridge.ui.tokens.Palettes.of(
+            checkNotNull(app) {
+                "Theme.install was not called; StmpApp must be the application class"
+            }
+        )
+
     /** Paper background: warm cream, not white, not grey. */
-    const val BG = 0xFFF5EEDF.toInt()
+    val BG: Int get() = paper().body
 
     /** Raised paper: slightly darker kraft, like a card sitting on the desk. */
-    const val SURFACE = 0xFFEDE3CB.toInt()
+    val SURFACE: Int get() = paper().panel
 
     /** Secondary paper: chips, secondary buttons, inset blocks. */
-    const val SURFACE_VARIANT = 0xFFE3D6B8.toInt()
+    val SURFACE_VARIANT: Int get() = paper().sunken
 
     /** Ink line: hairline borders, drawn separators. */
-    const val BORDER = 0xFF8F805F.toInt()
+    val BORDER: Int get() = paper().hairline
 
     /** Primary ink: near-black brown, never pure black. */
     /**
@@ -78,22 +103,22 @@ object Theme {
      * host. Set `setTextColor(ON_SURFACE)` and `setHintTextColor(ON_SURFACE_VARIANT)` on every
      * input, or the value is there and unreadable.
      */
-    const val ON_SURFACE = 0xFF2B2318.toInt()
+    val ON_SURFACE: Int get() = paper().ink
 
     /** Faded ink: secondary text, captions. */
-    const val ON_SURFACE_VARIANT = 0xFF67563C.toInt()
+    val ON_SURFACE_VARIANT: Int get() = paper().etched
 
     /** The one stamp accent: deep rubber-stamp red. */
-    const val ACCENT = 0xFFB23A2F.toInt()
+    val ACCENT: Int get() = paper().signal
 
     // Ink re-tints for the existing semantic states. Deliberately muted so they read as
     // ink, not as neon over paper.
-    const val SUCCESS = 0xFF27673F.toInt()
-    const val SUCCESS_SURFACE = 0xFFDCEBD7.toInt()
-    const val WARNING = 0xFF745410.toInt()
-    const val WARNING_SURFACE = 0xFFF0E4C8.toInt()
-    const val DANGER = 0xFF94372D.toInt()
-    const val DANGER_SURFACE = 0xFFF1D9D0.toInt()
+    val SUCCESS: Int get() = paper().okText
+    val SUCCESS_SURFACE: Int get() = paper().okSurface
+    val WARNING: Int get() = paper().cautionText
+    val WARNING_SURFACE: Int get() = paper().cautionSurface
+    val DANGER: Int get() = paper().signalText
+    val DANGER_SURFACE: Int get() = paper().signalSurface
 
     /**
      * How a RISK bucket looks, in one place.
@@ -136,7 +161,7 @@ object Theme {
 
     /** Text/icons on a filled coloured control. On paper the only filled controls are the
      *  stamp red and the ink-tinted semantic buttons, so this stays cream-white for legibility. */
-    const val ON_COLOR = 0xFFFBF6EA.toInt()
+    val ON_COLOR: Int get() = paper().onInk
 
     // --- metrics ---
 
@@ -219,7 +244,7 @@ object Theme {
     const val TEXT_TITLE_SP = 22f
 
     /** Ripple colour for controls on paper. A translucent ink tint, not the old white ripple. */
-    private const val RIPPLE = 0x332B2318
+    private val RIPPLE: Int get() = paper().ripple
 
     fun dp(ctx: Context, v: Int): Int = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics
