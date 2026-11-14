@@ -143,9 +143,19 @@ class SshPlugin(private val ctx: Context) : Plugin {
                     // A card that leads with `deploy@10.0.0.4:22` makes the reader reconstruct
                     // which connection that is, and on a wall of approvals that reconstruction is
                     // where a wrong tap comes from.
-                    add(ApprovalRow("CONNECTION", name, ApprovalRow.Style.NORMAL))
-                    // The address is the exact target, so it stays monospace and selectable.
-                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.MONO))
+                    // **One row: the name, then the address small beneath it.** Two labelled rows
+                    // made the reader match `evox2` to `ahmed@100.99.67.14:22` by eye, and on a
+                    // tall card those two lines were far enough apart to lose the pairing. The
+                    // name stays the readable one; the address is the exact target, so it rides
+                    // underneath in a smaller monospace rather than competing for the same line.
+                    add(
+                        ApprovalRow(
+                            "CONNECTION",
+                            name,
+                            ApprovalRow.Style.MONO,
+                            detail = "${conn.user}@${conn.host}:${conn.port}",
+                        )
+                    )
                     // The command, verbatim, in the CODE field: monospace, syntax-coloured, and
                     // broken at token boundaries. Not truncated in the modal: a long command that
                     // is silently clipped is exactly the "you approved something you could not
@@ -194,8 +204,19 @@ class SshPlugin(private val ctx: Context) : Plugin {
                 buildList {
                     // Same rule as the synchronous route: the friendly name leads, the address
                     // is the detail beneath it.
-                    add(ApprovalRow("CONNECTION", name, ApprovalRow.Style.NORMAL))
-                    add(ApprovalRow("HOST", "${conn.user}@${conn.host}:${conn.port}", ApprovalRow.Style.MONO))
+                    // **One row: the name, then the address small beneath it.** Two labelled rows
+                    // made the reader match `evox2` to `ahmed@100.99.67.14:22` by eye, and on a
+                    // tall card those two lines were far enough apart to lose the pairing. The
+                    // name stays the readable one; the address is the exact target, so it rides
+                    // underneath in a smaller monospace rather than competing for the same line.
+                    add(
+                        ApprovalRow(
+                            "CONNECTION",
+                            name,
+                            ApprovalRow.Style.MONO,
+                            detail = "${conn.user}@${conn.host}:${conn.port}",
+                        )
+                    )
                     // The command verbatim, exactly as the synchronous route shows it: detaching
                     // changes WHEN it runs, never WHAT runs.
                     add(ApprovalRow("COMMAND", command, ApprovalRow.Style.CODE))

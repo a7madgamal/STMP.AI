@@ -147,7 +147,15 @@ object ApprovalGate {
     class Row(
         val label: String,
         val value: String,
-        val style: Style = Style.NORMAL
+        val style: Style = Style.NORMAL,
+        /**
+         * A second line under [value], drawn smaller.
+         *
+         * The exact target behind a friendly name — `ahmed@100.99.67.14:22` under `evox2`. A
+         * renderer weights the two so the pairing is obvious without a second label competing
+         * for the reader's attention.
+         */
+        val detail: String = "",
     ) {
         enum class Style {
             /** Ordinary value, body text colour. */

@@ -255,17 +255,31 @@ class ApprovalActivity : FragmentActivity() {
         // Never move this block back above WHO/WHAT: AI is advisory, not the request.
 
         if (view != null) {
-            // --- WHO ---
-            content.addView(Theme.sectionHeader(this, "WHO"))
-            content.addView(label("Who is asking: ${view.requester}", Theme.TEXT_ROW_TITLE_SP, Theme.WARNING))
-            if (view.account.isNotBlank() && view.account != "—") {
+            // **One sentence, no section headers.**
+            //
+            // The modal used to open with `WHO` and `WHAT` headings stacked above the request
+            // details, which spent the top third of a phone screen on scaffolding: two header
+            // lines and two labels to say "OpenClaw wants to run a command over SSH". Mido,
+            // 2026-11-14, on a card where the reader crossed both headings out: the sentence is
+            // the header.
+            //
+            // The requester now reads as `OpenClaw wants to <action>` — who and what in one line,
+            // in the words the route already carries. The endpoint is dropped here because the
+            // rows below name the real target (`evox2`, the command, the host), and repeating a
+            // route template above them pushed those facts down.
+            content.addView(
+                label(
+                    "${view.requester} wants to ${view.actionLabel}",
+                    Theme.TEXT_TITLE_SP,
+                )
+            )
+            // **The email only where it is the subject.** A Google modal acts on an account, so
+            // naming it is part of what is being approved. On an SSH command the account is the
+            // caller's own address — a fact about the phone, not about the request — and it was
+            // reading as noise under every card.
+            if (isGoogleRequest(endpoint) && view.account.isNotBlank() && view.account != "—") {
                 content.addView(label("as ${view.account}", Theme.TEXT_BODY_SP, Theme.SUCCESS))
             }
-
-            // --- WHAT (the resolved action, in words) ---
-            content.addView(Theme.sectionHeader(this, "WHAT"))
-            content.addView(label(view.actionLabel, Theme.TEXT_TITLE_SP))
-            content.addView(label(endpoint, Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT))
 
             // Render a labelled row: label on its own quiet line, value below in the
             // style the row asked for. This is the ONE renderer; it knows nothing
@@ -343,6 +357,23 @@ class ApprovalActivity : FragmentActivity() {
                     }
                 }
                 content.addView(view)
+                // The qualifying line, in a smaller face. Never its own label: this is the same
+                // fact as the value, at a lower weight — the exact address behind a friendly
+                // connection name, not a second thing to read.
+                if (r.detail.isNotBlank()) {
+                    content.addView(
+                        Theme.text(
+                            this,
+                            r.detail,
+                            Theme.TEXT_CAPTION_SP,
+                            Theme.ON_SURFACE_VARIANT,
+                            mono = true,
+                        ).apply {
+                            setTextIsSelectable(true)
+                            setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
+                        }
+                    )
+                }
             }
 
             // Plugin-provided sections (Calendar, Gmail, …). Each section renders
@@ -350,7 +381,10 @@ class ApprovalActivity : FragmentActivity() {
             for (sec in view.sections) {
                 val rows = sec.rows.filter { it.value.isNotBlank() }
                 if (rows.isEmpty()) continue
-                content.addView(Theme.sectionHeader(this, sec.title))
+                // A section with no title renders its rows straight into the flow. The plugin
+                // says what the rows ARE by labelling each one; an empty header line above them
+                // would be scaffolding that says nothing.
+                if (sec.title.isNotBlank()) content.addView(Theme.sectionHeader(this, sec.title))
                 rows.forEach { row(it) }
             }
 
@@ -1047,6 +1081,24 @@ class ApprovalActivity : FragmentActivity() {
      */
     private var stamping = false
     private val forcedExit = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Whether this request acts on a Google account.
+     *
+     * The account line under the requester only means something where the ACCOUNT is the subject:
+     * a Gmail message, a Calendar event, a Drive file all belong to one, and naming it is part of
+     * what the human is approving. Everywhere else the account is the caller's own address — a
+     * fact about the phone, not about the request — and it read as noise under every card.
+     *
+     * Matched on the route prefix, because the endpoint is what this Activity already has in hand;
+     * the plugin id never crosses the intent.
+     */
+    private fun isGoogleRequest(routePath: String): Boolean {
+        val path = routePath.substringBefore('?')
+        return path.startsWith("/gmail") ||
+            path.startsWith("/calendar") ||
+            path.startsWith("/drive")
+    }
 
     private fun finishWith(id: Long, approved: Boolean) {
         val resolved = ApprovalGate.resolve(id, approved)

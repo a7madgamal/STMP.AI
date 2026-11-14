@@ -5484,8 +5484,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.15 (build 341) — 2026-11-14
 - The paper-crease sound that plays as the approval modal arrives is a page turn, matching the sheet that slides in. The decision stamp keeps its own thud, so arrival and verdict still sound like two different moments.
 
-## 0.51.16 (build 342) — 2026-11-14 — CURRENT
+## 0.51.16 (build 342) — 2026-11-14
 - Request log times follow the device's own clock: 12- or 24-hour as the phone is set, and the locale's field order rather than a hardcoded `HH:mm:ss` in `Locale.US`. `LogTime` also names the zone and provides `Today` / `Yesterday` headings, so a scroll of timestamps reads as sessions instead of a column of numbers.
+
+## 0.51.17 (build 343) — 2026-11-14 — CURRENT
+- Every approval modal opens with one sentence, `<caller> wants to <action>`, instead of `WHO` and `WHAT` section headers above two labelled lines. The headers spent the top third of the card restating what the sentence says, and pushed the actual request details down.
+- A Google request still names the account (`as you@example.com`) because the account IS what it acts on. Every other modal drops it: the address is the caller's own, a fact about the phone rather than about the request.
+- A connection row carries its exact target on a second, smaller line, so `evox2` and `ahmed@100.99.67.14:22` read as one fact rather than two rows the eye has to pair.
 
 ## Keeping this file honest
 

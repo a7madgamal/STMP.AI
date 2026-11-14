@@ -461,7 +461,19 @@ interface Plugin {
 data class ApprovalRow(
     val label: String,
     val value: String,
-    val style: Style = Style.WARN
+    val style: Style = Style.WARN,
+    /**
+     * A second line under [value], rendered in a smaller face.
+     *
+     * For a fact that qualifies the value without being equal to it: the exact address behind a
+     * connection's friendly name, a full path behind a file name. Kept as its own field rather
+     * than concatenated into [value] so the renderer can weight the two — a label and its detail
+     * at the same size read as two separate facts.
+     *
+     * Blank means there is no second line, not an empty one: an empty line under every row would
+     * add height to the whole card for nothing.
+     */
+    val detail: String = "",
 ) {
     enum class Style {
         NORMAL,

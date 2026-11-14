@@ -44,7 +44,7 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
         messageCount = 0,
         replyText = null,
         sections = listOf(
-            ApprovalGate.Section("WHAT", listOf(ApprovalGate.Row("Search", "sara", ApprovalGate.Row.Style.MONO))),
+            ApprovalGate.Section("", listOf(ApprovalGate.Row("SEARCH", "sara", ApprovalGate.Row.Style.MONO))),
         ),
         requiresBiometric = biometric,
         exceptionOffer = offer,
@@ -119,6 +119,44 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun exception_offer() = show(
         "exception_offer",
         view = view(offer = ApprovalGate.ExceptionOffer(Rule("contacts", Verb.READ, Mode.DONT_DISTURB), "ALWAYS NOTIFY")),
+    )
+
+    /**
+     * The SSH command modal, which is the one that carries a friendly name with the exact address
+     * beneath it. Captured so the merged CONNECTION row and the smaller detail line are pinned:
+     * the layout could regress to two equal-weight rows and every other fixture would stay green,
+     * because no other route produces a connection name and an address together.
+     */
+    @Test
+    fun ssh_command() = show(
+        "ssh_command",
+        endpoint = "POST /ssh/evox2",
+        view = ApprovalGate.ApprovalView(
+            requester = "OpenClaw",
+            account = "me@example.com",
+            actionLabel = "RUN COMMAND OVER SSH",
+            appLabel = "",
+            notifTitle = "",
+            notifSender = "",
+            notifText = "",
+            messageCount = 0,
+            replyText = null,
+            sections = emptyList(),
+            destructive = listOf(
+                // The friendly name, with the exact target smaller beneath it.
+                ApprovalGate.Row(
+                    "CONNECTION",
+                    "evox2",
+                    ApprovalGate.Row.Style.MONO,
+                    detail = "ahmed@100.99.67.14:22",
+                ),
+                ApprovalGate.Row(
+                    "COMMAND",
+                    "cd ~ && gh pr close 7 --repo a7madgamal/STMP.AI",
+                    ApprovalGate.Row.Style.CODE,
+                ),
+            ),
+        ),
     )
 
     @Test fun queued_2() = show("queued_2", queued = 2)
