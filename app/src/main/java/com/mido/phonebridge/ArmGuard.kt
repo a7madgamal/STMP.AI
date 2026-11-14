@@ -7,7 +7,7 @@ package com.mido.phonebridge
  * armed the buttons at `shownAtMs` — the instant the modal appeared. That is not a window a human
  * can read in; a tap already in flight when the modal arrives lands on APPROVE. Mido,
  * 2026-10-21: *"when AI is disabled, we need the 3 seconds protection again to avoid misclicking
- * the dialog"*.
+ * the dialog"* (the guard is now 1 s: [MISCLICK_GUARD_MS], lowered 2026-10-26).
  *
  * **The duration was later lowered to 1s (2026-10-26)**, paired with a visual dim on both surfaces.
  * The guard was never really about the number of seconds — it is about a human not being able to
@@ -22,9 +22,8 @@ package com.mido.phonebridge
  *
  * So the rule is a MINIMUM time since shown: whichever comes later, the guard or the summary.
  *
- * **The AI path is barely affected in practice.** A summary takes ~1.2s to land and the model is
- * only consulted when it is enabled, so the guard adds at most ~1.8s there — and a request that
- * took longer than 3s to summarise is unchanged.
+ * **The AI path is barely affected.** A summary takes ~1.2s, which is already past the 1s guard,
+ * so the guard usually adds nothing there; it only binds when the summary lands in under a second.
  *
  * Pure and Context-free so [ArmGuardTest] can pin the boundaries; the gate and the Activity both
  * read the same function rather than each computing "is it armed yet".
@@ -68,7 +67,7 @@ object ArmGuard {
      *
      * **The NOTIFY card used to approve on any tap, with no guard at all.** Mido, 2026-10-24:
      * *"add the same 3 seconds waiting period before ANY touch event on the notification works so
-     * that I don't approve or cancel by mistake"*. The overlay is a floating card that can appear
+     * that I don't approve or cancel by mistake"* (now 1 s, the same constant). The overlay is a floating card that can appear
      * under a finger already in motion, and a tap means APPROVE — so the same minimum window the
      * modal uses has to apply here.
      *
@@ -84,7 +83,7 @@ object ArmGuard {
      */
     fun decisionsAllowed(shownAtMs: Long, nowMs: Long): Boolean {
         // `0` means "never attached" (see `Entry.shownAt`). Treating it as a timestamp would make
-        // every comparison true, since a real clock reading is far past 0 + 3000 — so a card that
+        // every comparison true, since a real clock reading is far past 0 + MISCLICK_GUARD_MS — so a card that
         // somehow received a touch before it was stamped would be fully armed. Refuse instead: an
         // unattached card has no decision to make yet.
         if (shownAtMs <= 0L) return false

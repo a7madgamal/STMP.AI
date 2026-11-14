@@ -23,10 +23,11 @@ class UpdaterSafetyTest {
     private val updater = File("src/main/java/com/mido/phonebridge/core/Updater.kt")
     private val installer = File("src/main/java/com/mido/phonebridge/core/ApkInstaller.kt")
     /**
-     * The screen hosting the update UI. Moving it must update this guard, not copy
-     * verification logic back into Home or Settings.
+     * The screen that owns the update UI. It moved from Settings to Home (Mido, 2026-11-04:
+     * *"move the update section to the home page"*), so this points at the new owner — the guard
+     * failing on the move is the guard working.
      */
-    private val screen = File("src/main/java/com/mido/phonebridge/ui/UpdatesSection.kt")
+    private val screen = File("src/main/java/com/mido/phonebridge/HomeFragment.kt")
 
     @Test
     fun `a check that cannot reach the source is not reported as up to date`() {
@@ -48,7 +49,7 @@ class UpdaterSafetyTest {
 
     @Test
     fun `the install refuses when the digest does not match`() {
-        assertTrue("UpdatesSection.kt missing", screen.isFile)
+        assertTrue("HomeFragment.kt missing", screen.isFile)
         val source = screen.readText()
 
         assertTrue(

@@ -63,7 +63,7 @@ class ArmGuardTest {
     @Test
     fun `a slow summary is not delayed further`() {
         // The guard only pushes LATER. A summary that took 6s is already past it, so the arm time
-        // is the moment it landed — adding 3s on top would punish a slow model twice.
+        // is the moment it landed — adding the guard on top would punish a slow model twice.
         val shown = 5_000L
         val ready = shown + 6_000L
         assertEquals(ready, ArmGuard.armAt(shown, ready))
@@ -130,7 +130,7 @@ class ArmGuardTest {
     @Test
     fun `an unattached card allows no decision`() {
         // `Entry.shownAt` is 0 until the view is attached. A real clock reading is far past
-        // 0 + 3000, so treating 0 as a timestamp would leave an unattached card fully armed.
+        // 0 + MISCLICK_GUARD_MS, so treating 0 as a timestamp would leave an unattached card fully armed.
         assertFalse(ArmGuard.decisionsAllowed(0L, System.currentTimeMillis()))
         assertFalse(ArmGuard.decisionsAllowed(-1L, 10_000L))
     }

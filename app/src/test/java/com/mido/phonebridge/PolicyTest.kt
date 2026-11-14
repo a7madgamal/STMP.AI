@@ -520,14 +520,14 @@ class PolicyTest {
     // --- preferences (fingerprint / AI) ---
 
     @Test
-    fun `an old file with no preference keys parses with both OFF`() {
+    fun `an old file with no preference keys parses with fingerprint ON and AI OFF`() {
         // The migration-free path: `policy.json` written before these fields existed must parse
         // unchanged, because VERSION did not move. A bump here would invalidate the file on every
         // device that already has one — and that file now survives a reinstall, so the damage
         // would be sticky.
         val raw = """{"version":1,"global":"PARANOID","rules":[]}"""
         val p = Policy.parse(raw)
-        assertEquals(false, p.fingerprintForModals)
+        assertEquals(true, p.fingerprintForModals)
         assertEquals(AiBackend.OFF, p.aiBackend)
         // Auto-start is the ONE preference that defaults ON: an install predating it should get
         // the new behaviour without a migration, because a bridge that only runs after someone
@@ -589,6 +589,13 @@ class PolicyTest {
     }
 
     @Test
+    fun `a fresh Policy has the fingerprint on and a stored off is kept`() {
+        assertEquals(true, Policy(global = GlobalMode.PARANOID, rules = emptyList()).fingerprintForModals)
+        val raw = """{"version":1,"global":"PARANOID","rules":[],"fingerprintForModals":false}"""
+        assertEquals(false, Policy.parse(raw).fingerprintForModals)
+    }
+
+    @Test
     fun `a NON-BOOLEAN preference falls back to the default instead of throwing`() {
         // The whole reason these are lenient: a preference must never be able to refuse to start
         // the server. `optBoolean` would coerce "yes" to false silently; this asserts the value
@@ -596,7 +603,7 @@ class PolicyTest {
         val raw = """{"version":1,"global":"PARANOID","rules":[],""" +
             """"fingerprintForModals":"yes","aiBackend":0}"""
         val p = Policy.parse(raw)
-        assertEquals(false, p.fingerprintForModals)
+        assertEquals(true, p.fingerprintForModals)
         assertEquals(AiBackend.OFF, p.aiBackend)
     }
 

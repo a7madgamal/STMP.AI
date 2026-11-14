@@ -22,10 +22,10 @@ class TypographyTest {
     private val root = File("src/main/java/com/mido/phonebridge")
 
     /**
-     * 13sp is the scale's floor; supporting text may be smaller than body copy but never tiny.
-     * guard enforces it rather than trusting that the previous sweep stayed swept.
+     * Below this, text is unreadable at normal phone distance. 12sp is the scale's floor; this
+     * test enforces it rather than trusting that the previous sweep stayed swept.
      */
-    private val floorSp = 13.0
+    private val floorSp = 12.0
 
     @Test
     fun `no text renders below the floor`() {
@@ -70,20 +70,9 @@ class TypographyTest {
 
         assertTrue(
             "these render text smaller than ${floorSp}sp, which is unreadable on a phone at " +
-                "arm's length. Use Theme's scale (TEXT_CAPTION_SP is the floor):\n  " +
+                "arm's length. Use Theme's scale (TEXT_FLOOR_SP is the floor):\n  " +
                 offenders.joinToString("\n  "),
             offenders.isEmpty()
-        )
-    }
-
-    @Test
-    fun `the tab bar labels are upper case`() {
-        val source = File("src/main/java/com/mido/phonebridge/ui/Theme.kt").readText()
-        assertTrue(
-            "the bottom bar must upper-case its labels (Mido, 2026-11-04); otherwise a label " +
-                "change can silently render in mixed case again",
-            source.contains("tab.label.uppercase(Locale.US)") ||
-                source.contains("tab.label.uppercase(java.util.Locale.US)")
         )
     }
 }

@@ -8,6 +8,11 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.kit.Etched
+import com.mido.phonebridge.ui.kit.KeyButton
+import com.mido.phonebridge.ui.tokens.Dimens
+import com.mido.phonebridge.ui.tokens.Type
+import com.mido.phonebridge.ui.tokens.TypeRole
 
 /**
  * Asks for one fingerprint so a blocked request can continue.
@@ -29,31 +34,44 @@ class VaultUnlockActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (SecretVault.isUnlocked()) { close(true); return }
-        setContentView(Theme.inset(buildShell()))
+        setContentView(buildShell())
         prompt()
     }
 
     private fun buildShell(): android.view.View {
+        val p = Theme.palette(this)
+        val full = { android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+        ) }
+        val gutter = Theme.dp(this, Dimens.GUTTER)
         val root = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            background = Theme.sheet(Theme.BG)
-            gravity = android.view.Gravity.CENTER
-            setPadding(Theme.dp(this@VaultUnlockActivity, 24), 0,
-                Theme.dp(this@VaultUnlockActivity, 24), 0)
+            setBackgroundColor(p.body)
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(gutter, Theme.dp(this@VaultUnlockActivity, Dimens.SPACE_XL), gutter,
+                Theme.dp(this@VaultUnlockActivity, Dimens.SPACE_XL))
         }
-        root.addView(Theme.text(this, "Vault locked", Theme.TEXT_TITLE_SP).apply {
-            typeface = Theme.handFont(this@VaultUnlockActivity)
+        root.addView(Etched.label(this, "VAULT LOCKED").also {
+            androidx.core.view.ViewCompat.setAccessibilityHeading(it, true)
         })
-        root.addView(Theme.text(
-            this,
-            "A request needs a stored credential. Unlock the vault to review it — you will " +
-                "still approve the request itself on the next screen.",
-            Theme.TEXT_DETAIL_SP, Theme.ON_SURFACE_VARIANT,
-        ).apply { setPadding(0, Theme.dp(this@VaultUnlockActivity, 8), 0, Theme.dp(this@VaultUnlockActivity, 16)) })
-        root.addView(Theme.button(this, "UNLOCK", Theme.ButtonStyle.SUCCESS) { prompt() })
-        root.addView(Theme.button(this, "CANCEL", Theme.ButtonStyle.GHOST) { close(false) }.apply {
-            setPadding(0, Theme.dp(this@VaultUnlockActivity, 12), 0, 0)
-        })
+        root.addView(
+            Type.text(
+                this,
+                "A request needs a stored credential. Unlock the vault to review it. You will " +
+                    "still approve the request itself on the next screen.",
+                TypeRole.BODY, p.ink,
+            ),
+            full().apply { topMargin = Theme.dp(this@VaultUnlockActivity, Dimens.SPACE_M) },
+        )
+        root.addView(
+            KeyButton.create(this, "Unlock", KeyButton.Kind.INK, KeyButton.Size.LARGE) { prompt() },
+            full().apply { topMargin = Theme.dp(this@VaultUnlockActivity, Dimens.GUTTER) },
+        )
+        root.addView(
+            KeyButton.create(this, "Cancel", KeyButton.Kind.OUTLINE) { close(false) },
+            full().apply { topMargin = Theme.dp(this@VaultUnlockActivity, Dimens.SPACE_M) },
+        )
         return root
     }
 

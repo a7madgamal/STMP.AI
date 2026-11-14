@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("io.github.takahirom.roborazzi")
 }
 
 /**
@@ -73,8 +74,8 @@ android {
         applicationId = "com.mido.phonebridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 311
-        versionName = "0.51.9"
+        versionCode = 326
+        versionName = "0.52.11"
 
         // OAuth, from local.properties. Empty when unset, which the app treats as "not configured".
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"${localProp("google.clientId")}\"")
@@ -223,9 +224,20 @@ android {
                 //
                 // `CI` is set to "true" by GitHub Actions. Anywhere else stays at 1.
                 test.maxParallelForks = if (System.getenv("CI") == "true") 2 else 1
+
+                // Fixed English locale: number and date formatting (and so SummaryFailureTest and
+                // the screenshots) no longer depend on the machine's region.
+                test.jvmArgs("-Duser.language=en", "-Duser.country=US")
+                // Native graphics draws elevation and shadows the way a device does.
+                test.systemProperty("robolectric.pixelCopyRenderMode", "hardware")
             }
         }
     }
+}
+
+roborazzi {
+    // Reference images are committed; the default build/ location would be wiped by clean.
+    outputDir.set(file("src/test/screenshots"))
 }
 
 /*
@@ -247,6 +259,7 @@ dependencies {
     // the components and the theme machinery are exactly what we do not want to
     // hand-roll (a custom GradientDrawable background is what killed the ripple).
     implementation("com.google.android.material:material:1.12.0")
+implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
     // On-device LLM inference for the request summariser (LiteRT-LM — Google's
     // supported successor to the deprecated MediaPipe tasks-genai API). The model
     // FILE is not bundled — it is a separate ~475MB asset (see ai/ModelRegistry.kt).
@@ -298,6 +311,8 @@ dependencies {
     // `org.json:json` is deliberately GONE: keeping it would let the reference implementation win
     // the classpath and re-open exactly the hole this is closing.
     testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-junit-rule:1.77.0")
 }
 
 /*

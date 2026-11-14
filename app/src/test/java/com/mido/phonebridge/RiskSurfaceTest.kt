@@ -27,52 +27,54 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33])
 class RiskSurfaceTest {
 
+    private val p get() = Theme.current()
+
     @Test
     fun `an absent assessment leaves the sheet untouched`() {
         assertEquals(
             "no assessment is not 'safe' — it must not wear the success tint",
-            Theme.BG,
-            Theme.riskSurface(null)
+            p.body,
+            Theme.riskSurface(p, null)
         )
     }
 
     @Test
-    fun `each bucket has its own tint`() {
-        val low = Theme.riskSurface(Risk.LOW)
-        val medium = Theme.riskSurface(Risk.MEDIUM)
-        val high = Theme.riskSurface(Risk.HIGH)
+    fun `low differs from medium and medium shares caution with high`() {
+        val low = Theme.riskSurface(p, Risk.LOW)
+        val medium = Theme.riskSurface(p, Risk.MEDIUM)
+        val high = Theme.riskSurface(p, Risk.HIGH)
 
-        assertEquals(
-            "distinct buckets, or the wash says nothing",
-            setOf(low, medium, high).size,
-            3
-        )
+        assertNotEquals("LOW and MEDIUM must differ", low, medium)
+        assertEquals("MEDIUM and HIGH share the caution wash; the word tells them apart", medium, high)
     }
 
     @Test
     fun `no bucket reuses the plain sheet colour`() {
-        // A bucket that returned BG would be invisible — the tint would look like "no
-        // assessment", which reads as a missing answer rather than a real one.
         for (risk in Risk.entries) {
             assertNotEquals(
                 "$risk must be visually distinguishable from no-assessment",
-                Theme.BG,
-                Theme.riskSurface(risk)
+                p.body,
+                Theme.riskSurface(p, risk)
             )
         }
     }
 
     @Test
-    fun `the tint agrees with the ink colour for the same bucket`() {
-        // Two mappings, one per role: `riskColor` for text/marks, `riskSurface` for the wash.
-        // They must not disagree about which semantic family a bucket belongs to, or the
-        // modal's text and its background would tell different stories.
-        assertEquals(Theme.SUCCESS_SURFACE, Theme.riskSurface(Risk.LOW))
-        assertEquals(Theme.WARNING_SURFACE, Theme.riskSurface(Risk.MEDIUM))
-        assertEquals(Theme.DANGER_SURFACE, Theme.riskSurface(Risk.HIGH))
+    fun `no bucket uses the signal wash`() {
+        val signal = p.signalSurface
+        for (risk in Risk.entries) {
+            assertNotEquals("$risk must never wear the EXECUTE/DELETE colour", signal, Theme.riskSurface(p, risk))
+        }
+    }
 
-        assertEquals(Theme.SUCCESS, Theme.riskColor(Risk.LOW))
-        assertEquals(Theme.WARNING, Theme.riskColor(Risk.MEDIUM))
-        assertEquals(Theme.DANGER, Theme.riskColor(Risk.HIGH))
+    @Test
+    fun `the tint agrees with the ink colour for the same bucket`() {
+        assertEquals(p.okSurface, Theme.riskSurface(p, Risk.LOW))
+        assertEquals(p.cautionSurface, Theme.riskSurface(p, Risk.MEDIUM))
+        assertEquals(p.cautionSurface, Theme.riskSurface(p, Risk.HIGH))
+
+        assertEquals(p.okText, Theme.riskColor(p, Risk.LOW))
+        assertEquals(p.cautionText, Theme.riskColor(p, Risk.MEDIUM))
+        assertEquals(p.cautionText, Theme.riskColor(p, Risk.HIGH))
     }
 }

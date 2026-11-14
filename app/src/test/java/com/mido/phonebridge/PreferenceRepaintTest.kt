@@ -20,7 +20,7 @@ import java.io.File
 class PreferenceRepaintTest {
 
     private val options = File("src/main/java/com/mido/phonebridge/OptionsFragment.kt")
-    private val inventory = File("src/main/java/com/mido/phonebridge/ui/PluginInventoryView.kt")
+    private val inventory = File("src/main/java/com/mido/phonebridge/PluginsFragment.kt")
 
     @Test
     fun `preference repaints are posted and coalesced, never run inside the click`() {
@@ -38,27 +38,22 @@ class PreferenceRepaintTest {
             saveBody.substringBefore("\n    private fun").contains("renderPosted()")
         )
         // The two known click-path callers: the vault row and the model download progress.
-        assertTrue(source.contains("force = true) { renderPosted() }"))
-        assertTrue(source.contains("onProgress = { ui { renderPosted() } }"))
+        assertTrue(source.contains("force = true) { uiSafe { renderPosted() } }"))
+        assertTrue(source.contains("onProgress = { uiSafe { if (percentChangedOnScreen()) renderPosted() } }"))
         assertFalse(
             "no click callback may call render() inline",
-            source.contains("onProgress = { ui { render() } }")
+            source.contains("onProgress = { uiSafe { if (percentChangedOnScreen()) render() } }")
         )
     }
 
     @Test
     fun `the plugin toggle defers its row rebuild out of click dispatch`() {
-        assertTrue("PluginInventoryView.kt missing", inventory.isFile)
+        assertTrue("PluginsFragment.kt missing", inventory.isFile)
         val source = inventory.readText()
 
         assertTrue(
-            "PluginInventoryView.resume() must post and coalesce its rebuild",
-            source.contains("private var renderPosted = false") &&
-                source.substringAfter("fun resume()").contains("renderPosted = true")
-        )
-        assertFalse(
-            "the plugin toggle must not rebuild the list inside its own click",
-            source.contains("enabled=\$want\")\n                render()")
+            "the plugin toggle must post its rebuild, not render inside its own click",
+            source.contains("list.post { render() }")
         )
     }
 }

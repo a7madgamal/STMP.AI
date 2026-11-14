@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Key lip: the 4dp the key stands proud of the panel (keyLipInk). -->
+    <path android:fillColor="@color/stmp_launcher_key_lip"
+        android:pathData="M41,27 L67,27 C74.73,27,81,33.27,81,41 L81,67 C81,74.73,74.73,81,67,81 L41,81 C33.27,81,27,74.73,27,67 L27,41 C27,33.27,33.27,27,41,27 Z" />
+    <!-- Key face (ink). -->
+    <path android:fillColor="@color/stmp_launcher_key"
+        android:pathData="M41,27 L67,27 C74.73,27,81,33.27,81,41 L81,63 C81,70.73,74.73,77,67,77 L41,77 C33.27,77,27,70.73,27,63 L27,41 C27,33.27,33.27,27,41,27 Z" />
+    <!-- Top highlight line (inkHighlight). -->
+    <path android:strokeColor="@color/stmp_launcher_key_hi" android:strokeWidth="1.5"
+        android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M41,28 L67,28" />
+    <!-- LED halo, then LED core with its ring. -->
+    <path android:fillColor="@color/stmp_launcher_led_halo"
+        android:pathData="M68,30 C72.42,30 76,33.58 76,38 C76,42.42 72.42,46 68,46 C63.58,46 60,42.42 60,38 C60,33.58 63.58,30 68,30 Z" />
+    <path android:fillColor="@color/stmp_launcher_led" android:strokeColor="@color/stmp_launcher_led_ring"
+        android:strokeWidth="1"
+        android:pathData="M68,33.8 C70.32,33.8 72.2,35.68 72.2,38 C72.2,40.32 70.32,42.2 68,42.2 C65.68,42.2 63.8,40.32 63.8,38 C63.8,35.68 65.68,33.8 68,33.8 Z" />
+    <!-- Prompt: chevron and underscore. -->
+    <path android:strokeColor="@color/stmp_launcher_glyph" android:strokeWidth="3.2"
+        android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000"
+        android:pathData="M41,46 L51,52.5 L41,59" />
+    <path android:strokeColor="@color/stmp_launcher_glyph" android:strokeWidth="3.2"
+        android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M55,60 L66,60" />
+</vector>

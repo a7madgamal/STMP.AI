@@ -1,18 +1,15 @@
 package com.mido.phonebridge
 
-import android.app.Application
-
-/**
- * The process entry point, and the one place early enough to catch a crash before it happens.
- *
- * `MainActivity.onCreate` is too late for the failures that matter most — an exception thrown
- * while the Activity inflates, or in `appStartup()` itself, never reaches a handler installed
- * further down. This runs first, so every later crash is recorded.
- */
-class StmpApp : Application() {
+/** The application class: installs the palette's context so services and overlays can read it. */
+class StmpApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
-        Crash.install(this)
-        Stall.install(this)
+        // Skipped under Robolectric: its paused main looper never runs the stall heartbeat, so the
+        // watchdog thread would pile up and run the unit-test JVM out of memory.
+        if (android.os.Build.FINGERPRINT != "robolectric") {
+            Crash.install(this)
+            Stall.install(this)
+        }
+        com.mido.phonebridge.ui.Theme.install(this)
     }
 }

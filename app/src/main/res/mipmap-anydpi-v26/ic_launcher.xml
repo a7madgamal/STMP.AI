@@ -1,22 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Launcher icon — adaptive.
-
-  minSdk is 26, the release that introduced adaptive icons, so this file covers
-  every supported device and no density-bucket fallback is needed.
-
-  The foreground is a BITMAP, not a traced vector, and that is deliberate. The
-  supplied mark is a distressed rubber stamp: its character is the ink speckle,
-  which is thousands of tiny shapes. Tracing it would either blow up the path
-  count or drop the texture and leave a clean logo that is not the brand. A
-  raster layer at five exact density buckets is scaled 1:1 by the launcher for
-  each bucket, so there is no resampling blur to lose either.
-
-  The monochrome layer is the same silhouette in flat white for Android 13+
-  themed icons, which the system tints itself. Ignored below API 33.
--->
+<!-- Adaptive icon (API 26+, the minSdk): vector layers, themed icon on API 33+. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-    <monochrome android:drawable="@mipmap/ic_launcher_monochrome" />
+    <background android:drawable="@color/stmp_launcher_bg" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

@@ -43,3 +43,6 @@ fun originOf(remote: String): Origin = when {
 
 /** The audit label for a request: `plugin.verb`, e.g. `gmail.write`. */
 fun labelOf(pluginId: String, verb: Verb): String = "$pluginId.${verb.name.lowercase()}"
+
+/** EXECUTE and DELETE: the verbs that get signal colour (D1, D6) and need a hold to approve (D12). */
+fun Verb.executesOrDeletes(): Boolean = this == Verb.EXECUTE || this == Verb.DELETE

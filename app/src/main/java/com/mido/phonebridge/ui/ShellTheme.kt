@@ -131,7 +131,7 @@ object ShellTheme {
         "brightcyan" to Color.rgb(41, 184, 219),
         "brightwhite" to Color.rgb(255, 255, 255),
         // `default` is zsh's "terminal's own colour"; the paper ink stands in for it.
-        "default" to Theme.ON_SURFACE,
+        "default" to Theme.current().ink,
     )
 
     /** xterm's 256-colour table, compressed to the 16 system colours. */

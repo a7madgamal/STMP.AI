@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Screenshot tests only. Not exported: nothing outside this app can start it. -->
+        <activity
+            android:name=".debug.ScreenshotHostActivity"
+            android:exported="false"
+            android:theme="@style/Theme.STMP" />
+        <!-- Kit component screenshots only. Not exported. -->
+        <activity
+            android:name=".debug.KitHostActivity"
+            android:exported="false"
+            android:theme="@style/Theme.STMP" />
+    </application>
+</manifest>

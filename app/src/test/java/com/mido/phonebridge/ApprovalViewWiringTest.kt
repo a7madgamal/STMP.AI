@@ -64,5 +64,21 @@ class ApprovalViewWiringTest {
             constructions,
             offers
         )
+
+        // WP03a: the three gesture inputs, each passed through by every construction.
+        val passThroughs = mapOf(
+            "verb = effectiveVerb" to """verb\s*=\s*effectiveVerb\s*,?\s*$""",
+            "routeKey = routeKey" to """routeKey\s*=\s*routeKey\s*,?\s*$""",
+            "holdExempt = route.holdExempt" to """holdExempt\s*=\s*route\.holdExempt\s*,?\s*$""",
+        )
+        for ((name, pattern) in passThroughs) {
+            val count = Regex(pattern, RegexOption.MULTILINE).findAll(src).count()
+            assertEquals(
+                "every ApprovalView construction must pass `$name`; found $constructions " +
+                    "construction(s) but $count pass-through(s).",
+                constructions,
+                count
+            )
+        }
     }
 }
