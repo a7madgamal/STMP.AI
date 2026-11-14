@@ -5481,3 +5481,30 @@ devDependencies. `node_modules/` is gitignored.
 - A command in the approval readout underlines the tokens worth a second look: `sudo`, `doas`, `rm -rf`, a pipe into a shell, a write redirect, `dd of=`, `mkfs`, `shutdown`, `chmod -R`, `kill -9`, `git push -f`, a fork bomb and `eval`. The rule sits under the exact run and adds no characters, so the command still reads as what will run.
 - `2>` and `2>&1` are not underlined: stderr plumbing appears on nearly every command, and marking it would train the eye to ignore the underline.
 
+## 0.51.15 (build 341) — 2026-11-14 — CURRENT
+- The paper-crease sound that plays as the approval modal arrives is a page turn, matching the sheet that slides in. The decision stamp keeps its own thud, so arrival and verdict still sound like two different moments.
+
+## Keeping this file honest
+
+- **Format, always:**
+
+  ```
+  ## 0.43.70 (build 224) — 2026-11-03
+  - Fixed summary failures reporting a false cause.
+  - Durations in user-facing messages read as seconds.
+  ```
+
+  Heading: `## <version> (build <n>) — <date>`. Body: bullet lines. Nothing else.
+
+- **No names.** Not mine, not anyone's. Release notes describe the software.
+- **No history.** Not what was tried, not what failed, not what the old behaviour used to be,
+  not how many releases it took. If a reader needs the archaeology, it is in the commit message.
+- **No essays.** One bullet per change, one or two sentences. Say what changed and, briefly, why
+  it mattered. If a bullet runs past two sentences, it is a paragraph pretending to be a bullet.
+- **Newest entry at the BOTTOM**, above this section.
+- **Every commit updates this file** — a version bump without an entry is an incomplete change.
+- **`— CURRENT` on the newest entry only.** `tools/changelog-check.ts` enforces that, plus the
+  version/build match with `app/build.gradle.kts`.
+- **No commit hash in an entry.** A hash is computed from its content, so it cannot contain
+  itself. Find the commit later with `git log --oneline --grep "<version>"`.
+- **Do not rewrite old entries** when a release is corrected; add a new one.
