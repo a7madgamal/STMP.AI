@@ -544,7 +544,18 @@ object NotifyOverlay {
         var originX = 0
         var originY = 0
         var dragging = false
+        // **Covered AT ANY POINT during this gesture vetoes the tap.**
+        //
+        // The card used to decide on ACTION_UP alone, which asks only "is something over me
+        // right now?". A cover that appears mid-tap and is pulled away just before release
+        // answers "no" at the moment of decision, so a tap nobody could see still approved the
+        // request. Mido, 2026-11-14: a cover pulled away before release could steer an approval.
+        //
+        // One-way flag: once this gesture has been obscured, no later event in it can approve.
+        // It is reset on DOWN, so a fresh, clearly-seen tap works normally.
+        var obscuredThisGesture = false
         card.setOnTouchListener { _, ev ->
+            if (isObscured(ev)) obscuredThisGesture = true
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = ev.rawX
@@ -552,6 +563,7 @@ object NotifyOverlay {
                     originX = params.x
                     originY = params.y
                     dragging = false
+                    obscuredThisGesture = isObscured(ev)
                     true
                 }
 
@@ -591,6 +603,19 @@ object NotifyOverlay {
                             ctx, anchorOrientation, CardAnchor(anchorX, anchorY)
                         )
                     } else if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                        // **A gesture that was ever covered cannot approve.** The check happens
+                        // here, at the decision, so the approval path stays the single place that
+                        // decides; the flag above is only evidence. Refusing is silent by design:
+                        // an overlay that learns it was detected just tries a different shape of
+                        // tap, and the human sees an unchanged card rather than a message they
+                        // cannot act on.
+                        if (obscuredThisGesture) {
+                            com.mido.phonebridge.Debug.log(
+                                "notify[${entry.id}] approve refused: gesture was obscured"
+                            )
+                            undim(entry)
+                            return@setOnTouchListener true
+                        }
                         // Tap = approve, and skip whatever wait remains (fetch included).
                         // Settle only: this card is meant to fade out normally, and the
                         // settle backstop guarantees its removal.
@@ -1307,6 +1332,21 @@ object NotifyOverlay {
 
     private fun wm(ctx: Context): WindowManager =
         ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+    /**
+     * Was this event delivered through a covered window?
+     *
+     * `MotionEvent.FLAG_WINDOW_IS_OBSCURED` is set by the system when another window is drawn
+     * over the one that received the touch, and it is the only signal a tapjacking check can
+     * trust: it is decided by WindowManager, not by anything the app or an overlay can claim.
+     *
+     * `FLAG_WINDOW_IS_PARTIALLY_OBSCURED` is deliberately NOT treated as obscured. A partial
+     * cover is the normal case on a phone — a notification shade edge, a floating bubble, a
+     * gesture bar — and refusing every tap it touches would make the card unusable in ordinary
+     * use. A card cannot be steered by a cover that leaves its own approve target visible.
+     */
+    private fun isObscured(ev: MotionEvent): Boolean =
+        (ev.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED) != 0
 
     /**
      * The card's current rectangle in OVERLAY-WINDOW coordinates, or null if it is not laid out.

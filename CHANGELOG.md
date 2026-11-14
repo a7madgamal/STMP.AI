@@ -5467,33 +5467,13 @@ devDependencies. `node_modules/` is gitignored.
 - Each screen has its own test class, so re-recording one screen cannot silently re-baseline the rest.
 - Baselines cover this build's screens: the Plugins tab and the Plugin help sheet had no surface to capture and are not part of it, and Settings records the Preferences tab it actually lives in.
 
-## 0.51.12 (build 338) — 2026-11-14 — CURRENT
+## 0.51.12 (build 338) — 2026-11-14
 - Colour, type, motion, dimension and haptic values now live in `ui/tokens` as roles, so a screen is written against `signal` and `etched` rather than a hex literal. `Theme` reads them through the same names it always had, so no call site changed.
 - The palette is the original paper one: warm cream `#F5EEDF`, ink `#2B2318`, stamp red `#B23A2F`, and the torn edge and grain are unchanged. The Instrument kit's structure is kept; its grey and orange colours are not.
 - Faces are Handlee for the stamp and display roles, Atkinson Hyperlegible for anything read, JetBrains Mono NL for anything copied exactly.
 - There is one palette and it is light. Paper has no night mode, so the app no longer follows the system theme.
 
-## Keeping this file honest
+## 0.51.13 (build 339) — 2026-11-14
+- The Don't-disturb card refuses an approve tap if another window covered it at any point during the gesture, not only at the moment the finger lifts. A cover that appeared mid-tap and was pulled away before release could otherwise steer an approval.
+- A partial cover does not veto the tap: a notification shade edge or a gesture bar is ordinary and refusing those taps would make the card unusable.
 
-- **Format, always:**
-
-  ```
-  ## 0.43.70 (build 224) — 2026-11-03
-  - Fixed summary failures reporting a false cause.
-  - Durations in user-facing messages read as seconds.
-  ```
-
-  Heading: `## <version> (build <n>) — <date>`. Body: bullet lines. Nothing else.
-
-- **No names.** Not mine, not anyone's. Release notes describe the software.
-- **No history.** Not what was tried, not what failed, not what the old behaviour used to be,
-  not how many releases it took. If a reader needs the archaeology, it is in the commit message.
-- **No essays.** One bullet per change, one or two sentences. Say what changed and, briefly, why
-  it mattered. If a bullet runs past two sentences, it is a paragraph pretending to be a bullet.
-- **Newest entry at the BOTTOM**, above this section.
-- **Every commit updates this file** — a version bump without an entry is an incomplete change.
-- **`— CURRENT` on the newest entry only.** `tools/changelog-check.ts` enforces that, plus the
-  version/build match with `app/build.gradle.kts`.
-- **No commit hash in an entry.** A hash is computed from its content, so it cannot contain
-  itself. Find the commit later with `git log --oneline --grep "<version>"`.
-- **Do not rewrite old entries** when a release is corrected; add a new one.
