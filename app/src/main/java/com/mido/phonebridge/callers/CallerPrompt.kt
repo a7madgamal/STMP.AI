@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import com.mido.phonebridge.R
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -168,7 +169,9 @@ object CallerPrompt {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = Notification.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            // The app's own mark. A stock alert glyph in a CALL-category notification reads as a
+            // system warning rather than "a caller is asking this phone".
+            .setSmallIcon(R.drawable.ic_stat_stmp)
             .setContentTitle("Unknown caller")
             .setContentText("${p.ip} wants to reach this phone")
             .setCategory(Notification.CATEGORY_CALL)

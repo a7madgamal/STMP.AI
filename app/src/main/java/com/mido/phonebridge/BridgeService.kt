@@ -554,7 +554,10 @@ class BridgeService : Service() {
             .setContentText(
                 BridgeStatusNotice.text(kind, attempt, StartupRetry.maxAttempts())
             )
-            .setSmallIcon(android.R.drawable.stat_notify_error)
+            // The app's own mark, not Android's generic error triangle: this notice is how the
+            // bridge tells you it is not up, and a stock glyph makes it look like a system fault
+            // rather than the app speaking.
+            .setSmallIcon(R.drawable.ic_stat_stmp)
             .setCategory(Notification.CATEGORY_ERROR)
             .setContentIntent(pi)
             .setOngoing(BridgeStatusNotice.ongoing(kind))
@@ -924,9 +927,13 @@ class BridgeService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
         val notif = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("PhoneBridge running")
+            // The app has been STMP since the 2026-10-26 rebrand; the tray was the one place
+            // still announcing the old name.
+            .setContentTitle("STMP running")
             .setContentText("HTTP server on port $PORT")
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            // The running notice wears the app's own mark; `stat_sys_upload_done` is Android's
+            // generic "upload finished" tick and read as "something completed", not "STMP is up".
+            .setSmallIcon(R.drawable.ic_stat_stmp)
             .setContentIntent(pi)
             .setOngoing(true)
             .build()

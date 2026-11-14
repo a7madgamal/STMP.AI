@@ -41,9 +41,9 @@ object BridgeStatusNotice {
     }
 
     fun title(kind: Kind): String = when (kind) {
-        Kind.RETRYING -> "PhoneBridge can't start yet"
-        Kind.WAITING_FOR_ADDRESS -> "PhoneBridge is waiting for a network"
-        Kind.STOPPED -> "PhoneBridge is not running"
+        Kind.RETRYING -> "STMP can't start yet"
+        Kind.WAITING_FOR_ADDRESS -> "STMP is waiting for a network"
+        Kind.STOPPED -> "STMP is not running"
     }
 
     /**

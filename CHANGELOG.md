@@ -5511,8 +5511,13 @@ devDependencies. `node_modules/` is gitignored.
 - Deleting a secret or an SSH connection no longer opens with the destructive key focused. Android focuses an `AlertDialog`'s POSITIVE button, so `delete` was the first thing a hardware keyboard, a D-pad, a switch device or TalkBack reached — on the one dialog opened to prevent an accident. `cancel` now takes focus on show, so a stray confirm keeps the record.
 - Both delete dialogs stay screenshot-proof: the focus fix sets `FLAG_SECURE` on the same window it changes the focus of.
 
-## 0.51.22 (build 348) — 2026-11-14 — CURRENT
+## 0.51.22 (build 348) — 2026-11-14
 - `changelog-check` refuses a committed merge-conflict marker. The changelog is the release history, so a leftover `<<<<<<<` is both unreadable and a lie about what shipped, and it is cheaper to catch in CI than to notice later.
+
+## 0.51.23 (build 349) — 2026-11-14 — CURRENT
+- Notifications wear the app's own mark instead of an Android placeholder. The running notice used `stat_sys_upload_done`, a generic "upload finished" tick, so the bridge being up looked like something had completed; the can't-start notice used `stat_notify_error`, so the app speaking looked like a system fault; the unknown-caller prompt used `ic_dialog_alert`.
+- The icon is the stamp's SILHOUETTE, drawn at 24dp, not the launcher artwork. That artwork is a distressed stamp with the word STMP across it, and both the texture and the lettering are gone at status-bar size — rendered and checked, it arrives as a black rectangle with a smear in it. The launcher's monochrome layer has the same problem. The outline is the one part that survives, so that is what the small icon is.
+- The tray names the app STMP. The running notice said "PhoneBridge running" and the three status notices said "PhoneBridge can't start yet / is waiting for a network / is not running", three weeks after `app_name` became STMP.
 
 ## Keeping this file honest
 
