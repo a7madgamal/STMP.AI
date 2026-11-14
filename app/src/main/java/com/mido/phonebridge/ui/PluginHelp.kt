@@ -20,23 +20,45 @@ import com.mido.phonebridge.core.Plugin
  *
  * **Example prompts are the load-bearing part.** "Read my last email" explains Gmail faster than
  * any description of it, and it is the shape of thing a human will actually type.
+ *
+ * **The status line asks the plugin, and used to not.** It printed "On, and ready." whenever the
+ * stored switch was on — including for a plugin that was never set up, or one missing the
+ * permission its own `status()` reports as NEEDS_ATTENTION. The screen the human opens to ask
+ * "why is this not working" was therefore answering "it is fine". The row above already calls
+ * `status()`; passing it in costs nothing and stops the two from disagreeing.
  */
 object PluginHelp {
 
-    /** Show the `?` dialog for [plugin]. */
-    fun show(ctx: Context, plugin: Plugin, enabled: Boolean) {
+    /**
+     * Show the `?` dialog for [plugin].
+     *
+     * [status] is the plugin's OWN report, or null when the switch is off (nothing to report).
+     * A caller that has not asked for one gets the honest "not asked" sentence rather than a
+     * cheerful claim, because an unverified "ready" is the bug this signature exists to stop.
+     */
+    fun show(
+        ctx: Context,
+        plugin: Plugin,
+        enabled: Boolean,
+        status: com.mido.phonebridge.core.PluginStatus? = null,
+    ) {
         val info = PluginCopy.forId(plugin.id, plugin.displayName)
 
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
 
         // State first, because the question is usually "why is this not working" rather than
         // "what is this". Both sentences are short: the answer is the whole point of the row.
+        val line = PluginCopy.statusLine(enabled, status)
         body.addView(
             Theme.text(
                 ctx,
-                if (enabled) "On, and ready." else PluginCopy.OFF_NOTE,
-                13f,
-                if (enabled) Theme.SUCCESS else Theme.ON_SURFACE_VARIANT,
+                line.text,
+                Theme.TEXT_DETAIL_SP,
+                when (line.tone) {
+                    PluginCopy.LineTone.OK -> Theme.SUCCESS
+                    PluginCopy.LineTone.CAUTION -> Theme.WARNING
+                    PluginCopy.LineTone.NEUTRAL -> Theme.ON_SURFACE_VARIANT
+                },
             )
         )
 

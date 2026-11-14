@@ -19,6 +19,7 @@ import com.mido.phonebridge.core.SecretTemplate
 import com.mido.phonebridge.core.SecretTemplates
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.showSecure
 
 /**
  * The secret CRUD screen (plan D1/D7, plus the hardening list).
@@ -301,7 +302,7 @@ class SecretsActivity : Activity() {
             .setTitle(name)
             .setMessage(value)
             .setPositiveButton("hide", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -363,7 +364,7 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -400,7 +401,7 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     private fun addSecretDialog(existing: String? = null, template: SecretTemplate? = null) {
@@ -517,7 +518,7 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -544,7 +545,7 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     private fun addHostDialog(secret: String) {
@@ -573,7 +574,7 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     private fun toast(msg: String) {

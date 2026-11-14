@@ -5492,12 +5492,16 @@ devDependencies. `node_modules/` is gitignored.
 - A Google request still names the account (`as you@example.com`) because the account IS what it acts on. Every other modal drops it: the address is the caller's own, a fact about the phone rather than about the request.
 - A connection row carries its exact target on a second, smaller line, so `evox2` and `ahmed@100.99.67.14:22` read as one fact rather than two rows the eye has to pair.
 
-## 0.51.18 (build 344) — 2026-11-14 — CURRENT
+## 0.51.18 (build 344) — 2026-11-14
 - The request log, the activity list and the record detail say what happened in words: `Approved by silence`, `Denied, phone unattended`, `Caller left` — instead of the stored identifier, which a person was reading as `NOTIFY_APPROVED` and `DENIED_UNATTENDED`.
 - The record detail no longer prints the word `null`. `optString` on Android answers the four-character string "null" for a JSON null, so every successful request showed an `ERROR null` row and every decision the gate made itself showed `RULE null`. Absence is now read as absence.
 - The three decision moments (`ENQUEUED`, `SHOWN`, `DECIDED`) are clock times in the phone's own zone, not raw epoch milliseconds, and the record's own timestamp appears under the header. The screen now agrees with the day-grouped list that opens it.
 - Removing or changing an exception no longer throws the list back to the top. `render()` clears and refills the column, which resets the scroll position, so a rule halfway down a long list was unreachable without scrolling again.
 - A model download no longer repaints Settings four times a second. `ModelProvisioner` reports every 250 ms and each report rebuilt the whole screen, so with the AI knob on Remote the server URL and token fields were destroyed under the keyboard mid-word and focus was lost. A percent nobody can see now repaints nothing; only the on-device card draws one.
+
+## 0.51.19 (build 345) — 2026-11-14 — CURRENT
+- Every Secrets and SSH dialog now refuses screenshots, screen recording and the recents thumbnail. `FLAG_SECURE` is per-WINDOW and a dialog gets its own, so the flag on `SecretsActivity` and `SshActivity` protected the list of names and none of the dialogs they open — including the reveal dialog that prints a decrypted credential and the add/edit dialog that holds one in a password field.
+- The plugin help dialog asks the plugin before it says anything about it. It printed "On, and ready." whenever the stored switch was on, so the one screen a person opens to ask "why is this not working" claimed everything was fine — for a plugin with no secret saved, or one missing the permission its own `status()` reports. It now carries the plugin's own sentence and tone, and says "its state was not read" when nobody asked.
 
 ## Keeping this file honest
 

@@ -152,4 +152,40 @@ object PluginCopy {
     const val OFF_NOTE: String =
         "Switched off. Nothing is broken — its routes stay registered and simply answer that " +
             "the plugin is disabled, so no call starts failing with a 404."
+
+    /** How the status sentence should read, for the caller to pick a colour from. */
+    enum class LineTone { OK, NEUTRAL, CAUTION }
+
+    data class StatusLine(val text: String, val tone: LineTone)
+
+    /**
+     * What the help dialog says about a plugin's state, from the plugin's own report.
+     *
+     * **Never "ready" unless the plugin said so.** This used to print "On, and ready." whenever
+     * the stored switch was on, so the one screen a person opens to ask "why is this not working"
+     * claimed everything was fine — for a plugin with no secret saved, or missing the permission
+     * its own `status()` reports. [status] null means nobody asked, which is stated as itself.
+     */
+    fun statusLine(enabled: Boolean, status: com.mido.phonebridge.core.PluginStatus?): StatusLine {
+        if (!enabled) return StatusLine(OFF_NOTE, LineTone.NEUTRAL)
+        if (status == null) return StatusLine("On. Its state was not read.", LineTone.NEUTRAL)
+        val detail = status.detail.trim()
+        fun withDetail(lead: String): String = when {
+            detail.isEmpty() -> lead
+            detail.last() in ".!?" -> "$lead $detail"
+            else -> "$lead $detail."
+        }
+        return when (status.state) {
+            com.mido.phonebridge.core.PluginStatus.State.OK ->
+                StatusLine(withDetail("On, and ready."), LineTone.OK)
+            com.mido.phonebridge.core.PluginStatus.State.NEEDS_ATTENTION ->
+                StatusLine(withDetail("On, but it needs action."), LineTone.CAUTION)
+            com.mido.phonebridge.core.PluginStatus.State.ERROR ->
+                StatusLine(withDetail("On, but it hit an error."), LineTone.CAUTION)
+            // On, but reporting OFF internally: measurably misconfigured, not switched off by the
+            // human. Naming it "not set up" keeps the two states apart.
+            com.mido.phonebridge.core.PluginStatus.State.OFF ->
+                StatusLine(withDetail("On, but not set up yet."), LineTone.NEUTRAL)
+        }
+    }
 }

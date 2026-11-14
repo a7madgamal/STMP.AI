@@ -343,7 +343,9 @@ class PluginInventoryView(
         // help affordance that navigated somewhere would be the same door twice.
         titleRow.addView(
             Theme.bulbBadge(context, "What ${plugin.displayName} does") {
-                PluginHelp.show(context, plugin, on)
+                // The row already asked the plugin for this; passing it stops the dialog from
+                // claiming "ready" for a plugin the row is simultaneously labelling ERROR.
+                PluginHelp.show(context, plugin, on, status)
             },
         )
 

@@ -18,6 +18,7 @@ import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.plugins.ssh.SshConnection
 import com.mido.phonebridge.plugins.ssh.SshKeygen
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.showSecure
 
 /**
  * SSH connections: one row per host, with its public key ready to copy.
@@ -243,7 +244,7 @@ class SshActivity : Activity() {
                 toast("public key copied")
             }
             .setNegativeButton("close", null)
-            .show()
+            .showSecure()
     }
 
     /**
@@ -385,7 +386,7 @@ class SshActivity : Activity() {
                 }
             }
         }
-        dialog.show()
+        dialog.showSecure()
     }
 
     /** A text field styled to match the paper palette. */
@@ -428,7 +429,7 @@ class SshActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .show()
+            .showSecure()
     }
 
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {
