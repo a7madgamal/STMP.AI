@@ -5503,9 +5503,13 @@ devDependencies. `node_modules/` is gitignored.
 - Every Secrets and SSH dialog now refuses screenshots, screen recording and the recents thumbnail. `FLAG_SECURE` is per-WINDOW and a dialog gets its own, so the flag on `SecretsActivity` and `SshActivity` protected the list of names and none of the dialogs they open — including the reveal dialog that prints a decrypted credential and the add/edit dialog that holds one in a password field.
 - The plugin help dialog asks the plugin before it says anything about it. It printed "On, and ready." whenever the stored switch was on, so the one screen a person opens to ask "why is this not working" claimed everything was fine — for a plugin with no secret saved, or one missing the permission its own `status()` reports. It now carries the plugin's own sentence and tone, and says "its state was not read" when nobody asked.
 
-## 0.51.20 (build 346) — 2026-11-14 — CURRENT
+## 0.51.20 (build 346) — 2026-11-14
 - A stopped bridge no longer keeps waking itself up. The watchdog probes on a background thread and a probe can take up to 1.5 s, so one in flight when you stopped the bridge would return AFTER the teardown had cleared its callbacks and re-arm the watchdog inside a service that no longer existed — every minute, for the life of the process, with nothing on screen saying so. A `destroyed` flag is now checked before the probe and again before it reschedules.
 - The Gmail, Calendar and Drive screens offer a sign-in row. Their status line already said "not signed in — Gmail, Calendar and Drive cannot serve until you are", and that sentence was a dead end: the only route to sign-in was Home → the Google account row. The row appears only when the build has an OAuth client and nobody is signed in, so it never offers an action that cannot work, and a plugin that does not use the account never shows it.
+
+## 0.51.21 (build 347) — 2026-11-14 — CURRENT
+- Deleting a secret or an SSH connection no longer opens with the destructive key focused. Android focuses an `AlertDialog`'s POSITIVE button, so `delete` was the first thing a hardware keyboard, a D-pad, a switch device or TalkBack reached — on the one dialog opened to prevent an accident. `cancel` now takes focus on show, so a stray confirm keeps the record.
+- Both delete dialogs stay screenshot-proof: the focus fix sets `FLAG_SECURE` on the same window it changes the focus of.
 
 ## Keeping this file honest
 

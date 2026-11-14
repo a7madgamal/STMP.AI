@@ -18,6 +18,7 @@ import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.plugins.ssh.SshConnection
 import com.mido.phonebridge.plugins.ssh.SshKeygen
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.showDestructive
 import com.mido.phonebridge.ui.showSecure
 
 /**
@@ -429,7 +430,7 @@ class SshActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .showSecure()
+            .showDestructive()
     }
 
     private fun row(title: String, detail: String, color: Int) = TextView(this).apply {

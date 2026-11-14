@@ -40,3 +40,28 @@ fun AlertDialog.showSecure(): Unit {
  */
 fun AlertDialog.Builder.showSecure(): AlertDialog =
     create().also { dialog -> dialog.showSecure() }
+
+/**
+ * Show a dialog whose positive button DESTROYS something, with the harm-free button focused.
+ *
+ * **The platform focuses the positive button.** Measured, not assumed: an AlertDialog with
+ * `delete` positive and `cancel` negative opens with focus on `delete`, and the accessibility
+ * order starts there too. So on a hardware keyboard, a D-pad, a switch device, or TalkBack, the
+ * first confirm gesture destroys the record — and the dialog was opened to prevent exactly that.
+ *
+ * `isFocusableInTouchMode` has to be set as well, or `requestFocus` is ignored on a phone that is
+ * being touched, which is every phone.
+ */
+fun AlertDialog.Builder.showDestructive(): AlertDialog =
+    create().also { dialog ->
+        dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Set on the SHOW listener: the buttons do not exist until the dialog is created, and
+        // their focusability is re-derived when the window is attached.
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+                isFocusableInTouchMode = true
+                requestFocus()
+            }
+        }
+        dialog.show()
+    }

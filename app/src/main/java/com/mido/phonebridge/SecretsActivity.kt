@@ -19,6 +19,7 @@ import com.mido.phonebridge.core.SecretTemplate
 import com.mido.phonebridge.core.SecretTemplates
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.ui.showDestructive
 import com.mido.phonebridge.ui.showSecure
 
 /**
@@ -545,7 +546,9 @@ class SecretsActivity : Activity() {
                 }
             }
             .setNegativeButton("cancel", null)
-            .showSecure()
+            // keep-first: the platform focuses the POSITIVE button, so the one that destroys the
+            // record must not be where a stray confirm lands.
+            .showDestructive()
     }
 
     private fun addHostDialog(secret: String) {
