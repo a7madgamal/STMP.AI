@@ -42,10 +42,20 @@ class ExceptionsActivity : Activity() {
 
     private lateinit var container: LinearLayout
 
+    /**
+     * The scroll view, kept so a repaint can put the reader back where they were.
+     *
+     * `render()` clears and refills the whole column, which resets `scrollY` to 0 — so removing
+     * a rule halfway down the list threw the reader back to the header, and on a long list they
+     * had to scroll down again to reach the next rule they meant to change.
+     */
+    private var scroll: ScrollView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val scroll = ScrollView(this)
+        this.scroll = scroll
         container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 16),
@@ -59,6 +69,9 @@ class ExceptionsActivity : Activity() {
     }
 
     private fun render() {
+        // Read BEFORE clearing: an empty column has nothing to scroll, so the position is
+        // already lost by the time the new rows are in.
+        val keepY = scroll?.scrollY ?: 0
         container.removeAllViews()
 
         container.addView(Theme.text(this, "EXCEPTIONS", 20f).apply {
@@ -123,6 +136,10 @@ class ExceptionsActivity : Activity() {
                 12f, Theme.ON_SURFACE_VARIANT
             )
         )
+
+        // Posted, because a fresh layout has no height yet: the scroll view cannot be moved to
+        // keepY until the rows it is moving past have been measured.
+        scroll?.post { scroll?.scrollTo(0, keepY) }
     }
 
     /**

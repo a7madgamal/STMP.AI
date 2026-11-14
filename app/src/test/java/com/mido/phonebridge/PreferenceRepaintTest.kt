@@ -39,10 +39,43 @@ class PreferenceRepaintTest {
         )
         // The two known click-path callers: the vault row and the model download progress.
         assertTrue(source.contains("force = true) { renderPosted() }"))
-        assertTrue(source.contains("onProgress = { ui { renderPosted() } }"))
         assertFalse(
             "no click callback may call render() inline",
             source.contains("onProgress = { ui { render() } }")
+        )
+    }
+
+    /**
+     * A progress callback that repaints unconditionally destroys the form it is repainting.
+     *
+     * `ModelProvisioner` reports every 250 ms. Each report rebuilt the whole screen, so with the
+     * AI knob on Remote the URL and token fields were torn down and recreated four times a
+     * second and the keyboard lost focus mid-word. Only the "On this phone" card draws a percent,
+     * so a tick that changes nothing visible must not repaint — and a tick that IS visible must.
+     */
+    @Test
+    fun `model progress repaints only when the visible percent moves`() {
+        val source = options.readText()
+
+        assertTrue(
+            "the download callback must go through the visibility check",
+            source.contains("onProgress = { ui { repaintIfVisibleProgressChanged() } }")
+        )
+        assertFalse(
+            "the download callback must not repaint on every chunk",
+            source.contains("onProgress = { ui { renderPosted() } }")
+        )
+        assertTrue(
+            "the check must compare against what was drawn, and give up when nothing is drawn",
+            source.contains("private fun repaintIfVisibleProgressChanged()") &&
+                source.substringAfter("private fun repaintIfVisibleProgressChanged()")
+                    .substringBefore("\n    }")
+                    .let { it.contains("drawnDownloadPercent ?: return") && it.contains("!= drawn") }
+        )
+        assertTrue(
+            "render() must record what it drew, per backend",
+            source.contains("drawnDownloadPercent = if (policy.aiBackend == ") &&
+                source.contains("com.mido.phonebridge.policy.AiBackend.LOCAL) {")
         )
     }
 

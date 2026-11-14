@@ -13,6 +13,7 @@ import com.mido.phonebridge.audit.AuditHeader
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditOutcome
 import com.mido.phonebridge.notify.NotifyOverlay
+import com.mido.phonebridge.ui.OutcomeCopy
 import com.mido.phonebridge.ui.Theme
 
 /** Waiting requests and recorded decisions. Deliberately offers NO resolver or policy action. */
@@ -183,7 +184,7 @@ class ActivityFragment : BridgeFragment() {
             background = Theme.rippled(ctx, Theme.SURFACE, Theme.RADIUS_CONTROL)
             isClickable = true
             isFocusable = true
-            contentDescription = "Request details: ${h.label}, ${h.outcome.name}"
+            contentDescription = "Request details: ${h.label}, ${OutcomeCopy.words(h.outcome)}"
             setOnClickListener {
                 go(Intent(ctx, LogDetailActivity::class.java).apply {
                     putExtra(LogDetailActivity.EXTRA_ID, h.id)
@@ -199,7 +200,7 @@ class ActivityFragment : BridgeFragment() {
                 true
             }
         }
-        row.addView(Theme.text(ctx, "${glyph(h.outcome)} ${h.outcome.name} · ${h.label.ifBlank { "—" }}",
+        row.addView(Theme.text(ctx, "${glyph(h.outcome)} ${OutcomeCopy.words(h.outcome)} · ${h.label.ifBlank { "—" }}",
             Theme.TEXT_LABEL_SP, colorOf(h.outcome)))
         row.addView(Theme.text(ctx, h.summary.ifBlank { "(no summary)" }, Theme.TEXT_BODY_SP))
         row.addView(Theme.text(ctx, "${timeOf(h.ts)} · ${h.durationMs}ms · Request details ›",

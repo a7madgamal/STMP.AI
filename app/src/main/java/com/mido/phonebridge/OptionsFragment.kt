@@ -48,6 +48,18 @@ class OptionsFragment : BridgeFragment() {
     private var renderQueued = false
 
     /**
+     * The download percent the last `render()` actually drew, or null when this page shows no
+     * progress at all.
+     *
+     * **Why the page has to remember this.** `ModelProvisioner` reports progress every 250 ms and
+     * each report used to queue a whole-screen rebuild, so with the AI knob on Remote the URL and
+     * token fields were destroyed and recreated four times a second and the keyboard lost its
+     * focus mid-word. Only the "On this phone" card draws a percent, so a change nobody can see
+     * must not repaint.
+     */
+    private var drawnDownloadPercent: Int? = null
+
+    /**
      * Rebuild on the NEXT loop, never inside the tap that asked for it.
      *
      * `save()` used to end in a synchronous `render()`, which rebuilt the whole screen — a fresh
@@ -64,6 +76,17 @@ class OptionsFragment : BridgeFragment() {
             renderQueued = false
             if (isAdded) render()
         }
+    }
+
+    /**
+     * Repaint only when the download percent the human can SEE has moved.
+     *
+     * Compares against what was drawn rather than posting unconditionally, so a burst of
+     * callbacks collapses into one repaint of the last percent instead of one per chunk.
+     */
+    private fun repaintIfVisibleProgressChanged() {
+        val drawn = drawnDownloadPercent ?: return
+        if ((com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: 0) != drawn) renderPosted()
     }
 
     // This screen IS the Settings tab. It inherits the bar and the insets from BridgeScreen,
@@ -140,6 +163,15 @@ class OptionsFragment : BridgeFragment() {
                 )
             )
             return
+        }
+
+        // What this pass is about to draw, so progress callbacks can tell a visible change from
+        // an invisible one. Null when the page shows no percent at all (AI off, or the remote
+        // card selected) — then a download tick must never repaint this screen.
+        drawnDownloadPercent = if (policy.aiBackend == com.mido.phonebridge.policy.AiBackend.LOCAL) {
+            com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: 0
+        } else {
+            null
         }
 
         // --- SYSTEM: how the bridge and device behave ---
@@ -788,7 +820,7 @@ class OptionsFragment : BridgeFragment() {
             val result = com.mido.phonebridge.ai.ModelProvisioner.provision(
                 requireContext(),
                 force = force,
-                onProgress = { ui { renderPosted() } },
+                onProgress = { ui { repaintIfVisibleProgressChanged() } },
             )
             ui {
                 Debug.log("model provision: ${result.detail}")

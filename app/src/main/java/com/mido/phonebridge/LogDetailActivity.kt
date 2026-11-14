@@ -11,10 +11,15 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.mido.phonebridge.audit.AuditField
 import com.mido.phonebridge.audit.AuditLog
-import com.mido.phonebridge.ui.Theme
+import com.mido.phonebridge.audit.AuditOutcome
 import com.mido.phonebridge.ui.JsonCode
+import com.mido.phonebridge.ui.LogTime
+import com.mido.phonebridge.ui.OutcomeCopy
+import com.mido.phonebridge.ui.Theme
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * One audit record, verbatim.
@@ -50,6 +55,10 @@ class LogDetailActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
+        val zone = LogTime.zone()
+        val locale = Locale.getDefault()
+        val is24 = LogTime.is24Hour(this)
+
         val raw = AuditLog.from(applicationContext).line(id)
         if (raw == null) {
             content.addView(Theme.text(
@@ -69,8 +78,12 @@ class LogDetailActivity : Activity() {
             return
         }
 
-        fun labelled(label: String, value: String, mono: Boolean = false, color: Int = Theme.ON_SURFACE) {
-            if (value.isBlank()) return
+        // Absence has to be read as absence: `optString` answers the string "null" for a JSON
+        // null on Android, which printed `ERROR null` on every clean record. See `AuditField`.
+        fun text(o: JSONObject, key: String): String? = AuditField.text(o, key)
+
+        fun labelled(label: String, value: String?, mono: Boolean = false, color: Int = Theme.ON_SURFACE) {
+            if (value.isNullOrBlank()) return
             content.addView(Theme.text(this, label, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
                 setPadding(0, Theme.dp(this@LogDetailActivity, 8), 0, 0)
             })
@@ -92,8 +105,14 @@ class LogDetailActivity : Activity() {
             content.addView(view)
         }
 
-        val outcome = o.optString("outcome")
-        content.addView(Theme.text(this, "$outcome   ${o.optString("label").ifBlank { "—" }}", 20f).apply {
+        // The stored value is the enum's identifier; the screen shows a sentence. A record whose
+        // outcome is absent or unknown keeps its raw text rather than being called "Unknown".
+        val outcomeRaw = text(o, "outcome")
+        val outcome = outcomeRaw?.let { raw ->
+            AuditOutcome.values().firstOrNull { it.name == raw }
+        }
+        val headline = outcome?.let(OutcomeCopy::words) ?: outcomeRaw ?: "Record"
+        content.addView(Theme.text(this, "$headline   ${text(o, "label") ?: "—"}", 20f).apply {
             typeface = Theme.bodyFont(this@LogDetailActivity)
         })
         content.addView(Theme.text(
@@ -102,29 +121,36 @@ class LogDetailActivity : Activity() {
                 (if (o.optBoolean("noise")) "noise" else "signal"),
             13f, Theme.ON_SURFACE_VARIANT
         ).apply { setPadding(0, Theme.dp(this@LogDetailActivity, 4), 0, 0) })
+        // When it happened, in the phone's own format and zone. A record is the one place a
+        // bare millisecond count is unreadable: the log list groups by day and this screen has
+        // to agree with it.
+        content.addView(Theme.text(
+            this, LogTime.dateTime(o.optLong("ts"), LogTime.zone(), locale, LogTime.is24Hour(this)),
+            13f, Theme.ON_SURFACE_VARIANT,
+        ).apply { setPadding(0, Theme.dp(this@LogDetailActivity, 2), 0, 0) })
 
         content.addView(Theme.sectionHeader(this, "who"))
-        labelled("REQUESTER", o.optString("requester"))
-        labelled("REMOTE", o.optString("remote"), mono = true)
-        labelled("ORIGIN", o.optString("origin"))
+        labelled("REQUESTER", text(o, "requester"))
+        labelled("REMOTE", text(o, "remote"), mono = true)
+        labelled("ORIGIN", text(o, "origin"))
         labelled(
             "UNROUTED",
-            if (o.optString("plugin").isBlank()) "yes — no route matched, so no plugin or verb" else ""
+            if (text(o, "plugin") == null) "yes — no route matched, so no plugin or verb" else ""
         )
 
         content.addView(Theme.sectionHeader(this, "what"))
-        labelled("SUMMARY", o.optString("summary"))
-        labelled("ROUTE", o.optString("route"), mono = true)
-        labelled("LABEL", o.optString("label"), mono = true)
-        labelled("PATH", o.optString("path"), mono = true)
+        labelled("SUMMARY", text(o, "summary"))
+        labelled("ROUTE", text(o, "route"), mono = true)
+        labelled("LABEL", text(o, "label"), mono = true)
+        labelled("PATH", text(o, "path"), mono = true)
 
         val query = o.optJSONObject("query")
         if (query != null && query.length() > 0) {
             labelled("QUERY", query.toString(), mono = true)
         }
 
-        val err = o.optString("error", "")
-        if (err.isNotBlank()) labelled("ERROR", err, mono = true, color = Theme.DANGER)
+        val err = text(o, "error")
+        if (err != null) labelled("ERROR", err, mono = true, color = Theme.DANGER)
 
         content.addView(Theme.sectionHeader(this, "request"))
         val headers = o.optJSONObject("requestHeaders")
@@ -153,16 +179,19 @@ class LogDetailActivity : Activity() {
         val decision = o.optJSONObject("decision")
         if (decision != null) {
             content.addView(Theme.sectionHeader(this, "decision"))
-            labelled("MODE", decision.optString("mode"))
-            labelled("SOURCE", decision.optString("source"))
-            val rule = decision.optString("rule", "")
-            if (rule.isNotBlank()) labelled("RULE", rule, mono = true)
-            val enq = if (decision.isNull("enqueuedAt")) null else decision.optLong("enqueuedAt")
-            val shown = if (decision.isNull("shownAt")) null else decision.optLong("shownAt")
-            val decided = if (decision.isNull("decidedAt")) null else decision.optLong("decidedAt")
-            if (enq != null) labelled("ENQUEUED", enq.toString(), mono = true)
-            if (shown != null) labelled("SHOWN", shown.toString(), mono = true)
-            if (decided != null) labelled("DECIDED", decided.toString(), mono = true)
+            labelled("MODE", text(decision, "mode"))
+            labelled("SOURCE", text(decision, "source"))
+            val rule = text(decision, "rule")
+            if (rule != null) labelled("RULE", rule, mono = true)
+            val enq = AuditField.millis(decision, "enqueuedAt")
+            val shown = AuditField.millis(decision, "shownAt")
+            val decided = AuditField.millis(decision, "decidedAt")
+            // Times, not millisecond counts: these three are moments on a clock, and the whole
+            // screen is supposed to say WHEN something happened.
+            fun clockAt(ts: Long) = LogTime.clock(ts, zone, locale, is24)
+            if (enq != null) labelled("ENQUEUED", clockAt(enq), mono = true)
+            if (shown != null) labelled("SHOWN", clockAt(shown), mono = true)
+            if (decided != null) labelled("DECIDED", clockAt(decided), mono = true)
             if (shown != null && decided != null) {
                 labelled("HUMAN SAW IT FOR", "${decided - shown}ms")
             }

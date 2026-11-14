@@ -16,6 +16,7 @@ import android.widget.Toast
 import com.mido.phonebridge.audit.AuditHeader
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.AuditOutcome
+import com.mido.phonebridge.ui.OutcomeCopy
 import com.mido.phonebridge.ui.LogTime
 import com.mido.phonebridge.ui.Theme
 
@@ -155,7 +156,7 @@ class LogActivity : Activity() {
         }
         row.addView(Theme.text(
             this,
-            "${timeOf(h.ts)}   ${glyph(h.outcome)} ${h.outcome.name}   ${h.label.ifBlank { "—" }}",
+            "${timeOf(h.ts)}   ${glyph(h.outcome)} ${OutcomeCopy.words(h.outcome)}   ${h.label.ifBlank { "—" }}",
             14f, colorOf(h.outcome), mono = true
         ))
         row.addView(Theme.text(

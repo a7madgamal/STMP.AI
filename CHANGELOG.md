@@ -5487,10 +5487,17 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.16 (build 342) — 2026-11-14
 - Request log times follow the device's own clock: 12- or 24-hour as the phone is set, and the locale's field order rather than a hardcoded `HH:mm:ss` in `Locale.US`. `LogTime` also names the zone and provides `Today` / `Yesterday` headings, so a scroll of timestamps reads as sessions instead of a column of numbers.
 
-## 0.51.17 (build 343) — 2026-11-14 — CURRENT
+## 0.51.17 (build 343) — 2026-11-14
 - Every approval modal opens with one sentence, `<caller> wants to <action>`, instead of `WHO` and `WHAT` section headers above two labelled lines. The headers spent the top third of the card restating what the sentence says, and pushed the actual request details down.
 - A Google request still names the account (`as you@example.com`) because the account IS what it acts on. Every other modal drops it: the address is the caller's own, a fact about the phone rather than about the request.
 - A connection row carries its exact target on a second, smaller line, so `evox2` and `ahmed@100.99.67.14:22` read as one fact rather than two rows the eye has to pair.
+
+## 0.51.18 (build 344) — 2026-11-14 — CURRENT
+- The request log, the activity list and the record detail say what happened in words: `Approved by silence`, `Denied, phone unattended`, `Caller left` — instead of the stored identifier, which a person was reading as `NOTIFY_APPROVED` and `DENIED_UNATTENDED`.
+- The record detail no longer prints the word `null`. `optString` on Android answers the four-character string "null" for a JSON null, so every successful request showed an `ERROR null` row and every decision the gate made itself showed `RULE null`. Absence is now read as absence.
+- The three decision moments (`ENQUEUED`, `SHOWN`, `DECIDED`) are clock times in the phone's own zone, not raw epoch milliseconds, and the record's own timestamp appears under the header. The screen now agrees with the day-grouped list that opens it.
+- Removing or changing an exception no longer throws the list back to the top. `render()` clears and refills the column, which resets the scroll position, so a rule halfway down a long list was unreachable without scrolling again.
+- A model download no longer repaints Settings four times a second. `ModelProvisioner` reports every 250 ms and each report rebuilt the whole screen, so with the AI knob on Remote the server URL and token fields were destroyed under the keyboard mid-word and focus was lost. A percent nobody can see now repaints nothing; only the on-device card draws one.
 
 ## Keeping this file honest
 
