@@ -151,7 +151,7 @@ class LogDetailActivity : AppCompatActivity() {
         panel.addView(line1, full())
 
         val headline = when {
-            m.plugin != null -> PluginLabel.of(m.plugin)
+            m.plugin != null -> PluginLabel.marked(m.plugin, p.cautionText)
             m.isPolicyChange -> "Gate change"
             else -> "Unrouted request"
         }
@@ -208,7 +208,7 @@ class LogDetailActivity : AppCompatActivity() {
         val rows = mutableListOf<View>()
         val summary = m.summary?.let { s -> m.outcome?.let { AuditCopy.summary(it, s) } ?: s }
         summary?.let { rows += keyValue("Summary", it) }
-        m.plugin?.let { rows += keyValue("Plugin", PluginLabel.of(it)) }
+        m.plugin?.let { rows += keyValue("Plugin", PluginLabel.marked(it, p.cautionText)) }
         if (!m.isPolicyChange) m.verb?.let { rows += keyValue("Action", AuditCopy.verbWords(it).replaceFirstChar { c -> c.uppercase() }) }
         m.route?.let { rows += keyValue("Route", it, mono = true) }
         m.label?.let { rows += keyValue("Id", it, mono = true) }
@@ -297,7 +297,7 @@ class LogDetailActivity : AppCompatActivity() {
     }
 
     /** An etched label with its value, one focus item for a screen reader. Screen-private. */
-    private fun keyValue(label: String, value: String, mono: Boolean = false, color: Int = p.ink): View {
+    private fun keyValue(label: String, value: CharSequence, mono: Boolean = false, color: Int = p.ink): View {
         val valueView = Type.text(this, UntrustedText.mark(value, p.cautionText), if (mono) TypeRole.MONO_BODY else TypeRole.BODY, color).apply {
             setTextIsSelectable(true)
         }

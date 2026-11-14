@@ -247,12 +247,12 @@ class LogActivity : AppCompatActivity() {
         val verb = Verb.values().firstOrNull { it.name.equals(h.verb, true) }
         val chipVerb = verb.takeIf { look.allowsChip }
         val summary = AuditCopy.summary(h.outcome, h.summary)
-        val plugin = PluginLabel.of(h.plugin)
-        val safePlugin = UntrustedText.escape(plugin)
+        val plugin = PluginLabel.marked(h.plugin, p.cautionText)
+        val safePlugin = PluginLabel.of(h.plugin)
         // Drawn with the hidden characters marked in the caution colour (like Tape.row); the spoken
         // description below uses the plain escaped string.
         val detail = android.text.SpannableStringBuilder().apply {
-            if (safePlugin.isNotBlank()) append(UntrustedText.mark(plugin, p.cautionText))
+            if (safePlugin.isNotBlank()) append(plugin)
             AuditCopy.duration(h.durationMs, locale)?.let { if (isNotEmpty()) append(" · "); append(it) }
         }
 

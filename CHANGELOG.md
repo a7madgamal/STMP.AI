@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.52.17 (build 332)**.
+Current build: **v0.52.18 (build 333)**.
 
 ---
 
@@ -5669,9 +5669,12 @@ devDependencies. `node_modules/` is gitignored.
 - In Settings, the debug log's Show log / Hide log key keeps its size and place when the log opens; the Copy log key gets its own half of the row instead of squeezing the first.
 - Field hints that were too long for a narrow field at large text sizes are shorter, so none is cut off any more, and a screen reader or autofill still gets the full hint where one is cut.
 
-## 0.52.17 (build 332) — 2026-11-14 — CURRENT
+## 0.52.17 (build 332) — 2026-11-14
 - Plugin names, caller addresses and rule names taken from the request log, the exceptions or the callers now show hidden characters as `\u{202E}`-style marks everywhere they are drawn or read out, including the heading of a request's detail page, instead of only on the screens checked one by one.
 - A field's hint is kept whole and cut only when it is drawn, so a screen reader announces the full hint when the field is empty and when it gets focus. The 0.52.16 note that autofill gets the full hint was wrong: autofill is turned off in these fields.
+
+## 0.52.18 (build 333) — 2026-11-14 — CURRENT
+- A plugin name with hidden characters in the request log, the request detail headline and its Plugin row draws the `\u{202E}`-style marks in the caution colour again, like every other stored text.
 
 ## Keeping this file honest
 

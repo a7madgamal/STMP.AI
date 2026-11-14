@@ -32,6 +32,15 @@ class PluginLabelTest {
         val label = PluginLabel.of("evil\u202Eplug\u200Bin")
         assertEquals("Evil\\u{202E}plug\\u{200B}in", label)
     }
+
+    @Test fun `readable keeps hidden characters raw while of and marked make them visible`() {
+        val id = "evil\u202Eplug"
+        assertEquals("Evil\u202Eplug", PluginLabel.readable(id))
+        assertEquals("Evil\\u{202E}plug", PluginLabel.of(id))
+        val marked = PluginLabel.marked(id, 0xFF0000)
+        assertEquals("Evil\\u{202E}plug", marked.toString())
+        assertEquals(1, (marked as android.text.Spanned).getSpans(0, marked.length, android.text.style.ForegroundColorSpan::class.java).size)
+    }
 }
 
 /** A plugin with a fixed display name, for screens that print plugin names. */
