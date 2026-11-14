@@ -5507,9 +5507,12 @@ devDependencies. `node_modules/` is gitignored.
 - A stopped bridge no longer keeps waking itself up. The watchdog probes on a background thread and a probe can take up to 1.5 s, so one in flight when you stopped the bridge would return AFTER the teardown had cleared its callbacks and re-arm the watchdog inside a service that no longer existed — every minute, for the life of the process, with nothing on screen saying so. A `destroyed` flag is now checked before the probe and again before it reschedules.
 - The Gmail, Calendar and Drive screens offer a sign-in row. Their status line already said "not signed in — Gmail, Calendar and Drive cannot serve until you are", and that sentence was a dead end: the only route to sign-in was Home → the Google account row. The row appears only when the build has an OAuth client and nobody is signed in, so it never offers an action that cannot work, and a plugin that does not use the account never shows it.
 
-## 0.51.21 (build 347) — 2026-11-14 — CURRENT
+## 0.51.21 (build 347) — 2026-11-14
 - Deleting a secret or an SSH connection no longer opens with the destructive key focused. Android focuses an `AlertDialog`'s POSITIVE button, so `delete` was the first thing a hardware keyboard, a D-pad, a switch device or TalkBack reached — on the one dialog opened to prevent an accident. `cancel` now takes focus on show, so a stray confirm keeps the record.
 - Both delete dialogs stay screenshot-proof: the focus fix sets `FLAG_SECURE` on the same window it changes the focus of.
+
+## 0.51.22 (build 348) — 2026-11-14 — CURRENT
+- `changelog-check` refuses a committed merge-conflict marker. The changelog is the release history, so a leftover `<<<<<<<` is both unreadable and a lie about what shipped, and it is cheaper to catch in CI than to notice later.
 
 ## Keeping this file honest
 
