@@ -27,6 +27,7 @@ import com.mido.phonebridge.audit.DecisionSource
 import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.audit.recordResponse
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.HiddenText
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.Req
@@ -1245,6 +1246,34 @@ class HttpServer(
                 draft.requestBodyNotStored()
             }
             val body = if (method == "POST" && !streamsRequest) parseBody(rawBody) else JSONObject()
+
+            // **HIDDEN CHARACTERS: refused before anything can draw them.**
+            //
+            // A bidi override in a command makes the approval screen show one string and the
+            // shell run another, which is the whole gate defeated. The check is HERE — after the
+            // body is parsed, before `validate`, the summary, and the modal — so a hostile
+            // request never costs a tap and never reaches a view. See [HiddenText] for what is
+            // refused and why emoji joiners are not.
+            //
+            // Scanned: the raw body (the payload itself) and the query values (a caller can put
+            // text in `?to=` just as easily as in a JSON field). Both are caller-supplied and
+            // both end up on a screen.
+            run {
+                val bodyHit = HiddenText.firstHidden(rawBody)
+                if (bodyHit != null) {
+                    throw PluginError(
+                        "hidden_characters",
+                        HiddenText.message(bodyHit, "the request body"),
+                    )
+                }
+                for ((name, value) in query) {
+                    val queryHit = HiddenText.firstHidden(value) ?: continue
+                    throw PluginError(
+                        "hidden_characters",
+                        HiddenText.message(queryHit, "the '$name' query value"),
+                    )
+                }
+            }
 
             val req = Req(
                 method = method,

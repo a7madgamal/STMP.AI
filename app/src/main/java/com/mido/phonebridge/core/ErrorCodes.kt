@@ -55,6 +55,12 @@ object ErrorCodes {
         "bad_timezone" to BAD_REQUEST,
         "bad_max" to BAD_REQUEST,
         "bad_lines" to BAD_REQUEST,
+        // Request text carrying an invisible character that can reorder or conceal what the
+        // approval screen draws: a bidi override turns `rm -rf ~/Projects` into something that
+        // READS as `rm -rf ~/stcejorP`. Refused before the modal exists, because a request that
+        // shows one string and runs another is not a request to review — it is an attempt to
+        // defeat the gate. The caller's payload, so the caller's fault: 400, and noise.
+        "hidden_characters" to BAD_REQUEST,
         // A sudo command that cannot read stdin can never succeed from here — sudo
         // answers "a terminal is required to authenticate". The caller's mistake, and
         // refused pre-gate, so it is noise like every other bad request.
@@ -253,6 +259,10 @@ object ErrorCodes {
         "bad_timezone" to "`timeZone` is missing or not a recognised zone id.",
         "bad_max" to "`max` is outside the range this route accepts.",
         "bad_lines" to "`lines` is outside 1..500.",
+        "hidden_characters" to
+            "The request contains an invisible character that could change how the approval " +
+                "screen draws it. Nothing was shown and nothing ran. The error names the code " +
+                "point; remove it and retry.",
         "sudo_needs_stdin" to "The command needs a TTY for sudo, which this route cannot provide.",
         "unsupported_action" to "The notification has no action with that index or label.",
         "missing_reply_text" to "A Reply action needs `replyText` and none was sent.",
