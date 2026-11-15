@@ -1,0 +1,78 @@
+#!/bin/sh
+# pre-push — a branch must not move the base BACKWARDS.
+#
+# WHY HERE
+#   `version-guard.ts` runs in CI on a pull request, which is the check that gates a merge.
+#   This runs strictly earlier and covers what CI cannot see: a direct push to `main`, and the
+#   window between pushing a branch and opening its PR. `main` has no branch protection, so a
+#   direct push is a real path to shipping a downgrade.
+#
+# WHAT IT CHECKS
+#   For every branch being pushed, the base is the remote's `main` — what the branch would be
+#   merged into, or what it would replace. The incoming version must not be lower than main's,
+#   must not reuse main's build code under a different name, and must not move the code without
+#   the name. All three rules live in `version-guard.ts`, which also explains them; this script
+#   only decides which base to hand it.
+#
+# BYPASS
+#   `git push --no-verify`, same reasoning as the pre-commit hook: a conscious act, not a
+#   silent fallback.
+
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+REMOTE=${1:-origin}
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-push: node is not installed, so version-guard cannot run." >&2
+  echo "pre-push: refusing to push an unverified version. Install Node 22+ or use --no-verify." >&2
+  exit 1
+fi
+
+# Fetch first: comparing against a stale local `origin/main` is exactly how a downgrade slips
+# through after someone else bumped. A failed fetch must not be read as "no base" — that is the
+# one answer that would make this check useless.
+if ! git fetch --quiet --no-tags "$REMOTE" "+refs/heads/main:refs/remotes/$REMOTE/main"; then
+  echo "pre-push: could not fetch $REMOTE/main, so there is nothing trustworthy to compare" >&2
+  echo "pre-push: against. Refusing to push unverified; use --no-verify to override." >&2
+  exit 1
+fi
+
+BASE="$REMOTE/main"
+
+# stdin carries "<local ref> <local sha> <remote ref> <remote sha>" per ref being pushed.
+STATUS=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # A deletion moves nothing; all-zero sha means "delete this ref".
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) continue ;;
+  esac
+  # Only branches can be merged into main. Tags are a release concern, and version-check.ts
+  # already refuses a duplicate tag.
+  case "$remote_ref" in
+    refs/heads/*) ;;
+    *) continue ;;
+  esac
+  # A branch that does not carry the build file (docs-only) cannot move the version.
+  if ! git cat-file -e "$local_sha:app/build.gradle.kts" 2>/dev/null; then
+    continue
+  fi
+
+  echo "pre-push: version-guard against $BASE for ${remote_ref#refs/heads/}"
+  # The pushed COMMIT is the truth, not the working tree: a push can carry commits this
+  # checkout has not got checked out.
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT INT TERM
+  if ! git show "$local_sha:app/build.gradle.kts" > "$TMP/build.gradle.kts"; then
+    echo "pre-push: could not read the build file from $local_sha" >&2
+    STATUS=1
+  elif ! node "$ROOT/tools/version-guard.ts" --file "$TMP/build.gradle.kts" --base "$BASE"; then
+    STATUS=1
+  fi
+  rm -rf "$TMP"
+  trap - EXIT INT TERM
+done
+
+exit "$STATUS"

@@ -5522,10 +5522,14 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.24 (build 350) — 2026-11-14
 - The status-bar icon IS the launcher mark, at five exact density buckets, so the tray shows the same stamp the launcher does. Chosen over a drawn silhouette, and over a vector traced from the artwork: the mark is 2:1 with lettering inside it, and both of those turn to a smudge at 24dp — rendered and looked at rather than assumed. The launcher's own foreground is a bitmap for the same reason, and at the device's density the system scales it 1:1 with no resampling.
 
-## 0.51.25 (build 351) — 2026-11-15 — CURRENT
+## 0.51.25 (build 351) — 2026-11-15
 - APPROVE can no longer be green on a destructive command. Its colour came only from the optional model reading, so a `chown -R` running as root sat under a green button whenever the model was still loading, switched off, or (wrongly) answered "low" — while the readout directly above it underlined `chown -R`. The button said "safe" and the card said "look at this".
 - The floor is deterministic and computed from the command rows the modal actually renders: `chown -R`, `chmod -R`, `rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`/`doas`, `shutdown`/`reboot`, `git push --force`/`reset --hard`, and a pipe into a shell paint it red. `eval`, `kill -9`, `git clean -f` and a fork bomb go amber.
 - The model may still RAISE the risk — it can see facts a pattern cannot — but it can never lower it. Both lists are separate from the underline list on purpose: underlining `>` is a nudge, a red button is a claim about consequence, and warning on half of all commands is how a warning gets ignored.
+
+## 0.51.26 (build 352) — 2026-11-15 — CURRENT
+- A pull request that carries an older build number than `main` is now refused in CI, before it can be merged. The version guard only ran at release time, so the default branch could be moved backwards freely: on 2026-11-15 `main` was at build 351 while every open PR carried 324, 326 and 333. Nothing installs over a lower `versionCode`, and Android reports that as "App not installed" — which reads as a corrupt download rather than a version regression.
+- The check is `tools/version-guard.ts` and it asks a question the release guard cannot: not "has this been released" but "would this merge move `main` backwards". Three cases fail — a lower code, one code carrying two different names, and a code that moved while the name did not (the in-app updater orders by name, so that build is never offered). A PR that does not bump at all still passes, because carrying the base version forward is legitimate and failing it would make the check noise.
 
 ## Keeping this file honest
 

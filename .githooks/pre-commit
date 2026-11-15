@@ -1,0 +1,41 @@
+#!/bin/sh
+# pre-commit — the cheap truth about the version trio before the commit exists.
+#
+# WHY HERE
+#   `changelog-check.ts` already knows the invariant: the newest CHANGELOG heading, the
+#   `versionCode` and the `versionName` in app/build.gradle.kts must all describe the same
+#   build. In CI that runs too late — the commit is already made and the branch is already
+#   pushed, so the fix is an amend plus a force-push on a branch someone else may have
+#   pulled. This is the same check at the moment it can still be corrected for free.
+#
+#   It is deliberately NOT the release guard. `version-check.ts` asks origin whether the tag
+#   exists, which is a network call and a fact about a release, not about this commit.
+#
+# WHAT IT RUNS
+#   changelog-check.ts only. Seconds, no JDK, no Gradle, no network.
+#
+# BYPASS
+#   `git commit --no-verify` for a genuinely unrelated commit (a typo in a doc, a merge
+#   from upstream). That is a conscious act, which is the point; a silent fallback would
+#   make this decoration.
+
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+# A commit that does not touch the app's version or the changelog cannot break the trio.
+# Skipping is not a fallback here: the check's whole input is unchanged, so its answer is
+# the one it already gave.
+if ! git diff --cached --name-only | grep -qE '^(CHANGELOG\.md|app/build\.gradle\.kts)$'; then
+  exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node is not installed, so changelog-check cannot run." >&2
+  echo "pre-commit: refusing to pass a version change unverified. Install Node 22+ or use --no-verify." >&2
+  exit 1
+fi
+
+echo "pre-commit: changelog-check"
+node tools/changelog-check.ts

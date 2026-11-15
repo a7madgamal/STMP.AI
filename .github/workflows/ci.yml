@@ -4,9 +4,16 @@ name: CI
 # pass, does lint complain. No keystore, no Google credentials, no build, no
 # release.
 #
-# Deliberately NOT here: the version guard. A PR legitimately carries the same
-# version as the tag it branched from, so guarding it there would fail every PR
-# for the wrong reason. That check belongs to the release workflow.
+# The version guard IS here, but it is a different question from the release
+# one. `version-check.ts` (release workflow) asks "has this version been released".
+# `version-guard.ts` (this file) asks "would merging this branch move main
+# BACKWARDS" — which only a pull request can be asked, and which nothing checked
+# until 2026-11-15, when all three open PRs turned out to carry a lower
+# versionCode than main.
+#
+# A PR that does not bump at all still passes: carrying the base's version
+# forward is legitimate. Only a LOWER code, or a code and name that disagree
+# about which build this is, fails.
 
 on:
   pull_request:
@@ -20,6 +27,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheapest job first, on purpose: it needs no JDK, no SDK, no Gradle cache. A
+  # downgrade is a fact about two files, so the answer arrives in seconds rather
+  # than after a full unit-test run.
+  version:
+    name: version does not go backwards
+    runs-on: ubuntu-latest
+    steps:
+      # `fetch-depth: 0` so `origin/main` is a real ref with history. The default
+      # shallow single-commit clone has no other branches at all, and the guard
+      # would be reading a base that does not exist.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install tooling
+        run: npm ci --silent --no-audit --no-fund
+
+      # `checkout` on a pull_request gives the MERGE commit, and a full clone does not
+      # guarantee a local `origin/main`. Both are needed: the merge tree is the version
+      # that would actually land, and the base is what it must not undercut.
+      - name: Fetch the base branch
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Guard the version
+        run: node tools/version-guard.ts --base origin/main
+
   test:
     name: unit tests
     runs-on: ubuntu-latest
