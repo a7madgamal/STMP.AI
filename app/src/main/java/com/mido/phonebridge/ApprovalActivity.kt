@@ -42,6 +42,19 @@ import com.mido.phonebridge.alert.SoundAlerts
 class ApprovalActivity : FragmentActivity() {
 
     /**
+     * Every command this modal is about to run, collected as its rows are rendered.
+     *
+     * A field rather than a local because the row renderer and the risk painter live in
+     * different scopes, and the floor must be readable from both. Filled once while the view
+     * is built; never mutated afterwards, so it cannot disagree with what is on screen.
+     *
+     * The deterministic risk floor reads this, which is why it exists: WITHOUT it the button
+     * colour depended entirely on the model answering, and a `chown -R` sat under a green
+     * APPROVE whenever the model was loading, off, or simply wrong.
+     */
+    private val commandsSeen = mutableListOf<String>()
+
+    /**
      * The password field, when this request needs one; null otherwise.
      *
      * A FIELD rather than a local because [approveNow] is a method and has to read it —
@@ -297,6 +310,10 @@ class ApprovalActivity : FragmentActivity() {
                 // what they looked like before this existed.
                 val view = when (r.style) {
                     ApprovalGate.Row.Style.CODE -> TextView(this).apply {
+                        // The COMMAND is what the risk floor reads. Collected here because this
+                        // is the one place a command row becomes a view, and because the floor
+                        // must run even when the model never answers.
+                        commandsSeen += r.value
                         text = ShellCode.render(
                             r.value,
                             dangerUnderlinePx = Theme.dp(this@ApprovalActivity, 2).toFloat(),
@@ -884,9 +901,24 @@ class ApprovalActivity : FragmentActivity() {
         // null means no assessment yet (still loading, or the fetch failed). The button then
         // keeps its resting green rather than implying a safety that was never determined —
         // an absent assessment is not "safe".
+        /**
+         * The floor for THIS modal, computed once from the commands it is about to run.
+         *
+         * Computed here rather than at each paint because it cannot change: the commands are
+         * fixed when the view is built. One value, so the sheet wash and the button can never
+         * disagree about it.
+         */
+        val floor: com.mido.phonebridge.ai.Risk? =
+            commandsSeen.mapNotNull { com.mido.phonebridge.ai.RiskFloor.of(it) }
+                .maxByOrNull { it.ordinal }
+
         applyRisk = { risk ->
             if (!isFinishing) {
-                val colour = if (risk == null) Theme.SUCCESS else Theme.riskColor(risk)
+                // **The model may raise the risk, never lower it.** A green APPROVE on a
+                // `chown -R` was the report: the button said "safe" while the readout above it
+                // underlined the command. `RiskFloor.combine` is the only place the two meet.
+                val effective = com.mido.phonebridge.ai.RiskFloor.combine(risk, floor)
+                val colour = if (effective == null) Theme.SUCCESS else Theme.riskColor(effective)
                 allow.backgroundTintList = android.content.res.ColorStateList.valueOf(colour)
             }
         }

@@ -5519,8 +5519,13 @@ devDependencies. `node_modules/` is gitignored.
 - The icon is the stamp's SILHOUETTE, drawn at 24dp, not the launcher artwork. That artwork is a distressed stamp with the word STMP across it, and both the texture and the lettering are gone at status-bar size — rendered and checked, it arrives as a black rectangle with a smear in it. The launcher's monochrome layer has the same problem. The outline is the one part that survives, so that is what the small icon is.
 - The tray names the app STMP. The running notice said "PhoneBridge running" and the three status notices said "PhoneBridge can't start yet / is waiting for a network / is not running", three weeks after `app_name` became STMP.
 
-## 0.51.24 (build 350) — 2026-11-14 — CURRENT
+## 0.51.24 (build 350) — 2026-11-14
 - The status-bar icon IS the launcher mark, at five exact density buckets, so the tray shows the same stamp the launcher does. Chosen over a drawn silhouette, and over a vector traced from the artwork: the mark is 2:1 with lettering inside it, and both of those turn to a smudge at 24dp — rendered and looked at rather than assumed. The launcher's own foreground is a bitmap for the same reason, and at the device's density the system scales it 1:1 with no resampling.
+
+## 0.51.25 (build 351) — 2026-11-15 — CURRENT
+- APPROVE can no longer be green on a destructive command. Its colour came only from the optional model reading, so a `chown -R` running as root sat under a green button whenever the model was still loading, switched off, or (wrongly) answered "low" — while the readout directly above it underlined `chown -R`. The button said "safe" and the card said "look at this".
+- The floor is deterministic and computed from the command rows the modal actually renders: `chown -R`, `chmod -R`, `rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`/`doas`, `shutdown`/`reboot`, `git push --force`/`reset --hard`, and a pipe into a shell paint it red. `eval`, `kill -9`, `git clean -f` and a fork bomb go amber.
+- The model may still RAISE the risk — it can see facts a pattern cannot — but it can never lower it. Both lists are separate from the underline list on purpose: underlining `>` is a nudge, a red button is a claim about consequence, and warning on half of all commands is how a warning gets ignored.
 
 ## Keeping this file honest
 
