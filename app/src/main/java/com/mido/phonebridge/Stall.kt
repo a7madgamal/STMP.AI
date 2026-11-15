@@ -91,10 +91,19 @@ object Stall {
             val stack = main.thread.stackTrace
                 .joinToString("\n") { "    at $it" }
             val text = buildString {
-                append("at=").append(System.currentTimeMillis()).append('\n')
+                // **The SAME header a crash carries**, not a bare `at=`. Evidence.read deletes a
+                // record whose timestamp predates the installed package, so a freeze from a build
+                // the user has already replaced cannot outlive its fix. Writing only `at=` here
+                // meant Stall bypassed that rule entirely: the stale report kept rendering after
+                // every upgrade, which is the same "works now / but i see this" complaint that put
+                // the rule in Crash.kt.
+                append(Evidence.header(context = app))
                 append("heartbeat posted at=").append(postedAt).append('\n')
                 append("main thread did not process a message for ").append(STALL_MS).append("ms\n")
-                append("thread=").append(main.thread.name).append("\n")
+                // `frozen thread=`, because Evidence.header already wrote `thread=` for the
+                // RECORDING thread. Two lines with the same key would make the trace ambiguous
+                // about which thread froze — the one fact this instrument exists to state.
+                append("frozen thread=").append(main.thread.name).append("\n")
                 append(stack)
             }
             File(app.filesDir, FILE).writeText(text)
@@ -106,12 +115,13 @@ object Stall {
         }
     }
 
-    /** The last recorded stall, or null when the main thread has never frozen. */
-    fun last(ctx: Context): String? = try {
-        File(ctx.applicationContext.filesDir, FILE).takeIf { it.isFile }?.readText()
-    } catch (e: Exception) {
-        null
-    }
+    /**
+     * The last recorded stall, or null when the main thread has never frozen in THIS build.
+     *
+     * Delegates to [Evidence.read] for the same reason [Crash.last] does: a record written by a
+     * build that is no longer installed is stale evidence, and it is deleted rather than shown.
+     */
+    fun last(ctx: Context): String? = Evidence.read(ctx, FILE)
 
     /** Clear the record, so a later stall is distinguishable from this one. */
     fun clear(ctx: Context) {

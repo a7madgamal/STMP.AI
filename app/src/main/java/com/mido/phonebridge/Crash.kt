@@ -106,7 +106,7 @@ internal object Evidence {
         } catch (e: Exception) {
             0L
         }
-        if (writtenAt != null && installedAt > 0L && writtenAt < installedAt) {
+        if (isStale(writtenAt, installedAt)) {
             android.util.Log.i(
                 "PhoneBridge",
                 "$name predates this install (${writtenAt} < $installedAt); discarding",
@@ -116,4 +116,19 @@ internal object Evidence {
         }
         return text
     }
+
+    /**
+     * Whether a record written at [writtenAt] predates the installed package.
+     *
+     * **Pure, and separate from [read], because the answer is the whole rule and it was otherwise
+     * untestable.** Both facts it needs come from the platform, and a JVM test cannot stage either:
+     * Robolectric reports `lastUpdateTime` as 0, so the guard short-circuits and every assertion
+     * about staleness passes no matter what the code does.
+     *
+     * Unknown on either side means NOT stale: a record with no readable timestamp is evidence the
+     * reader can still use, and a device that cannot report its install time is not a reason to
+     * throw away the only trace there is.
+     */
+    fun isStale(writtenAt: Long?, installedAt: Long): Boolean =
+        writtenAt != null && installedAt > 0L && writtenAt < installedAt
 }

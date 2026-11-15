@@ -894,6 +894,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                     toast("copied — paste it to whoever is fixing this")
                 },
             ))
+            if (isStall) {
+                // **A freeze report can be cleared, a crash report cannot.** A crash ends the
+                // process and the next start is itself the recovery, so the record is history. A
+                // freeze does not: the process keeps running, nothing rewrites the file, and until
+                // 0.51.28 nothing called `Stall.clear` at all — so one bad day left a permanent row
+                // on Home, above every real problem, forever. Clearing it is the reader's decision
+                // because the trace is still worth copying first.
+                rows.add(Theme.statusRow(
+                    ctx, "Dismiss this report",
+                    "Hide the freeze trace once you have copied it.",
+                    Theme.ON_SURFACE_VARIANT,
+                    onClick = {
+                        com.mido.phonebridge.Stall.clear(ctx)
+                        render()
+                    },
+                ))
+            }
         }
         if (rows.isEmpty()) return
         problemsHost.addView(Theme.sectionHeader(ctx, "Fix next"))
