@@ -5527,9 +5527,16 @@ devDependencies. `node_modules/` is gitignored.
 - The floor is deterministic and computed from the command rows the modal actually renders: `chown -R`, `chmod -R`, `rm -rf`, `mkfs`, `dd of=/dev/`, `sudo`/`doas`, `shutdown`/`reboot`, `git push --force`/`reset --hard`, and a pipe into a shell paint it red. `eval`, `kill -9`, `git clean -f` and a fork bomb go amber.
 - The model may still RAISE the risk — it can see facts a pattern cannot — but it can never lower it. Both lists are separate from the underline list on purpose: underlining `>` is a nudge, a red button is a claim about consequence, and warning on half of all commands is how a warning gets ignored.
 
-## 0.51.26 (build 352) — 2026-11-15 — CURRENT
+## 0.51.26 (build 352) — 2026-11-15
 - A pull request that carries an older build number than `main` is now refused in CI, before it can be merged. The version guard only ran at release time, so the default branch could be moved backwards freely: on 2026-11-15 `main` was at build 351 while every open PR carried 324, 326 and 333. Nothing installs over a lower `versionCode`, and Android reports that as "App not installed" — which reads as a corrupt download rather than a version regression.
 - The check is `tools/version-guard.ts` and it asks a question the release guard cannot: not "has this been released" but "would this merge move `main` backwards". Three cases fail — a lower code, one code carrying two different names, and a code that moved while the name did not (the in-app updater orders by name, so that build is never offered). A PR that does not bump at all still passes, because carrying the base version forward is legitimate and failing it would make the check noise.
+
+## 0.51.27 (build 353) — 2026-11-15 — CURRENT
+- Home no longer contradicts itself while the bridge starts or stops. The hero read `● Stopped` and "Switch the server on to begin" for up to three seconds after a tap that had already asked to start, directly under a switch that was already on — so the screen said nothing was happening while something was.
+- The settling look is now one rule, `ServerStatus.isPending`, read by both the sentence and the switch. It used to be computed twice — once as `checked == up` plus a literal timeout inside the toggle block, once not at all for the title — which is how the two came to disagree. Three conditions end it: the bridge reaches the asked state, the window closes, or a start was refused. That last one matters because `startBridge` clears `lastError` before it tries, so an error afterwards is new and belongs on screen at once rather than hiding behind a "Starting" that will never finish.
+- The direction comes from the tap, not from the switch. The rocker deliberately renders the STORED state and is never flipped optimistically, so while a tap settles it still draws the old position — the direction asked for is the opposite of what it shows, and the phrase "the switch is never flipped on tap" was already in the file as the reason.
+- Closing the window repaints explicitly. The 5-second tick only redraws when the render signature changed, and "the pending window closed" is not in that signature, so without the extra timer the hero kept saying "Starting" after the window had passed.
+- An `up` local and a second `PENDING_WINDOW_MS` literal are gone; the window is declared once in `ServerStatus` and re-exported.
 
 ## Keeping this file honest
 

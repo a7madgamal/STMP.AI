@@ -96,6 +96,56 @@ object ServerStatus {
     }
 
     /**
+     * The hero title while a start or stop is still settling.
+     *
+     * Without this the screen contradicts the switch: a tap that asks to start paints nothing
+     * new, because `serverUp` is still false, so for up to [HomeFragment.PENDING_WINDOW_MS] the
+     * hero reads "● Stopped" and "Switch the server on to begin" directly under a switch that is
+     * already on. The screen is not wrong about the state — the state genuinely has not changed
+     * yet — it is wrong about what it is doing about it.
+     *
+     * `starting` is the direction of the tap, not the current state. The rocker renders the STORED
+     * state and is never flipped optimistically, so the pending direction is the opposite of
+     * whatever the switch is drawing.
+     */
+    fun pendingTitle(starting: Boolean): String =
+        if (starting) "● Starting" else "● Stopping"
+
+    /** The hero's supporting line while a start or stop is still settling. See [pendingTitle]. */
+    fun pendingDetail(starting: Boolean): String =
+        if (starting) {
+            "Opening the port now — this clears itself when the bridge answers."
+        } else {
+            "Closing the port now — this clears itself when the bridge stops."
+        }
+
+    /**
+     * Whether a start or stop tap is still settling.
+     *
+     * Pure, and extracted from the fragment so the rules can be tested without a phone. Three
+     * conditions end the pending look, and each one is a distinct way it used to get stuck:
+     *
+     * - the bridge reached the state that was asked for ([up] == [want]) — the normal case;
+     * - the [PENDING_WINDOW] closed — a start that never lands must not say "Starting" forever;
+     * - a start FAILED, which is detectable because `startBridge` clears `lastError` before it
+     *   tries: an error present afterwards is new, and belongs on the screen at once rather than
+     *   hiding behind a "Starting" that will never finish.
+     *
+     * `want == null` is "no tap yet", and `since <= 0` is "no tap this session". Both mean not
+     * pending: a pending look with no tap behind it is a claim about an action nobody took.
+     */
+    fun isPending(want: Boolean?, up: Boolean, since: Long, now: Long, lastError: String?): Boolean {
+        if (want == null || since <= 0L || up == want) return false
+        if (now - since >= PENDING_WINDOW) return false
+        // A refused start ends the look immediately. A refused STOP has no error of its own, so
+        // this only ever shortens a start.
+        return !(want && !lastError.isNullOrBlank())
+    }
+
+    /** How long a start or stop tap may show as settling. Matches the fragment's own window. */
+    const val PENDING_WINDOW = 3_000L
+
+    /**
      * The hero's supporting line.
      *
      * On [State.FAILED] this is the error VERBATIM — the reason a start was refused is the

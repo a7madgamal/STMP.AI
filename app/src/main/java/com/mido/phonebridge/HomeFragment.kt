@@ -51,8 +51,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
          * Long enough to cover a bind on a slow device, short enough that a start which silently
          * failed does not leave the knob looking busy forever. After this the knob simply reflects
          * whatever the service says, including "still down".
+         *
+         * **The number lives in [ServerStatus], re-exported here.** It is the input to
+         * `ServerStatus.isPending`, which the hero's title reads too — two literals for one window
+         * is exactly how the sentence above the switch and the switch itself drift apart.
          */
-        const val PENDING_WINDOW_MS = 3_000L
+        const val PENDING_WINDOW_MS = ServerStatus.PENDING_WINDOW
     }
 
     /**
@@ -74,6 +78,17 @@ class HomeFragment : BridgeFragment(), BridgeControl {
      * until `render()` sees the real value.
      */
     private var pendingSince: Long = 0L
+
+    /**
+     * Which way the last start/stop tap asked to go. Null until the first tap.
+     *
+     * Kept separately from [pendingSince] because the switch cannot answer it: the rocker renders
+     * the STORED state and is never flipped optimistically, so while a tap settles it still draws
+     * the previous position. The direction asked for is therefore the opposite of `checked`, and
+     * reading it back off the switch would mean inferring intent from a view that deliberately
+     * refuses to show it.
+     */
+    private var pendingWant: Boolean? = null
     private lateinit var auditBanner: TextView
     private lateinit var problemsHost: LinearLayout
     private lateinit var pendingHost: LinearLayout
@@ -241,6 +256,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // The knob is still NOT flipped here: `render()` moves it once `BridgeService.serverUp`
             // actually changes, so a failed stop cannot leave it showing a state that is not true.
             pendingSince = android.os.SystemClock.elapsedRealtime()
+            pendingWant = want
             serverToggle.pending = true
             uiTickHandler.post {
                 if (want) {
@@ -255,6 +271,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // The service binds asynchronously; a re-render after a beat picks up the result
             // without waiting for the 5s tick. The tick covers the case where it takes longer.
             uiTickHandler.postDelayed({ render() }, 600)
+            // **The repaint that ends the pending look.** The 5-second tick only repaints when the
+            // render signature CHANGED, and "the pending window closed" is not in that signature —
+            // so without this the hero keeps saying "Starting" after the window has passed, until
+            // something unrelated changes. One timer, at the exact moment the look expires.
+            uiTickHandler.postDelayed({ render() }, ServerStatus.PENDING_WINDOW + 120L)
         }
 
         serverToggle.setAccessibilityLabel("Bridge server")
@@ -622,6 +643,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         val failed = state == ServerStatus.State.FAILED ||
             state == ServerStatus.State.UNRESPONSIVE
 
+        // **Is a start or stop still settling?** Computed ONCE, here, because two things downstream
+        // need the same answer: the hero's title and detail above, and the switch's pending look
+        // below. Splitting the rule across both is how they came to disagree in the first place.
+        //
+        // The direction comes from the TAP, not from the switch and not from the state. The rocker
+        // renders the stored state and is never flipped optimistically, so while a tap settles it
+        // still draws the OLD position — reading `checked` here would say "stopping" for a tap that
+        // asked to start. `pendingWant` is non-null whenever `pending` is true, by construction.
+        val pending = ServerStatus.isPending(
+            want = pendingWant,
+            up = BridgeService.serverUp,
+            since = pendingSince,
+            now = android.os.SystemClock.elapsedRealtime(),
+            lastError = BridgeService.lastError,
+        )
+        val starting = pendingWant == true
+
         // The state colour is applied ONCE, here. The old code set a background per
         // branch and then overwrote it two lines later, so the hero card was always
         // the neutral grey regardless of state.
@@ -632,7 +670,11 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             ServerStatus.State.FAILED -> Theme.DANGER_SURFACE
             ServerStatus.State.STOPPED -> Theme.SURFACE
         }
-        heroTitle.text = ServerStatus.title(state)
+        heroTitle.text = if (pending) {
+            ServerStatus.pendingTitle(starting = starting)
+        } else {
+            ServerStatus.title(state)
+        }
         heroTitle.setTextColor(
             when (state) {
                 ServerStatus.State.RUNNING_HEALTHY -> Theme.SUCCESS
@@ -646,12 +688,16 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // No email here (Mido, 2026-11-03: *"move email from home, it belongs to the google
         // plugin"*). The hero answers "is the bridge running, and where" -- who is signed in is a
         // fact about the ACCOUNT, and it lives on the screen that can change it.
-        heroSub.text = ServerStatus.detail(
-            state = state,
-            lastError = BridgeService.lastError,
-            bindAddress = BridgeService.bindAddress,
-            port = BridgeService.PORT,
-        )
+        heroSub.text = if (pending) {
+            ServerStatus.pendingDetail(starting = starting)
+        } else {
+            ServerStatus.detail(
+                state = state,
+                lastError = BridgeService.lastError,
+                bindAddress = BridgeService.bindAddress,
+                port = BridgeService.PORT,
+            )
+        }
         // The reason is the one thing on this screen that must be read, so it gets the
         // danger colour rather than the muted body colour it used to share with log lines.
         heroSub.setTextColor(if (failed) Theme.DANGER else Theme.ON_SURFACE_VARIANT)
@@ -663,30 +709,23 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // Tint, never `setBackgroundColor`: assigning a background drawable to a
         // MaterialButton replaces the ripple/state-list machinery. `backgroundTintList`
         // recolours the same component and keeps the feedback.
-        // The knob renders the STORED state, never the tap. `pendingSince` only suppresses the
-        // "settled" look for a moment so a slow bind does not flick the knob back and forth.
-        val up = BridgeService.serverUp
-        // **Settled as soon as the real state matches what was asked for.**
         //
-        // The old rule was "pending for 3 seconds, then sync". That left the knob showing its
-        // PREVIOUS position — and, because the callback inverts `checked`, still reporting the
-        // previous state — for the whole window. After a stop it kept saying "on" for three
-        // seconds and every tap sent "off" again, which read as the switch being dead (reported
-        // 2026-11-04: *"stopping the server left toggle unresponsive"*).
-        //
-        // So: clear the pending look the moment `serverUp` agrees with the knob, and fall back to
-        // the timeout only for a start that has not landed yet.
-        val settled = serverToggle.checked == up
-        val windowOpen = pendingSince > 0L &&
-            android.os.SystemClock.elapsedRealtime() - pendingSince < PENDING_WINDOW_MS
-        if (windowOpen && !settled) {
+        // `pending` was computed above, once, and the hero reads the same value. This block used
+        // to compute its own — `checked == up` plus a literal timeout — which is why the switch
+        // and the sentence above it could disagree about whether anything was happening.
+        if (pending) {
             // Still waiting for the service to answer. The knob stays where the last real state
             // put it; only the colour says "working".
             serverToggle.pending = true
         } else {
             pendingSince = 0L
+            pendingWant = null
             serverToggle.pending = false
-            if (serverToggle.checked != up) serverToggle.setCheckedAnimated(up)
+            // The knob was never moved off the stored state, so this only ever corrects the case
+            // where the service changed underneath it.
+            if (serverToggle.checked != BridgeService.serverUp) {
+                serverToggle.setCheckedAnimated(BridgeService.serverUp)
+            }
         }
 
         // The status checklist moved to Settings > Permissions. Home now answers one question
@@ -776,6 +815,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 "Requests cannot be served. ${BridgeService.lastError.ifBlank { "Retry the listener connection." }}",
                 Theme.DANGER) {
                 pendingSince = android.os.SystemClock.elapsedRealtime()
+                pendingWant = true
                 startBridge()
                 render()
             }
