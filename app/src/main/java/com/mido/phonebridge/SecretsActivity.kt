@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
@@ -159,13 +160,41 @@ class SecretsActivity : Activity() {
                 // No reveal, no replace — both would put the private key on screen or in a paste
                 // box. Deleting is still here: removing a connection is legitimate, and it destroys
                 // the key rather than exposing it.
+                //
+                // Nothing harmless sits beside it on this branch, so it stays in the row: there is
+                // no safe key for a mis-tap to reach instead.
                 buttons.addView(small("delete") { confirmDelete(n) })
             } else {
                 buttons.addView(small("reveal") { revealValue(n) })
                 buttons.addView(small("replace") { addSecretDialog(n) })
-                buttons.addView(small("delete") { confirmDelete(n) })
             }
             rowView.addView(buttons)
+
+            if (!isSsh) {
+                // **Delete is on its own line, away from the keys that only read or change a
+                // value.** Reveal and Replace both open something you can back out of; Delete
+                // destroys the vault entry, and for an API key that means re-issuing it at the
+                // provider. On one row the three sit ~8dp apart at the same size and shape, so a
+                // mis-tap one key over is unrecoverable.
+                //
+                // The dialog already has this care — `confirmDelete` uses `.showDestructive()`, and
+                // its comment says the destroying control must not be where a stray confirm lands.
+                // That reasoning stops at the dialog; this is the same reasoning applied to the
+                // card the dialog is opened from.
+                val destructive = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.END
+                }
+                destructive.addView(
+                    Theme.button(this, "delete", Theme.ButtonStyle.GHOST, small = true) { confirmDelete(n) }
+                )
+                rowView.addView(
+                    destructive,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(this@SecretsActivity, 4) },
+                )
+            }
 
             if (isSsh) {
                 // Say WHY there is no reveal, or the missing buttons read as a bug. The public key
