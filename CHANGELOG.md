@@ -5551,10 +5551,16 @@ devDependencies. `node_modules/` is gitignored.
 - Both the raw body and every query value are scanned: a caller can put text in `?to=` as easily as in a JSON field, and both reach a screen. The check runs after the body is parsed and before validation and the summary, so a hostile request never costs a tap and never reaches a view.
 - This is a rejection, not an escape. Drawing each hidden character as a visible `\u{XXXX}` token keeps a request runnable, which is the right call for a build that must render whatever arrives. Here the request is refused instead, because text carrying a bidi override is not a request with a rendering problem — there is no honest version of it to display, and refusing costs nothing real since no legitimate caller sends one.
 
-## 0.51.30 (build 356) — 2026-11-15 — CURRENT
+## 0.51.30 (build 356) — 2026-11-15
 - On a secret's card, Delete is no longer one key away from Replace. The three keys sat in one row at the same size and shape, roughly 8dp apart: a stray tap on Replace opens a dialog that can be cancelled, a stray tap one key over destroys the vault entry — and for an API key that means re-issuing it at the provider. Delete now sits on its own line, right-aligned, as a ghost key.
 - The confirmation dialog already had this care. `confirmDelete` uses `showDestructive()` because the platform focuses the positive button, and its own comment says the destroying control must not be where a stray confirm lands. That reasoning stopped at the dialog; it now applies to the card the dialog is opened from too.
 - Deliberately unchanged for an SSH entry: there, Delete is the only key on the card, so there is no benign neighbour for a mis-tap to reach instead and moving it would only change the spacing.
+
+## 0.51.31 (build 357) — 2026-11-15 — CURRENT
+- The hidden-character rejection had a hole, and a smoke test found it. It scanned the raw request bytes, so a body written as `{"text":"...\u202e..."}` — six ASCII characters, which is exactly what Python's `json.dumps` produces — passed the check, and then the parser turned that escape into a real bidi character bound for the approval screen. The scan now walks the PARSED values instead.
+- Not `body.toString()` either, for the same reason in reverse: `JSONObject.quote` re-escapes C0 controls on the way out, so the round trip hides the very characters the check exists to find. The values have to be read as values.
+- The refusal now names the field, not just the body: `the body's 'text' field` rather than `the request body`, because a caller with a large payload should not have to hunt for which string was rejected.
+- Worth recording how this was missed: the unit tests built their strings in Kotlin, where a bidi escape IS the character. Only a real client, serialising JSON the way a real client does, exercises the difference. The new test pins the round trip explicitly.
 
 ## Keeping this file honest
 

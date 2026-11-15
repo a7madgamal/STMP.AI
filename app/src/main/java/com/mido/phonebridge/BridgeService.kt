@@ -1259,12 +1259,16 @@ class HttpServer(
             // text in `?to=` just as easily as in a JSON field). Both are caller-supplied and
             // both end up on a screen.
             run {
-                val bodyHit = HiddenText.firstHidden(rawBody)
+                // **The PARSED values, walked as values — not the raw bytes, and not
+                // `body.toString()`.** Both of those are the same trap: a JSON producer may
+                // write `\u202e` as six ASCII characters (Python's `json.dumps` does exactly
+                // that), and `JSONObject.quote` re-escapes C0 controls on the way back out. So a
+                // scan of either one sees an escape sequence, passes it, and then the real
+                // character is what reaches a view. Found by testing this guard with a real
+                // client instead of trusting my own assumption about the bytes.
+                val bodyHit = firstHiddenInJson(body, "")
                 if (bodyHit != null) {
-                    throw PluginError(
-                        "hidden_characters",
-                        HiddenText.message(bodyHit, "the request body"),
-                    )
+                    throw PluginError("hidden_characters", HiddenText.message(bodyHit.first, bodyHit.second))
                 }
                 for ((name, value) in query) {
                     val queryHit = HiddenText.firstHidden(value) ?: continue
@@ -2275,6 +2279,38 @@ class HttpServer(
     }
 
     /** Parse, failing hard and coded. The raw text is already on the draft by now. */
+    /**
+     * Walk a parsed body and return the first hidden code point with where it was found.
+     *
+     * Every leaf is scanned where it is a VALUE: a `String` is checked as characters, and a nested
+     * object or array is walked. Numbers and booleans cannot carry one.
+     *
+     * **The path is returned so the refusal names the field**, which is the difference between a
+     * caller fixing `text` and a caller hunting their whole payload.
+     */
+    private fun firstHiddenInJson(value: Any?, path: String): Pair<Int, String>? {
+        val where = if (path.isEmpty()) "the request body" else "the body's '$path' field"
+        return when (value) {
+            is String -> HiddenText.firstHidden(value)?.let { it to where }
+            is JSONObject -> {
+                for (key in value.keys()) {
+                    val hit = firstHiddenInJson(value.opt(key), if (path.isEmpty()) key else "$path.$key")
+                    if (hit != null) return hit
+                }
+                null
+            }
+            is JSONArray -> {
+                for (i in 0 until value.length()) {
+                    val hit = firstHiddenInJson(value.opt(i), "$path[$i]")
+                    if (hit != null) return hit
+                }
+                null
+            }
+            // Numbers, booleans and JSONObject.NULL carry no text.
+            else -> null
+        }
+    }
+
     private fun parseBody(raw: String): JSONObject = try {
         if (raw.isBlank()) JSONObject() else JSONObject(raw)
     } catch (e: Exception) {

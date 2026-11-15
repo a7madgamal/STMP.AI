@@ -6,6 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * Request text that can hide what it says is refused before the approval screen draws it.
@@ -13,7 +16,13 @@ import org.junit.Test
  * The case that motivates the whole file, stated as a test: a command with a
  * RIGHT-TO-LEFT OVERRIDE in it renders as different text than it runs. If this test ever
  * starts passing a bidi character, the approval gate is decorative.
+ *
+ * **Robolectric is not decoration here.** The JSON round-trip test needs the REAL `org.json`, and
+ * the plain JVM stub throws `Method not mocked` for every method — which would have made that test
+ * fail for a reason unrelated to what it asserts.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class HiddenTextTest {
 
     @Test
@@ -74,6 +83,21 @@ class HiddenTextTest {
         assertNull(HiddenText.firstHidden("shipped 🚀"))
         assertFalse(HiddenText.isHidden(0x200D))
         assertFalse(HiddenText.isHidden(0xFE0F))
+    }
+
+    @Test
+    fun `a JSON-escaped hidden character is still found`() {
+        // **The bug this test exists for, found by running the guard against a real client.**
+        // Python's `json.dumps` writes U+202E as six ASCII characters — `\u202e` — so a scan of the
+        // raw request bytes sees an escape sequence and passes it. `org.json`'s own `quote()` does
+        // the same on the way back out for C0 controls, so scanning `toString()` is no better.
+        //
+        // The value has to be read as a VALUE, after parsing, which is what the walker does. This
+        // asserts the character survives the round trip `JSONObject` performs, so the scan will
+        // see it.
+        val parsed = org.json.JSONObject("{\"text\":\"rm -rf ~/\\u202estcejorP\"}")
+        val text = parsed.getString("text")
+        assertEquals(0x202E, HiddenText.firstHidden(text))
     }
 
     @Test
