@@ -92,6 +92,11 @@ class ApprovalTipView(context: Context) : View(context) {
 
     init {
         setWillNotDraw(false)
+        // A control a screen reader cannot name is a control a blind user cannot use, and this
+        // one is the only way into the approval sheet. Set here rather than by the Activity so
+        // it cannot be forgotten at the one call site that builds a tip.
+        contentDescription = "approval waiting — tap to open"
+        isClickable = true
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -170,6 +175,15 @@ class ApprovalTipView(context: Context) : View(context) {
          */
         const val ARRIVE_MS = 180L
         const val LEAVE_MS = 140L
+
+        /**
+         * Frames after which the loop snaps to its end no matter what the clock says.
+         *
+         * 120 frames is two seconds at 60 Hz — an order of magnitude longer than either beat, so
+         * a working animation never approaches it. It exists for the one case where the clock
+         * cannot advance, where "keep waiting for the next frame" becomes an infinite loop.
+         */
+        const val MAX_FRAMES = 120
     }
 
     /**
@@ -185,18 +199,27 @@ class ApprovalTipView(context: Context) : View(context) {
         val from = slide
         val start = android.os.SystemClock.uptimeMillis()
         val interpolator = DecelerateInterpolator()
+        var frames = 0
         val frame = object : Runnable {
             override fun run() {
-                val fraction = ((android.os.SystemClock.uptimeMillis() - start).toFloat() / ms)
-                    .coerceIn(0f, 1f)
-                slide = from + (end - from) * interpolator.getInterpolation(fraction)
+                val elapsed = android.os.SystemClock.uptimeMillis() - start
+                val fraction = (elapsed.toFloat() / ms).coerceIn(0f, 1f)
+                val done = fraction >= 1f || frames++ >= MAX_FRAMES
+                // **The backstop, and why it exists.** This loop stops on the CLOCK. Any
+                // environment where the clock does not advance — a test harness that flushes the
+                // main looper with a frozen clock, most obviously — would have it re-post forever
+                // and never return to its caller. A motion that cannot finish must SNAP, because
+                // the alternative is a tip stuck mid-slide with the request expiring under it.
+                // Two seconds is several times the longest beat here, so a real animation never
+                // reaches it.
+                slide = if (done) end
+                else from + (end - from) * interpolator.getInterpolation(fraction)
                 invalidate()
-                when {
-                    fraction < 1f && isAttachedToWindow -> postOnAnimation(this)
-                    else -> {
-                        tick = null
-                        onDone?.invoke()
-                    }
+                if (!done && isAttachedToWindow) {
+                    postOnAnimation(this)
+                } else {
+                    tick = null
+                    onDone?.invoke()
                 }
             }
         }
@@ -258,6 +281,20 @@ class ApprovalTipView(context: Context) : View(context) {
      * rectangular target would swallow taps in the empty corners — which is the difference
      * between "the paper is there" and "a strip of the screen is missing".
      */
+    /**
+     * The tip's one action, through the platform's own activation path.
+     *
+     * A tap, a TalkBack double-tap and a programmatic click all arrive here, which is why the
+     * touch handler below calls this instead of invoking `onOpen` itself: a control that only
+     * responds to raw touch is a control a screen reader cannot operate, and this is the whole
+     * approval gate — not a decorative affordance.
+     */
+    override fun performClick(): Boolean {
+        super.performClick()
+        onOpen?.invoke()
+        return true
+    }
+
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         if (event.actionMasked != android.view.MotionEvent.ACTION_UP) {
             return event.actionMasked == android.view.MotionEvent.ACTION_DOWN
@@ -272,7 +309,7 @@ class ApprovalTipView(context: Context) : View(context) {
                 m, refWidth, frontTopPx,
                 event.x - screenToView() - offset, event.y,
             )
-        if (hit) onOpen?.invoke()
+        if (hit) performClick()
         return true
     }
 
