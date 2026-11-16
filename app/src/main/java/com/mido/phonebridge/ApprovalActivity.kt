@@ -184,6 +184,17 @@ class ApprovalActivity : FragmentActivity() {
 
     private var sheetRoot: View? = null
 
+    /**
+     * The sheet's shape-change wrapper.
+     *
+     * Held as a field because the stamp and the tear anchor to it. They used to take the root's
+     * last child, which was the sheet; once the tip became a sibling, the last child was the
+     * 195px strip, so the stamp anchored to a wedge, drew nothing recognisable, and — because its
+     * animation never reported finished — left a full-screen overlay behind that swallowed every
+     * touch. Naming the sheet directly is the fix, not reordering the children.
+     */
+    private var paperWrapper: com.mido.phonebridge.ui.PaperSheetView? = null
+
     /** The resting wedge stack. Visible only while resting. */
     private var tipView: com.mido.phonebridge.ui.ApprovalTipView? = null
 
@@ -1334,6 +1345,7 @@ class ApprovalActivity : FragmentActivity() {
         }
         sheetRoot = outer
         val presentation = com.mido.phonebridge.ui.PaperSheetView(this)
+        paperWrapper = presentation
         presentation.addView(outer, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -1533,11 +1545,16 @@ class ApprovalActivity : FragmentActivity() {
         // the human has decided, it must not reappear behind the stamp.
         armBar.visibility = ViewGroup.GONE
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
-        val sheet = root.getChildAt(root.childCount - 1)
+        // The SHEET, named — not "whatever happens to be last". See [paperWrapper].
+        val sheet: View = paperWrapper ?: sheetRoot ?: root
         val overlay = StampOverlay(this).apply {
             onFinished = {
                 if (!approved) showDenialTear(root, sheet) else finish()
             }
+            // **A stamp that cannot finish must not become a shield.** While it is on screen it
+            // covers everything and takes every touch, so a stamp that never calls back is a locked
+            // phone. This is the same backstop the overlay's own window carries.
+            
             onImpact = {
                 playStampImpact()
                 sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {

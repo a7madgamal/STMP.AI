@@ -77,16 +77,24 @@ class ApprovalTipView(context: Context) : View(context) {
     private val grain = PaperGrain.paint()
 
     /**
-     * The shadow cast by the paper.
+     * The paper's shadow: a REAL blur, baked once into a bitmap.
      *
-     * **Drawn as layered offset copies, not `setShadowLayer`.** A shadow layer needs software
-     * rendering or a render-node and gets dropped silently in some window configurations — the same
-     * class of silent failure this project has already paid for twice with animators. Three
-     * increasingly wide, increasingly faint copies of the same path cost almost nothing and cannot
-     * fail to appear.
+     * **Why not `setShadowLayer`.** That needs a software layer or a render node and is silently
+     * ignored in some window configurations — this project has already paid twice for visuals that
+     * failed without a trace.
+     *
+     * **Why not hand-offset copies.** That was the previous attempt and it was wrong for a reason
+     * no offset value can fix: a few offset copies of a hard-edged path are still a hard-edged
+     * shape, so the shadow read as a second grey wedge sitting behind the paper rather than as
+     * something the paper casts. Reported from the device as "the shadow is vertical".
+     *
+     * So the blur is real: `BlurMaskFilter` over the actual outline, rendered ONCE into a bitmap
+     * whenever the geometry changes. Per frame the cost is one `drawBitmap`.
      */
-    private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0x2E000000
+    private var shadowBitmap: android.graphics.Bitmap? = null
+
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x59000000
         style = Paint.Style.FILL
     }
 
@@ -117,13 +125,6 @@ class ApprovalTipView(context: Context) : View(context) {
     /** Cached density, so the shadow maths does not re-read resources per frame. */
     private var density: Float = resources.displayMetrics.density
 
-    /**
-     * The direction the paper's shadow falls, in radians from straight down.
-     *
-     * Matches the tilt the outline is drawn with, so the shadow lies along the edge that casts it.
-     */
-    private val shadowAngle: Float =
-        Math.toRadians(ApprovalTip.TILT_DEGREES.toDouble()).toFloat()
 
     /** Counts real draws, so the diagnostic line is emitted once rather than per frame. */
     private var drawnOnce = 0
@@ -199,6 +200,35 @@ class ApprovalTipView(context: Context) : View(context) {
             }
             fronts.add(path)
         }
+        buildShadow()
+    }
+
+    /**
+     * Bake the blurred shadow for the current outline.
+     *
+     * The blur radius is set on the mask filter, and the paths are drawn once into an offscreen
+     * bitmap — so the shadow follows the paper's ACTUAL shape, including its lean, instead of being
+     * a translated copy. The bitmap is rebuilt only when the geometry changes.
+     */
+    private fun buildShadow() {
+        val w = width
+        val h = height
+        if (w <= 0 || h <= 0 || fronts.isEmpty()) {
+            shadowBitmap = null
+            return
+        }
+        val bmp = shadowBitmap?.takeIf { it.width == w && it.height == h }
+            ?: android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(0)
+        val c = Canvas(bmp)
+        // A soft edge, and a small offset down-right so the sheet reads as lifted rather than
+        // printed on. Both live in the mask filter, which is what makes it a shadow and not a copy.
+        shadowPaint.maskFilter =
+            android.graphics.BlurMaskFilter(SHADOW_BLUR_DP * density, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        c.translate(SHADOW_OFFSET_DP * density, SHADOW_OFFSET_DP * density * 1.4f)
+        for (path in fronts) c.drawPath(path, shadowPaint)
+        shadowPaint.maskFilter = null
+        shadowBitmap = bmp
     }
 
     /** Slide the stack in from the right edge. */
@@ -308,17 +338,11 @@ class ApprovalTipView(context: Context) : View(context) {
          */
         const val MAX_FRAMES = 120
 
-        /** How far below the paper its shadow falls, in dp. */
-        const val SHADOW_DROP_PX = 2.5f
+        /** Blur radius of the paper's shadow, in dp. */
+        const val SHADOW_BLUR_DP = 5f
 
-        /** How far each successive shadow copy spreads, in px. */
-        const val SHADOW_SPREAD_PX = 2f
-
-        /** Alpha of the first shadow copy. */
-        const val SHADOW_ALPHA = 96f
-
-        /** Successive widening steps, each fainter than the last. */
-        val SHADOW_STEPS = floatArrayOf(0f, 1f, 2.2f)
+        /** How far the shadow sits from the paper, in dp. */
+        const val SHADOW_OFFSET_DP = 2f
     }
 
     /**
@@ -385,6 +409,8 @@ class ApprovalTipView(context: Context) : View(context) {
         // Everything shifts right by the un-slid part, so the paper reads as still arriving.
         val offset = (1f - slide) * m.topWidthPx
         canvas.save()
+        // The baked shadow travels with the paper.
+        shadowBitmap?.let { canvas.drawBitmap(it, offset, 0f, null) }
         // Only the arrival displaces the stack now: the geometry is already in view space.
         canvas.translate(offset, 0f)
 
@@ -414,24 +440,6 @@ class ApprovalTipView(context: Context) : View(context) {
             canvas.save()
             canvas.translate(dx, dy)
 
-            // The shadow first, so the paper sits ON it.
-            //
-            // **Offset along the paper's own downward direction, not the screen's.** The first
-            // version dropped the shadow straight down in screen space, so at a 15-degree lean the
-            // shadow fell at an angle to the edge casting it and read as a separate grey shape.
-            // A shadow is cast perpendicular to the surface it lands on, so the offset follows the
-            // paper's rotation.
-            for (step in SHADOW_STEPS) {
-                val distance = SHADOW_DROP_PX * density * (1f + step)
-                val sx = distance * kotlin.math.sin(shadowAngle)
-                val sy = distance * kotlin.math.cos(shadowAngle)
-                val layerAlpha = (SHADOW_ALPHA * (1f - step * 0.45f)).toInt().coerceIn(0, 255)
-                shadow.alpha = layerAlpha
-                canvas.save()
-                canvas.translate(sx, sy)
-                canvas.drawPath(path, shadow)
-                canvas.restore()
-            }
 
             canvas.drawPath(path, fill)
             // The fibre, clipped to the paper. Without this the tip is a flat triangle sitting on

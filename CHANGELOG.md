@@ -5605,11 +5605,15 @@ devDependencies. `node_modules/` is gitignored.
 - The resting wedge is narrower and hangs lower. At a quarter of the display it still read as a panel leaning in rather than a corner of a sheet caught mid-slide, and every dp of it is screen the human cannot see; it is now a fraction under a quarter, with the clamp lowered to match. It also starts 56dp below the top edge, because a wedge pinned to the very corner reads as part of the status bar rather than something slipped in from the side.
 - Opening takes 320ms instead of 220. At the faster setting the sheet arrived before the eye had registered the wedge leaving, which read as a cut rather than a motion. Leaving is unchanged at 140ms — arriving deliberately and departing obediently is the pair that feels responsive rather than sluggish.
 
-## 0.51.40 (build 366) — 2026-11-16 — CURRENT
+## 0.51.40 (build 366) — 2026-11-16
 - The wedge is now genuinely a corner of a leaning sheet. Its top edge was horizontal, so the shape read as a cut-off panel glued to the edge rather than paper seen at an angle — the giveaway being that the top edge ran parallel to the screen. Both visible edges lean, they meet at a true 90 degrees, and the taper length follows from the angle (`w / sin θ`) instead of being stored separately.
 - The shadow falls along the paper's own downward direction, not the screen's. Dropped straight down, a shadow at a fifteen-degree lean fell at an angle to the edge casting it and read as a separate grey shape.
 - The stack is legible. Layers stepped 10dp apart overlapped into what looked like one thicker wedge; they now step 22dp and 26dp and hold more of their opacity, because a stack nobody can count is not a queue indicator.
 - A queued request no longer goes missing. The handover used to rely on the platform routing a second launch to the existing window, which it does not do when that launch lands in a different task — with an empty `taskAffinity` and NEW_TASK required from a background service, three requests surfaced as one. The gate now holds a live reference to the window that is on screen and delivers into it directly, falling back to a launch only when there is no window.
+
+## 0.51.41 (build 367) — 2026-11-16 — CURRENT
+- The stamp and the tear are anchored to the sheet by NAME, not to the root's last child. Once the tip became a sibling of the sheet the last child was the 195dp strip, so the stamp anchored to a wedge, drew a mark nobody could see, and — because its animation never reported finished — left a full-screen overlay behind that swallowed every touch. Reported as "after accepting I only see shadow and I can't touch anything", which is exactly what a stamp that never finishes does: it is a shield over the whole screen.
+- The paper's shadow is a real blur now. Offsetting copies of the outline was wrong in a way no offset value could fix: a few copies of a hard-edged path are still hard-edged, so the shadow read as a second grey wedge behind the paper rather than something the paper casts. It is rendered once into a bitmap with a `BlurMaskFilter` over the actual outline, so it follows the paper's lean, and costs one `drawBitmap` per frame.
 
 ## Keeping this file honest
 
