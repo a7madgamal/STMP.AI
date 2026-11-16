@@ -143,6 +143,35 @@ class ApprovalTipViewTest {
     }
 
     @Test
+    fun `promoting a lone wedge just adopts the new depth`() {
+        // Nothing behind it to move forward, so there is no motion to play.
+        val v = tip(depth = 1)
+        var done = false
+        v.promote(fromDepth = 1, toDepth = 1) { done = true }
+        assertTrue("a stack of one has nothing to promote, so it must report immediately", done)
+        assertEquals(1, v.drawnWedges)
+    }
+
+    @Test
+    fun `promoting shrinks the stack by one slot`() {
+        val v = tip(depth = 3)
+        var done = false
+        v.promote(fromDepth = 3, toDepth = 2) { done = true }
+        // Unattached: no frames to play, so the promotion snaps rather than stranding.
+        assertTrue("an unattached tip must not strand mid-step", done)
+        assertEquals(2, v.drawnWedges)
+    }
+
+    @Test
+    fun `promoting to the same depth is a no-op`() {
+        val v = tip(depth = 2)
+        var done = false
+        v.promote(fromDepth = 2, toDepth = 2) { done = true }
+        assertTrue(done)
+        assertEquals(2, v.drawnWedges)
+    }
+
+    @Test
     fun `a zero size does not build a degenerate wedge`() {
         val ctx = RuntimeEnvironment.getApplication()
         val v = ApprovalTipView(ctx)

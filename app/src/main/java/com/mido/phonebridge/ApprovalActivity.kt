@@ -289,11 +289,24 @@ class ApprovalActivity : FragmentActivity() {
      */
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+
+        // **What the stack looked like BEFORE the gate moved on.**
+        //
+        // The gate has already promoted the next request to head by the time this arrives, so it
+        // cannot say how deep the stack was a moment ago — only the view still knows, because it
+        // was drawing it. Read here, before anything is rebuilt.
+        val depthBefore = tipView?.depth ?: 1
+
         // Everything the outgoing request bound to this Activity goes first: its tick, its
         // password field, its "a decision is happening" flag. A swap that forgot one would let the
         // previous request's countdown keep running behind the new request's card.
         releaseRequestScopedState()
         applyIntent(intent)
+
+        // The answered wedge leaves and the one behind it steps forward, THEN the card for the new
+        // request is presented. Playing them together would show two requests moving at once.
+        val depthAfter = tipView?.depth ?: 1
+        tipView?.promote(fromDepth = depthBefore, toDepth = depthAfter)
     }
 
     /**
@@ -1402,11 +1415,14 @@ class ApprovalActivity : FragmentActivity() {
 
     /** The resting shape: strip window, wedge only, nothing dimmed, nothing focused. */
     private fun restSilently() {
+        // Resuming after a rotation: the window has no shape yet, but the request has already been
+        // on screen, so the tip must not replay an arrival for a request the human has met.
+        val resumed = shape == null && tipView?.isAtRest == false
         applyWindowShape(WindowShape.RESTING)
         sheetRoot?.visibility = View.GONE
         tipView?.let {
             it.visibility = View.VISIBLE
-            it.present()
+            if (!resumed) it.present()
         }
     }
 

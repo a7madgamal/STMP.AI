@@ -86,6 +86,15 @@ class ApprovalTipView(context: Context) : View(context) {
      * the hit area with the paper instead of leaving it behind.
      */
     private var frontTopPx: Float = 0f
+
+    /** One slot's vertical step, captured at build time so promotion can move by exactly that. */
+    private var stepDropPx: Float = 0f
+
+    /** 0 = at rest, 1 = the step forward has completed. */
+    private var promoteProgress = 0f
+
+    /** True while a promotion is playing, which changes what `onDraw` does per wedge. */
+    private var promoting = false
     private val fronts = ArrayList<Path>()
 
     private var tick: Runnable? = null
@@ -125,6 +134,9 @@ class ApprovalTipView(context: Context) : View(context) {
         fronts.clear()
         val wedges = ApprovalTip.stack(depth, density)
         frontTopPx = wedges.firstOrNull()?.dropPx ?: 0f
+        // The step between two adjacent wedges, which is what a promotion travels.
+        stepDropPx = (wedges.getOrNull(1)?.dropPx ?: (ApprovalTip.GHOST_DROP_DP * density)) -
+            (wedges.firstOrNull()?.dropPx ?: 0f)
         for (wedge in wedges) {
             val top = wedge.dropPx
             val points = ApprovalTip.outline(m, screenWidth, top)
@@ -155,6 +167,53 @@ class ApprovalTipView(context: Context) : View(context) {
         invalidate()
     }
 
+    /**
+     * The request in front was answered: the wedge behind it steps forward into its place.
+     *
+     * **Why this needs a swap to exist at all.** With one Activity per request the window died
+     * with the head, so the stack could only re-form from nothing — there was no paper left to
+     * move. The handover keeps the window, so the promotion is a real motion: the answered wedge
+     * leaves to the right while the one behind it rises into the front slot and brightens to full.
+     *
+     * [fromDepth] is drawn first, then [toDepth] is adopted once the motion ends. Both are passed
+     * in rather than read from the gate, because the gate has already moved on: it no longer knows
+     * how deep the stack WAS.
+     */
+    fun promote(fromDepth: Int, toDepth: Int, onDone: (() -> Unit)? = null) {
+        val from = fromDepth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
+        val to = toDepth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
+        // One wedge leaving a stack of one has nothing to promote: the whole tip simply goes.
+        if (from <= 1 || from == to) {
+            depth = to
+            onDone?.invoke()
+            return
+        }
+        depth = from
+        promoting = true
+        promoteProgress = 0f
+        val target = { depth = to; promoting = false; promoteProgress = 0f; rebuildPaths(); invalidate(); onDone?.invoke() }
+        if (!isAttachedToWindow) {
+            target()
+            return
+        }
+        val start = android.os.SystemClock.uptimeMillis()
+        val interpolator = DecelerateInterpolator()
+        var frames = 0
+        tick?.let { removeCallbacks(it) }
+        val frame = object : Runnable {
+            override fun run() {
+                val fraction = ((android.os.SystemClock.uptimeMillis() - start).toFloat() / STEP_MS)
+                    .coerceIn(0f, 1f)
+                val done = fraction >= 1f || frames++ >= MAX_FRAMES
+                promoteProgress = if (done) 1f else interpolator.getInterpolation(fraction)
+                invalidate()
+                if (!done && isAttachedToWindow) postOnAnimation(this) else { tick = null; target() }
+            }
+        }
+        tick = frame
+        postOnAnimation(frame)
+    }
+
     /** Take the stack out to the right edge. */
     fun dismiss(onDone: (() -> Unit)? = null) {
         if (!isAttachedToWindow) {
@@ -175,6 +234,15 @@ class ApprovalTipView(context: Context) : View(context) {
          */
         const val ARRIVE_MS = 180L
         const val LEAVE_MS = 140L
+
+        /**
+         * The step forward when the front request is answered.
+         *
+         * Shorter than either of the others: this is a consequence of the human's own decision
+         * arriving one frame later, not a new surface appearing, so it must feel like the stack
+         * settling rather than a second thing to watch.
+         */
+        const val STEP_MS = 160L
 
         /**
          * Frames after which the loop snaps to its end no matter what the clock says.
@@ -250,9 +318,28 @@ class ApprovalTipView(context: Context) : View(context) {
         // Back to front: index 0 is the FRONT wedge, so draw in reverse and the head lands last.
         for (i in fronts.indices.reversed()) {
             val path = fronts[i]
-            val alpha = ApprovalTip.GHOST_ALPHA[i]
+            var alpha = ApprovalTip.GHOST_ALPHA[i]
+            var dy = 0f
+            var dx = 0f
+            if (promoting) {
+                if (i == 0) {
+                    // The answered wedge leaves: it fades and slides out to the right, the same
+                    // direction the sheet went when it was collapsed.
+                    alpha = 1f - promoteProgress
+                    dx = promoteProgress * m.topWidthPx
+                    dy = -promoteProgress * stepDropPx * 0.4f
+                } else {
+                    // Each ghost rises one slot and brightens to the alpha of the slot it enters.
+                    dy = -promoteProgress * stepDropPx
+                    alpha = ApprovalTip.GHOST_ALPHA[i] +
+                        (ApprovalTip.GHOST_ALPHA[i - 1] - ApprovalTip.GHOST_ALPHA[i]) * promoteProgress
+                }
+                alpha = alpha.coerceIn(0f, 1f)
+            }
             val layer = canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), (alpha * 255).toInt())
 
+            canvas.save()
+            canvas.translate(dx, dy)
             canvas.drawPath(path, fill)
             // The fibre, clipped to the paper. Without this the tip is a flat triangle sitting on
             // a textured sheet, which reads as a sticker rather than the same stock.
@@ -261,6 +348,7 @@ class ApprovalTipView(context: Context) : View(context) {
             canvas.drawPaint(grain)
             canvas.restore()
             canvas.drawPath(path, edge)
+            canvas.restore()
 
             canvas.restoreToCount(layer)
         }
