@@ -76,6 +76,20 @@ class ApprovalTipView(context: Context) : View(context) {
     }
     private val grain = PaperGrain.paint()
 
+    /**
+     * The shadow cast by the paper.
+     *
+     * **Drawn as layered offset copies, not `setShadowLayer`.** A shadow layer needs software
+     * rendering or a render-node and gets dropped silently in some window configurations — the same
+     * class of silent failure this project has already paid for twice with animators. Three
+     * increasingly wide, increasingly faint copies of the same path cost almost nothing and cannot
+     * fail to appear.
+     */
+    private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x2E000000
+        style = Paint.Style.FILL
+    }
+
     private var metrics: ApprovalTip.Metrics? = null
 
     /**
@@ -100,11 +114,15 @@ class ApprovalTipView(context: Context) : View(context) {
 
     private var tick: Runnable? = null
 
+    /** Cached density, so the shadow maths does not re-read resources per frame. */
+    private var density: Float = resources.displayMetrics.density
+
     /** Counts real draws, so the diagnostic line is emitted once rather than per frame. */
     private var drawnOnce = 0
 
     init {
         setWillNotDraw(false)
+        com.mido.phonebridge.Debug.log("tip: constructed")
         // A control a screen reader cannot name is a control a blind user cannot use, and this
         // one is the only way into the approval sheet. Set here rather than by the Activity so
         // it cannot be forgotten at the one call site that builds a tip.
@@ -112,8 +130,19 @@ class ApprovalTipView(context: Context) : View(context) {
         isClickable = true
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        com.mido.phonebridge.Debug.log("tip: attached")
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        com.mido.phonebridge.Debug.log("tip: windowVisibility=$visibility")
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        com.mido.phonebridge.Debug.log("tip: size ${w}x$h")
         rebuildPaths()
     }
 
@@ -224,7 +253,13 @@ class ApprovalTipView(context: Context) : View(context) {
         postOnAnimation(frame)
     }
 
-    /** Take the stack out to the right edge. */
+    /**
+     * Take the stack out to the right edge.
+     *
+     * Runs while the sheet is arriving, so the two motions overlap into one gesture. The view is
+     * deliberately NOT hidden here: hiding it on the first frame is what turned a 140ms exit into
+     * a flicker.
+     */
     fun dismiss(onDone: (() -> Unit)? = null) {
         if (!isAttachedToWindow) {
             slide = 0f
@@ -262,6 +297,18 @@ class ApprovalTipView(context: Context) : View(context) {
          * cannot advance, where "keep waiting for the next frame" becomes an infinite loop.
          */
         const val MAX_FRAMES = 120
+
+        /** How far below the paper its shadow falls, in dp. */
+        const val SHADOW_DROP_PX = 2.5f
+
+        /** How far each successive shadow copy spreads, in px. */
+        const val SHADOW_SPREAD_PX = 2f
+
+        /** Alpha of the first shadow copy. */
+        const val SHADOW_ALPHA = 96f
+
+        /** Successive widening steps, each fainter than the last. */
+        val SHADOW_STEPS = floatArrayOf(0f, 1f, 2.2f)
     }
 
     /**
@@ -307,6 +354,7 @@ class ApprovalTipView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         val m = metrics
+        com.mido.phonebridge.Debug.log("tip: onDraw called")
         if (drawnOnce == 0) {
             // One line, once, at the first real draw. The window geometry is invisible from
             // outside the view, so without this a blank tip is indistinguishable from a tip that
@@ -355,6 +403,19 @@ class ApprovalTipView(context: Context) : View(context) {
 
             canvas.save()
             canvas.translate(dx, dy)
+
+            // The shadow first, so the paper sits ON it.
+            val drop = SHADOW_DROP_PX * density
+            val spread = SHADOW_SPREAD_PX * density
+            for (step in SHADOW_STEPS) {
+                canvas.save()
+                canvas.translate(0f, drop * (1f + step))
+                canvas.scale(1f + spread * step / width.coerceAtLeast(1), 1f + spread * step / height.coerceAtLeast(1), width.toFloat(), 0f)
+                shadow.alpha = (SHADOW_ALPHA * (1f - step * 0.45f)).toInt().coerceIn(0, 255)
+                canvas.drawPath(path, shadow)
+                canvas.restore()
+            }
+
             canvas.drawPath(path, fill)
             // The fibre, clipped to the paper. Without this the tip is a flat triangle sitting on
             // a textured sheet, which reads as a sticker rather than the same stock.
@@ -372,6 +433,7 @@ class ApprovalTipView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
+        com.mido.phonebridge.Debug.log("tip: detached")
         tick?.let { removeCallbacks(it) }
         tick = null
         super.onDetachedFromWindow()

@@ -5587,10 +5587,19 @@ devDependencies. `node_modules/` is gitignored.
 - Opening takes 220ms with a small settle, folding back 140ms flat. Leaving is quicker than arriving on purpose — that asymmetry is what reads as a response rather than an animation.
 - The wedge is now a control in the accessibility sense: activation goes through `performClick`, so a screen reader can open the card, and it carries a description that says what it is.
 
-## 0.51.36 (build 362) — 2026-11-16 — CURRENT
+## 0.51.36 (build 362) — 2026-11-16
 - The resting tip no longer takes more of the screen than the paper it draws. Its window was sized as paper plus the full inward touch reach, which on a 720px display meant 394px — 55% of the width — and a window swallows every touch that lands inside it, so the app behind stopped accepting input across half the screen. The margin is now 12dp, which exists only so the wedge's own edge is not clipped by its window: 267px, or 37%.
 - The wedge's outline is built against the window's right edge rather than the display's, and then translated. Both halves were true in different places — the paper's WIDTH is a property of the phone, its ANCHOR is a property of the window it is drawn in — and computing the outline in one space while translating it from another put the paper outside its own view.
 - One diagnostic line is now emitted at the tip's first draw, naming its size, depth, wedge count and paper dimensions. The tip is the only surface whose geometry is invisible from the outside: a wedge that never got a size, never got a depth, or drew itself off the edge all look identical from the rest of the app, and the first report of a blank tip could not be traced to any of them.
+
+## 0.51.37 (build 363) — 2026-11-16
+- The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it.
+- The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it. The next report will name the missing step instead of requiring another guess.
+
+## 0.51.38 (build 364) — 2026-11-16 — CURRENT
+- The sheet now casts a shadow. It rests slightly off-axis so it reads as paper laid on the screen, and paper laid on something has an edge — without one the card looked pasted on rather than lying there. It is the platform's own elevation shadow against a rounded outline, so it costs no drawing of its own; the wedge stack draws three widening copies of its own outline instead, because a shadow layer is silently dropped in some window configurations and this project has already paid for silent visual failures twice.
+- Expanding starts at 2° and settles to half a degree. Starting from the tip's full lean read as a spin; two degrees down to a half is a settle.
+- Opening and closing are single motions. The wedge used to be hidden the instant the sheet appeared, so the eye saw paper vanish and then paper arrive — two events with a gap, which reads as a flicker however short the gap. Both now run on the same beat: the wedge slides out to the right while the sheet rotates in from that edge, and collapsing shows the wedge before the window shrinks so it has a strip to slide into.
 
 ## Keeping this file honest
 

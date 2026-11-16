@@ -1357,6 +1357,7 @@ class ApprovalActivity : FragmentActivity() {
         // decision window on a surface nobody can act on.
         val locked = (getSystemService(android.content.Context.KEYGUARD_SERVICE)
             as android.app.KeyguardManager).isKeyguardLocked
+        com.mido.phonebridge.Debug.log("approval: keyguardLocked=$locked -> ${if (locked) "OPEN" else "RESTING"}")
         if (locked) openSheet(animateEntrance = true) else restSilently()
 
         val entrance = PaperMotion.entrance(
@@ -1372,18 +1373,26 @@ class ApprovalActivity : FragmentActivity() {
      * (nothing was ever resting), while a tap on the tip is a change of shape and animates.
      */
     private fun openSheet(animateEntrance: Boolean = false) {
-        tipView?.let {
-            it.visibility = View.GONE
-        }
+        // **One motion, not two.**
+        //
+        // The tip used to be hidden the instant the sheet appeared, so the eye saw paper vanish
+        // and then paper arrive — two events with a gap, which reads as a flicker no matter how
+        // short the gap is. Both now run on the same beat: the wedge slides out to the right while
+        // the sheet rotates in from that same edge, so the surface looks like one sheet of paper
+        // changing shape rather than one leaving and another arriving.
+        //
+        // The window grows FIRST: the sheet cannot animate into area the window does not have yet,
+        // and growing it afterwards would show the wedge jump.
         applyWindowShape(WindowShape.OPEN)
         sheetRoot?.visibility = View.VISIBLE
-        // The expand is an arrival, not a crossfade: the sheet rotates out of the tip's own lean,
-        // so the two shapes read as one piece of paper changing shape.
+
         if (animateEntrance) {
+            tipView?.dismiss()
             sheet()?.present()
         } else {
             // A locked phone opens straight to the sheet, and a re-show must not replay an
             // entrance for a request the human has already met.
+            tipView?.let { it.visibility = View.GONE }
             sheet()?.settle()
         }
     }
@@ -1400,16 +1409,18 @@ class ApprovalActivity : FragmentActivity() {
         if (shape != WindowShape.OPEN || stamping) return
         // Fold first, then shrink the window: hiding the sheet before the motion finishes would
         // turn a 140ms fold into a single frame of nothing.
+        // The wedge is shown BEFORE the window shrinks, so it has a strip to slide into while the
+        // sheet is still folding — one continuous hand-back rather than fold, blank, arrive.
+        tipView?.let {
+            it.visibility = View.VISIBLE
+            it.depth = visibleWedgeCount()
+            it.present()
+        }
         sheet()?.dismiss {
             // Only shrink once the fold has played. A window that becomes a strip while the sheet
             // is still drawn would clip the animation to a third of the screen.
-            sheetRoot?.visibility = View.GONE
+            sheetRoot?.visibility = ViewGroup.GONE
             applyWindowShape(WindowShape.RESTING)
-            tipView?.let {
-                it.visibility = View.VISIBLE
-                it.depth = visibleWedgeCount()
-                it.present()
-            }
         }
     }
 
@@ -1430,6 +1441,7 @@ class ApprovalActivity : FragmentActivity() {
 
     /** The resting shape: strip window, wedge only, nothing dimmed, nothing focused. */
     private fun restSilently() {
+        com.mido.phonebridge.Debug.log("approval: restSilently")
         // Resuming after a rotation: the window has no shape yet, but the request has already been
         // on screen, so the tip must not replay an arrival for a request the human has met.
         val resumed = shape == null && tipView?.isAtRest == false

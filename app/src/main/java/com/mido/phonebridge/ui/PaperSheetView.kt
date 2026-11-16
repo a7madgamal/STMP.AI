@@ -60,6 +60,27 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
         setWillNotDraw(false)
         clipChildren = false
         clipToPadding = false
+
+        // **A real elevation shadow, not a drawn one.**
+        //
+        // The sheet rests slightly off-axis precisely so it reads as paper laid ON the screen
+        // rather than a page replacing it — and paper laid on something casts a shadow. Raising the
+        // view lets the platform draw the soft, view-shaped shadow around its own outline, the same
+        // cue every other raised surface in this app uses. A hand-drawn blur would have to paint
+        // outside the view's bounds and would be clipped by the parent on some OEMs.
+        elevation = context.resources.displayMetrics.density * ELEVATION_DP
+        // Rounded, so the shadow's corners are soft like the paper's own torn edge.
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                outline.setRoundRect(
+                    0,
+                    0,
+                    view.width,
+                    view.height,
+                    context.resources.displayMetrics.density * Theme.RADIUS_CARD,
+                )
+            }
+        }
     }
 
     /** Whether the sheet is fully open and settled. */
@@ -213,7 +234,14 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
         const val COLLAPSE_MS = 140L
 
         /** The wedge's lean, which the sheet starts from so the two shapes are one motion. */
-        const val START_TILT_DEGREES = 15f
+        /**
+         * Where the expand STARTS, in degrees.
+         *
+         * Two, not the tip's fifteen. The tip's lean belongs to the tip; making the sheet begin at
+         * that angle and unwind to its rest tilt reads as a spin rather than paper settling. Two
+         * degrees down to half a degree is a settle you feel instead of one you watch.
+         */
+        const val START_TILT_DEGREES = 2f
 
         /**
          * The sheet's resting lean: half a degree.
@@ -253,5 +281,13 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
          * advance, where "wait for the next frame" becomes an infinite loop.
          */
         const val MAX_FRAMES = 120
+
+        /**
+         * How high the sheet sits above the surface, in dp.
+         *
+         * Enough for a soft edge on every side at the resting tilt; much more reads as a floating
+         * panel rather than a sheet of paper.
+         */
+        const val ELEVATION_DP = 6f
     }
 }
