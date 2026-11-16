@@ -114,6 +114,15 @@ class ApprovalActivity : FragmentActivity() {
          * aliased edge of the wedge is not clipped by the window itself.
          */
         private const val TIP_WINDOW_MARGIN_DP = 12F
+
+        /**
+         * How long the stamp may cover the screen before the Activity closes regardless.
+         *
+         * Generous compared with the stamp's own sequence (~1.6s total). It exists only for the
+         * case where the stamp never reports finishing — which is not hypothetical: a frame loop
+         * that returned instead of re-posting left a full-screen overlay taking every touch.
+         */
+        private const val STAMP_DEADLINE_MS = 4_000L
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
         const val EXTRA_ENDPOINT = "endpoint"
@@ -1575,6 +1584,18 @@ class ApprovalActivity : FragmentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
+        // **A second, independent backstop.**
+        //
+        // The overlay owns its own deadline now, but this screen must come back even if the overlay
+        // itself is never laid out, never attached, or throws inside its own frame loop. The decision
+        // is already recorded above; the only thing left is to stop covering the phone.
+        forcedExit.removeCallbacksAndMessages(null)
+        forcedExit.postDelayed({
+            if (stamping && !isFinishing) {
+                Log.w("ApprovalActivity", "stamp never finished; closing the approval screen")
+                finish()
+            }
+        }, STAMP_DEADLINE_MS)
         // **No timed exit any more.**
         //
         // The stamp is dismissed by the human, so a wall-clock backstop would recreate exactly

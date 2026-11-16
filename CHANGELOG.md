@@ -5611,9 +5611,13 @@ devDependencies. `node_modules/` is gitignored.
 - The stack is legible. Layers stepped 10dp apart overlapped into what looked like one thicker wedge; they now step 22dp and 26dp and hold more of their opacity, because a stack nobody can count is not a queue indicator.
 - A queued request no longer goes missing. The handover used to rely on the platform routing a second launch to the existing window, which it does not do when that launch lands in a different task — with an empty `taskAffinity` and NEW_TASK required from a background service, three requests surfaced as one. The gate now holds a live reference to the window that is on screen and delivers into it directly, falling back to a launch only when there is no window.
 
-## 0.51.41 (build 367) — 2026-11-16 — CURRENT
+## 0.51.41 (build 367) — 2026-11-16
 - The stamp and the tear are anchored to the sheet by NAME, not to the root's last child. Once the tip became a sibling of the sheet the last child was the 195dp strip, so the stamp anchored to a wedge, drew a mark nobody could see, and — because its animation never reported finished — left a full-screen overlay behind that swallowed every touch. Reported as "after accepting I only see shadow and I can't touch anything", which is exactly what a stamp that never finishes does: it is a shield over the whole screen.
 - The paper's shadow is a real blur now. Offsetting copies of the outline was wrong in a way no offset value could fix: a few copies of a hard-edged path are still hard-edged, so the shadow read as a second grey wedge behind the paper rather than something the paper casts. It is rendered once into a bitmap with a `BlurMaskFilter` over the actual outline, so it follows the paper's lean, and costs one `drawBitmap` per frame.
+
+## 0.51.42 (build 368) — 2026-11-16 — CURRENT
+- The stamp can no longer lock the phone. Its frame loop began with `if (finished || !isAttachedToWindow) return` — and `stamp()` posts the first frame immediately after the overlay is added, so a frame that ran before attachment ended the loop for good. Nothing else ever finished the overlay, and an overlay that never finishes covers the whole screen and takes every touch. That is the reported "after accepting I only see shadow and I can't touch anything": not a stuck modal, a dead stamp acting as a shield. A pre-attachment frame now re-posts instead of returning, the overlay carries its own wall-clock deadline, and the Activity carries a second one that closes the screen if the stamp never reports finishing at all.
+- Two independent backstops rather than one, because the failure had two ways to happen: the loop dying, and the overlay never being laid out in the first place. The decision is already recorded before either fires, so closing the screen is always safe.
 
 ## Keeping this file honest
 

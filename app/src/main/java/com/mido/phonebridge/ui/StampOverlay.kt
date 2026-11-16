@@ -16,6 +16,8 @@ import com.mido.phonebridge.R
  * still converges and the caller is told exactly once. No decision, latch or audit timing is
  * changed by this class.
  */
+private const val HARD_DEADLINE_SLACK_MS = 1_200L
+
 class StampOverlay(
     context: Context,
     private val scrimAlpha: Int = 0x66,
@@ -93,7 +95,18 @@ class StampOverlay(
 
     private val tick: Runnable = object : Runnable {
         override fun run() {
-            if (finished || !isAttachedToWindow) return
+            if (finished) return
+            // **A frame before attachment must RE-POST, not return.**
+            //
+            // `return` here killed the loop for good: `stamp()` posts the first frame immediately
+            // after the overlay is added, and if that frame runs before the view is attached the
+            // loop simply ended. Nothing else ever finished the overlay — and an overlay that
+            // never finishes covers the whole screen and takes every touch. That is the "only
+            // shadow, cannot touch anything" report: a dead stamp acting as a shield.
+            if (!isAttachedToWindow) {
+                postOnAnimation(this)
+                return
+            }
             if (startedAt == 0L) {
                 // **Wait for the window to be ours again.** The biometric prompt is a separate
                 // window that is still dismissing when the approve callback fires, so arming with
@@ -152,6 +165,19 @@ class StampOverlay(
         }
     }
 
+    /**
+     * Absolute ceiling on how long this overlay may exist, in ms.
+     *
+     * Independent of the animation's own clock: whatever goes wrong with focus, attachment or
+     * scheduling, the screen must come back. A receipt nobody can dismiss is a locked phone.
+     */
+    private val hardDeadline: Runnable = Runnable {
+        if (!finished) {
+            android.util.Log.w("StampOverlay", "hard deadline: forcing finish ($verdict)")
+            finishOnce()
+        }
+    }
+
     fun stamp(value: Verdict) {
         verdict = value
         bitmap?.recycle()
@@ -176,6 +202,12 @@ class StampOverlay(
         // never start anything while another window is on top and this one is not drawn.
         postOnAnimation(tick)
         invalidate()
+        // And a wall-clock backstop, because every other exit in this class is driven by frames.
+        removeCallbacks(hardDeadline)
+        postDelayed(
+            hardDeadline,
+            PaperMotion.STAMP_TOTAL_MS + PaperMotion.STAMP_HOLD_MS + HARD_DEADLINE_SLACK_MS,
+        )
     }
 
     /** Arm on a draw that happens while nothing is on top of us. */
@@ -210,6 +242,7 @@ class StampOverlay(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(tick)
+        removeCallbacks(hardDeadline)
         bitmap?.recycle()
         bitmap = null
         super.onDetachedFromWindow()
@@ -218,6 +251,8 @@ class StampOverlay(
     private fun finishOnce() {
         if (finished) return
         finished = true
+        removeCallbacks(tick)
+        removeCallbacks(hardDeadline)
         android.util.Log.i("StampOverlay", "finished: $verdict")
         onFinished?.invoke()
     }
