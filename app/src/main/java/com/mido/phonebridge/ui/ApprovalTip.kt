@@ -29,11 +29,17 @@ object ApprovalTip {
      * device, so it is clamped to [TOP_WIDTH_MIN_DP]..[TOP_WIDTH_MAX_DP] to stay readable to
      * look at and easy to hit.
      */
-    private const val TOP_WIDTH_FRACTION = 0.34f
+    private const val TOP_WIDTH_FRACTION = 0.24f
 
-    /** Roughly 3 cm on a phone: big enough to read as paper, small enough to ignore. */
-    const val TOP_WIDTH_MIN_DP = 72f
-    const val TOP_WIDTH_MAX_DP = 220f
+    /**
+     * A narrow strip of paper, not a panel.
+     *
+     * This is the width the wedge reaches in from the edge, and every dp of it is screen the human
+     * cannot see. Measured by eye on the device: at a third of the display it read as a card
+     * leaning in, which is not what this is — it is a corner of a sheet caught mid-slide.
+     */
+    const val TOP_WIDTH_MIN_DP = 56f
+    const val TOP_WIDTH_MAX_DP = 150f
 
     /**
      * How far the leaning edge bows outwards, as a fraction of the top width.
@@ -52,6 +58,14 @@ object ApprovalTip {
      * extends inwards so a tap in the last 80 dp lands on the tip.
      */
     const val TOUCH_REACH_DP = 80f
+
+    /**
+     * How far below the top edge the paper hangs, in dp.
+     *
+     * Not flush with the top: a wedge pinned to the very corner reads as part of the status bar.
+     * A little air above it makes it read as a sheet slipped in from the side.
+     */
+    const val TOP_OFFSET_DP = 56f
 
     /** Each ghost steps inwards and downwards from the one in front of it. */
     const val GHOST_INSET_DP = 10f

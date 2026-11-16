@@ -172,12 +172,14 @@ class ApprovalTipView(context: Context) : View(context) {
 
         fronts.clear()
         val wedges = ApprovalTip.stack(depth, density)
-        frontTopPx = wedges.firstOrNull()?.dropPx ?: 0f
+        // The stack hangs below the top edge rather than flush against it.
+        val topOffset = ApprovalTip.TOP_OFFSET_DP * density
+        frontTopPx = topOffset + (wedges.firstOrNull()?.dropPx ?: 0f)
         // The step between two adjacent wedges, which is what a promotion travels.
         stepDropPx = (wedges.getOrNull(1)?.dropPx ?: (ApprovalTip.GHOST_DROP_DP * density)) -
             (wedges.firstOrNull()?.dropPx ?: 0f)
         for (wedge in wedges) {
-            val top = wedge.dropPx
+            val top = topOffset + wedge.dropPx
             val points = ApprovalTip.outline(m, w, top)
             val control = ApprovalTip.bowControl(m, w, top)
             val path = Path().apply {

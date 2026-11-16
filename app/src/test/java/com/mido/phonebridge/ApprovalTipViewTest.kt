@@ -25,6 +25,9 @@ import org.robolectric.shadows.ShadowLooper
 @Config(sdk = [33])
 class ApprovalTipViewTest {
 
+    /** The same offset the view applies, in px at the test density (1.0 under Robolectric). */
+    private val TOP_OFFSET_PX = ApprovalTip.TOP_OFFSET_DP
+
     private fun tip(depth: Int = 1, width: Int = 320, height: Int = 470): ApprovalTipView {
         val ctx = RuntimeEnvironment.getApplication()
         val v = ApprovalTipView(ctx)
@@ -74,9 +77,21 @@ class ApprovalTipViewTest {
         val v = tip()
         var opened = false
         v.onOpen = { opened = true }
-        // Just inside the top-right corner, where the wedge is at its widest.
-        tap(v, 319f, 4f)
+        // The paper hangs below the top edge, so the tap goes where the wedge is at its widest:
+        // just inside the right edge, a little below the top offset.
+        tap(v, 319f, TOP_OFFSET_PX + 8f)
         assertTrue("a tap on the paper must open the sheet", opened)
+    }
+
+    @Test
+    fun `the paper does not start flush against the top edge`() {
+        // A wedge pinned to the very corner reads as part of the status bar rather than a sheet
+        // slipped in from the side, so the strip's top is empty on purpose.
+        val v = tip()
+        var opened = false
+        v.onOpen = { opened = true }
+        tap(v, 319f, 4f)
+        assertFalse("the area above the offset must be empty", opened)
     }
 
     @Test
@@ -151,7 +166,7 @@ class ApprovalTipViewTest {
         var opened = false
         narrow.onOpen = { opened = true }
         // The wedge occupies the right edge, so a tap near it must land on paper.
-        tap(narrow, 130f, 4f)
+        tap(narrow, 130f, TOP_OFFSET_PX + 8f)
         assertTrue("the paper must be inside a strip window, not off its left edge", opened)
     }
 
@@ -169,7 +184,7 @@ class ApprovalTipViewTest {
         v.layout(0, 0, 132, 470)
         var opened = false
         v.onOpen = { opened = true }
-        tap(v, 131f, 4f)
+        tap(v, 131f, TOP_OFFSET_PX + 8f)
         assertTrue("a strip must still show and hit its paper", opened)
     }
 

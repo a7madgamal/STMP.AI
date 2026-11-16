@@ -222,8 +222,15 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
     }
 
     private companion object {
-        /** In at 220 ms: slow enough to read as a sheet being laid down. */
-        const val EXPAND_MS = 220L
+        /**
+         * In at 320 ms.
+         *
+         * Slower than the first cut on request: at 220ms the sheet arrived before the eye had
+         * registered the wedge leaving, which read as a cut rather than a motion. Leaving stays
+         * fast — arriving deliberately and departing obediently is what makes the pair feel
+         * responsive instead of sluggish.
+         */
+        const val EXPAND_MS = 320L
 
         /**
          * Out at 140 ms, and FLAT.

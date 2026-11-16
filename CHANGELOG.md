@@ -5596,10 +5596,14 @@ devDependencies. `node_modules/` is gitignored.
 - The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it.
 - The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it. The next report will name the missing step instead of requiring another guess.
 
-## 0.51.38 (build 364) — 2026-11-16 — CURRENT
+## 0.51.38 (build 364) — 2026-11-16
 - The sheet now casts a shadow. It rests slightly off-axis so it reads as paper laid on the screen, and paper laid on something has an edge — without one the card looked pasted on rather than lying there. It is the platform's own elevation shadow against a rounded outline, so it costs no drawing of its own; the wedge stack draws three widening copies of its own outline instead, because a shadow layer is silently dropped in some window configurations and this project has already paid for silent visual failures twice.
 - Expanding starts at 2° and settles to half a degree. Starting from the tip's full lean read as a spin; two degrees down to a half is a settle.
 - Opening and closing are single motions. The wedge used to be hidden the instant the sheet appeared, so the eye saw paper vanish and then paper arrive — two events with a gap, which reads as a flicker however short the gap. Both now run on the same beat: the wedge slides out to the right while the sheet rotates in from that edge, and collapsing shows the wedge before the window shrinks so it has a strip to slide into.
+
+## 0.51.39 (build 365) — 2026-11-16 — CURRENT
+- The resting wedge is narrower and hangs lower. At a quarter of the display it still read as a panel leaning in rather than a corner of a sheet caught mid-slide, and every dp of it is screen the human cannot see; it is now a fraction under a quarter, with the clamp lowered to match. It also starts 56dp below the top edge, because a wedge pinned to the very corner reads as part of the status bar rather than something slipped in from the side.
+- Opening takes 320ms instead of 220. At the faster setting the sheet arrived before the eye had registered the wedge leaving, which read as a cut rather than a motion. Leaving is unchanged at 140ms — arriving deliberately and departing obediently is the pair that feels responsive rather than sluggish.
 
 ## Keeping this file honest
 
