@@ -95,33 +95,6 @@ object ApprovalTip {
      */
     data class Wedge(val insetPx: Float, val dropPx: Float, val alpha: Float)
 
-    /**
-     * Whether [x],[y] falls on the wedge whose top edge is at [topPx].
-     *
-     * **Pure arithmetic, not a `Region`.** The wedge is a triangle, so a point test is three
-     * cross products — and it is a FUNCTION, so the hit area can be asserted in a JVM test
-     * instead of trusted. A `Region` would need rebuilding on every layout and can answer
-     * differently under a shadowed runtime than on the device, which is the last thing a hit
-     * target should do.
-     *
-     * The bow is deliberately ignored: it is 6 % of the width, well inside a fingertip, and
-     * approximating the curved edge with the straight one can only make the target slightly
-     * LARGER — a tap near the paper's edge still opens it, which is the forgiving direction.
-     */
-    fun contains(m: Metrics, screenWidthPx: Int, topPx: Float, x: Float, y: Float): Boolean {
-        val pts = outline(m, screenWidthPx, topPx)
-        val ax = pts[0].x; val ay = pts[0].y
-        val bx = pts[1].x; val by = pts[1].y
-        val cx = pts[2].x; val cy = pts[2].y
-        // Cross products of the three edges; one consistent sign means inside. The triangle
-        // winds one way only, so a single convention is enough and no ordering can flip it.
-        val d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by)
-        val d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy)
-        val d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay)
-        val hasNeg = d1 < 0f || d2 < 0f || d3 < 0f
-        val hasPos = d1 > 0f || d2 > 0f || d3 > 0f
-        return !(hasNeg && hasPos)
-    }
 
     /**
      * The wedges to draw for a queue of [depth] requests, front first.
@@ -176,7 +149,7 @@ object ApprovalTip {
         // runs perpendicular to that until it meets the screen edge again. Solving those two lines
         // for the meeting point gives `w / sin(theta)` — so the length follows from the angle and
         // neither number is stored twice.
-        val heightPx = topWidthPx / kotlin.math.sin(TILT_DEGREES * PI.toFloat() / 180f)
+        val heightPx = topWidthPx * 3.4f
 
         return Metrics(
             topWidthPx = topWidthPx,
@@ -187,45 +160,71 @@ object ApprovalTip {
     }
 
     /**
-     * The three corners of the wedge, front-face, anchored to the right edge at [topPx].
+     * The four corners of a ROTATED RECTANGLE that floats clear of the screen edge.
      *
-     * Order matters: top-right, top-left, then the point at the bottom of the leaning edge.
-     * A `Path` closes from the last point back to the first, which draws the right edge as the
-     * vertical screen edge it is meant to be flush against.
+     * **No edge of this shape touches the screen edge, and that is the entire point.** Every earlier
+     * version clipped the paper against the right edge, so one side of it was exactly vertical — and
+     * the shadow of a vertical side is a vertical band. Reported twice as "the shadow is still
+     * vertical", and the report was right: no shadow parameter can fix a shape with a vertical edge.
+     *
+     * A sheet lying at an angle has four leaning edges and no vertical one, so this is a floating
+     * rectangle, rotated, with a corner reaching in towards the screen edge without touching it.
      */
     fun outline(m: Metrics, screenWidthPx: Int, topPx: Float): List<Point> {
-        val right = screenWidthPx.toFloat()
         val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
         val sin = kotlin.math.sin(t)
         val cos = kotlin.math.cos(t)
 
-        // **The corner of a rotated sheet, not a right triangle stuck to the edge.**
-        //
-        // The first version had a HORIZONTAL top edge and a vertical right edge, which is a shape
-        // no sheet of paper makes: the top read as parallel to the screen edge, so the whole thing
-        // looked like a cut-off panel rather than paper at an angle. Both visible edges now carry
-        // the same lean, so the corner is a genuine corner and the two edges are perpendicular to
-        // each other in the paper's own frame.
-        // A is the top-right corner, on the screen edge. B is the far end of the TOP edge, which
-        // descends as it goes left — so the edge is visibly not parallel to the screen, and the
-        // corner at B is a true 90 degrees. C is where the leaning edge meets the screen edge
-        // again, which closes the taper.
-        val a = Point(right, topPx)
-        val b = Point(right - m.topWidthPx * cos, topPx + m.topWidthPx * sin)
-        val c = Point(right, topPx + m.heightPx)
-        return listOf(a, b, c)
+        // The rectangle's own axes in screen space. `along` runs down-left (the sheet's length),
+        // `across` runs down-right (its visible band). Neither is horizontal or vertical.
+        val alongX = -cos; val alongY = sin
+        val acrossX = sin; val acrossY = cos
+
+        val length = m.heightPx
+        val band = m.topWidthPx
+
+        // Anchor the topmost corner so the whole rectangle sits inside the view, clear of the edge.
+        val margin = band * EDGE_CLEARANCE_FRACTION
+        val ax = screenWidthPx - margin - band * acrossX
+        val ay = topPx
+
+        fun at(la: Float, lb: Float) = Point(
+            ax + alongX * la + acrossX * lb,
+            ay + alongY * la + acrossY * lb,
+        )
+        return listOf(
+            at(0f, 0f),
+            at(length, 0f),
+            at(length, band),
+            at(0f, band),
+        )
     }
 
     /**
-     * Control point for the bow on the leaning edge, pulled inwards (left) from its midpoint.
+     * Whether [x],[y] is inside the rotated rectangle.
      *
-     * Inwards, because the leaning edge is the wedge's LEFT boundary: bowing it left makes the
-     * paper flex OUT, which is the shape a sheet makes when it is caught mid-slide. Bowing it
-     * right would eat into the strip and make the tip look pinched instead.
+     * Convex-polygon test: same side of every edge. Path-independent and order-independent, so a
+     * shape change cannot silently invert it.
+     */
+    fun contains(m: Metrics, screenWidthPx: Int, topPx: Float, x: Float, y: Float): Boolean {
+        val pts = outline(m, screenWidthPx, topPx)
+        var hasNeg = false
+        var hasPos = false
+        for (i in pts.indices) {
+            val a = pts[i]
+            val b = pts[(i + 1) % pts.size]
+            val d = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)
+            if (d < 0f) hasNeg = true
+            if (d > 0f) hasPos = true
+        }
+        return !(hasNeg && hasPos)
+    }
+
+    /**
+     * Control point that bows the paper's long edge outwards.
      *
-     * Returned rather than baked into [outline] so the view can `quadTo` it and a test can
-     * assert the clamp: on a narrow screen a fixed bow could push the control point off the
-     * left edge, and a quadratic control point outside the window draws a curve that leaves it.
+     * Kept from the earlier shape because it is the detail that makes the edge read as flexed paper
+     * rather than a cut rectangle. Applied to the long edge between the two far corners.
      */
     fun bowControl(m: Metrics, screenWidthPx: Int, topPx: Float): Point {
         val pts = outline(m, screenWidthPx, topPx)
@@ -233,8 +232,10 @@ object ApprovalTip {
         val c = pts[2]
         val midX = (b.x + c.x) / 2f
         val midY = (b.y + c.y) / 2f
-        // Pushed out to the LEFT of the leaning edge, perpendicular-ish, so the paper flexes
-        // outwards. Floored at 0 so the curve can never leave the display.
+        // Push outwards, away from the paper's own centre (which lies to the right of this edge).
         return Point((midX - m.bowPx).coerceAtLeast(0f), midY)
     }
+
+    /** How much clear screen the paper keeps from the edge, as a fraction of its band. */
+    private const val EDGE_CLEARANCE_FRACTION = 0.45f
 }

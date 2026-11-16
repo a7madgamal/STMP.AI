@@ -205,8 +205,6 @@ class ApprovalActivity : FragmentActivity() {
     private var paperWrapper: com.mido.phonebridge.ui.PaperSheetView? = null
 
     /** The resting wedge stack. Visible only while resting. */
-    private var tipView: com.mido.phonebridge.ui.ApprovalTipView? = null
-
     /**
      * Resize the window for [next] and apply that shape's flags.
      *
@@ -348,23 +346,14 @@ class ApprovalActivity : FragmentActivity() {
 
     private fun handleNewRequest(intent: android.content.Intent) {
 
-        // **What the stack looked like BEFORE the gate moved on.**
-        //
-        // The gate has already promoted the next request to head by the time this arrives, so it
-        // cannot say how deep the stack was a moment ago — only the view still knows, because it
-        // was drawing it. Read here, before anything is rebuilt.
-        val depthBefore = tipView?.depth ?: 1
-
         // Everything the outgoing request bound to this Activity goes first: its tick, its
         // password field, its "a decision is happening" flag. A swap that forgot one would let the
         // previous request's countdown keep running behind the new request's card.
         releaseRequestScopedState()
         applyIntent(intent)
 
-        // The answered wedge leaves and the one behind it steps forward, THEN the card for the new
-        // request is presented. Playing them together would show two requests moving at once.
-        val depthAfter = tipView?.depth ?: 1
-        tipView?.promote(fromDepth = depthBefore, toDepth = depthAfter)
+        // The stack itself lives in the overlay now; refresh its depth for this request.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(this, visibleWedgeCount())
     }
 
     /**
@@ -940,9 +929,12 @@ class ApprovalActivity : FragmentActivity() {
                 // can act on is the one that is also visible while the sheet is closed. Fed here
                 // rather than in its own timer so a queue change can never arrive in one place
                 // before the other.
-                tipView?.depth = (behind + 1).coerceAtMost(
-                    com.mido.phonebridge.ui.ApprovalTip.MAX_VISIBLE,
-                )
+                // The resting stack is an overlay window; keep its depth in step with the queue.
+                if (com.mido.phonebridge.notify.ApprovalTipOverlay.isShowing) {
+                    com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+                        this@ApprovalActivity, visibleWedgeCount(),
+                    )
+                }
 
                 // Keep ticking while the modal is live. A loading modal has no countdown to
                 // expire on, so the tick — not a timer — is what ends it.
@@ -1363,14 +1355,6 @@ class ApprovalActivity : FragmentActivity() {
         // the whole life of the request, and the shape decides which one is visible. Swapping the
         // content view per shape would rebuild the card — and the card's tick, its handlers and
         // its countdown are all bound to the views built here.
-        val display = resources.displayMetrics
-        tipView = com.mido.phonebridge.ui.ApprovalTipView(this).apply {
-            // The paper is proportioned to the SCREEN even though it is drawn in a strip.
-            screenWidthPx = display.widthPixels
-            depth = visibleWedgeCount()
-            onOpen = { openSheet(animateEntrance = true) }
-        }
-
         // A tap beside the sheet folds it back to the wedge. It deliberately does NOT reach the
         // app underneath: a request is in flight, and stray taps landing on the app behind a
         // half-open approval is how someone approves by accident.
@@ -1380,9 +1364,12 @@ class ApprovalActivity : FragmentActivity() {
             setOnClickListener { collapseToTip() }
         }
 
+        // A tap beside the sheet folds it back to the tip overlay rather than reaching the app
+        // behind: a request is in flight, and stray taps landing behind a half-open approval is
+        // how someone approves by accident.
+        scrim.setOnClickListener { collapseToTip() }
+
         val root = android.widget.FrameLayout(this).apply {
-            // Transparent, not paper: in the resting shape this window is a strip against the
-            // right edge and the area beside the wedge is someone else's app.
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             addView(scrim, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -1390,19 +1377,16 @@ class ApprovalActivity : FragmentActivity() {
             addView(presentation, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             ))
-            addView(tipView, ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-            ))
         }
         setContentView(root)
 
-        // The keyguard decides the opening shape, and it is read HERE rather than in the gate: a
-        // wedge on a lock screen cannot be read or tapped, so presenting one would burn the whole
-        // decision window on a surface nobody can act on.
-        val locked = (getSystemService(android.content.Context.KEYGUARD_SERVICE)
-            as android.app.KeyguardManager).isKeyguardLocked
-        com.mido.phonebridge.Debug.log("approval: keyguardLocked=$locked -> ${if (locked) "OPEN" else "RESTING"}")
-        if (locked) openSheet(animateEntrance = true) else restSilently()
+        // **This Activity is only ever the SHEET now.**
+        //
+        // The resting wedge moved to `ApprovalTipOverlay`, a system overlay window, because an
+        // Activity pauses whatever is behind it — so a translucent strip still froze the screen.
+        // A sheet is a full-screen decision surface, which is exactly what an Activity is for, so
+        // there is no longer a "resting shape" to choose here.
+        openSheet(animateEntrance = true)
 
         val entrance = PaperMotion.entrance(
             alreadyPresented = !entranceRegistry.claim(id),
@@ -1430,15 +1414,7 @@ class ApprovalActivity : FragmentActivity() {
         applyWindowShape(WindowShape.OPEN)
         sheetRoot?.visibility = View.VISIBLE
 
-        if (animateEntrance) {
-            tipView?.dismiss()
-            sheet()?.present()
-        } else {
-            // A locked phone opens straight to the sheet, and a re-show must not replay an
-            // entrance for a request the human has already met.
-            tipView?.let { it.visibility = View.GONE }
-            sheet()?.settle()
-        }
+        if (animateEntrance) sheet()?.present() else sheet()?.settle()
     }
 
     /**
@@ -1453,18 +1429,15 @@ class ApprovalActivity : FragmentActivity() {
         if (shape != WindowShape.OPEN || stamping) return
         // Fold first, then shrink the window: hiding the sheet before the motion finishes would
         // turn a 140ms fold into a single frame of nothing.
-        // The wedge is shown BEFORE the window shrinks, so it has a strip to slide into while the
-        // sheet is still folding — one continuous hand-back rather than fold, blank, arrive.
-        tipView?.let {
-            it.visibility = View.VISIBLE
-            it.depth = visibleWedgeCount()
-            it.present()
-        }
+        // The tip overlay is shown BEFORE this window goes, so there is something to hand back to
+        // while the sheet is still folding — one continuous motion rather than fold, blank, appear.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+            this, visibleWedgeCount(),
+        )
         sheet()?.dismiss {
-            // Only shrink once the fold has played. A window that becomes a strip while the sheet
-            // is still drawn would clip the animation to a third of the screen.
-            sheetRoot?.visibility = ViewGroup.GONE
-            applyWindowShape(WindowShape.RESTING)
+            // The request is untouched: no resolution, no clock change. This window simply leaves
+            // and the overlay carries the tip.
+            finish()
         }
     }
 
@@ -1483,19 +1456,6 @@ class ApprovalActivity : FragmentActivity() {
     private fun sheet(): com.mido.phonebridge.ui.PaperSheetView? =
         sheetRoot?.parent as? com.mido.phonebridge.ui.PaperSheetView
 
-    /** The resting shape: strip window, wedge only, nothing dimmed, nothing focused. */
-    private fun restSilently() {
-        com.mido.phonebridge.Debug.log("approval: restSilently")
-        // Resuming after a rotation: the window has no shape yet, but the request has already been
-        // on screen, so the tip must not replay an arrival for a request the human has met.
-        val resumed = shape == null && tipView?.isAtRest == false
-        applyWindowShape(WindowShape.RESTING)
-        sheetRoot?.visibility = View.GONE
-        tipView?.let {
-            it.visibility = View.VISIBLE
-            if (!resumed) it.present()
-        }
-    }
 
     /**
      * True from the moment a decision is taken until the stamp has finished.

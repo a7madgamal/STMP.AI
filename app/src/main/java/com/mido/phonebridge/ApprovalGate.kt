@@ -791,6 +791,7 @@ object ApprovalGate {
                 }
                 if (current != null && current!!.requestId != pending.requestId) current else null
             }
+            com.mido.phonebridge.notify.ApprovalTipOverlay.hide()
             cancelNotification(ctx, id)
             if (next != null) {
                 postApprovalNotification(ctx, next)
@@ -862,16 +863,31 @@ object ApprovalGate {
         // out. On Android 10+ this background start is legal because the app holds
         // SYSTEM_ALERT_WINDOW (a listed background-activity-start exemption), and
         // the Full-screen popup toggle covers the FSI path on Android 14+.
-        // A window is already on screen: hand the request to IT. This is the path that makes a
-        // queue of requests actually reachable — the launch below can start a second task and the
+        // **The request rests as an OVERLAY, not as an Activity.**
+        //
+        // An Activity pauses whatever is behind it, so a resting modal — however narrow and
+        // translucent — froze the screen it was supposed to sit on top of. A system overlay window
+        // does not: the app below keeps running and every touch outside the strip reaches it.
+        //
+        // So the flow is: the tip appears here, nothing else launches. Tapping it removes the
+        // overlay and launches the Activity, which opens straight to the sheet. The Activity is
+        // therefore only ever a modal again, which is what it is good at.
+        if (com.mido.phonebridge.notify.ApprovalTipOverlay.isShowing) {
+            // A queued request only needs the stack to grow.
+            com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+                ctx, 1 + waitingBehindCurrent(),
+            )
+            return
+        }
+
+        // A window is already on screen (the sheet is open): hand the request to IT. This is what
+        // makes a queue of requests reachable — a fresh launch can land in another task and the
         // queued request then has no window to appear in.
         if (deliverToRunningWindow(ctx, intent)) return
 
-        try {
-            ctx.startActivity(intent)
-        } catch (e: Exception) {
-            android.util.Log.w("ApprovalGate", "direct activity launch failed: ${e.message}")
-        }
+        // Nothing is open: rest the request behind the tip. The Activity launches only when the
+        // human touches it.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(ctx, 1 + waitingBehindCurrent())
     }
 
     /**
