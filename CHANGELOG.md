@@ -5571,10 +5571,14 @@ devDependencies. `node_modules/` is gitignored.
 - The exception key in the approval modal says what happens NEXT TIME rather than naming a mode: "USE CARD FROM NOW ON" and "ASK FROM NOW ON", replacing "ALWAYS NOTIFY" and "ALWAYS ASK". NOTIFY is an internal mode name, and "always notify me" never said what the human would actually get. Asked for on 2026-11-15; the code change had been sitting uncommitted while two tests already expected the new wording, so the screenshot baselines were the only stale thing left — re-recorded here.
 - The agent-facing contract moves to v5: one route added (`GET /health`), so a cached caller understanding is now incomplete. Pinned by `HelpContractTest`, which failed on the first run for exactly this reason — the guard working as intended.
 
-## 0.51.33 (build 359) — 2026-11-16 — CURRENT
+## 0.51.33 (build 359) — 2026-11-16
 - The getting-started tour is reachable again after it has been seen. Home set the whole `Get started` host to `GONE` once `OnboardingPrefs.seen` was true, reading that flag as "stop taking up Home" — but `MainActivity` gates its auto-launch on the SAME flag, so both doors closed at once and the tour became unreachable for anyone who had been introduced to it. That included someone who opened it once and swiped away, because the flag is written on ENTRY, not on finish. Reported 2026-11-16: *"it should always be available even if user is onboarded"*.
 - Seen now decides the door's WEIGHT, never whether it exists. Unseen gets the header and a full-width key above the gate, so a first run meets the explanation before three unexplained mode radios. Seen gets the same key and the same words as a ghost key in the same place — still one tap from Home, no longer the loudest thing on a screen whose question is whether the bridge is running.
 - Rebuilt on every render rather than built once and toggled. It is one header and one key, and toggling visibility is exactly what produced the bug where the door disappeared.
+
+## 0.51.34 (build 360) — 2026-11-16 — CURRENT
+- The seen-state `WHAT IS STMP?` key gets the module gap above it. With no "Get started" header to separate it from the hero card it sat flush against the card; unseen already has that header, so the margin is applied only when the header is absent.
+- A screenshot baseline now covers the state that had none. Every Home fixture left the tour UNSEEN, so the baselines described a screen nobody has after the first run — which is exactly why the tour could disappear without a screenshot changing. `home__get_started_seen` captures the returning user: no header, one quiet key, and the gap that keeps it off the card.
 
 ## Keeping this file honest
 

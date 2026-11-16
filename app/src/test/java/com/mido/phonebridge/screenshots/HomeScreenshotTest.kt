@@ -23,4 +23,20 @@ class HomeScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun gate_unreadable() { Fixtures.gateUnreadable(); capture("gate_unreadable") }
     @Test fun updates_up_to_date() { Fixtures.updatesUpToDate(); capture("updates_up_to_date") }
     @Test fun updates_available() { Fixtures.updatesAvailable(); capture("updates_available") }
+
+    /**
+     * **The state no screenshot covered, which is why the tour disappeared unnoticed.**
+     *
+     * Every fixture above leaves the tour UNSEEN, so `Get started` rendered with its header and a
+     * full-width key — and the baseline was correct for a screen nobody actually has after the
+     * first run. This captures what a returning user sees: no header, one quiet key, and the gap
+     * above it that keeps it off the hero card.
+     */
+    @Test fun get_started_seen() {
+        com.mido.phonebridge.core.OnboardingPrefs.markSeen(
+            androidx.test.core.app.ApplicationProvider
+                .getApplicationContext<android.content.Context>()
+        )
+        capture("get_started_seen")
+    }
 }

@@ -828,6 +828,21 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 if (unseen) Theme.ButtonStyle.NEUTRAL else Theme.ButtonStyle.GHOST,
             ) {
                 go(Intent(ctx, OnboardingActivity::class.java))
+            }.apply {
+                // **Only when seen.** Unseen has a "Get started" header directly above, which
+                // already separates the key from the hero card. Seen has no header, so the key sat
+                // flush against the card — that is the gap this fills.
+                //
+                // Module gap rather than an invented number: it is the same distance every other
+                // Home section uses between cards.
+                if (!unseen) {
+                    layoutParams = LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply {
+                        topMargin = Theme.dp(ctx, com.mido.phonebridge.ui.tokens.Dimens.MODULE_GAP)
+                    }
+                }
             },
         )
     }
