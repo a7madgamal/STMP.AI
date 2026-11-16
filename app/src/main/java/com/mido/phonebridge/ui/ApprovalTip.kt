@@ -1,0 +1,148 @@
+package com.mido.phonebridge.ui
+
+import kotlin.math.PI
+import kotlin.math.tan
+
+/**
+ * Geometry for the resting approval tip: the paper wedge that waits against the right edge.
+ *
+ * **The lean IS the taper.** The wedge is not a rectangle with a decorative angle: it is a
+ * triangle whose long edge runs down-right at [TILT_DEGREES] from vertical, so its width
+ * shrinks to nothing over a height fixed by that same angle. Deriving one from the other is
+ * what keeps the shape honest — a hand-picked "taper length" would drift away from the tilt the
+ * moment either number changed, and the sheet would stop reading as a sheet.
+ *
+ * **Pure arithmetic, no Android types.** The view needs a `Path`, but every decision that can be
+ * wrong — how wide, how tall, where the point lands — is decided here, where a JVM test can
+ * check it. `ApprovalTipView` only draws what this returns.
+ */
+object ApprovalTip {
+
+    /** Lean of the long edge, in degrees from vertical. The taper follows from this. */
+    const val TILT_DEGREES = 15f
+
+    /**
+     * Top width as a fraction of screen width, before clamping.
+     *
+     * The requested size is "about 3 cm". A phone is roughly 7 cm wide, so a third of the width
+     * lands there — but a fraction alone would give 5 cm on a tablet and 1.5 cm on a tiny
+     * device, so it is clamped to [TOP_WIDTH_MIN_DP]..[TOP_WIDTH_MAX_DP] to stay readable to
+     * look at and easy to hit.
+     */
+    private const val TOP_WIDTH_FRACTION = 0.34f
+
+    /** Roughly 3 cm on a phone: big enough to read as paper, small enough to ignore. */
+    const val TOP_WIDTH_MIN_DP = 72f
+    const val TOP_WIDTH_MAX_DP = 220f
+
+    /**
+     * How far the leaning edge bows outwards, as a fraction of the top width.
+     *
+     * A dead-straight edge reads as a cut shape; a few pixels of bow reads as paper flexed
+     * mid-slide. Small on purpose — at 6 % it is a hint, not a curve.
+     */
+    private const val BOW_FRACTION = 0.06f
+
+    /**
+     * How far the touch target reaches inwards from the strip, in dp.
+     *
+     * The right edge of a gesture-nav screen belongs to the system back gesture, and the system
+     * wins that competition — a target that only exists at the very edge is a target that
+     * sometimes cannot be hit. The visual strip stays where the design puts it; the *hit area*
+     * extends inwards so a tap in the last 80 dp lands on the tip.
+     */
+    const val TOUCH_REACH_DP = 80f
+
+    /** Each ghost steps inwards and downwards from the one in front of it. */
+    const val GHOST_INSET_DP = 10f
+    const val GHOST_DROP_DP = 6f
+
+    /**
+     * Alpha per depth, front first: the front wedge is opaque, the two behind it fade.
+     *
+     * Three, not more. A fourth wedge would be a second stack of paper with a stack of its own,
+     * and the human cannot act on any of them until one becomes head anyway.
+     */
+    val GHOST_ALPHA = floatArrayOf(1f, 0.45f, 0.22f)
+
+    /** Hard ceiling on how many wedges are ever drawn. */
+    const val MAX_VISIBLE = 3
+
+    data class Point(val x: Float, val y: Float)
+
+    data class Metrics(
+        /** Width of the horizontal top edge, in pixels. */
+        val topWidthPx: Float,
+        /** Vertical distance from the top edge to the point, in pixels. */
+        val heightPx: Float,
+        /** Inward reach of the hit area, in pixels. */
+        val reachPx: Float,
+        /** Distance the leaning edge bows outwards, in pixels. */
+        val bowPx: Float,
+    )
+
+    /**
+     * The wedge's measurements for one screen.
+     *
+     * @param screenWidthPx the full display width; the wedge is anchored to its right edge.
+     * @param density the display density, for the dp clamps.
+     */
+    fun metrics(screenWidthPx: Int, density: Float): Metrics {
+        require(screenWidthPx > 0) { "screenWidthPx must be positive, was $screenWidthPx" }
+        require(density > 0f) { "density must be positive, was $density" }
+
+        val minPx = TOP_WIDTH_MIN_DP * density
+        val maxPx = TOP_WIDTH_MAX_DP * density
+        val topWidthPx = (screenWidthPx * TOP_WIDTH_FRACTION).coerceIn(minPx, maxPx)
+
+        // tan(15°) = width / height, so the height is the width divided by it. This is the
+        // whole taper: change the tilt and the length follows, which is why neither number is
+        // stored twice.
+        val heightPx = topWidthPx / tan(TILT_DEGREES * PI.toFloat() / 180f)
+
+        return Metrics(
+            topWidthPx = topWidthPx,
+            heightPx = heightPx,
+            reachPx = TOUCH_REACH_DP * density,
+            bowPx = topWidthPx * BOW_FRACTION,
+        )
+    }
+
+    /**
+     * The three corners of the wedge, front-face, anchored to the right edge at [topPx].
+     *
+     * Order matters: top-right, top-left, then the point at the bottom of the leaning edge.
+     * A `Path` closes from the last point back to the first, which draws the right edge as the
+     * vertical screen edge it is meant to be flush against.
+     */
+    fun outline(m: Metrics, screenWidthPx: Int, topPx: Float): List<Point> {
+        val right = screenWidthPx.toFloat()
+        return listOf(
+            Point(right, topPx),
+            Point(right - m.topWidthPx, topPx),
+            Point(right, topPx + m.heightPx),
+        )
+    }
+
+    /**
+     * Control point for the bow on the leaning edge, pulled inwards (left) from its midpoint.
+     *
+     * Inwards, because the leaning edge is the wedge's LEFT boundary: bowing it left makes the
+     * paper flex OUT, which is the shape a sheet makes when it is caught mid-slide. Bowing it
+     * right would eat into the strip and make the tip look pinched instead.
+     *
+     * Returned rather than baked into [outline] so the view can `quadTo` it and a test can
+     * assert the clamp: on a narrow screen a fixed bow could push the control point off the
+     * left edge, and a quadratic control point outside the window draws a curve that leaves it.
+     */
+    fun bowControl(m: Metrics, screenWidthPx: Int, topPx: Float): Point {
+        val right = screenWidthPx.toFloat()
+        val topLeft = Point(right - m.topWidthPx, topPx)
+        val point = Point(right, topPx + m.heightPx)
+        val midX = (topLeft.x + point.x) / 2f
+        val midY = (topLeft.y + point.y) / 2f
+        // Floored at 0 so the curve can never be dragged off the left edge of the display.
+        val x = (midX - m.bowPx).coerceAtLeast(0f)
+        return Point(x, midY)
+    }
+}
