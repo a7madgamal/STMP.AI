@@ -862,6 +862,11 @@ object ApprovalGate {
         // out. On Android 10+ this background start is legal because the app holds
         // SYSTEM_ALERT_WINDOW (a listed background-activity-start exemption), and
         // the Full-screen popup toggle covers the FSI path on Android 14+.
+        // A window is already on screen: hand the request to IT. This is the path that makes a
+        // queue of requests actually reachable — the launch below can start a second task and the
+        // queued request then has no window to appear in.
+        if (deliverToRunningWindow(ctx, intent)) return
+
         try {
             ctx.startActivity(intent)
         } catch (e: Exception) {
@@ -959,6 +964,44 @@ object ApprovalGate {
             // gate, not from this Activity.
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
+
+    /**
+     * The approval window currently on screen, if any.
+     *
+     * **Why a reference and not a launch flag.** The next request used to be handed over by
+     * launching the Activity again with SINGLE_TOP and hoping the platform routed it to the
+     * existing instance. With an empty `taskAffinity` and NEW_TASK required from a background
+     * service, that second launch can land in a *different* task — so `singleTop` never fires,
+     * `onNewIntent` never runs, and the queued requests simply never appear. Reported from the
+     * device: three requests, only the first surfaced.
+     *
+     * A live reference to the one window that exists is the honest version: if it is on screen the
+     * request goes straight into it; if it is not, the launch path is unchanged.
+     */
+    @Volatile
+    private var runningWindow: java.lang.ref.WeakReference<ApprovalActivity>? = null
+
+    /** Called by the Activity itself, so the gate never guesses which window is live. */
+    fun registerWindow(activity: ApprovalActivity?) {
+        runningWindow = activity?.let { java.lang.ref.WeakReference(it) }
+    }
+
+    /**
+     * Hand [p]'s intent to the running window, or report that there was none.
+     *
+     * Must run on the main thread: it rebuilds the card.
+     */
+    private fun deliverToRunningWindow(ctx: Context, intent: Intent): Boolean {
+        val activity = runningWindow?.get() ?: return false
+        if (activity.isFinishing || activity.isDestroyed) return false
+        return try {
+            activity.runOnUiThread { activity.onNewRequest(intent) }
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("ApprovalGate", "handover to the running window failed: ${e.message}")
+            false
+        }
+    }
 
     /** Whether the app may post full-screen intents (Android 14+). */
     fun canUseFullScreenIntent(ctx: Context): Boolean {

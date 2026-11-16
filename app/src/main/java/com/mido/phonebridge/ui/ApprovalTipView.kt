@@ -117,6 +117,14 @@ class ApprovalTipView(context: Context) : View(context) {
     /** Cached density, so the shadow maths does not re-read resources per frame. */
     private var density: Float = resources.displayMetrics.density
 
+    /**
+     * The direction the paper's shadow falls, in radians from straight down.
+     *
+     * Matches the tilt the outline is drawn with, so the shadow lies along the edge that casts it.
+     */
+    private val shadowAngle: Float =
+        Math.toRadians(ApprovalTip.TILT_DEGREES.toDouble()).toFloat()
+
     /** Counts real draws, so the diagnostic line is emitted once rather than per frame. */
     private var drawnOnce = 0
 
@@ -407,13 +415,20 @@ class ApprovalTipView(context: Context) : View(context) {
             canvas.translate(dx, dy)
 
             // The shadow first, so the paper sits ON it.
-            val drop = SHADOW_DROP_PX * density
-            val spread = SHADOW_SPREAD_PX * density
+            //
+            // **Offset along the paper's own downward direction, not the screen's.** The first
+            // version dropped the shadow straight down in screen space, so at a 15-degree lean the
+            // shadow fell at an angle to the edge casting it and read as a separate grey shape.
+            // A shadow is cast perpendicular to the surface it lands on, so the offset follows the
+            // paper's rotation.
             for (step in SHADOW_STEPS) {
+                val distance = SHADOW_DROP_PX * density * (1f + step)
+                val sx = distance * kotlin.math.sin(shadowAngle)
+                val sy = distance * kotlin.math.cos(shadowAngle)
+                val layerAlpha = (SHADOW_ALPHA * (1f - step * 0.45f)).toInt().coerceIn(0, 255)
+                shadow.alpha = layerAlpha
                 canvas.save()
-                canvas.translate(0f, drop * (1f + step))
-                canvas.scale(1f + spread * step / width.coerceAtLeast(1), 1f + spread * step / height.coerceAtLeast(1), width.toFloat(), 0f)
-                shadow.alpha = (SHADOW_ALPHA * (1f - step * 0.45f)).toInt().coerceIn(0, 255)
+                canvas.translate(sx, sy)
                 canvas.drawPath(path, shadow)
                 canvas.restore()
             }

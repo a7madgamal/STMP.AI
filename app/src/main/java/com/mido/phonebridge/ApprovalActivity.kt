@@ -145,7 +145,16 @@ class ApprovalActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApprovalGate.registerWindow(this)
         applyIntent(intent)
+    }
+
+    override fun onDestroy() {
+        ApprovalGate.registerWindow(null)
+        forcedExit.removeCallbacksAndMessages(null)
+        passwordField?.text?.clear()
+        passwordField = null
+        super.onDestroy()
     }
 
     /**
@@ -302,8 +311,22 @@ class ApprovalActivity : FragmentActivity() {
      * Activity, and the intent carries the ORIGINAL `createdAt`. A swap therefore inherits exactly
      * the deadline the request actually has.
      */
+    /**
+     * A new request arrived while this window is already on screen.
+     *
+     * **Called directly by the gate**, not only through `onNewIntent`. A re-launch relies on the
+     * platform routing to this instance, which it does not do when the second launch lands in a
+     * different task — the reason three queued requests showed only one. The gate holds a live
+     * reference to this window instead, so delivery cannot be lost.
+     */
+    fun onNewRequest(intent: android.content.Intent) = handleNewRequest(intent)
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        handleNewRequest(intent)
+    }
+
+    private fun handleNewRequest(intent: android.content.Intent) {
 
         // **What the stack looked like BEFORE the gate moved on.**
         //
@@ -1912,11 +1935,4 @@ class ApprovalActivity : FragmentActivity() {
      * first means the chars are gone even if a view reference survives somewhere; dropping
      * the field then removes the last easy path to them.
      */
-    override fun onDestroy() {
-        forcedExit.removeCallbacksAndMessages(null)
-
-        passwordField?.text?.clear()
-        passwordField = null
-        super.onDestroy()
-    }
 }

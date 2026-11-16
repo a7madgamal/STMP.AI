@@ -5601,9 +5601,15 @@ devDependencies. `node_modules/` is gitignored.
 - Expanding starts at 2° and settles to half a degree. Starting from the tip's full lean read as a spin; two degrees down to a half is a settle.
 - Opening and closing are single motions. The wedge used to be hidden the instant the sheet appeared, so the eye saw paper vanish and then paper arrive — two events with a gap, which reads as a flicker however short the gap. Both now run on the same beat: the wedge slides out to the right while the sheet rotates in from that edge, and collapsing shows the wedge before the window shrinks so it has a strip to slide into.
 
-## 0.51.39 (build 365) — 2026-11-16 — CURRENT
+## 0.51.39 (build 365) — 2026-11-16
 - The resting wedge is narrower and hangs lower. At a quarter of the display it still read as a panel leaning in rather than a corner of a sheet caught mid-slide, and every dp of it is screen the human cannot see; it is now a fraction under a quarter, with the clamp lowered to match. It also starts 56dp below the top edge, because a wedge pinned to the very corner reads as part of the status bar rather than something slipped in from the side.
 - Opening takes 320ms instead of 220. At the faster setting the sheet arrived before the eye had registered the wedge leaving, which read as a cut rather than a motion. Leaving is unchanged at 140ms — arriving deliberately and departing obediently is the pair that feels responsive rather than sluggish.
+
+## 0.51.40 (build 366) — 2026-11-16 — CURRENT
+- The wedge is now genuinely a corner of a leaning sheet. Its top edge was horizontal, so the shape read as a cut-off panel glued to the edge rather than paper seen at an angle — the giveaway being that the top edge ran parallel to the screen. Both visible edges lean, they meet at a true 90 degrees, and the taper length follows from the angle (`w / sin θ`) instead of being stored separately.
+- The shadow falls along the paper's own downward direction, not the screen's. Dropped straight down, a shadow at a fifteen-degree lean fell at an angle to the edge casting it and read as a separate grey shape.
+- The stack is legible. Layers stepped 10dp apart overlapped into what looked like one thicker wedge; they now step 22dp and 26dp and hold more of their opacity, because a stack nobody can count is not a queue indicator.
+- A queued request no longer goes missing. The handover used to rely on the platform routing a second launch to the existing window, which it does not do when that launch lands in a different task — with an empty `taskAffinity` and NEW_TASK required from a background service, three requests surfaced as one. The gate now holds a live reference to the window that is on screen and delivers into it directly, falling back to a launch only when there is no window.
 
 ## Keeping this file honest
 

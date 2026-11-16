@@ -23,8 +23,10 @@ class ApprovalTipTest {
 
     @Test
     fun `the taper length follows the tilt`() {
+        // `w / sin(theta)`, because the leaning edge has to come back to the screen edge after
+        // travelling the top edge's perpendicular. Asserted from the angle, not a stored constant.
         val m = ApprovalTip.metrics(width, density)
-        val expected = m.topWidthPx / tan(ApprovalTip.TILT_DEGREES * PI.toFloat() / 180f)
+        val expected = m.topWidthPx / kotlin.math.sin(ApprovalTip.TILT_DEGREES * PI.toFloat() / 180f)
         assertEquals(expected, m.heightPx, 0.01f)
     }
 
@@ -64,19 +66,44 @@ class ApprovalTipTest {
     }
 
     @Test
-    fun `the outline is flush to the right edge and tapers to a point`() {
+    fun `the top edge is NOT parallel to the screen`() {
+        // The first version had a horizontal top edge, so the wedge read as a cut-off panel glued
+        // to the corner rather than a sheet seen at an angle. Both visible edges now lean.
         val m = ApprovalTip.metrics(width, density)
-        val top = 100f
-        val points = ApprovalTip.outline(m, width, top)
-        assertEquals(3, points.size)
-        // Top-right and the point both sit exactly on the display's right edge...
-        assertEquals(width.toFloat(), points[0].x, 0f)
-        assertEquals(width.toFloat(), points[2].x, 0f)
-        // ...and the top-left is the full width inwards from it.
-        assertEquals(width - m.topWidthPx, points[1].x, 0.01f)
-        // The taper is vertical: no horizontal movement between top-right and the point.
-        assertEquals(points[0].y, top, 0f)
-        assertEquals(top + m.heightPx, points[2].y, 0.01f)
+        val pts = ApprovalTip.outline(m, width, 100f)
+        val topLeftY = pts[1].y
+        assertTrue(
+            "the top edge must not be level with the corner: cornerY=100 topLeftY=$topLeftY",
+            kotlin.math.abs(topLeftY - 100f) > 1f,
+        )
+    }
+
+    @Test
+    fun `the two visible edges are perpendicular in the paper's own frame`() {
+        // A sheet of paper has square corners. Whatever the lean, the top edge and the leaning
+        // edge must meet at 90 degrees or the shape is a wedge, not a corner of paper.
+        val m = ApprovalTip.metrics(width, density)
+        val pts = ApprovalTip.outline(m, width, 100f)
+        val topDx = pts[1].x - pts[0].x
+        val topDy = pts[1].y - pts[0].y
+        val leanDx = pts[2].x - pts[1].x
+        val leanDy = pts[2].y - pts[1].y
+        val dot = topDx * leanDx + topDy * leanDy
+        val n1 = kotlin.math.hypot(topDx, topDy)
+        val n2 = kotlin.math.hypot(leanDx, leanDy)
+        val cosAngle = dot / (n1 * n2)
+        assertEquals("the corner must be square, cos=$cosAngle", 0.0, cosAngle.toDouble(), 0.02)
+    }
+
+    @Test
+    fun `the leaning edge returns to the screen edge at the taper point`() {
+        val m = ApprovalTip.metrics(width, density)
+        val pts = ApprovalTip.outline(m, width, 100f)
+        // The corner and the taper point both sit on the display's right edge.
+        assertEquals(width.toFloat(), pts[0].x, 0f)
+        assertEquals(width.toFloat(), pts[2].x, 0f)
+        // The taper point is BELOW the corner, so the shape runs downwards.
+        assertTrue("the taper must descend", pts[2].y > pts[0].y)
     }
 
     @Test

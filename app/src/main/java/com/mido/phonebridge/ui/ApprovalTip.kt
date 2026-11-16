@@ -67,9 +67,14 @@ object ApprovalTip {
      */
     const val TOP_OFFSET_DP = 56f
 
-    /** Each ghost steps inwards and downwards from the one in front of it. */
-    const val GHOST_INSET_DP = 10f
-    const val GHOST_DROP_DP = 6f
+    /**
+     * Each ghost steps inwards and downwards from the one in front of it.
+     *
+     * Wide enough to be unmistakable. At 10dp the layers overlapped into what looked like one
+     * thicker wedge — a stack nobody can count is not a queue indicator.
+     */
+    const val GHOST_INSET_DP = 22f
+    const val GHOST_DROP_DP = 26f
 
     /**
      * Alpha per depth, front first: the front wedge is opaque, the two behind it fade.
@@ -77,7 +82,7 @@ object ApprovalTip {
      * Three, not more. A fourth wedge would be a second stack of paper with a stack of its own,
      * and the human cannot act on any of them until one becomes head anyway.
      */
-    val GHOST_ALPHA = floatArrayOf(1f, 0.45f, 0.22f)
+    val GHOST_ALPHA = floatArrayOf(1f, 0.62f, 0.38f)
 
     /** Hard ceiling on how many wedges are ever drawn. */
     const val MAX_VISIBLE = 3
@@ -104,11 +109,10 @@ object ApprovalTip {
      * LARGER — a tap near the paper's edge still opens it, which is the forgiving direction.
      */
     fun contains(m: Metrics, screenWidthPx: Int, topPx: Float, x: Float, y: Float): Boolean {
-        val right = screenWidthPx.toFloat()
-        // Triangle: top-right (A), top-left (B), point (C).
-        val ax = right; val ay = topPx
-        val bx = right - m.topWidthPx; val by = topPx
-        val cx = right; val cy = topPx + m.heightPx
+        val pts = outline(m, screenWidthPx, topPx)
+        val ax = pts[0].x; val ay = pts[0].y
+        val bx = pts[1].x; val by = pts[1].y
+        val cx = pts[2].x; val cy = pts[2].y
         // Cross products of the three edges; one consistent sign means inside. The triangle
         // winds one way only, so a single convention is enough and no ordering can flip it.
         val d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by)
@@ -166,10 +170,13 @@ object ApprovalTip {
         val maxPx = TOP_WIDTH_MAX_DP * density
         val topWidthPx = (screenWidthPx * TOP_WIDTH_FRACTION).coerceIn(minPx, maxPx)
 
-        // tan(15°) = width / height, so the height is the width divided by it. This is the
-        // whole taper: change the tilt and the length follows, which is why neither number is
-        // stored twice.
-        val heightPx = topWidthPx / tan(TILT_DEGREES * PI.toFloat() / 180f)
+        // The taper length, derived from the lean.
+        //
+        // The visible shape is a corner of a rotated sheet: its top edge leans, and its left edge
+        // runs perpendicular to that until it meets the screen edge again. Solving those two lines
+        // for the meeting point gives `w / sin(theta)` — so the length follows from the angle and
+        // neither number is stored twice.
+        val heightPx = topWidthPx / kotlin.math.sin(TILT_DEGREES * PI.toFloat() / 180f)
 
         return Metrics(
             topWidthPx = topWidthPx,
@@ -188,11 +195,25 @@ object ApprovalTip {
      */
     fun outline(m: Metrics, screenWidthPx: Int, topPx: Float): List<Point> {
         val right = screenWidthPx.toFloat()
-        return listOf(
-            Point(right, topPx),
-            Point(right - m.topWidthPx, topPx),
-            Point(right, topPx + m.heightPx),
-        )
+        val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
+        val sin = kotlin.math.sin(t)
+        val cos = kotlin.math.cos(t)
+
+        // **The corner of a rotated sheet, not a right triangle stuck to the edge.**
+        //
+        // The first version had a HORIZONTAL top edge and a vertical right edge, which is a shape
+        // no sheet of paper makes: the top read as parallel to the screen edge, so the whole thing
+        // looked like a cut-off panel rather than paper at an angle. Both visible edges now carry
+        // the same lean, so the corner is a genuine corner and the two edges are perpendicular to
+        // each other in the paper's own frame.
+        // A is the top-right corner, on the screen edge. B is the far end of the TOP edge, which
+        // descends as it goes left — so the edge is visibly not parallel to the screen, and the
+        // corner at B is a true 90 degrees. C is where the leaning edge meets the screen edge
+        // again, which closes the taper.
+        val a = Point(right, topPx)
+        val b = Point(right - m.topWidthPx * cos, topPx + m.topWidthPx * sin)
+        val c = Point(right, topPx + m.heightPx)
+        return listOf(a, b, c)
     }
 
     /**
@@ -207,13 +228,13 @@ object ApprovalTip {
      * left edge, and a quadratic control point outside the window draws a curve that leaves it.
      */
     fun bowControl(m: Metrics, screenWidthPx: Int, topPx: Float): Point {
-        val right = screenWidthPx.toFloat()
-        val topLeft = Point(right - m.topWidthPx, topPx)
-        val point = Point(right, topPx + m.heightPx)
-        val midX = (topLeft.x + point.x) / 2f
-        val midY = (topLeft.y + point.y) / 2f
-        // Floored at 0 so the curve can never be dragged off the left edge of the display.
-        val x = (midX - m.bowPx).coerceAtLeast(0f)
-        return Point(x, midY)
+        val pts = outline(m, screenWidthPx, topPx)
+        val b = pts[1]
+        val c = pts[2]
+        val midX = (b.x + c.x) / 2f
+        val midY = (b.y + c.y) / 2f
+        // Pushed out to the LEFT of the leaning edge, perpendicular-ish, so the paper flexes
+        // outwards. Floored at 0 so the curve can never leave the display.
+        return Point((midX - m.bowPx).coerceAtLeast(0f), midY)
     }
 }
