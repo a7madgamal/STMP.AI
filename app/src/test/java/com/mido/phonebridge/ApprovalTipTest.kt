@@ -106,4 +106,41 @@ class ApprovalTipTest {
     fun `a zero density is refused`() {
         ApprovalTip.metrics(width, 0f)
     }
+
+    @Test
+    fun `an empty queue draws nothing`() {
+        assertEquals(emptyList<ApprovalTip.Wedge>(), ApprovalTip.stack(0, density))
+    }
+
+    @Test
+    fun `the queue is capped at three wedges`() {
+        assertEquals(ApprovalTip.MAX_VISIBLE, ApprovalTip.stack(9, density).size)
+        assertEquals(2, ApprovalTip.stack(2, density).size)
+    }
+
+    @Test
+    fun `each ghost is further in and further down than the one in front`() {
+        val wedges = ApprovalTip.stack(3, density)
+        // The front wedge is exactly on the edge and has no drop.
+        assertEquals(0f, wedges[0].insetPx, 0f)
+        assertEquals(0f, wedges[0].dropPx, 0f)
+        wedges.zipWithNext().forEach { (front, behind) ->
+            assertTrue("ghost must sit further from the edge", behind.insetPx > front.insetPx)
+            assertTrue("ghost must sit lower", behind.dropPx > front.dropPx)
+            assertTrue("ghost must be fainter", behind.alpha < front.alpha)
+        }
+    }
+
+    @Test
+    fun `stack offsets scale with density`() {
+        val at1x = ApprovalTip.stack(2, 1f)[1]
+        val at2x = ApprovalTip.stack(2, 2f)[1]
+        assertEquals(at1x.insetPx * 2f, at2x.insetPx, 0.01f)
+        assertEquals(at1x.dropPx * 2f, at2x.dropPx, 0.01f)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `a zero density stack is refused`() {
+        ApprovalTip.stack(2, 0f)
+    }
 }

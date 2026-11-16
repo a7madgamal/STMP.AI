@@ -68,6 +68,63 @@ object ApprovalTip {
     /** Hard ceiling on how many wedges are ever drawn. */
     const val MAX_VISIBLE = 3
 
+    /**
+     * One wedge in the stack, in front-to-back order.
+     *
+     * [insetPx] moves it left (away from the edge it leans on) and [dropPx] moves it down, so
+     * each one behind peeks out from under the one in front rather than sitting on top of it.
+     */
+    data class Wedge(val insetPx: Float, val dropPx: Float, val alpha: Float)
+
+    /**
+     * Whether [x],[y] falls on the wedge whose top edge is at [topPx].
+     *
+     * **Pure arithmetic, not a `Region`.** The wedge is a triangle, so a point test is three
+     * cross products — and it is a FUNCTION, so the hit area can be asserted in a JVM test
+     * instead of trusted. A `Region` would need rebuilding on every layout and can answer
+     * differently under a shadowed runtime than on the device, which is the last thing a hit
+     * target should do.
+     *
+     * The bow is deliberately ignored: it is 6 % of the width, well inside a fingertip, and
+     * approximating the curved edge with the straight one can only make the target slightly
+     * LARGER — a tap near the paper's edge still opens it, which is the forgiving direction.
+     */
+    fun contains(m: Metrics, screenWidthPx: Int, topPx: Float, x: Float, y: Float): Boolean {
+        val right = screenWidthPx.toFloat()
+        // Triangle: top-right (A), top-left (B), point (C).
+        val ax = right; val ay = topPx
+        val bx = right - m.topWidthPx; val by = topPx
+        val cx = right; val cy = topPx + m.heightPx
+        // Cross products of the three edges; one consistent sign means inside. The triangle
+        // winds one way only, so a single convention is enough and no ordering can flip it.
+        val d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by)
+        val d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy)
+        val d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay)
+        val hasNeg = d1 < 0f || d2 < 0f || d3 < 0f
+        val hasPos = d1 > 0f || d2 > 0f || d3 > 0f
+        return !(hasNeg && hasPos)
+    }
+
+    /**
+     * The wedges to draw for a queue of [depth] requests, front first.
+     *
+     * Clamped rather than refused: a depth of 0 or 9 is not a caller error to throw over — the
+     * queue can legitimately be empty (nothing to draw) or ten deep (draw three). The cap exists
+     * because a fourth sheet would be a second stack of paper, and none of them can be acted on
+     * until one becomes the front.
+     */
+    fun stack(depth: Int, density: Float): List<Wedge> {
+        require(density > 0f) { "density must be positive, was $density" }
+        val visible = depth.coerceIn(0, MAX_VISIBLE)
+        return (0 until visible).map { i ->
+            Wedge(
+                insetPx = i * GHOST_INSET_DP * density,
+                dropPx = i * GHOST_DROP_DP * density,
+                alpha = GHOST_ALPHA[i],
+            )
+        }
+    }
+
     data class Point(val x: Float, val y: Float)
 
     data class Metrics(
