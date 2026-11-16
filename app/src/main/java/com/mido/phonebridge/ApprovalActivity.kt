@@ -1214,7 +1214,7 @@ class ApprovalActivity : FragmentActivity() {
             insets
         }
         sheetRoot = outer
-        val presentation = PaperEntranceView(this)
+        val presentation = com.mido.phonebridge.ui.PaperSheetView(this)
         presentation.addView(outer, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
@@ -1281,9 +1281,15 @@ class ApprovalActivity : FragmentActivity() {
         }
         applyWindowShape(WindowShape.OPEN)
         sheetRoot?.visibility = View.VISIBLE
-        // The expand is an arrival, not a crossfade: the sheet's own entrance plays, so the paper
-        // grows out of the same edge the tip was leaning on.
-        if (animateEntrance) (sheetRoot?.parent as? com.mido.phonebridge.ui.PaperEntranceView)?.present()
+        // The expand is an arrival, not a crossfade: the sheet rotates out of the tip's own lean,
+        // so the two shapes read as one piece of paper changing shape.
+        if (animateEntrance) {
+            sheet()?.present()
+        } else {
+            // A locked phone opens straight to the sheet, and a re-show must not replay an
+            // entrance for a request the human has already met.
+            sheet()?.settle()
+        }
     }
 
     /**
@@ -1296,14 +1302,24 @@ class ApprovalActivity : FragmentActivity() {
      */
     private fun collapseToTip() {
         if (shape != WindowShape.OPEN || stamping) return
-        sheetRoot?.visibility = View.GONE
-        applyWindowShape(WindowShape.RESTING)
-        tipView?.let {
-            it.visibility = View.VISIBLE
-            it.depth = 1 + ApprovalGate.waitingBehindCurrent()
-            it.present()
+        // Fold first, then shrink the window: hiding the sheet before the motion finishes would
+        // turn a 140ms fold into a single frame of nothing.
+        sheet()?.dismiss {
+            // Only shrink once the fold has played. A window that becomes a strip while the sheet
+            // is still drawn would clip the animation to a third of the screen.
+            sheetRoot?.visibility = View.GONE
+            applyWindowShape(WindowShape.RESTING)
+            tipView?.let {
+                it.visibility = View.VISIBLE
+                it.depth = 1 + ApprovalGate.waitingBehindCurrent()
+                it.present()
+            }
         }
     }
+
+    /** The sheet's own shape-change wrapper, when it exists. */
+    private fun sheet(): com.mido.phonebridge.ui.PaperSheetView? =
+        sheetRoot?.parent as? com.mido.phonebridge.ui.PaperSheetView
 
     /** The resting shape: strip window, wedge only, nothing dimmed, nothing focused. */
     private fun restSilently() {
