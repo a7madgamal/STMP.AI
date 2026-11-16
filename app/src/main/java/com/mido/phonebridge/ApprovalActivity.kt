@@ -155,6 +155,15 @@ class ApprovalActivity : FragmentActivity() {
     private var shape: WindowShape? = null
 
     /** The sheet (paper + controls). Present for the life of the request, visible only when open. */
+    /**
+     * The tick loop for the request currently on screen.
+     *
+     * One handler for the life of the Activity rather than one per request: a swap must be able to
+     * cancel the outgoing tick, and a handler created inside `render` is not reachable from the
+     * swap path.
+     */
+    private val requestTicker = android.os.Handler(android.os.Looper.getMainLooper())
+
     private var sheetRoot: View? = null
 
     /** The resting wedge stack. Visible only while resting. */
@@ -262,6 +271,50 @@ class ApprovalActivity : FragmentActivity() {
         }
 
         render(header)
+    }
+
+    /**
+     * A second request arrives while this Activity is already on screen.
+     *
+     * **Why the window survives a handover.** The gate used to launch a NEW Activity per request
+     * with `FLAG_ACTIVITY_CLEAR_TASK`, which destroyed the window, so the wedge stack could never
+     * visibly move forward: the ghosts died with the window and the next tip slid in beside
+     * nothing. One long-lived Activity means the paper that carries the queue is the paper that
+     * shows the next request, and a promotion can be an animation instead of a re-entry.
+     *
+     * **The clock is not reset here, and must not be.** Everything time-related is read from the
+     * gate (`currentEnabledAtMs`, `waitingBehindCurrent`), not from anything stamped in this
+     * Activity, and the intent carries the ORIGINAL `createdAt`. A swap therefore inherits exactly
+     * the deadline the request actually has.
+     */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        // Everything the outgoing request bound to this Activity goes first: its tick, its
+        // password field, its "a decision is happening" flag. A swap that forgot one would let the
+        // previous request's countdown keep running behind the new request's card.
+        releaseRequestScopedState()
+        applyIntent(intent)
+    }
+
+    /**
+     * Drop everything that belonged to the request being replaced.
+     *
+     * Named as one act rather than seven resets scattered where each field is declared: the
+     * failure this prevents is a forgotten field, and a forgotten field is invisible until it
+     * leaks. Anything bound to one request belongs in here.
+     */
+    private fun releaseRequestScopedState() {
+        requestTicker.removeCallbacksAndMessages(null)
+        forcedExit.removeCallbacksAndMessages(null)
+        passwordField?.text?.clear()
+        passwordField = null
+        needsPassword = false
+        needsContactsPermission = false
+        contactsPromptRunning = false
+        commandsSeen.clear()
+        // Not reset to a shape: the incoming request decides that from the keyguard, in render.
+        shape = null
+        stamping = false
     }
 
     /**
@@ -623,7 +676,11 @@ class ApprovalActivity : FragmentActivity() {
             visibility = ViewGroup.GONE
         }
 
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        // Hoisted from a local so a swap can cancel the PREVIOUS request's tick. A local handler
+        // would keep ticking against views that no longer exist, and its `isCurrent(id)` check
+        // would be testing an id nothing displays any more.
+        val handler = requestTicker
+        handler.removeCallbacksAndMessages(null)
         // Loading-word + dot animation state. Advanced only while the fetch is running.
         var wordIdx = 0
         var dotCount = 0
@@ -804,6 +861,17 @@ class ApprovalActivity : FragmentActivity() {
                 if (behind > 0) {
                     queueLine.text = "≡ $behind waiting behind this one"
                 }
+
+                // The wedge stack reads the SAME live value, on the same tick.
+                //
+                // Not a second source of truth: a stack that disagreed with the line above would
+                // be two answers to "is anything waiting" on one screen, and the number the human
+                // can act on is the one that is also visible while the sheet is closed. Fed here
+                // rather than in its own timer so a queue change can never arrive in one place
+                // before the other.
+                tipView?.depth = (behind + 1).coerceAtMost(
+                    com.mido.phonebridge.ui.ApprovalTip.MAX_VISIBLE,
+                )
 
                 // Keep ticking while the modal is live. A loading modal has no countdown to
                 // expire on, so the tick — not a timer — is what ends it.
@@ -1227,7 +1295,7 @@ class ApprovalActivity : FragmentActivity() {
         tipView = com.mido.phonebridge.ui.ApprovalTipView(this).apply {
             // The paper is proportioned to the SCREEN even though it is drawn in a strip.
             screenWidthPx = display.widthPixels
-            depth = 1 + ApprovalGate.waitingBehindCurrent()
+            depth = visibleWedgeCount()
             onOpen = { openSheet(animateEntrance = true) }
         }
 
@@ -1311,11 +1379,22 @@ class ApprovalActivity : FragmentActivity() {
             applyWindowShape(WindowShape.RESTING)
             tipView?.let {
                 it.visibility = View.VISIBLE
-                it.depth = 1 + ApprovalGate.waitingBehindCurrent()
+                it.depth = visibleWedgeCount()
                 it.present()
             }
         }
     }
+
+    /**
+     * How many wedges the tip should draw: this request plus whoever is behind it, capped.
+     *
+     * The cap lives here as well as in `ApprovalTip.stack` because the two answer different
+     * questions: this one says how many the queue HOLDS for the view, the view's says how many it
+     * will DRAW. A fourth request is real and must still be counted by the sheet's own line.
+     */
+    private fun visibleWedgeCount(): Int =
+        (1 + ApprovalGate.waitingBehindCurrent())
+            .coerceAtMost(com.mido.phonebridge.ui.ApprovalTip.MAX_VISIBLE)
 
     /** The sheet's own shape-change wrapper, when it exists. */
     private fun sheet(): com.mido.phonebridge.ui.PaperSheetView? =

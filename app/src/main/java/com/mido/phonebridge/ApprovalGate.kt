@@ -944,7 +944,20 @@ object ApprovalGate {
             putExtra(ApprovalActivity.EXTRA_TIMEOUT_SECONDS, p.view?.timeoutSeconds ?: TIMEOUT_SECONDS)
             putExtra(ApprovalActivity.EXTRA_CREATED_AT, p.createdAtMs)
             putExtra(ApprovalActivity.EXTRA_WAITING_BEHIND, waitingBehindCurrent())
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            // **NEW_TASK without CLEAR_TASK, and that is the whole change.**
+            //
+            // The approval surface is one long-lived window: the next request is delivered to the
+            // Activity already on screen through `onNewIntent`, so the wedge stack that shows the
+            // queue survives the handover instead of dying with the window. `CLEAR_TASK` emptied
+            // the task first, which destroyed the Activity and made the stack re-form from
+            // nothing on every decision.
+            //
+            // `singleTop` in the manifest is what routes the launch to `onNewIntent` rather than
+            // to a new instance; NEW_TASK stays because this is launched from a background
+            // service, where a task is required. Nothing about the request's clock moves: the
+            // intent still carries the ORIGINAL `createdAt`, and the deadline is read from the
+            // gate, not from this Activity.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
 
     /** Whether the app may post full-screen intents (Android 14+). */
