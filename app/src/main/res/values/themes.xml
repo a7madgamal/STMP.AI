@@ -21,6 +21,27 @@
         <item name="colorPrimary">@color/pb_accent</item>
     </style>
 
+    <!--
+      **Translucent, on purpose.** This window has two shapes: a paper wedge against the right
+      edge, and the full sheet. `windowIsTranslucent` is read when the WINDOW is created, before
+      `onCreate` runs, so it cannot be decided per-shape at runtime — the only honest options are
+      "always translucent" (this) or two Activities. One window wins: the wedge and the sheet can
+      then genuinely animate between the two shapes, because they are the same surface.
+
+      `backgroundDimEnabled` is off because the dim is a property of the SHAPE: resting must not
+      dim anything (the app underneath stays usable), expanded must. That is set per mode in
+      `ApprovalActivity.applyWindowMode`, not baked into the theme.
+
+      The vault prompt keeps `Theme.STMP.Approval`: it is always a full sheet, so it has no
+      reason to give up an opaque window.
+    -->
+    <style name="Theme.STMP.Approval.Sheet" parent="Theme.Material3.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="colorPrimary">@color/pb_accent</item>
+    </style>
+
     <style name="Theme.STMP.Approval" parent="Theme.Material3.Light.NoActionBar">
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:backgroundDimEnabled">true</item>

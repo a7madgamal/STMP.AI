@@ -51,6 +51,23 @@ class ApprovalTipView(context: Context) : View(context) {
     /** Called when the front wedge is tapped. Nothing else in this view is interactive. */
     var onOpen: (() -> Unit)? = null
 
+    /**
+     * The screen width the paper is sized against, when this view is narrower than the display.
+     *
+     * In the resting shape the window is a STRIP pinned to the right edge, so `width` is the
+     * strip and not the phone. Sizing the wedge from the strip would make the paper a third of a
+     * third — a sliver. The paper's proportions belong to the screen; only the room it is drawn
+     * in belongs to the strip. Zero means "this view is the screen", which is the case in a test
+     * and in the expanded shape.
+     */
+    var screenWidthPx: Int = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            rebuildPaths()
+            invalidate()
+        }
+
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Theme.BG }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Theme.BORDER
@@ -94,11 +111,11 @@ class ApprovalTipView(context: Context) : View(context) {
         if (w <= 0 || h <= 0) return
 
         val density = resources.displayMetrics.density
-        // The window is the strip only, so "screen width" for the geometry is this view's own
-        // width: the wedge is anchored to what it can actually paint on.
-        val m = ApprovalTip.metrics(w, density)
+        // The width the PAPER is proportioned to: the screen when we know it, else this view.
+        val refWidth = if (screenWidthPx > 0) screenWidthPx else w
+        val m = ApprovalTip.metrics(refWidth, density)
         metrics = m
-        val screenWidth = w
+        val screenWidth = refWidth
 
         fronts.clear()
         val wedges = ApprovalTip.stack(depth, density)
@@ -187,6 +204,17 @@ class ApprovalTipView(context: Context) : View(context) {
         postOnAnimation(frame)
     }
 
+    /**
+     * How far the screen-space geometry must move to land in this view.
+     *
+     * Negative when the view is a narrow strip against the right edge: the paper's coordinates
+     * are computed against the full display, and x = screenWidth must coincide with x = width.
+     */
+    private fun screenToView(): Float {
+        val refWidth = if (screenWidthPx > 0) screenWidthPx else width
+        return (width - refWidth).toFloat()
+    }
+
     override fun onDraw(canvas: Canvas) {
         val m = metrics ?: return
         if (fronts.isEmpty()) return
@@ -194,7 +222,7 @@ class ApprovalTipView(context: Context) : View(context) {
         // Everything shifts right by the un-slid part, so the paper reads as still arriving.
         val offset = (1f - slide) * m.topWidthPx
         canvas.save()
-        canvas.translate(offset, 0f)
+        canvas.translate(screenToView() + offset, 0f)
 
         // Back to front: index 0 is the FRONT wedge, so draw in reverse and the head lands last.
         for (i in fronts.indices.reversed()) {
@@ -235,10 +263,15 @@ class ApprovalTipView(context: Context) : View(context) {
             return event.actionMasked == android.view.MotionEvent.ACTION_DOWN
         }
         val m = metrics
-        // The drawn stack is shifted by the un-slid part, so the hit target moves with it.
+        // The drawn stack is shifted by the un-slid part, so the hit target moves with it — and
+        // it is tested in SCREEN space, which is what the geometry function speaks.
         val offset = m?.let { (1f - slide) * it.topWidthPx } ?: 0f
+        val refWidth = if (screenWidthPx > 0) screenWidthPx else width
         val hit = m != null &&
-            ApprovalTip.contains(m, width, frontTopPx, event.x - offset, event.y)
+            ApprovalTip.contains(
+                m, refWidth, frontTopPx,
+                event.x - screenToView() - offset, event.y,
+            )
         if (hit) onOpen?.invoke()
         return true
     }

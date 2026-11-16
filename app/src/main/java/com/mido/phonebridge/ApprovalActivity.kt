@@ -140,6 +140,81 @@ class ApprovalActivity : FragmentActivity() {
     }
 
     /**
+     * The two shapes this window has, and the only two.
+     *
+     * `RESTING` is the paper wedge against the right edge: a strip window, no dim, not focusable,
+     * and every touch outside it belongs to whatever is underneath. `OPEN` is the sheet as it has
+     * always been — full screen, dimmed, focused, so the password field and the buttons work.
+     *
+     * A named state rather than a pair of booleans because the transitions are the thing that can
+     * go wrong: an explicit list of which flag belongs in which shape cannot drift, while two
+     * booleans can encode four states of which two are meaningless.
+     */
+    private enum class WindowShape { RESTING, OPEN }
+
+    private var shape: WindowShape? = null
+
+    /** The sheet (paper + controls). Present for the life of the request, visible only when open. */
+    private var sheetRoot: View? = null
+
+    /** The resting wedge stack. Visible only while resting. */
+    private var tipView: com.mido.phonebridge.ui.ApprovalTipView? = null
+
+    /**
+     * Resize the window for [next] and apply that shape's flags.
+     *
+     * **Why a strip, not a full-screen transparent window.** A full-screen translucent window
+     * sits ON TOP of the app behind it, and Android 12+ blocks touches that would pass through a
+     * window opaque enough to hide what it covers. A strip that is only as wide as the paper
+     * never covers the screen, so nothing needs passing through and the rule never applies.
+     *
+     * **Why `setAttributes` rather than the theme.** `windowIsTranslucent` is fixed when the
+     * window is created, which is before `onCreate`; the theme is therefore always translucent
+     * (`Theme.STMP.Approval.Sheet`) and only the geometry, dim and focus change here.
+     */
+    private fun applyWindowShape(next: WindowShape) {
+        if (shape == next) return
+        shape = next
+
+        val attrs = window.attributes
+        val dm = resources.displayMetrics
+        when (next) {
+            WindowShape.RESTING -> {
+                // Wide enough for the paper plus the inward reach that makes it hittable past the
+                // system's back-gesture edge. The view decides the paper; this is the room it
+                // needs to receive a tap.
+                val tipWidth = com.mido.phonebridge.ui.ApprovalTip.metrics(
+                    dm.widthPixels, dm.density,
+                ).topWidthPx + com.mido.phonebridge.ui.ApprovalTip.TOUCH_REACH_DP * dm.density
+                attrs.width = tipWidth.toInt().coerceAtMost(dm.widthPixels)
+                attrs.height = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.gravity = Gravity.END or Gravity.TOP
+                attrs.dimAmount = 0f
+                attrs.flags = attrs.flags or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                // Keep the screen awake for the whole life of the prompt, both shapes: a request
+                // that expires while the phone sleeps is a decision nobody was given.
+                attrs.flags = attrs.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            }
+            WindowShape.OPEN -> {
+                attrs.width = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.height = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.gravity = Gravity.TOP or Gravity.START
+                attrs.dimAmount = 0.45f
+                // Focus and touch-modality come BACK: the password field needs the IME, and the
+                // sheet owns the whole screen so there is nothing behind it to pass taps to.
+                attrs.flags = attrs.flags and
+                    (WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL).inv()
+                attrs.flags = attrs.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            }
+        }
+        window.attributes = attrs
+        window.setDimAmount(attrs.dimAmount)
+    }
+
+    /**
      * The one place an intent becomes screen state.
      *
      * `onCreate` and (once the tip lands) `onNewIntent` both call this, so a swap and a rotation
@@ -1138,15 +1213,106 @@ class ApprovalActivity : FragmentActivity() {
             v.setPadding(0, bars.top, 0, bars.bottom)
             insets
         }
+        sheetRoot = outer
         val presentation = PaperEntranceView(this)
         presentation.addView(outer, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        setContentView(presentation)
+
+        // The tip is a SIBLING of the sheet, not a replacement for it: both live in the window for
+        // the whole life of the request, and the shape decides which one is visible. Swapping the
+        // content view per shape would rebuild the card — and the card's tick, its handlers and
+        // its countdown are all bound to the views built here.
+        val display = resources.displayMetrics
+        tipView = com.mido.phonebridge.ui.ApprovalTipView(this).apply {
+            // The paper is proportioned to the SCREEN even though it is drawn in a strip.
+            screenWidthPx = display.widthPixels
+            depth = 1 + ApprovalGate.waitingBehindCurrent()
+            onOpen = { openSheet(animateEntrance = true) }
+        }
+
+        // A tap beside the sheet folds it back to the wedge. It deliberately does NOT reach the
+        // app underneath: a request is in flight, and stray taps landing on the app behind a
+        // half-open approval is how someone approves by accident.
+        val scrim = View(this).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            isClickable = true
+            setOnClickListener { collapseToTip() }
+        }
+
+        val root = android.widget.FrameLayout(this).apply {
+            // Transparent, not paper: in the resting shape this window is a strip against the
+            // right edge and the area beside the wedge is someone else's app.
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            addView(scrim, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            addView(presentation, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            addView(tipView, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
+        setContentView(root)
+
+        // The keyguard decides the opening shape, and it is read HERE rather than in the gate: a
+        // wedge on a lock screen cannot be read or tapped, so presenting one would burn the whole
+        // decision window on a surface nobody can act on.
+        val locked = (getSystemService(android.content.Context.KEYGUARD_SERVICE)
+            as android.app.KeyguardManager).isKeyguardLocked
+        if (locked) openSheet(animateEntrance = true) else restSilently()
+
         val entrance = PaperMotion.entrance(
             alreadyPresented = !entranceRegistry.claim(id),
         )
-        if (entrance.durationMs > 0L) presentation.present()
+        if (entrance.durationMs > 0L && shape == WindowShape.OPEN) presentation.present()
+    }
+
+    /**
+     * The sheet, full screen, with everything a decision needs.
+     *
+     * [animateEntrance] distinguishes the two ways in: a locked phone opens straight to the sheet
+     * (nothing was ever resting), while a tap on the tip is a change of shape and animates.
+     */
+    private fun openSheet(animateEntrance: Boolean = false) {
+        tipView?.let {
+            it.visibility = View.GONE
+        }
+        applyWindowShape(WindowShape.OPEN)
+        sheetRoot?.visibility = View.VISIBLE
+        // The expand is an arrival, not a crossfade: the sheet's own entrance plays, so the paper
+        // grows out of the same edge the tip was leaning on.
+        if (animateEntrance) (sheetRoot?.parent as? com.mido.phonebridge.ui.PaperEntranceView)?.present()
+    }
+
+    /**
+     * Fold the sheet back to the wedge.
+     *
+     * The request stays exactly where it was: nothing is resolved, the clock keeps running, and
+     * the sheet comes back on the next tap with its countdown already in the right place — the
+     * DENY drain is driven from the gate's arm time, not from a local timer, so collapsing cannot
+     * buy the human extra seconds.
+     */
+    private fun collapseToTip() {
+        if (shape != WindowShape.OPEN || stamping) return
+        sheetRoot?.visibility = View.GONE
+        applyWindowShape(WindowShape.RESTING)
+        tipView?.let {
+            it.visibility = View.VISIBLE
+            it.depth = 1 + ApprovalGate.waitingBehindCurrent()
+            it.present()
+        }
+    }
+
+    /** The resting shape: strip window, wedge only, nothing dimmed, nothing focused. */
+    private fun restSilently() {
+        applyWindowShape(WindowShape.RESTING)
+        sheetRoot?.visibility = View.GONE
+        tipView?.let {
+            it.visibility = View.VISIBLE
+            it.present()
+        }
     }
 
     /**
