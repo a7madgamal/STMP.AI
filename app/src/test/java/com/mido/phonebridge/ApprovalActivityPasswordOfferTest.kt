@@ -47,7 +47,7 @@ class ApprovalActivityPasswordOfferTest {
         replyText = null,
         requiresBiometric = false,
         exceptionOffer = ApprovalGate.ExceptionOffer(
-            Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), "ALWAYS NOTIFY"
+            Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), "USE CARD FROM NOW ON"
         ),
         needsPassword = needsPassword
     )
@@ -81,7 +81,7 @@ class ApprovalActivityPasswordOfferTest {
         val shown = renderedTexts(needsPassword = true)
         assertFalse(
             "the exception button must not render on a password request; saw $shown",
-            shown.any { it.equals("ALWAYS NOTIFY", ignoreCase = true) }
+            shown.any { it.equals("USE CARD FROM NOW ON", ignoreCase = true) }
         )
     }
 
@@ -90,7 +90,7 @@ class ApprovalActivityPasswordOfferTest {
         val shown = renderedTexts(needsPassword = false)
         assertTrue(
             "the offer must still render where it is allowed; saw $shown",
-            shown.any { it.equals("ALWAYS NOTIFY", ignoreCase = true) }
+            shown.any { it.equals("USE CARD FROM NOW ON", ignoreCase = true) }
         )
     }
 }

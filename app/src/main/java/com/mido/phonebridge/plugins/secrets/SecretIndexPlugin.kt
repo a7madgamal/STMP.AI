@@ -9,6 +9,7 @@ import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.policy.Mode
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,12 +42,18 @@ class SecretIndexPlugin(private val ctx: Context) : Plugin {
         Route(
             "GET", "/secrets",
             "List every secret's non-secret metadata (no values)",
-            Verb.READ
+            Verb.READ,
+            // **A tap.** No values are returned, but the list is a map of what exists to attack:
+            // every credential's name, where to get a key for it, and which hosts each may reach.
+            // Nothing about diagnosing a broken bridge needs that, and it was quiet by default —
+            // which meant so was every credential's name on a tailnet-reachable route.
+            minMode = Mode.PARANOID
         ) { list() },
         Route(
             "GET", "/secrets/{name}",
             "Read one secret's non-secret metadata (no value)",
-            Verb.READ
+            Verb.READ,
+            minMode = Mode.PARANOID
         ) { one(it) }
     )
 

@@ -21,7 +21,7 @@ import java.util.concurrent.CountDownLatch
  * A request that needs a password can only be approved WITH the password.
  *
  * WHY THIS EXISTS
- *   The modal's exception button ("ALWAYS NOTIFY" / "ALWAYS ASK") approved through
+ *   The modal's exception button ("USE CARD FROM NOW ON" / "ASK FROM NOW ON") approved through
  *   [ApprovalGate.resolveWithException], which carries no password, and it armed on the same
  *   signal as APPROVE without checking the password field. On a sudo request that meant one
  *   tap approved with an empty field: the command reached sudo with nothing on stdin, the
@@ -71,13 +71,13 @@ class ApprovalPasswordGateTest {
             GlobalMode.WHITELIST, "ssh", Verb.EXECUTE, Mode.PARANOID, needsPassword = false
         )
         assertNotNull(offer)
-        assertEquals("ALWAYS NOTIFY", offer!!.label)
+        assertEquals("USE CARD FROM NOW ON", offer!!.label)
         assertEquals(Rule("ssh", Verb.EXECUTE, Mode.DONT_DISTURB), offer.rule)
 
         val back = ApprovalGate.exceptionOfferFor(
             GlobalMode.WHITELIST, "gmail", Verb.DELETE, Mode.DONT_DISTURB, needsPassword = false
         )
-        assertEquals("ALWAYS ASK", back!!.label)
+        assertEquals("ASK FROM NOW ON", back!!.label)
         assertEquals(Rule("gmail", Verb.DELETE, Mode.PARANOID), back.rule)
     }
 

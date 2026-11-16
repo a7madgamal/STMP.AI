@@ -27,6 +27,7 @@ import com.mido.phonebridge.audit.DecisionSource
 import com.mido.phonebridge.audit.PolicyAudit
 import com.mido.phonebridge.audit.recordResponse
 import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.GateFloor
 import com.mido.phonebridge.core.HiddenText
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.PluginRegistry
@@ -1353,7 +1354,12 @@ class HttpServer(
             // Computed before the attendance check, because attendance is judged against
             // the mode that will actually gate the request, not the one policy suggested.
             val needsPassword = resolved.route.needsPassword?.invoke(req) == true
-            val mode = if (needsPassword) Mode.PARANOID else resolvedPolicyMode
+            // **The route's own floor, applied last so nothing can undercut it.** A route that
+            // declares `minMode = PARANOID` is gated properly even under a DONT_DISTURB global or
+            // a quiet rule for its pair — see [Route.minMode] for why the diagnostic routes need
+            // that and what `/health` does in exchange.
+            val floored = GateFloor.raise(resolvedPolicyMode, resolved.route.minMode)
+            val mode = if (needsPassword) Mode.PARANOID else floored
             val globalMode = policy.global
 
             // **THE VAULT, BEFORE THE ROWS.**

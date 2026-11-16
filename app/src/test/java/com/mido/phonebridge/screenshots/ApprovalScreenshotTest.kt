@@ -118,7 +118,7 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     @Test fun exception_offer() = show(
         "exception_offer",
-        view = view(offer = ApprovalGate.ExceptionOffer(Rule("contacts", Verb.READ, Mode.DONT_DISTURB), "ALWAYS NOTIFY")),
+        view = view(offer = ApprovalGate.ExceptionOffer(Rule("contacts", Verb.READ, Mode.DONT_DISTURB), "USE CARD FROM NOW ON")),
     )
 
     /**

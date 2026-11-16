@@ -5556,11 +5556,20 @@ devDependencies. `node_modules/` is gitignored.
 - The confirmation dialog already had this care. `confirmDelete` uses `showDestructive()` because the platform focuses the positive button, and its own comment says the destroying control must not be where a stray confirm lands. That reasoning stopped at the dialog; it now applies to the card the dialog is opened from too.
 - Deliberately unchanged for an SSH entry: there, Delete is the only key on the card, so there is no benign neighbour for a mis-tap to reach instead and moving it would only change the spacing.
 
-## 0.51.31 (build 357) — 2026-11-15 — CURRENT
+## 0.51.31 (build 357) — 2026-11-15
 - The hidden-character rejection had a hole, and a smoke test found it. It scanned the raw request bytes, so a body written as `{"text":"...\u202e..."}` — six ASCII characters, which is exactly what Python's `json.dumps` produces — passed the check, and then the parser turned that escape into a real bidi character bound for the approval screen. The scan now walks the PARSED values instead.
 - Not `body.toString()` either, for the same reason in reverse: `JSONObject.quote` re-escapes C0 controls on the way out, so the round trip hides the very characters the check exists to find. The values have to be read as values.
 - The refusal now names the field, not just the body: `the body's 'text' field` rather than `the request body`, because a caller with a large payload should not have to hunt for which string was rejected.
 - Worth recording how this was missed: the unit tests built their strings in Kotlin, where a bidi escape IS the character. Only a real client, serialising JSON the way a real client does, exercises the difference. The new test pins the round trip explicitly.
+
+## 0.51.32 (build 358) — 2026-11-16 — CURRENT
+- The diagnostic routes now demand a stamp. `/debug` carries the account, the whole gate policy, a request history and the log tail; `/secrets` names every credential and the hosts each may reach. Both were quiet by default — `DONT_DISTURB` in the seeded policy, meaning five seconds of silence approved them on a tailnet-reachable bridge. `GET /debug`, `DELETE /audit`, `GET /secrets` and `GET /secrets/{name}` are now floored at `PARANOID`, so a rule or a `DONT_DISTURB` global cannot make them quieter.
+- The mechanism is a FLOOR on the route, not a policy rule: `Route.minMode`. Policy says how a pair is usually asked about; a route that carries something sensitive insists on being asked properly on top of that. `GateFloor.raise` is total and only ever makes a request louder, which a test asserts exhaustively over every mode pair — a floor that could lower a resolution would be a way to disable the gate by editing a route.
+- `GET /health` is the trade that makes this affordable. A wedged phone is exactly when a modal cannot be drawn, so the route that answers "is it running, which build, is the disk full" carries no email, no policy, no history and no log tail — and stays answerable under `DONT_DISTURB`. It is not `gateExempt`: it still resolves, validates and writes an audit record, because the exemption exists for an attention cue that must not need attention.
+- `/logs` stays quiet on purpose. It is the one diagnostic needed when the app is wedged, and logcat holds no secret value, token or policy.
+- `email` is gone from `/debug`'s `account` block. Nothing in the app reads it, and a diagnostic report is the wrong place for an address that ends up pasted into bug reports. `loggedIn` and `clientIdConfigured` are what a diagnosis actually needs.
+- The exception key in the approval modal says what happens NEXT TIME rather than naming a mode: "USE CARD FROM NOW ON" and "ASK FROM NOW ON", replacing "ALWAYS NOTIFY" and "ALWAYS ASK". NOTIFY is an internal mode name, and "always notify me" never said what the human would actually get. Asked for on 2026-11-15; the code change had been sitting uncommitted while two tests already expected the new wording, so the screenshot baselines were the only stale thing left — re-recorded here.
+- The agent-facing contract moves to v5: one route added (`GET /health`), so a cached caller understanding is now incomplete. Pinned by `HelpContractTest`, which failed on the first run for exactly this reason — the guard working as intended.
 
 ## Keeping this file honest
 

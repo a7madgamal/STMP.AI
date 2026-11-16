@@ -17,6 +17,7 @@ import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.Route
 import com.mido.phonebridge.core.Verb
+import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.PolicyException
 import com.mido.phonebridge.policy.PolicyStore
 import com.mido.phonebridge.policy.Rule
@@ -88,7 +89,12 @@ class DebugPlugin(private val ctx: Context) : Plugin {
             // decision, so there is nothing for a summary to clarify. Declaring it here
             // is what exempts it from the model-readiness gate (Mido, 2026-10-19:
             // "we need to be able to disable AI summary for some endpoints").
-            aiSummary = false
+            aiSummary = false,
+            // **A tap, always.** This report carries the account's email, the whole gate policy,
+            // a request history and the log tail. It was quiet by default so a broken app could
+            // still be diagnosed — that need is real, and `/health` answers it instead with
+            // nothing sensitive. See [minMode] and the `/health` route below.
+            minMode = Mode.PARANOID
         ) { report(it) },
         Route(
             "DELETE", "/audit", "DELETE THE REQUEST LOG", Verb.DELETE,
@@ -98,8 +104,25 @@ class DebugPlugin(private val ctx: Context) : Plugin {
             aiSummary = false,
             // The response is a count, but the record of the deletion must not itself be
             // the only surviving record of a log the human asked to be gone.
-            auditResponseBody = true
-        ) { clearAudit(it) }
+            auditResponseBody = true,
+            // Destroying evidence is never quiet.
+            minMode = Mode.PARANOID
+        ) { clearAudit(it) },
+        // **The ungated-in-spirit diagnostic, and the reason `/debug` can afford a tap.**
+        //
+        // A wedged phone is exactly when a modal cannot be drawn, and "which build is this, is the
+        // server up, is the disk full" is the first thing that answers "why". So this one carries
+        // no email, no policy, no request history, no log tail — nothing a stranger on the tailnet
+        // could use — and it answers under any mode, DONT_DISTURB included.
+        //
+        // It is NOT `gateExempt`: it still resolves, still validates, and still writes an audit
+        // record like every other route. The exemption exists for an attention cue that must not
+        // need attention; this route can simply be quiet, which is a policy matter.
+        Route(
+            "GET", "/health", "Check the bridge is alive and which build it is", Verb.READ,
+            auditResponseBody = false,
+            aiSummary = false
+        ) { health(it) }
     )
 
     override fun status(): PluginStatus = PluginStatus(
@@ -264,9 +287,30 @@ class DebugPlugin(private val ctx: Context) : Plugin {
      */
     private fun accountInfo(): JSONObject = JSONObject()
         .put("loggedIn", AuthManager.isLoggedIn(ctx))
-        .put("email", AuthManager.accountEmail ?: JSONObject.NULL)
+        // **No email.** Nothing in the app reads this field, and a diagnostic report is the wrong
+        // place for an address: `/debug` is one of the few routes that can end up pasted into a bug
+        // report or read by a caller debugging a broken bridge. `loggedIn` and
+        // `clientIdConfigured` are what a diagnosis actually needs — whether there is an account at
+        // all, and whether this build could use one.
         .put("clientIdConfigured", AuthManager.clientId.isNotBlank())
         .put("accessTokenCachedMs", AuthManager.tokenRemainingMs())
+
+    /**
+     * The small, non-sensitive answer to "is the bridge alive, and which build".
+     *
+     * Deliberately NOT a trimmed `/debug`: no email, no policy, no request history, no log tail, no
+     * route table, no crash or freeze traces. Everything here is either a version string or a
+     * number a caller could infer by trying. That is what lets it answer under DONT_DISTURB while
+     * `/debug` demands a stamp.
+     */
+    private fun health(req: Req): Resp = Resp.ok(
+        JSONObject()
+            .put("ok", true)
+            .put("version", BuildConfig.VERSION_NAME)
+            .put("build", BuildConfig.VERSION_CODE)
+            .put("server", serverInfo())
+            .put("storage", storageInfo())
+    )
 
     private fun permissionsInfo(): JSONObject = JSONObject()
         // `USE_FULL_SCREEN_INTENT` is a SPECIAL APP ACCESS on Android 14+, not a runtime

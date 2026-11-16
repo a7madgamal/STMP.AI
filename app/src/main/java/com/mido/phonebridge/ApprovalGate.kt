@@ -240,7 +240,11 @@ object ApprovalGate {
         val exceptionMode = exceptionModeFor(resolvedMode)
         return ExceptionOffer(
             rule = Rule(plugin, verb, exceptionMode),
-            label = if (exceptionMode == Mode.DONT_DISTURB) "ALWAYS NOTIFY" else "ALWAYS ASK"
+            // **The label names the OUTCOME, not the mode.** "ALWAYS NOTIFY" read as jargon:
+            // NOTIFY is an internal mode name, and "always notify me" says nothing about what
+            // the human will actually get. Mido, 2026-11-15: *"change Always notify button text,
+            // it's not clear"*. So it says what happens next time: a card, or an ask.
+            label = if (exceptionMode == Mode.DONT_DISTURB) "USE CARD FROM NOW ON" else "ASK FROM NOW ON"
         )
     }
 

@@ -1,5 +1,6 @@
 package com.mido.phonebridge.core
 
+import com.mido.phonebridge.policy.Mode
 import org.json.JSONObject
 
 /**
@@ -189,6 +190,26 @@ data class Route(
      *    it impossible to read the log as one list of requests.
      */
     val gateExempt: Boolean = false,
+    /**
+     * The strictest gate mode this route may ever run under.
+     *
+     * **A FLOOR, not a default.** The resolved mode is raised to this when it is quieter, and
+     * never lowered — a policy rule cannot make a route quieter than its floor, and neither can a
+     * `DONT_DISTURB` global. Same shape as the password floor: the human's rules choose *how* a
+     * pair is asked about, and a route can only insist on being asked properly.
+     *
+     * **Why this exists rather than a policy rule.** The diagnostic routes need to answer when the
+     * app is broken — that was the reason for their exception — but three of them leak more than a
+     * broken app needs to: `/debug` carries the account email, the gate policy and a request
+     * history; `/secrets` names every credential and the hosts it may reach. Left to a rule, those
+     * are quiet by default and the quiet is invisible in review. A floor states the requirement on
+     * the route itself, where the next person adding a field can see it.
+     *
+     * **`/health` is the escape hatch this buys.** Version, build, uptime, free bytes and server
+     * state, all non-sensitive, all answerable with no card — so "is it running and which build"
+     * still works on a wedged phone, and the rich diagnostics can afford to demand a tap.
+     */
+    val minMode: Mode? = null,
     val handler: suspend (Req) -> Resp
 ) {
     /**
