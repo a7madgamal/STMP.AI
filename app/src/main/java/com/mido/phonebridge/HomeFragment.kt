@@ -290,20 +290,21 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         container.addView(problemsHost)
 
         // --- GET STARTED ---
-        // It remains one existing entry point, but stops taking up Home once onboarding
-        // has been seen. No second tour state or completion heuristic is introduced.
+        //
+        // **Always reachable, and that part is not negotiable.** The first version set the whole
+        // host to GONE once `OnboardingPrefs.seen` was true, which read as "stop taking up Home".
+        // But the auto-launch in `MainActivity` is gated on the SAME flag, so the two doors closed
+        // together and the tour became unreachable for anyone who had been introduced to it —
+        // including someone who opened it and swiped away, because the flag is written on ENTRY.
+        // Reported 2026-11-16: *"it should always be available even if user is onboarded"*.
+        //
+        // So the section stays. What changes after onboarding is only the WEIGHT: a full-width
+        // key above "Approval gate" is a front-door control, which is right on first run and
+        // noise afterwards. Seen means a quiet key in the same place instead: above the problems
+        // list and under the hero, which is the top half of Home rather than the bottom — still one
+        // tap away, still the same words.
         getStartedHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         container.addView(getStartedHost)
-        getStartedHost.addView(Theme.sectionHeader(ctx, "Get started"))
-        getStartedHost.addView(
-            // **"HOW TO USE THIS" named the door, not the room.** Mido, 2026-11-10: *"getting
-            // started section is not obvious"* — the button promised instructions and delivered
-            // one prompt. It now opens a flow that explains what the app IS first, and the label
-            // says so.
-            Theme.button(ctx, "WHAT IS STMP?", Theme.ButtonStyle.NEUTRAL) {
-                go(Intent(ctx, OnboardingActivity::class.java))
-            },
-        )
 
         // **The account section moved to the Google plugin** (Mido, 2026-11-03: *"move the
         // account part to the google plugin"*). Signing in is a precondition the Google plugins
@@ -797,14 +798,46 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         ))
     }
 
+    /**
+     * The tour door. Never hidden — only its WEIGHT changes.
+     *
+     * **Unseen:** a header and a full-width key above the gate, so a first run meets the one thing
+     * that explains the app before three unexplained mode radios.
+     *
+     * **Seen:** the same door as one quiet key, still one tap from Home but no longer a front-door
+     * control competing with "is the bridge running".
+     *
+     * Rebuilt on every `render()` rather than built once and toggled: it is one header and one key,
+     * and toggling visibility is what produced the bug where the door disappeared entirely.
+     */
+    private fun renderGetStarted() {
+        if (!::getStartedHost.isInitialized) return
+        getStartedHost.removeAllViews()
+        val unseen = !com.mido.phonebridge.core.OnboardingPrefs.seen(ctx)
+        if (unseen) getStartedHost.addView(Theme.sectionHeader(ctx, "Get started"))
+        getStartedHost.addView(
+            // **"HOW TO USE THIS" named the door, not the room.** Mido, 2026-11-10: *"getting
+            // started section is not obvious"* — the button promised instructions and delivered
+            // one prompt. It now opens a flow that explains what the app IS first, and the label
+            // says so.
+            Theme.button(
+                ctx,
+                "WHAT IS STMP?",
+                // Seen means secondary: visible, one tap, no longer the loudest thing on a screen
+                // whose question is whether the bridge is running.
+                if (unseen) Theme.ButtonStyle.NEUTRAL else Theme.ButtonStyle.GHOST,
+            ) {
+                go(Intent(ctx, OnboardingActivity::class.java))
+            },
+        )
+    }
+
     private fun renderRemedies(
         state: ServerStatus.State,
         listenerOk: Boolean,
         notifOk: Boolean,
     ) {
-        getStartedHost.visibility = if (com.mido.phonebridge.core.OnboardingPrefs.seen(ctx)) {
-            android.view.View.GONE
-        } else android.view.View.VISIBLE
+        renderGetStarted()
         problemsHost.removeAllViews()
         val rows = ArrayList<android.view.View>()
         fun add(title: String, detail: String, colour: Int, action: () -> Unit) {
