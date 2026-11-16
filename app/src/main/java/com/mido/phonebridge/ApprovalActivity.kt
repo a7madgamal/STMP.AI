@@ -136,6 +136,30 @@ class ApprovalActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyIntent(intent)
+    }
+
+    /**
+     * The one place an intent becomes screen state.
+     *
+     * `onCreate` and (once the tip lands) `onNewIntent` both call this, so a swap and a rotation
+     * take the same path. That is the whole point of the split: two entry points building the
+     * card separately is how a re-shown request ends up described by the previous one.
+     *
+     * `setIntent` is FIRST, before anything reads the extras — `getIntent()` keeps returning the
+     * ORIGINAL intent until it is set, so a rotation after a swap would otherwise rebuild the
+     * wrong request, silently.
+     */
+    private fun applyIntent(intent: android.content.Intent) {
+        setIntent(intent)
+
+        val header = RequestHeader(
+            id = intent.getLongExtra(EXTRA_ID, -1L),
+            remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?",
+            endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?",
+            summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?",
+            timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS),
+        )
 
         // Draw over other apps / show over the lockscreen, turn the screen on,
         // and keep it on while the human decides. This is what makes the modal
@@ -152,21 +176,46 @@ class ApprovalActivity : FragmentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        val view = ApprovalGate.currentView()
+
         // FLAG_SECURE whenever this modal can hold a password: without it the typed
         // password appears in the recents thumbnail and is capturable by a screen
         // recorder. Set unconditionally for a password request — the flag cannot be
         // added later without re-creating the window.
-        val wantsPassword = ApprovalGate.currentView()?.needsPassword == true
-        if (wantsPassword) {
+        if (view?.needsPassword == true) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
 
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
-        val remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?"
-        val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
-        val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?"
-        val timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS)
-        val createdAtMs = intent.getLongExtra(EXTRA_CREATED_AT, System.currentTimeMillis())
+        render(header)
+    }
+
+    /**
+     * Everything this request needs off the intent, read once.
+     *
+     * A tiny immutable carrier rather than six more fields: the renderer below takes it as a
+     * parameter, so "which request is this screen describing" has exactly one answer and no
+     * `getIntent()` call can disagree with the views already on screen.
+     */
+    private data class RequestHeader(
+        val id: Long,
+        val remote: String,
+        val endpoint: String,
+        val summary: String,
+        val timeoutSeconds: Long,
+    )
+
+    /**
+     * Build the card for one request. Called once per presented request.
+     *
+     * Everything below is a consequence of [header] plus the gate's live state: the request
+     * itself is never read from an intent here.
+     */
+    private fun render(header: RequestHeader) {
+        val id = header.id
+        val remote = header.remote
+        val endpoint = header.endpoint
+        val summary = header.summary
+        val timeoutSeconds = header.timeoutSeconds
 
         // Two sources of truth:
         //  - view:  the RESOLVED, human-readable WHAT/ON (built by the caller
