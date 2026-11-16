@@ -1,6 +1,7 @@
 # Approval tip plan
 
-**Status: IN PROGRESS on branch `feat/approval-tip`. No push, no release.**
+**Status: IMPLEMENTED LOCALLY on branch `feat/approval-tip` — awaiting device review. No push,
+no release.**
 
 Date: 2026-11-16
 Baseline: source at v0.51.34 / build 360.
@@ -83,23 +84,47 @@ The wedge's lean *is* its taper, so the shape is derived rather than hand-drawn:
    plan and changelog, single version bump.
 8. **Device review** — real phone, before any push.
 
-## 6. Open question
+## 6. Resolved: one long-lived Activity
 
-Steps 3–5 assume the stack lives in the current request's Activity. That holds while the head is
-on screen, but when the head resolves the gate finishes that Activity and launches a *new* one
-for the next request (`FLAG_ACTIVITY_CLEAR_TASK`), so ghost wedges cannot morph across the
-handover — they vanish with the dying window and the new tip slides in behind them.
+Option B was chosen. `CLEAR_TASK` is gone and the launch carries `SINGLE_TOP`, so the next request
+is delivered to the window already on screen. The stack therefore promotes rather than re-forms.
 
-Two ways forward, and this is the one thing to settle before step 3:
+The clock invariant survives because nothing time-related is stamped in the Activity: the deadline
+is the gate's arm time, and the intent carries the original `createdAt`. A test pins that a
+request which waited 30 seconds arrives with 30 seconds already spent.
 
-- **A — keep per-request Activities (today's model).** Promotion means the stack re-forms: the
-  sheet leaves, and 180 ms later a tip slides in carrying N-1 ghosts. Less continuity, no change
-  to the gate's launch contract.
-- **B — one long-lived Activity, next request delivered by `onNewIntent`.** The ghost can move
-  into the front position as a real animation, because nothing is destroyed. Requires dropping
-  `CLEAR_TASK`, teaching the Activity to swap its content for a new request, and re-establishing
-  that a re-show can never reset the clock — `buildApprovalIntent` already carries the original
-  `createdAt`, so the invariant is expressible, but it is a change to the safety surface.
+What a swap must drop is dropped in one named act (`releaseRequestScopedState`) rather than
+scattered per field, because the failure mode — a forgotten field — is invisible until the previous
+request's countdown runs behind the next request's card.
+
+## 6a. Implementation notes
+
+- **Rest is a strip window, not a full-screen transparent one.** A full-screen translucent window
+  sits on top of the app behind it, and Android 12+ blocks touches that would pass through a window
+  opaque enough to hide what it covers. A strip wider than the paper never covers the screen, so
+  the untrusted-touch rule never applies.
+- **The theme is always translucent.** `windowIsTranslucent` is read when the window is created,
+  before `onCreate`, so a per-shape theme is impossible without two Activities — and two launch
+  paths into one decision surface is the class of bug this repository has already paid for. The
+  vault prompt keeps the old opaque theme, since it is always a full sheet.
+- **0.5° rest tilt, chosen by eye.** Rendered at 5°, 3°, 2°, 1° and 0.5° at true phone size; 5°
+  wrapped a command over three lines and clipped the card's corners flush against the edge.
+- **Motion is clock-driven, never animator-driven**, and every loop carries a frame backstop: a
+  motion that cannot finish must snap, because the alternative is a sheet stuck half-open while the
+  request expires underneath it.
+- **The wedge activates through `performClick`**, so a screen reader can open the card. It also
+  carries a content description set in the view's `init`, where no call site can forget it.
+
+## 6b. Verification
+
+`./gradlew :app:testDebugUnitTest` — 899 tests, 0 failures.
+`./gradlew :app:lintDebug` — clean.
+`./gradlew :app:verifyRoborazziDebug` — all screenshot states match.
+`changelog-check`, `version-check`, `version-guard` — ok.
+
+Compilation, Robolectric and source guards do **not** establish that the motion feels right on a
+device, nor that a strip window behaves as described on a given OEM. Neither is verified until it
+has been seen on the phone.
 
 ## 7. What this plan deliberately does not do
 

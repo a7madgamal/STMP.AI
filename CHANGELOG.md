@@ -5576,9 +5576,16 @@ devDependencies. `node_modules/` is gitignored.
 - Seen now decides the door's WEIGHT, never whether it exists. Unseen gets the header and a full-width key above the gate, so a first run meets the explanation before three unexplained mode radios. Seen gets the same key and the same words as a ghost key in the same place — still one tap from Home, no longer the loudest thing on a screen whose question is whether the bridge is running.
 - Rebuilt on every render rather than built once and toggled. It is one header and one key, and toggling visibility is exactly what produced the bug where the door disappeared.
 
-## 0.51.34 (build 360) — 2026-11-16 — CURRENT
+## 0.51.34 (build 360) — 2026-11-16
 - The seen-state `WHAT IS STMP?` key gets the module gap above it. With no "Get started" header to separate it from the hero card it sat flush against the card; unseen already has that header, so the margin is applied only when the header is absent.
 - A screenshot baseline now covers the state that had none. Every Home fixture left the tour UNSEEN, so the baselines described a screen nobody has after the first run — which is exactly why the tour could disappear without a screenshot changing. `home__get_started_seen` captures the returning user: no header, one quiet key, and the gap that keeps it off the card.
+
+## 0.51.35 (build 361) — 2026-11-16 — CURRENT
+- The approval request no longer takes the whole screen on arrival. A tilted paper wedge appears against the right edge and everything outside it belongs to whatever the app underneath is doing, so a request no longer interrupts what the human was reading. Touching the wedge opens the full card; tapping beside the card folds it back. The 60-second window starts when the wedge appears, because a request that waits unseen must still expire, and only the wedge is tappable — denying from it was left out deliberately, since a collapse is not a decision.
+- Up to three wedges stack when requests are queued behind each other, the front one alone being interactive: acting on the third sheet would be answering a request nobody has read. When a request is answered its wedge slides away and the one behind it steps forward, which needed the approval surface to stop being one Activity per request — the window now survives the handover, so the stack promotes instead of re-forming.
+- The card rests at half a degree rather than square. The lean is what keeps a sliver of the background visible around the edges and makes it read as paper laid on the screen instead of a page replacing it, and half a degree is as much as a command can afford: a full-height card rotated by theta needs `w·cos(theta) + h·sin(theta)` of width to fit, and every degree of lean is taken from the width of the command being approved.
+- Opening takes 220ms with a small settle, folding back 140ms flat. Leaving is quicker than arriving on purpose — that asymmetry is what reads as a response rather than an animation.
+- The wedge is now a control in the accessibility sense: activation goes through `performClick`, so a screen reader can open the card, and it carries a description that says what it is.
 
 ## Keeping this file honest
 
