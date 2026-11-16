@@ -143,6 +143,37 @@ class ApprovalTipViewTest {
     }
 
     @Test
+    fun `a narrow strip draws the paper against its own right edge`() {
+        // The regression this pins: the outline used to be built in SCREEN coordinates and then
+        // shifted by (width - screenWidth), which put it outside the view when the view was the
+        // strip. The paper must be anchored to the edge it is actually drawn against.
+        val narrow = tip(depth = 1, width = 132, height = 470)
+        var opened = false
+        narrow.onOpen = { opened = true }
+        // The wedge occupies the right edge, so a tap near it must land on paper.
+        tap(narrow, 130f, 4f)
+        assertTrue("the paper must be inside a strip window, not off its left edge", opened)
+    }
+
+    @Test
+    fun `paper size follows the screen even inside a narrow strip`() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val v = ApprovalTipView(ctx)
+        // A strip 132 wide inside a 720 display: the paper keeps the display's proportions.
+        v.screenWidthPx = 720
+        v.depth = 1
+        v.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(132, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(470, android.view.View.MeasureSpec.EXACTLY),
+        )
+        v.layout(0, 0, 132, 470)
+        var opened = false
+        v.onOpen = { opened = true }
+        tap(v, 131f, 4f)
+        assertTrue("a strip must still show and hit its paper", opened)
+    }
+
+    @Test
     fun `promoting a lone wedge just adopts the new depth`() {
         // Nothing behind it to move forward, so there is no motion to play.
         val v = tip(depth = 1)

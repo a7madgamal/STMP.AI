@@ -97,7 +97,11 @@ class ApprovalTipView(context: Context) : View(context) {
     private var promoting = false
     private val fronts = ArrayList<Path>()
 
+
     private var tick: Runnable? = null
+
+    /** Counts real draws, so the diagnostic line is emitted once rather than per frame. */
+    private var drawnOnce = 0
 
     init {
         setWillNotDraw(false)
@@ -125,11 +129,17 @@ class ApprovalTipView(context: Context) : View(context) {
         if (w <= 0 || h <= 0) return
 
         val density = resources.displayMetrics.density
-        // The width the PAPER is proportioned to: the screen when we know it, else this view.
-        val refWidth = if (screenWidthPx > 0) screenWidthPx else w
-        val m = ApprovalTip.metrics(refWidth, density)
+        // **Proportions come from the screen; the ANCHOR is this view's right edge.**
+        //
+        // These are two different questions and conflating them is what drew the first build
+        // blank. How WIDE the paper should be is a property of the phone, so it is measured
+        // against the display. Where its right edge sits is a property of the window it is drawn
+        // in, which in the resting shape is a strip pinned to that same edge. Building the path
+        // in screen coordinates and translating it afterwards got the second question wrong by
+        // the width of the strip, and the paper landed outside its own view.
+        val proportionWidth = if (screenWidthPx > 0) screenWidthPx else w
+        val m = ApprovalTip.metrics(proportionWidth, density)
         metrics = m
-        val screenWidth = refWidth
 
         fronts.clear()
         val wedges = ApprovalTip.stack(depth, density)
@@ -139,8 +149,8 @@ class ApprovalTipView(context: Context) : View(context) {
             (wedges.firstOrNull()?.dropPx ?: 0f)
         for (wedge in wedges) {
             val top = wedge.dropPx
-            val points = ApprovalTip.outline(m, screenWidth, top)
-            val control = ApprovalTip.bowControl(m, screenWidth, top)
+            val points = ApprovalTip.outline(m, w, top)
+            val control = ApprovalTip.bowControl(m, w, top)
             val path = Path().apply {
                 moveTo(points[0].x, points[0].y)
                 lineTo(points[1].x, points[1].y)
@@ -295,25 +305,30 @@ class ApprovalTipView(context: Context) : View(context) {
         postOnAnimation(frame)
     }
 
-    /**
-     * How far the screen-space geometry must move to land in this view.
-     *
-     * Negative when the view is a narrow strip against the right edge: the paper's coordinates
-     * are computed against the full display, and x = screenWidth must coincide with x = width.
-     */
-    private fun screenToView(): Float {
-        val refWidth = if (screenWidthPx > 0) screenWidthPx else width
-        return (width - refWidth).toFloat()
-    }
-
     override fun onDraw(canvas: Canvas) {
-        val m = metrics ?: return
-        if (fronts.isEmpty()) return
+        val m = metrics
+        if (drawnOnce == 0) {
+            // One line, once, at the first real draw. The window geometry is invisible from
+            // outside the view, so without this a blank tip is indistinguishable from a tip that
+            // never got a size, never got a depth, or drew itself off the edge.
+            // One line per request, at the first real draw.
+            //
+            // The tip is the only surface whose geometry is invisible from outside itself: a wedge
+            // that gets a zero size, a zero depth, or an outline off the edge all look identical
+            // from the rest of the app. Three numbers name which one happened.
+            com.mido.phonebridge.Debug.log(
+                "tip: draw ${width}x${height} depth=$depth wedges=${fronts.size} " +
+                    "paperW=${m?.topWidthPx} paperH=${m?.heightPx}"
+            )
+            drawnOnce++
+        }
+        if (m == null || fronts.isEmpty()) return
 
         // Everything shifts right by the un-slid part, so the paper reads as still arriving.
         val offset = (1f - slide) * m.topWidthPx
         canvas.save()
-        canvas.translate(screenToView() + offset, 0f)
+        // Only the arrival displaces the stack now: the geometry is already in view space.
+        canvas.translate(offset, 0f)
 
         // Back to front: index 0 is the FRONT wedge, so draw in reverse and the head lands last.
         for (i in fronts.indices.reversed()) {
@@ -388,15 +403,10 @@ class ApprovalTipView(context: Context) : View(context) {
             return event.actionMasked == android.view.MotionEvent.ACTION_DOWN
         }
         val m = metrics
-        // The drawn stack is shifted by the un-slid part, so the hit target moves with it — and
-        // it is tested in SCREEN space, which is what the geometry function speaks.
+        // The drawn stack is shifted by the un-slid part, so the hit target moves with it.
         val offset = m?.let { (1f - slide) * it.topWidthPx } ?: 0f
-        val refWidth = if (screenWidthPx > 0) screenWidthPx else width
         val hit = m != null &&
-            ApprovalTip.contains(
-                m, refWidth, frontTopPx,
-                event.x - screenToView() - offset, event.y,
-            )
+            ApprovalTip.contains(m, width, frontTopPx, event.x - offset, event.y)
         if (hit) performClick()
         return true
     }

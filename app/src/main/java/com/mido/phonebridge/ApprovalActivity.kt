@@ -105,6 +105,15 @@ class ApprovalActivity : FragmentActivity() {
 
     companion object {
         private val entranceRegistry = PaperMotion.EntranceRegistry()
+
+        /**
+         * Breathing room between the paper and the window edge, in dp.
+         *
+         * Small on purpose: the window is a strip that swallows touches, so this is the only part
+         * of the screen it takes beyond what the wedge actually draws. It exists so the anti-
+         * aliased edge of the wedge is not clipped by the window itself.
+         */
+        private const val TIP_WINDOW_MARGIN_DP = 12F
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
         const val EXTRA_ENDPOINT = "endpoint"
@@ -189,12 +198,18 @@ class ApprovalActivity : FragmentActivity() {
         val dm = resources.displayMetrics
         when (next) {
             WindowShape.RESTING -> {
-                // Wide enough for the paper plus the inward reach that makes it hittable past the
-                // system's back-gesture edge. The view decides the paper; this is the room it
-                // needs to receive a tap.
-                val tipWidth = com.mido.phonebridge.ui.ApprovalTip.metrics(
-                    dm.widthPixels, dm.density,
-                ).topWidthPx + com.mido.phonebridge.ui.ApprovalTip.TOUCH_REACH_DP * dm.density
+                // **The strip is the PAPER, plus a margin. Not paper plus a long reach.**
+                //
+                // A window eats every touch that lands inside it, and FLAG_NOT_TOUCH_MODAL only
+                // passes through what falls OUTSIDE it. So each extra dp of window width is a dp
+                // of the screen the human cannot use while a request waits — the first build of
+                // this took 55% of the display for a wedge that is only 34% wide, and the app
+                // behind stopped accepting taps across half the screen.
+                //
+                // The paper is already ~130dp wide on a phone, which is a generous target on its
+                // own, so it does not need a margin wide enough to be a second target.
+                val metrics = com.mido.phonebridge.ui.ApprovalTip.metrics(dm.widthPixels, dm.density)
+                val tipWidth = metrics.topWidthPx + TIP_WINDOW_MARGIN_DP * dm.density
                 attrs.width = tipWidth.toInt().coerceAtMost(dm.widthPixels)
                 attrs.height = WindowManager.LayoutParams.MATCH_PARENT
                 attrs.gravity = Gravity.END or Gravity.TOP
