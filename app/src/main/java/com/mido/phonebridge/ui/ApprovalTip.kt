@@ -19,7 +19,7 @@ import kotlin.math.tan
 object ApprovalTip {
 
     /** Lean of the long edge, in degrees from vertical. The taper follows from this. */
-    const val TILT_DEGREES = -8f
+    const val TILT_DEGREES = -13f
 
     /**
      * Top width as a fraction of screen width, before clamping.
@@ -223,7 +223,7 @@ object ApprovalTip {
      * The sheet must be CUT by the edge, not finished at it: a shape that ends on the screen edge
      * has a vertical side, and a vertical side casts a vertical shadow.
      */
-    const val OVERSHOOT_FRACTION = 0.35f
+    const val OVERSHOOT_FRACTION = 0.63f
 
     /** A ceiling so a very tall window does not produce an absurd sheet. */
     const val MAX_BAND_DP = 260f
