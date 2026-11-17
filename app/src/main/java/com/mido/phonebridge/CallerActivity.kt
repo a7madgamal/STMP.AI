@@ -62,8 +62,8 @@ class CallerActivity : FragmentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@CallerActivity, 20), Theme.dp(this@CallerActivity, 24),
-                Theme.dp(this@CallerActivity, 20), Theme.dp(this@CallerActivity, 24)
+                Theme.dp(this@CallerActivity, Theme.SCREEN_GUTTER_DP), Theme.dp(this@CallerActivity, 24),
+                Theme.dp(this@CallerActivity, Theme.SCREEN_GUTTER_DP), Theme.dp(this@CallerActivity, 24)
             )
             background = Theme.sheet(Theme.BG)
             gravity = Gravity.CENTER_VERTICAL

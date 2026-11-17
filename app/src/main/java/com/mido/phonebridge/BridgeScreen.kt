@@ -75,10 +75,13 @@ abstract class BridgeScreen : AppCompatActivity(), ScreenHost {
             val scroll = ScrollView(this).apply { isFillViewport = true }
             body = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
+                // The screen gutter, from the ONE constant. Was 20dp here and 16 or 24 on other
+                // screens, which is why content sat at a different distance from the edge
+                // depending on which tab you were on.
                 setPadding(
-                    Theme.dp(this@BridgeScreen, 20),
-                    Theme.dp(this@BridgeScreen, 20),
-                    Theme.dp(this@BridgeScreen, 20),
+                    Theme.dp(this@BridgeScreen, Theme.SCREEN_GUTTER_DP),
+                    Theme.dp(this@BridgeScreen, Theme.SCREEN_GUTTER_DP),
+                    Theme.dp(this@BridgeScreen, Theme.SCREEN_GUTTER_DP),
                     Theme.dp(this@BridgeScreen, 24),
                 )
             }

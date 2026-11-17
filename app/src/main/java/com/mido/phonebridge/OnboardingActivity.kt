@@ -69,8 +69,8 @@ class OnboardingActivity : FragmentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
-                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 20),
-                Theme.dp(this@OnboardingActivity, 20), Theme.dp(this@OnboardingActivity, 16)
+                Theme.dp(this@OnboardingActivity, Theme.SCREEN_GUTTER_DP), Theme.dp(this@OnboardingActivity, 20),
+                Theme.dp(this@OnboardingActivity, Theme.SCREEN_GUTTER_DP), Theme.dp(this@OnboardingActivity, 16)
             )
             background = Theme.sheet(Theme.BG)
         }

@@ -187,12 +187,45 @@ object Theme {
     const val CARD_PAD_V = 12
 
     /**
+     * The screen gutter: how far content keeps from the display edge, in dp.
+     *
+     * **Nothing touches the edge.** There was no constant for this, so screens picked their own —
+     * 16, 20, 24, and some content had none at all — which is why a card sat hard against the side
+     * on one screen and 20dp in on the next. One gutter, applied by [padScreen].
+     *
+     * 16dp is the smallest inset that still reads as deliberate at phone density, and it lines up
+     * with the widest card inset so a card's own padding is not visibly larger than the gap beside
+     * it.
+     */
+    const val SCREEN_GUTTER_DP = 16
+
+    /**
+     * Apply the standard screen gutter to a root container.
+     *
+     * Horizontal only: vertical spacing belongs to the content, and a root that pads its top would
+     * push the first card away from the header that introduces it.
+     */
+    fun padScreen(ctx: Context, v: View) {
+        val g = dp(ctx, SCREEN_GUTTER_DP)
+        v.setPadding(g, v.paddingTop, g, v.paddingBottom)
+    }
+
+    /**
      * How far a drawn line wanders from true, in dp.
      *
      * 1.5dp reads as ink dragged by hand. Below ~1dp it is invisible at phone density; above ~3dp
      * a 40dp button starts looking like a doodle instead of a control.
      */
     const val SQUIGGLE_DP = 0.85f
+
+    /**
+     * Stroke weight of a squiggled outline, in dp.
+     *
+     * The wobble's amplitude and its line weight are different decisions: [SQUIGGLE_DP] is how far
+     * the line wanders, this is how thick it is. Callers that want a heavier selected state scale
+     * this, they do not change the waveform.
+     */
+    const val SQUIGGLE_STROKE_DP = 1.2f
 
     /**
      * The bottom bar's elevation, in dp.
@@ -632,18 +665,23 @@ object Theme {
      * while the code claimed paper. `GrainCoverageTest` scans the source and fails the build on
      * any raw background assignment outside this file, so this is enforced, not remembered.
      */
-    fun sheet(color: Int, radiusPx: Float = 0f, @Suppress("UNUSED_PARAMETER") squigglePx: Float = 0f): android.graphics.drawable.Drawable {
+    fun sheet(color: Int, radiusPx: Float = 0f, squigglePx: Float = 0f): android.graphics.drawable.Drawable {
         val base = GradientDrawable().apply {
             setColor(color)
             if (radiusPx > 0f) cornerRadius = radiusPx
         }
-        // **Fill and grain only.** This is the background layer; a bounded surface gets its torn
-        // silhouette from [tornCard], which paints the fill and the edge together so they can never
-        // disagree about where the outline is. The `squigglePx` parameter is kept so existing
-        // callers still compile, and ignored: the wobble it used to request no longer exists.
-        return LayerDrawable(
-            arrayOf<android.graphics.drawable.Drawable>(base, GrainOverlay(radiusPx))
-        )
+        val layers = mutableListOf<android.graphics.drawable.Drawable>(base, GrainOverlay(radiusPx))
+        // A drawn edge only makes sense on a bounded surface. A full-bleed sheet has no outline to
+        // draw, so it stays fill + grain.
+        if (radiusPx > 0f && squigglePx > 0f) {
+            layers += SquiggleBorder(
+                color = BORDER,
+                strokePx = squigglePx * (SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
+                radiusPx = radiusPx,
+                amplitudePx = squigglePx,
+            )
+        }
+        return LayerDrawable(layers.toTypedArray())
     }
 
     /**
@@ -654,7 +692,7 @@ object Theme {
      * full-bleed panel has no outline to tear.
      */
     fun sheetDp(ctx: Context, color: Int, radiusDp: Int = 0): android.graphics.drawable.Drawable =
-        if (radiusDp > 0) tornCard(ctx, color, radiusDp) else sheet(color)
+        if (radiusDp > 0) outlined(ctx, color, radiusDp) else sheet(color)
 
     /** dp as a Float — the drawn-edge constructors work in pixels. */
     fun dpF(ctx: Context, v: Float): Float = TypedValue.applyDimension(
@@ -662,42 +700,17 @@ object Theme {
     )
 
     /**
-     * The torn edge ALONE: same silhouette, no fill.
+     * A filled surface (card / block / badge), with paper grain and the hand-drawn edge.
      *
-     * For a surface whose fill must be a tint the platform controls — buttons use
-     * `backgroundTintList` to keep their ripple and disabled states, so the material can only be
-     * added in the FOREGROUND. A transparent [TornPaper] draws exactly the outline a card draws,
-     * which is what keeps a button and a card reading as one material instead of two.
-     */
-    fun tornEdge(
-        ctx: Context,
-        radiusPx: Float,
-        alpha: Int = 0x2E,
-        tearDp: Int = 3,
-        edgeColor: Int = ON_SURFACE,
-    ): android.graphics.drawable.Drawable = TornPaper(
-        fill = 0x00000000,
-        edge = withAlpha(edgeColor, alpha),
-        cornerPx = radiusPx,
-        tearPx = dp(ctx, tearDp).toFloat(),
-        strokePx = dpF(ctx, CARD_STROKE_DP),
-    )
-
-    /**
-     * A filled surface (card / block / badge) on paper.
-     *
-     * **Torn, not wobbled.** The app used to have two edge treatments: a torn silhouette here and a
-     * wobbly rounded rectangle from `outlined`. They had different stroke widths (1.5dp vs 1dp) and
-     * different colours (translucent ink vs the solid hairline), so two cards on one screen had two
-     * different borders. There is one look now, and it is the torn one: it follows the fill's own
-     * cut, which is what makes the paper read as having thickness.
+     * Same material as [card]; kept as its own name because a block is often not a card and call
+     * sites read better for it. It produces the identical border, so a block and a card on one
+     * screen cannot disagree.
      */
     fun surface(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): android.graphics.drawable.Drawable =
-        tornCard(ctx, color, radiusDp)
+        outlined(ctx, color, radiusDp)
 
     /**
-     * A card: torn paper, [RADIUS_CARD] corners, the one card stroke, [CARD_PAD_H] x
-     * [CARD_PAD_V] insets.
+     * **The card.** Fill, [RADIUS_CARD] corners and the drawn squiggle edge in one place.
      *
      * The fill defaults to [SURFACE] — the slightly darker panel that reads as a sheet lying on the
      * page. It is a parameter only so a risk card can pass [DANGER_SURFACE] or [WARNING_SURFACE]: a
@@ -708,7 +721,7 @@ object Theme {
      * thing.
      */
     fun card(ctx: Context, fill: Int = SURFACE): android.graphics.drawable.Drawable =
-        tornCard(ctx, fill, RADIUS_CARD)
+        outlined(ctx, fill, RADIUS_CARD)
 
     /** The same card, but tappable. */
     fun cardRippled(ctx: Context, fill: Int = SURFACE): RippleDrawable =
@@ -721,7 +734,7 @@ object Theme {
     /**
      * Apply the standard card padding.
      *
-     * Separate from [card] because a `Drawable` cannot carry insets that a view will honour, and
+     * Separate from [card] because a `Drawable` cannot carry insets that a view will honor, and
      * wrapping every card in an `InsetDrawable` would move the drawn border inwards instead of the
      * text. So the drawable fixes the look and this fixes the spacing, and every card calls both.
      */
@@ -732,147 +745,48 @@ object Theme {
     }
 
     /**
-     * A filled surface with the standard card edge — torn paper.
+     * A filled surface with the drawn squiggle edge — the app's standard bounded surface.
      *
-     * Kept as a separate name because a dozen call sites use it, but it now delegates: there is one
-     * edge treatment in the app. `strokeColor`/`strokeDp` are accepted and IGNORED rather than
-     * removed, because a caller that asks for a specific border colour has to be noticed by a
-     * human, not silently honoured with a second border style. The two live callers that legitimately
-     * vary the border (a selected row going 2dp) pass `strokeDp` and are handled by [cardEdge].
+     * No `setStroke` on the base: the [SquiggleBorder] IS the border. Two strokes would disagree
+     * about where the edge is, and the straight one would show through the wobble at every peak.
      */
     fun outlined(
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
-        @Suppress("UNUSED_PARAMETER") strokeColor: Int = BORDER,
+        strokeColor: Int = BORDER,
         strokeDp: Int = 1
-    ): android.graphics.drawable.Drawable = tornCard(ctx, color, radiusDp, tearDp = cardEdge(strokeDp))
-
-    /**
-     * Map the old stroke-width request onto a torn-card tear width.
-     *
-     * A selected row used to thicken a 1dp wobble to 2dp. Torn paper has no stroke to thicken — its
-     * edge is the fill's own cut — so the selected state keeps its louder border by tearing further
-     * (6dp normally, 9dp when selected). Same visual signal, one edge treatment.
-     */
-    private fun cardEdge(strokeDp: Int): Int = if (strokeDp >= 2) 9 else 6
+    ): android.graphics.drawable.Drawable {
+        val r = radiusPx(ctx, radiusDp)
+        val base = GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = r
+        }
+        return LayerDrawable(
+            arrayOf(
+                base,
+                GrainOverlay(r),
+                SquiggleBorder(
+                    color = strokeColor,
+                    // A selected row asks for 2dp. The amplitude stays fixed and the STROKE
+                    // scales, so a heavier state is the same edge drawn heavier rather than a
+                    // second style.
+                    strokePx = dpF(ctx, strokeDp.toFloat() * SQUIGGLE_STROKE_DP / SQUIGGLE_DP),
+                    radiusPx = r,
+                    amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                )
+            )
+        )
+    }
 
     /** A filled surface that ripples when tapped (for tappable rows). */
     fun rippled(ctx: Context, color: Int, radiusDp: Int = RADIUS_CARD): RippleDrawable =
         RippleDrawable(
             ColorStateList.valueOf(RIPPLE),
-            tornCard(ctx, color, radiusDp),
+            outlined(ctx, color, radiusDp),
             null
         )
 
-    /**
-     * A short hand-inked rule that sits under a section label.
-     *
-     * Drawn as a [Drawable] that paints ONLY a thin strip at its own bottom edge — the
-     * whole point. The first attempt used a `GradientDrawable` as the TextView's
-     * background, which fills the entire view and turned every section header into a solid
-     * salmon bar (caught on device 2026-10-26). A background drawable has no concept of
-     * "just the bottom", so the shape has to be painted, not stretched.
-     *
-     * Two strokes, one slightly shorter and fainter, give the line the uneven edge of ink
-     * rather than a printed hairline.
-     */
-
-    /**
-     * A card whose own OUTLINE is torn paper — the note ripped off a pad.
-     *
-     * The first attempt (0.43.6) layered a 24dp `torn_edge` vector over a card surface.
-     * That cannot work: a tile stretched to card size, drawn in paper colour on paper, is
-     * invisible — it changed nothing on screen. A torn edge is a property of the SHAPE, so
-     * this drawable paints a rounded body whose bottom edge is a deterministic jagged line.
-     *
-     * The tear pattern is a fixed array, not `Random`: a random tear would re-roll on every
-     * redraw and the card would visibly crawl each time it repainted. Same shape, every frame.
-     */
-    private class TornPaper(
-        private val fill: Int,
-        private val edge: Int,
-        private val cornerPx: Float,
-        private val tearPx: Float,
-        /**
-         * Line thickness, INDEPENDENT of [tearPx].
-         *
-         * **They used to be welded together** (`strokeWidth = tearPx / 4f`), which was invisible
-         * while only cards existed — they all tear 6dp, so they all got the same 1.5dp line. The
-         * toggle tears 2dp to keep its proportions on a 31dp control, and silently got a 0.5dp
-         * line: three times lighter than every card around it. Mido, 2026-11-04: *"toggle border
-         * still not the same as cards, toooo light currently. match the fucking cards exactly"*.
-         *
-         * Depth and weight are separate decisions, so they are separate parameters now.
-         */
-        private val strokePx: Float,
-    ) : android.graphics.drawable.Drawable() {
-
-        private val path = android.graphics.Path()
-        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        private val builtFor = android.graphics.Rect()
-        private var built = false
-        private var alphaMul = 255
-
-        override fun draw(canvas: android.graphics.Canvas) {
-            val b = bounds
-            if (b.isEmpty) return
-            if (!built || builtFor != b) {
-                build(b)
-                builtFor.set(b)
-                built = true
-            }
-
-            paint.style = android.graphics.Paint.Style.FILL
-            paint.color = scaled(fill)
-            canvas.drawPath(path, paint)
-
-            // Grain, clipped to the SAME torn path — so the texture follows the tear instead of
-            // stopping at a rectangle. This is the drawable the homepage's SETUP cards actually
-            // use, which is why adding grain only to `surface()` changed nothing visible there.
-            canvas.save()
-            canvas.clipPath(path)
-            canvas.drawPaint(PaperGrain.paint())
-            canvas.restore()
-
-            // A hairline on the torn edge so the paper reads as having thickness.
-            paint.style = android.graphics.Paint.Style.STROKE
-            paint.strokeWidth = strokePx
-            paint.color = scaled(edge)
-            canvas.drawPath(path, paint)
-        }
-
-        private fun build(b: android.graphics.Rect) {
-            // The SHARED torn silhouette. This used to hold its own copy of the pattern and the
-            // path construction; the toggle needed the same effect and grew a second, noisier one,
-            // which is exactly how "one hand" becomes "three slightly different hands". One
-            // implementation now serves cards, the bar and the toggle.
-            TornEdge.path(
-                out = path,
-                left = b.left.toFloat(),
-                top = b.top.toFloat(),
-                right = b.right.toFloat(),
-                bottom = b.bottom.toFloat(),
-                tearPx = tearPx,
-                cornerPx = cornerPx,
-            )
-        }
-
-        private fun scaled(color: Int): Int {
-            val a = (android.graphics.Color.alpha(color) * alphaMul / 255f).toInt()
-            return (color and 0x00FFFFFF) or (a.coerceIn(0, 255) shl 24)
-        }
-
-        override fun setAlpha(alpha: Int) {
-            alphaMul = alpha.coerceIn(0, 255)
-            invalidateSelf()
-        }
-
-        override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
-
-        @Deprecated("Deprecated in the framework; required by the Drawable contract")
-        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
-    }
 
     /**
      * The bottom bar's surface: paper with a torn TOP edge.
@@ -979,39 +893,6 @@ object Theme {
         override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
     }
 
-    /** A card with a genuinely torn bottom edge. See [TornPaper]. */
-    fun tornCard(
-        ctx: Context,
-        color: Int = SURFACE,
-        radiusDp: Int = RADIUS_CARD,
-        tearDp: Int = 6,
-    ): android.graphics.drawable.Drawable {
-        // The ONE card stroke, in dp. Every tornCard in the app uses it: 6dp of tear on a card or
-        // 2dp on a 31dp switch, the LINE is the same weight, so the set reads as one hand rather
-        // than as one bold card and one faint control.
-        val r = radiusPx(ctx, radiusDp)
-        // **ONE OUTLINE, NOT TWO.** Mido, 2026-11-03: *"why is the paper effect now seems done
-        // twice in this list?"*
-        //
-        // `TornPaper` already paints a hairline along its own torn path — the exact silhouette the
-        // fill was cut to. Stacking a second, separately-drawn outline on top drew a SECOND edge
-        // along a DIFFERENT curve — a rounded rectangle, which does not follow the tear.
-        // Two edges that agree nowhere read as a double-printed card, not as craft.
-        //
-        // The tear wins because it is the shape: the hairline follows the fill's own cut, so the
-        // paper reads as having thickness. A wobble that ignores the tear is decoration on top of
-        // an existing edge.
-        return TornPaper(
-            fill = color,
-            edge = withAlpha(ON_SURFACE, 0x2E),
-            cornerPx = r,
-            tearPx = dp(ctx, tearDp).toFloat(),
-            // The card's own 6dp tear used to imply this; declared so a smaller tear cannot
-            // silently thin it.
-            strokePx = dpF(ctx, CARD_STROKE_DP),
-        )
-    }
-
     // --- text ---
 
     /** A small all-caps section header in the handwritten face, with a drawn rule under it.
@@ -1109,10 +990,13 @@ object Theme {
             insetTop = 0
             insetBottom = 0
             setPadding(dp(ctx, if (small) 12 else 20), 0, dp(ctx, if (small) 12 else 20), 0)
-            if (style == ButtonStyle.GHOST) {
-                strokeWidth = dp(ctx, 1)
-                strokeColor = ColorStateList.valueOf(ACCENT)
-            }
+            // **NO platform stroke, on any style.**
+            //
+            // GHOST used to set `strokeWidth`/`strokeColor` on the MaterialButton AND rely on the
+            // squiggle foreground below, which drew TWO borders on one button: a straight
+            // rounded-rect outline from the platform plus the wobbling one on top of it. A GHOST
+            // button is already distinguished by its transparent fill and accent text; the accent
+            // edge it used to get is now the squiggle's own colour, chosen once below.
             // **GRAIN AND THE DRAWN EDGE GO IN FOREGROUND, not background.**
             //
             // `backgroundTintList` is what preserves the ripple, the pressed/disabled state and
@@ -1128,15 +1012,12 @@ object Theme {
             foreground = LayerDrawable(
                 arrayOf(
                     GrainOverlay(radiusPx(ctx, RADIUS_CONTROL)),
-                    tornEdge(
-                        ctx = ctx,
+                    SquiggleBorder(
+                        color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
+                        strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
                         radiusPx = radiusPx(ctx, RADIUS_CONTROL),
-                        // Buttons sit at 0x55 ink; cards at 0x2E. That difference is the button
-                        // reading as a CONTROL rather than a sheet, and it survives the move to
-                        // the torn edge deliberately.
-                        alpha = if (style == ButtonStyle.GHOST) 0x55 else 0x55,
-                        tearDp = 3,
-                    ),
+                        amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                    )
                 )
             )
             setOnClickListener { onClick() }

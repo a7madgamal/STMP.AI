@@ -63,13 +63,15 @@ class RuggedToggle(context: Context) : View(context) {
      * and feel"*.
      *
      * Buttons do not use `tornCard`. They use `backgroundTintList` for fill plus a FOREGROUND
-     * `LayerDrawable` holding grain and the torn edge at alpha 0x55. The toggle had been drawing
-     * the CARD material instead — 1.5dp at alpha 0x2E, which is less than half the ink. That is
-     * why it read as "toooo light" no matter how the tear was tuned: it was the wrong material
-     * entirely, not the wrong number.
+     * `LayerDrawable` holding grain and the drawn squiggle edge at alpha 0x55. The toggle had been
+     * drawing the CARD material instead — the card's heavier line at lower ink — which is why it
+     * read as "toooo light" no matter how the tear was tuned: it was the wrong material entirely,
+     * not the wrong number.
      *
-     * So the outline is built the same way here, and a switch and a button now differ only in
-     * shape and behaviour rather than in material.
+     * So the outline is built the same way here, and a switch and a button differ only in shape and
+     * behaviour rather than in material. **The fill is SURFACE**, the same slightly-darker panel a
+     * card uses: a switch sitting on a page in the page's own colour read as a hole rather than as a
+     * control.
      */
     private fun surfaceDrawable(fillColor: Int, radiusDp: Int): Drawable {
         val radius = Theme.dpF(context, radiusDp.toFloat())
@@ -77,20 +79,18 @@ class RuggedToggle(context: Context) : View(context) {
             setColor(fillColor)
             cornerRadius = radius
         }
-        // Tint-equivalent background, then grain, then the torn edge — the same three layers, in
-        // the same order, as `Theme.button`'s foreground. The toggle used to build its own
-        // torn edge like every other surface. `tearDp = 2` keeps the tear proportional on a 31dp
-        // control, and the LINE stays CARD_STROKE_DP so the switch and the cards around it carry the
-        // same weight.
+        // Fill, grain, then ONE drawn edge — the same three layers in the same order as
+        // `Theme.button`'s foreground, and the same squiggle, so a switch and the buttons beside it
+        // cannot disagree about their border.
         return android.graphics.drawable.LayerDrawable(
             arrayOf(
                 bg,
                 GrainOverlay(radius),
-                Theme.tornEdge(
-                    ctx = context,
+                com.mido.phonebridge.ui.SquiggleBorder(
+                    color = com.mido.phonebridge.ui.Theme.ON_SURFACE and 0x00FFFFFF or (0x55 shl 24),
+                    strokePx = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP),
                     radiusPx = radius,
-                    alpha = 0x55,
-                    tearDp = 2,
+                    amplitudePx = Theme.dpF(context, Theme.SQUIGGLE_DP),
                 ),
             )
         )

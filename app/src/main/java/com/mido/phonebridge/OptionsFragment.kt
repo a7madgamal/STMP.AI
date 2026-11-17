@@ -485,7 +485,7 @@ class OptionsFragment : BridgeFragment() {
         val block = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             Theme.padCard(ctx, this)
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.card(ctx)
         }
 
         // --- the master toggle ---

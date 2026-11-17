@@ -47,7 +47,7 @@ class UpdatesSection(
                 Theme.dp(context, 14), Theme.dp(context, 12),
                 Theme.dp(context, 14), Theme.dp(context, 12),
             )
-            background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = com.mido.phonebridge.ui.Theme.card(context)
         }
 
         val outcome = com.mido.phonebridge.core.Updater.lastOutcome

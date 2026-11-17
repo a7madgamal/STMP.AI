@@ -5697,11 +5697,17 @@ devDependencies. `node_modules/` is gitignored.
 - The countdown reads the gate's own deadline rather than starting its own timer. A timer inside the overlay assumed a fixed 60 seconds and would have run out while the request still had real time left, restarted from full whenever the sheet folded back, and never retargeted when a queued request became the head.
 - The disc is placed by geometry so it always sits inside the paper, and the ticker stops when nothing is waiting instead of running for the life of the window.
 
-## 0.51.59 (build 385) — 2026-11-17 — CURRENT
+## 0.51.59 (build 385) — 2026-11-17
 - Every card, button, toggle and input well now wears the same torn-paper edge. The app had two edge treatments in parallel — a torn silhouette and a separately drawn wobbly rectangle — with different stroke weights and different colours, so two cards on one screen had two different borders.
 - Card insets are one value now. They had five across fifteen call sites, so two cards beside each other disagreed about where their text started.
 - The wobbly-edge drawable is deleted; the hand-drawn rule under section headers is kept, because a rule is a line drawn on paper rather than a card silhouette.
 - The two risk-tinted cards keep their tint. A tint is a state, not a different kind of card.
+
+## 0.51.60 (build 386) — 2026-11-17 — CURRENT
+- Cards, buttons, switches and input wells all wear the same hand-drawn wobbly edge. A previous change had moved everything to the torn-bottom silhouette and the torn edge was the wrong look, so this restores the wobble everywhere and removes the torn card wrapper entirely. The bottom bar keeps its torn top edge: it is a bar, not a card.
+- Buttons no longer draw two borders. The accent style was setting a straight platform outline AND the drawn wobbly one, so the same button showed both.
+- Switches use the same slightly-darker panel fill as cards. A switch painted in the page colour read as a hole rather than as a control.
+- Nothing touches the screen edge. There was no gutter constant, so screens used 16, 20 or 24 depending on the file and content sat a different distance from the side on each one.
 
 ## Keeping this file honest
 

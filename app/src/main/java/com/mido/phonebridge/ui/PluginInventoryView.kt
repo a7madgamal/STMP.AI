@@ -176,7 +176,7 @@ class PluginInventoryView(
                 // before you wonder why they are greyed.
                 val googleCard = LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
-                    background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
+                    background = com.mido.phonebridge.ui.Theme.card(context)
                 }
                 googleCard.layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -239,7 +239,7 @@ class PluginInventoryView(
                 Theme.dp(context, 14), Theme.dp(context, 12),
                 Theme.dp(context, 14), Theme.dp(context, 12),
             )
-            background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = com.mido.phonebridge.ui.Theme.card(context)
             isClickable = true
             isFocusable = true
             minimumHeight = Theme.dp(context, Theme.MIN_TARGET_DP)
@@ -429,7 +429,7 @@ class PluginInventoryView(
             Theme.dp(context, 14), Theme.dp(context, 12),
             Theme.dp(context, 14), Theme.dp(context, 12),
         )
-        background = Theme.tornCard(context, Theme.SURFACE, Theme.RADIUS_CARD)
+        background = com.mido.phonebridge.ui.Theme.card(context)
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = Theme.dp(context, 10) }

@@ -58,7 +58,7 @@ class ExceptionsActivity : Activity() {
         this.scroll = scroll
         container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 16),
+            setPadding(Theme.dp(this@ExceptionsActivity, Theme.SCREEN_GUTTER_DP), Theme.dp(this@ExceptionsActivity, 16),
                 Theme.dp(this@ExceptionsActivity, 16), Theme.dp(this@ExceptionsActivity, 32))
             background = Theme.sheet(Theme.BG)
         }

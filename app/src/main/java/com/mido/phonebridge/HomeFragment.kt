@@ -177,7 +177,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         heroCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             Theme.padCard(ctx, this)
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.card(ctx)
         }
         heroTitle = TextView(ctx).apply {
             textSize = Theme.TEXT_TITLE_SP
@@ -317,7 +317,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         gateCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             Theme.padCard(ctx, this)
-            background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+            background = Theme.card(ctx)
         }
         gateTitle = TextView(ctx).apply {
             textSize = Theme.TEXT_LABEL_SP

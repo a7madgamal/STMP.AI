@@ -50,7 +50,7 @@ class SecretsActivity : Activity() {
             WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        val pad = Theme.dp(this, 20)
+        val pad = Theme.dp(this, Theme.SCREEN_GUTTER_DP)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)

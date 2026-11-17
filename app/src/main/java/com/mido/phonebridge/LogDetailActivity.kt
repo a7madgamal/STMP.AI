@@ -42,7 +42,7 @@ class LogDetailActivity : Activity() {
             return
         }
 
-        val pad = Theme.dp(this, 16)
+        val pad = Theme.dp(this, Theme.SCREEN_GUTTER_DP)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
