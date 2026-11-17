@@ -251,14 +251,16 @@ class RuggedToggle(context: Context) : View(context) {
         val knobTop = rect.top + insetPx
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
 
-        // **The knob carries the state.** Green when on, ink when off, amber while the server is
-        // still working on it — the switch is the one control whose whole job is to say whether
-        // something is enabled, so its colour is information, not decoration. The TRACK stays
-        // panel-fill paper; only the knob changes.
+        // **The knob carries the state: green on, RED off, amber while pending.**
+        //
+        // Off is red on purpose. This app's switches are mostly enabled/disabled security features —
+        // notifications, background activity, auto-start — and "off" on those is a thing the human
+        // should notice, not a neutral resting state. Ink-grey off read as "nothing to see here".
+        // The TRACK stays panel-fill paper; only the knob changes.
         val color = when {
             pending -> withAlpha(Theme.WARNING, 0xB0)
             checked -> Theme.SUCCESS
-            else -> Theme.ON_SURFACE
+            else -> Theme.DANGER
         }
         // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
         val current = knob.let { if (it != null && knobColorKey == color) it else null }
