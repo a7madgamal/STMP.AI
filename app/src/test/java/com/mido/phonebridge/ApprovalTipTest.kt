@@ -19,9 +19,15 @@ class ApprovalTipTest {
 
     private val density = 2.75f
 
-    /** The real tip window on the device this ships to: 2cm wide, sized to the triangle. */
-    private val tipW = 236f
-    private val tipH = 318f
+    /**
+     * The real tip window on the device this ships to.
+     *
+     * Width is 2cm in dp at this density — the window IS the sliver, so the point has exactly the
+     * window's width to travel. A fixture narrower than 2cm would clamp the point and the test
+     * would be asserting about a shape the device never draws.
+     */
+    private val tipW = 2f * 160f / 2.54f * 2.75f
+    private val tipH = tipW * 3.6f
     private val topPx = ApprovalTip.TOP_OFFSET_DP * density
 
     private fun tri(w: Float = tipW, h: Float = tipH, top: Float = topPx) =
@@ -44,18 +50,19 @@ class ApprovalTipTest {
     }
 
     @Test
-    fun `the top edge reaches the right edge of the window`() {
-        // Flush against the screen edge, so the shape is anchored there rather than floating.
+    fun `both base vertices sit exactly on the right edge`() {
+        // "the top and bottom points MUST be right 0" — no inset, both flush with the edge.
         val p = tri()
-        assertEquals("the top edge must end at the window's right edge", tipW, p[1].x, 0.5f)
+        assertEquals("the top vertex must be ON the edge", tipW, p[0].x, 0.5f)
+        assertEquals("the bottom vertex must be ON the edge", tipW, p[1].x, 0.5f)
     }
 
     @Test
-    fun `two edges run to the apex, so the outline tapers`() {
+    fun `the point tapers to 2cm in from the edge`() {
+        // The spec, stated by the human: two vertices on the right edge, the third 2cm to the left.
         val p = tri()
-        // Edge 1 goes apex-ward from the top-right, edge 2 comes back to the top-left.
-        assertTrue("the shape must taper, not stay a band", p[2].x < p[1].x)
-        assertTrue("the shape must taper on both sides", p[2].x > p[0].x - 1f)
+        assertEquals("the point must be 2cm in", tipW - ApprovalTip.apexInsetPx(density), p[2].x, 0.5f)
+        assertTrue("the point must taper inward, not outward", p[2].x < p[0].x)
     }
 
     @Test
@@ -72,9 +79,12 @@ class ApprovalTipTest {
 
     @Test
     fun `a tiny window still yields a usable triangle`() {
-        val p = ApprovalTip.outlineFit(30f, 30f, density, 4f)
+        // A narrow window cannot hold a 2cm point, so it clamps to the left edge rather than
+        // producing an inverted shape. What must never happen is a zero-area or flipped triangle.
+        val p = ApprovalTip.outlineFit(30f, 30f, density, 0f)
         assertEquals(3, p.size)
-        assertTrue("a small window must still produce an area", p[1].x > p[0].x)
+        assertTrue("the base must have height", p[1].y > p[0].y)
+        assertTrue("the point must not invert past the left edge", p[2].x >= 0f)
     }
 
     @Test

@@ -160,23 +160,21 @@ object ApprovalTip {
     }
 
     /**
-     * A TRIANGLE, by construction. Three points, nothing clipped.
+     * A sliver of paper tucked behind the right edge: a triangle with its BASE ON THE EDGE.
      *
-     * Three reports shaped this:
+     * Stated plainly from the device, after several wrong shapes:
+     *  - **"the top and bottom points MUST be right 0"** — two vertices sit exactly on the screen's
+     *    right edge, one at the top of the sliver and one at the bottom.
+     *  - **"left one should be 2cm wide"** — the third vertex is 2cm to the left of that edge,
+     *    vertically centred between the other two.
      *
-     * 1. "It should ALWAYS appear as a triangle, not a broken rectangle." A rectangle whose side is
-     *    cut by the screen edge shows a band with two square corners — which is a broken rectangle
-     *    however it is positioned. A triangle cannot look broken: it has one vertex and two edges
-     *    that both run to the edge.
-     * 2. "Bottom side is cut off." The previous shape was a long sheet inside a short window, so its
-     *    lower end was clipped by the window rather than finished by the shape. This one is sized to
-     *    fit the window exactly, so the point is always visible and always the paper's own point.
-     * 3. "Still too far in." The taper's tip is what makes it read as tucked behind the edge, so the
-     *    apex leans in only as far as the touch target needs.
+     * So the triangle points LEFT, its vertical base flush against the edge it is emerging from.
+     * That is what a sheet behind the glass looks like, and it is why earlier shapes were wrong:
+     * a top edge spanning the window, or an apex at the bottom, reads as a wedge hanging down
+     * rather than paper poking out.
      *
-     * The apex is at [apexInsetPx] from the right edge; the two top corners sit ON the edge, so the
-     * shape is flush against the screen and there is no vertical side of its own to cast a vertical
-     * shadow — the edge it meets belongs to the screen.
+     * The 2cm is a PHYSICAL width (`APEX_INSET_DP` scaled by density), so every screen size and
+     * resolution shows the same sliver.
      */
     fun outlineFit(
         viewWidthPx: Float,
@@ -184,20 +182,15 @@ object ApprovalTip {
         density: Float,
         topPx: Float,
     ): List<Point> {
-        val inset = SHAPE_INSET_DP * density
-        val top = topPx.coerceIn(inset, (viewHeightPx - inset).coerceAtLeast(inset + 1f))
-        val bottom = (viewHeightPx - inset).coerceAtLeast(top + 1f)
         val right = viewWidthPx
-
-        // A horizontal top edge of [bandPx], then two edges down to a single apex: a stalactite of
-        // paper hanging from the top edge, widest at the edge and tapering to nothing.
-        val band = (viewWidthPx * BAND_FRACTION).coerceAtLeast(1f)
-        val apexX = (right - apexInsetPx(density)).coerceAtLeast(band * 0.2f)
-
+        val top = topPx.coerceIn(0f, (viewHeightPx - 1f).coerceAtLeast(0f))
+        val bottom = viewHeightPx
         return listOf(
-            Point(right - band, top),
+            // Both base vertices exactly on the right edge: "right 0", no inset at all.
             Point(right, top),
-            Point(apexX, bottom),
+            Point(right, bottom),
+            // The point, 2cm to the left and vertically centred.
+            Point((right - apexInsetPx(density)).coerceAtLeast(0f), (top + bottom) / 2f),
         )
     }
 
@@ -231,11 +224,13 @@ object ApprovalTip {
         return !(hasNeg && hasPos)
     }
 
-    /** How wide the top edge is, relative to the window it hangs in. */
-    const val BAND_FRACTION = 1f
-
-    /** How far the apex reaches in from the right edge, in dp. A comfortable target, not a sheet. */
-    const val APEX_INSET_DP = 84f
+    /**
+     * The point's reach in from the edge, in dp — 2cm.
+     *
+     * A physical size, not a share of the display: "2cm" is the same sliver on every screen, which
+     * is exactly what was asked for and what a fraction of the width can never guarantee.
+     */
+    const val APEX_INSET_DP = 2f * 160f / 2.54f
 
     /** How far inside the view the paper keeps, in dp. */
     const val SHAPE_INSET_DP = 4f

@@ -46,7 +46,7 @@ object ApprovalTipOverlay {
      * A triangle that is twice as tall as it is wide reads as a spike; one a little taller than
      * wide reads as a corner of paper. The taper's angle is what the eye judges, not its length.
      */
-    private const val TRIANGLE_HEIGHT_RATIO = 1.35f
+    private const val TRIANGLE_HEIGHT_RATIO = 3.6f
 
     /**
      * The tallest the tip window may be, as a share of the display.
@@ -203,6 +203,8 @@ object ApprovalTipOverlay {
         // **Two centimetres, measured in dp.** 1 inch = 2.54cm = 160dp, so a centimetre is about
         // 63dp. Asking for "2cm from the right side" is a physical size, not a share of the screen,
         // and treating it as a share is what produced a sheet that covered half the display.
+        // The window is EXACTLY the sliver's width — 2cm — so the triangle's base lands on the
+        // window's right edge, which is the screen's right edge.
         val width = (CENTIMETRES_WIDE * 160f / 2.54f * density).toInt()
             .coerceAtMost(dm.widthPixels)
         // **A TAB near the top, not a column down the side.** A quarter of the display, so what
@@ -211,7 +213,9 @@ object ApprovalTipOverlay {
         //
         // Still capped below full height: a window that spans the display is exactly the case
         // Android 12 refuses to pass touches through.
-        // A TRIANGLE wider than it is tall, so the taper reads as a corner rather than a spike.
+        // **Tall enough that the sliver reads as paper, short enough not to be a column.**
+        // The base is on the edge and the point is 2cm in, so the height is what sets how steep the
+        // sliver looks. About 4x the width gives a long, gentle taper.
         val heightCap = (dm.heightPixels * MAX_WINDOW_HEIGHT_FRACTION).toInt()
         val height = (width * TRIANGLE_HEIGHT_RATIO).toInt().coerceAtMost(heightCap)
         val lp = WindowManager.LayoutParams(

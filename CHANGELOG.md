@@ -5663,9 +5663,12 @@ devDependencies. `node_modules/` is gitignored.
 - A request no longer disappears before it is drawn. The gate hands a new request to any approval window it still holds a reference to — and a window that is merely PAUSED behind another app still counted, so the tip was torn down and the request went into a screen nobody could see. Delivery now requires that window to actually have focus; otherwise the request rests on the tip as intended.
 - The gate logs which branch it took — resting the tip, growing the stack, or handing to a live window. Two rounds of "nothing appeared" could not be attributed to a branch, and a single line settles it.
 
-## 0.51.52 (build 378) — 2026-11-17 — CURRENT
+## 0.51.52 (build 378) — 2026-11-17
 - The arrival sound fires once per request, not once per redraw. It had moved into the tip's `show`, which the gate calls on every queue tick to keep the stack depth current — so a request that waited announced itself continuously and produced the reported stream of repeating sounds. The sound is now keyed on the request id and fired from the gate, the one place that knows a NEW request arrived rather than a redraw happening; `show` is idempotent and no longer announces at all.
 - The tip slides in over the distance of its own window. It had been advanced by a screen-proportional metric from a different coordinate system, so the shape was never actually pushed out of its window and appeared in place instead of sliding in from the side.
+
+## 0.51.53 (build 379) — 2026-11-17 — CURRENT
+- The tip is a sliver of paper tucked behind the right edge: a triangle whose two base vertices sit EXACTLY on the screen edge — top and bottom, zero inset — with the third vertex 2cm to the left, vertically centred. Earlier shapes had a top edge spanning the window or an apex hanging down, which read as a wedge rather than paper poking out from behind the glass. Both base points are now flush at 0 and the point is a physical 2cm from dp, so the same sliver appears on any screen width or resolution rather than a fraction of it.
 
 ## Keeping this file honest
 
