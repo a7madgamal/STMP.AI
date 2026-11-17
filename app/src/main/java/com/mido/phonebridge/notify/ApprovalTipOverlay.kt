@@ -207,27 +207,21 @@ object ApprovalTipOverlay {
         // the display is simply not there. Anchoring the window to the edge is what makes the cut
         // land on the screen edge rather than in mid-air.
         // **Two centimetres, measured in dp.** 1 inch = 2.54cm = 160dp, so a centimetre is about
-        // 63dp. Asking for "2cm from the right side" is a physical size, not a share of the screen,
-        // and treating it as a share is what produced a sheet that covered half the display.
-        // The window is EXACTLY the sliver's width — 2cm — so the triangle's base lands on the
-        // window's right edge, which is the screen's right edge.
-        // The window holds the corner plus room for its shadow, which spreads past the paper. Without
-        // that margin the blur is clipped to a hard edge at the window boundary and the shadow
-        // looks drawn on rather than cast.
-        val (boxW, boxH) = com.mido.phonebridge.ui.ApprovalTip.boundingBox(density)
-        val width = (boxW + SHADOW_ROOM_DP * density).toInt()
-            .coerceAtMost(dm.widthPixels)
-        // **A TAB near the top, not a column down the side.** A quarter of the display, so what
-        // shows is the corner of a sheet that slid in — the rest of the sheet is past the edge, and
-        // the paper inside is cut by it.
+        // **The window is exactly the shape plus room for its shadow.**
         //
-        // Still capped below full height: a window that spans the display is exactly the case
-        // Android 12 refuses to pass touches through.
-        // **Tall enough that the sliver reads as paper, short enough not to be a column.**
-        // The base is on the edge and the point is 2cm in, so the height is what sets how steep the
-        // sliver looks. About 4x the width gives a long, gentle taper.
+        // The shape is derived (`requiredSize`), not guessed: a triangle with two vertices on the
+        // edge and a 90° corner 1cm in needs `2cm x 2cm`. A window smaller than that clips the shape
+        // — which is what "bottom side is cut off" was — and a much larger one steals screen it
+        // does not need.
+        //
+        // The margin is only for the shadow's blur. It is deliberately small: this padding is
+        // transparent but still inside the window, and a window consumes every touch inside it.
+        val (needW, needH) = com.mido.phonebridge.ui.ApprovalTip.requiredSize(density)
+        val width = (needW + SHADOW_ROOM_DP * density).toInt()
+            .coerceAtMost(dm.widthPixels)
         val heightCap = (dm.heightPixels * MAX_WINDOW_HEIGHT_FRACTION).toInt()
-        val height = (boxH + SHADOW_ROOM_DP * density).toInt().coerceAtMost(heightCap)
+        val height = (needH + SHADOW_ROOM_DP * density).toInt().coerceAtMost(heightCap)
+
         val lp = WindowManager.LayoutParams(
             width,
             height,
