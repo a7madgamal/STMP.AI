@@ -125,10 +125,7 @@ class SshActivity : Activity() {
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(
-                    Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12),
-                    Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12)
-                )
+                com.mido.phonebridge.ui.Theme.padCard(this@SshActivity, this)
                 background = Theme.outlined(this@SshActivity, Theme.SURFACE, Theme.RADIUS_CARD)
             }
             card.layoutParams = LinearLayout.LayoutParams(
@@ -437,11 +434,8 @@ class SshActivity : Activity() {
         text = "$title\n$detail"
         textSize = Theme.TEXT_BODY_SP
         setTextColor(Theme.ON_SURFACE)
-        setPadding(
-            Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12),
-            Theme.dp(this@SshActivity, 14), Theme.dp(this@SshActivity, 12)
-        )
-        background = Theme.surface(this@SshActivity, color, Theme.RADIUS_CARD)
+        com.mido.phonebridge.ui.Theme.padCard(this@SshActivity, this)
+        background = com.mido.phonebridge.ui.Theme.card(this@SshActivity, color)
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = Theme.dp(this@SshActivity, 10) }

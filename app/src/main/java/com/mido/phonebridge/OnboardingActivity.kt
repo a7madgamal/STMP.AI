@@ -322,10 +322,7 @@ class OnboardingActivity : FragmentActivity() {
     ) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-            )
+            com.mido.phonebridge.ui.Theme.padCard(this@OnboardingActivity, this)
             background = Theme.outlined(
                 this@OnboardingActivity,
                 Theme.SURFACE,
@@ -534,10 +531,7 @@ class OnboardingActivity : FragmentActivity() {
     private fun card(content: LinearLayout.() -> Unit): LinearLayout {
         val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-                Theme.dp(this@OnboardingActivity, 14), Theme.dp(this@OnboardingActivity, 12),
-            )
+            com.mido.phonebridge.ui.Theme.padCard(this@OnboardingActivity, this)
             background = Theme.outlined(
                 this@OnboardingActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CARD,
             )

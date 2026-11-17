@@ -277,9 +277,8 @@ class SecretsActivity : Activity() {
         text = "$title\n$detail"
         textSize = Theme.TEXT_BODY_SP
         setTextColor(Theme.ON_SURFACE)
-        setPadding(Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10),
-            Theme.dp(this@SecretsActivity, 12), Theme.dp(this@SecretsActivity, 10))
-        background = Theme.surface(this@SecretsActivity, color, Theme.RADIUS_CONTROL)
+        com.mido.phonebridge.ui.Theme.padCard(this@SecretsActivity, this)
+        background = com.mido.phonebridge.ui.Theme.card(this@SecretsActivity, color)
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 6) }

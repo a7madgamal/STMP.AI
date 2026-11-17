@@ -180,7 +180,7 @@ class ActivityFragment : BridgeFragment() {
     private fun historyRow(h: AuditHeader): LinearLayout {
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(ctx, 14), Theme.dp(ctx, 12), Theme.dp(ctx, 14), Theme.dp(ctx, 12))
+            Theme.padCard(ctx, this)
             background = Theme.rippled(ctx, Theme.SURFACE, Theme.RADIUS_CONTROL)
             isClickable = true
             isFocusable = true

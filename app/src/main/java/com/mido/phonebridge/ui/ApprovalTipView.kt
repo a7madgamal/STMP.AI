@@ -127,7 +127,7 @@ class ApprovalTipView(context: Context) : View(context) {
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Theme.BORDER
         style = Paint.Style.STROKE
-        strokeWidth = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP)
+        strokeWidth = Theme.dpF(context, Theme.CARD_STROKE_DP)
     }
     private val grain = PaperGrain.paint()
 

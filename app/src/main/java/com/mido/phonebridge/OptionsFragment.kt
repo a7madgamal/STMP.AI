@@ -331,10 +331,7 @@ class OptionsFragment : BridgeFragment() {
         for (entry in entries.values.sortedBy { it.ip }) {
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-                )
+                Theme.padCard(ctx, this)
                 background = Theme.outlined(
                     ctx, Theme.SURFACE, Theme.RADIUS_CARD
                 )
@@ -420,10 +417,7 @@ class OptionsFragment : BridgeFragment() {
             typeface = Theme.monoFont(ctx)
             textSize = Theme.TEXT_BODY_SP
             background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-            setPadding(
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-            )
+            Theme.padCard(ctx, this)
         }
         row.addView(field)
         row.addView(
@@ -490,10 +484,7 @@ class OptionsFragment : BridgeFragment() {
 
         val block = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-            )
+            Theme.padCard(ctx, this)
             background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
 
@@ -594,10 +585,7 @@ class OptionsFragment : BridgeFragment() {
         val selected = policy.aiBackend == target
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-            )
+            Theme.padCard(ctx, this)
             background = Theme.outlined(
                 ctx,
                 if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
@@ -874,10 +862,7 @@ class OptionsFragment : BridgeFragment() {
                 typeface = Theme.monoFont(ctx)
                 textSize = Theme.TEXT_BODY_SP
                 background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-                setPadding(
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-                )
+                Theme.padCard(ctx, this)
             }
 
             // Fail hard, before saving: a URL the app cannot parse makes every AI-describable
@@ -925,10 +910,7 @@ class OptionsFragment : BridgeFragment() {
                 typeface = Theme.monoFont(ctx)
                 textSize = Theme.TEXT_BODY_SP
                 background = Theme.outlined(ctx, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-                setPadding(
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                    Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-                )
+                Theme.padCard(ctx, this)
                 // Set LAST, after inputType: `setInputType` re-derives the transformation from
                 // the type and silently clears anything assigned before it — the bug recorded in
                 // ApprovalActivity. Declared explicitly so the mask is not left to the theme.

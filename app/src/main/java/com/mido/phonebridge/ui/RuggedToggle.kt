@@ -63,10 +63,10 @@ class RuggedToggle(context: Context) : View(context) {
      * and feel"*.
      *
      * Buttons do not use `tornCard`. They use `backgroundTintList` for fill plus a FOREGROUND
-     * `LayerDrawable` holding grain and a `SquiggleBorder` at `SQUIGGLE_STROKE_DP` (1.2dp) with
-     * alpha 0x55. The toggle had been drawing the CARD material instead — 1.5dp at alpha 0x2E,
-     * which is less than half the ink. That is why it read as "toooo light" no matter how the tear
-     * was tuned: it was the wrong material entirely, not the wrong number.
+     * `LayerDrawable` holding grain and the torn edge at alpha 0x55. The toggle had been drawing
+     * the CARD material instead — 1.5dp at alpha 0x2E, which is less than half the ink. That is
+     * why it read as "toooo light" no matter how the tear was tuned: it was the wrong material
+     * entirely, not the wrong number.
      *
      * So the outline is built the same way here, and a switch and a button now differ only in
      * shape and behaviour rather than in material.
@@ -77,17 +77,20 @@ class RuggedToggle(context: Context) : View(context) {
             setColor(fillColor)
             cornerRadius = radius
         }
-        // Tint-equivalent background, then grain, then the wobbling edge — the same three layers,
-        // in the same order, as `Theme.button`'s foreground.
+        // Tint-equivalent background, then grain, then the torn edge — the same three layers, in
+        // the same order, as `Theme.button`'s foreground. The toggle used to build its own
+        // torn edge like every other surface. `tearDp = 2` keeps the tear proportional on a 31dp
+        // control, and the LINE stays CARD_STROKE_DP so the switch and the cards around it carry the
+        // same weight.
         return android.graphics.drawable.LayerDrawable(
             arrayOf(
                 bg,
                 GrainOverlay(radius),
-                SquiggleBorder(
-                    color = Theme.ON_SURFACE and 0x00FFFFFF or (0x55 shl 24),
-                    strokePx = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP),
+                Theme.tornEdge(
+                    ctx = context,
                     radiusPx = radius,
-                    amplitudePx = Theme.dpF(context, Theme.SQUIGGLE_DP),
+                    alpha = 0x55,
+                    tearDp = 2,
                 ),
             )
         )

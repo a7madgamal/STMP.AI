@@ -176,8 +176,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         // --- 1. HERO: the one thing you need to know ---
         heroCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(ctx, 16), Theme.dp(ctx, 14),
-                Theme.dp(ctx, 16), Theme.dp(ctx, 14))
+            Theme.padCard(ctx, this)
             background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         heroTitle = TextView(ctx).apply {
@@ -317,8 +316,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         container.addView(Theme.sectionHeader(ctx, "Approval gate"))
         gateCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(Theme.dp(ctx, 14), Theme.dp(ctx, 12),
-                Theme.dp(ctx, 14), Theme.dp(ctx, 12))
+            Theme.padCard(ctx, this)
             background = Theme.tornCard(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
         }
         gateTitle = TextView(ctx).apply {
@@ -450,11 +448,8 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         auditBanner = TextView(ctx).apply {
             textSize = Theme.TEXT_BODY_SP
             setTextColor(Theme.ON_COLOR)
-            background = Theme.surface(ctx, Theme.DANGER_SURFACE, Theme.RADIUS_CONTROL)
-            setPadding(
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10),
-                Theme.dp(ctx, 12), Theme.dp(ctx, 10)
-            )
+            background = Theme.card(ctx, Theme.DANGER_SURFACE)
+            Theme.padCard(ctx, this)
             visibility = TextView.GONE
         }
         container.addView(auditBanner)
@@ -685,7 +680,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 ServerStatus.State.STOPPED -> Theme.ON_SURFACE_VARIANT
             }
         )
-        heroCard.background = Theme.surface(ctx, heroSurface, Theme.RADIUS_CARD)
+        heroCard.background = Theme.card(ctx, heroSurface)
         // No email here (Mido, 2026-11-03: *"move email from home, it belongs to the google
         // plugin"*). The hero answers "is the bridge running, and where" -- who is signed in is a
         // fact about the ACCOUNT, and it lives on the screen that can change it.
@@ -979,7 +974,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // An unreadable policy is not a quiet fallback to SECURE: say it here, and
             // BridgeService refuses to serve on the same condition. This screen must
             // never show a switch position the engine is not actually honouring.
-            gateCard.background = Theme.surface(ctx, Theme.DANGER_SURFACE, Theme.RADIUS_CARD)
+            gateCard.background = Theme.card(ctx, Theme.DANGER_SURFACE)
             gateTitle.text = "⚠ POLICY UNREADABLE"
             gateSub.text = e.message ?: "policy could not be read"
             gateTitle.setTextColor(Theme.DANGER)
@@ -998,12 +993,12 @@ class HomeFragment : BridgeFragment(), BridgeControl {
             // request, and the card says which so the home screen never shows a switch
             // position without showing what it implies.
             GlobalMode.WHITELIST -> {
-                gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+                gateCard.background = Theme.card(ctx)
                 gateTitle.text = "WHITELIST"
                 gateSub.text = rulesSummary()
             }
             GlobalMode.PARANOID -> {
-                gateCard.background = Theme.surface(ctx, Theme.SURFACE, Theme.RADIUS_CARD)
+                gateCard.background = Theme.card(ctx)
                 gateTitle.text = "PARANOID"
                 gateSub.text = GlobalMode.PARANOID.blurb
             }
@@ -1011,7 +1006,7 @@ class HomeFragment : BridgeFragment(), BridgeControl {
                 // Amber, not red: the gate still exists, it is just quiet and fast.
                 // Calling it red would make the real panic switch less loud by
                 // comparison, which is the failure that matters.
-                gateCard.background = Theme.surface(ctx, Theme.WARNING_SURFACE, Theme.RADIUS_CARD)
+                gateCard.background = Theme.card(ctx, Theme.WARNING_SURFACE)
                 gateTitle.text = "⚠ DON'T DISTURB"
                 gateSub.text = GlobalMode.DONT_DISTURB.blurb
             }
