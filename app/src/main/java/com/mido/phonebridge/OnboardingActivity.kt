@@ -327,7 +327,6 @@ class OnboardingActivity : FragmentActivity() {
                 this@OnboardingActivity,
                 Theme.SURFACE,
                 Theme.RADIUS_CONTROL,
-                strokeColor = if (granted) Theme.SUCCESS else Theme.BORDER,
                 strokeDp = if (granted) 2 else 1,
             )
             isClickable = true
@@ -570,7 +569,6 @@ class OnboardingActivity : FragmentActivity() {
                 this@OnboardingActivity,
                 if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
                 Theme.RADIUS_CONTROL,
-                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
                 strokeDp = if (selected) 2 else 1,
             )
             isClickable = true

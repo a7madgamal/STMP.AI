@@ -605,7 +605,6 @@ class OptionsFragment : BridgeFragment() {
                 ctx,
                 if (selected) Theme.SURFACE else Theme.SURFACE_VARIANT,
                 Theme.RADIUS_CONTROL,
-                strokeColor = if (selected) Theme.ACCENT else Theme.BORDER,
                 strokeDp = if (selected) 2 else 1,
             )
             isClickable = true

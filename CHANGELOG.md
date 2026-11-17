@@ -5709,11 +5709,15 @@ devDependencies. `node_modules/` is gitignored.
 - Switches use the same slightly-darker panel fill as cards. A switch painted in the page colour read as a hole rather than as a control.
 - Nothing touches the screen edge. There was no gutter constant, so screens used 16, 20 or 24 depending on the file and content sat a different distance from the side on each one.
 
-## 0.51.61 (build 387) — 2026-11-17 — CURRENT
+## 0.51.61 (build 387) — 2026-11-17
 - Rows added straight into a settings section keep the screen margin. The section container discarded a child's own layout margins, so the Diagnostics row and the Show Log button rendered flush against the screen edge while every card beside them was inset.
 - Switches use the panel fill for both track and knob. The knob had been painted in body ink, which read as a dark blob punched into the switch rather than as a part of it.
 - Plugin rows are the panel fill. The standalone rows were painted in the page colour, so they drew a border around empty paper and looked like translucent boxes.
 - The bottom of Preferences has screenshot coverage. That section is below the fold, so nothing there was ever checked in a golden — which is why a flush button there needed an install to find.
+
+## 0.51.62 (build 388) — 2026-11-17 — CURRENT
+- There is one border colour in the app. A `strokeColor` parameter let four call sites pass accent or success, and buttons and switches used a translucent ink instead of the hairline, so lines came in two shades side by side. The parameter is gone, which makes a second shade a compile error rather than a review catch.
+- Switches carry their state in the knob again: green when on, ink when off, amber while the server is still working. The track stays panel-fill paper.
 
 ## Keeping this file honest
 

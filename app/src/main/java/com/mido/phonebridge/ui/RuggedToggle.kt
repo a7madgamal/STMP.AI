@@ -87,7 +87,9 @@ class RuggedToggle(context: Context) : View(context) {
                 bg,
                 GrainOverlay(radius),
                 com.mido.phonebridge.ui.SquiggleBorder(
-                    color = com.mido.phonebridge.ui.Theme.ON_SURFACE and 0x00FFFFFF or (0x55 shl 24),
+                    // Same border ink as every card and button. Was a translucent ON_SURFACE,
+                    // which read as a second, fainter shade of line.
+                    color = Theme.BORDER,
                     strokePx = Theme.dpF(context, Theme.SQUIGGLE_STROKE_DP),
                     radiusPx = radius,
                     amplitudePx = Theme.dpF(context, Theme.SQUIGGLE_DP),
@@ -249,12 +251,15 @@ class RuggedToggle(context: Context) : View(context) {
         val knobTop = rect.top + insetPx
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
 
-        // **The knob is paper, not ink.** It used to be ON_SURFACE — near-black — which on a light
-        // track read as a dark blob punched into the switch rather than as a slider you could push.
-        // One colour, always: the switch is made of the same material as the cards around it, and
-        // state is carried by which side the knob sits on plus the track fill, not by painting the
-        // knob a foreign colour.
-        val color = Theme.SURFACE
+        // **The knob carries the state.** Green when on, ink when off, amber while the server is
+        // still working on it — the switch is the one control whose whole job is to say whether
+        // something is enabled, so its colour is information, not decoration. The TRACK stays
+        // panel-fill paper; only the knob changes.
+        val color = when {
+            pending -> withAlpha(Theme.WARNING, 0xB0)
+            checked -> Theme.SUCCESS
+            else -> Theme.ON_SURFACE
+        }
         // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
         val current = knob.let { if (it != null && knobColorKey == color) it else null }
         val drawable = current ?: surfaceDrawable(color, 2).also {

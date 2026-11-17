@@ -754,7 +754,6 @@ object Theme {
         ctx: Context,
         color: Int = SURFACE,
         radiusDp: Int = RADIUS_CARD,
-        strokeColor: Int = BORDER,
         strokeDp: Int = 1
     ): android.graphics.drawable.Drawable {
         val r = radiusPx(ctx, radiusDp)
@@ -767,7 +766,10 @@ object Theme {
                 base,
                 GrainOverlay(r),
                 SquiggleBorder(
-                    color = strokeColor,
+                    // The ONE line colour. There used to be a `strokeColor` parameter, and four
+                    // call sites passed ACCENT or SUCCESS, so the app drew two shades of border
+                    // side by side. A selected or granted state is already carried by the FILL.
+                    color = BORDER,
                     // A selected row asks for 2dp. The amplitude stays fixed and the STROKE
                     // scales, so a heavier state is the same edge drawn heavier rather than a
                     // second style.
@@ -1013,7 +1015,12 @@ object Theme {
                 arrayOf(
                     GrainOverlay(radiusPx(ctx, RADIUS_CONTROL)),
                     SquiggleBorder(
-                        color = withAlpha(if (style == ButtonStyle.GHOST) ACCENT else ON_SURFACE, 0x55),
+                        // **One border colour in the app: BORDER.** This used to switch to ACCENT
+                        // for the accent style and to a translucent ink for the others, so a ghost
+                        // button and the card beside it carried visibly different line colours.
+                        // The style is already carried by the FILL and the text colour; the edge is
+                        // the same ink everywhere.
+                        color = BORDER,
                         strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
                         radiusPx = radiusPx(ctx, RADIUS_CONTROL),
                         amplitudePx = dpF(ctx, SQUIGGLE_DP),
