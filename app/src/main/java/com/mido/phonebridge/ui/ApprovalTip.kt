@@ -169,21 +169,19 @@ object ApprovalTip {
     }
 
     /**
-     * A sliver of paper tucked behind the right edge: a triangle with its BASE ON THE EDGE.
+     * The visible corner of a sheet of paper: a RIGHT-ANGLED triangle.
      *
-     * Stated plainly from the device, after several wrong shapes:
-     *  - **"the top and bottom points MUST be right 0"** — two vertices sit exactly on the screen's
-     *    right edge, one at the top of the sliver and one at the bottom.
-     *  - **"left one should be 2cm wide"** — the third vertex is 2cm to the left of that edge,
-     *    vertically centred between the other two.
+     * Three reports shaped this, and the third is the one that explains the others:
      *
-     * So the triangle points LEFT, its vertical base flush against the edge it is emerging from.
-     * That is what a sheet behind the glass looks like, and it is why earlier shapes were wrong:
-     * a top edge spanning the window, or an apex at the bottom, reads as a wedge hanging down
-     * rather than paper poking out.
+     *  - **"a fucking paper is 90 degrees"** — a sheet's corner is a RIGHT ANGLE. Any shape whose
+     *    visible corner is not 90 is not paper; it is a wedge, a lozenge or a spike, which is what
+     *    every earlier version looked like. The right angle is the property that makes it read as a
+     *    corner rather than a cut.
+     *  - **"1cm only"** — a physical size, so it is 1cm on every screen and resolution.
+     *  - **"top and bottom must be right 0"** — the two legs run to the edge; the corner pokes in.
      *
-     * The 2cm is a PHYSICAL width (`APEX_INSET_DP` scaled by density), so every screen size and
-     * resolution shows the same sliver.
+     * Built in the sheet's own frame and then ROTATED, so no leg lies parallel to the screen: a leg
+     * along the screen edge would cast a vertical shadow, which is the defect reported earlier.
      */
     fun outlineFit(
         viewWidthPx: Float,
@@ -191,30 +189,60 @@ object ApprovalTip {
         density: Float,
         topPx: Float,
     ): List<Point> {
-        val right = viewWidthPx
-        val top = topPx.coerceIn(0f, (viewHeightPx - 1f).coerceAtLeast(0f))
-        val bottom = viewHeightPx
-        // **The point is at the TOP.** Measured from the screenshot the human annotated: the cream
-        // shape starts at zero width and widens as it descends, so the sharp end is the upper one
-        // and the paper spreads downward behind the edge. A point at the vertical centre — the
-        // previous shape — reads as a lozenge, not as something sliding in.
-        return listOf(
-            // The point, 2cm in from the edge, at the top of the window.
-            Point((right - apexInsetPx(density)).coerceAtLeast(0f), top),
-            // Both base vertices exactly on the right edge: "right 0", no inset at all.
-            Point(right, top),
-            Point(right, bottom),
+        val leg = apexInsetPx(density)
+        val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
+        val cos = kotlin.math.cos(t)
+        val sin = kotlin.math.sin(t)
+
+        // The corner in the paper's own frame: a right angle at the origin, one leg along +u and one
+        // along +v. Rotating the whole thing is what keeps both legs off the screen axes.
+        val local = listOf(
+            Point(0f, 0f),   // the corner — exactly 90 degrees between the two legs
+            Point(leg, 0f),  // leg one
+            Point(0f, leg),  // leg two, perpendicular by construction
         )
+        val rotated = local.map { Point(it.x * cos - it.y * sin, it.x * sin + it.y * cos) }
+
+        // Place it so the corner sits at the right edge, with the legs running inwards and down.
+        val maxX = rotated.maxOf { it.x }
+        val minY = rotated.minOf { it.y }
+        val top = topPx.coerceIn(0f, (viewHeightPx - 1f).coerceAtLeast(0f))
+        // Clamp inside the view, so a window smaller than the shape's bounding box squeezes the
+        // corner in rather than letting it hang outside — a shape drawn outside its window is
+        // invisible, which is worse than a shape that is merely clipped.
+        val dx = (viewWidthPx - maxX).coerceAtLeast(-rotated.minOf { it.x })
+        val dy = top - minY
+        return rotated.map {
+            Point(
+                (it.x + dx).coerceIn(0f, viewWidthPx),
+                (it.y + dy).coerceIn(0f, viewHeightPx),
+            )
+        }
     }
 
-    /** How far the point of the taper reaches in from the right edge, in px. */
+    /** Length of each leg of the corner, in px — 1cm. */
     fun apexInsetPx(density: Float): Float = APEX_INSET_DP * density
 
     /**
-     * Whether [x],[y] is inside the triangle.
+     * The width and height the rotated corner needs, in px.
      *
-     * Convex test: the point must be on the same side of all three edges. Order-independent, so a
-     * shape change cannot silently invert it.
+     * A rotated right angle no longer fits in a square of its leg length: the bounding box grows.
+     * The window asks for this rather than guessing, so the shape can never be clipped by the
+     * window that holds it — the defect behind "bottom side is cut off".
+     */
+    fun boundingBox(density: Float): Pair<Float, Float> {
+        val leg = apexInsetPx(density)
+        val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
+        val cos = kotlin.math.abs(kotlin.math.cos(t))
+        val sin = kotlin.math.abs(kotlin.math.sin(t))
+        return Pair(leg * (cos + sin), leg * (cos + sin))
+    }
+
+    /**
+     * Whether [x],[y] is inside the corner.
+     *
+     * Convex test: same side of all three edges. Order-independent, so a shape change cannot
+     * silently invert it.
      */
     fun containsFit(
         viewWidthPx: Float,
@@ -238,12 +266,12 @@ object ApprovalTip {
     }
 
     /**
-     * The point's reach in from the edge, in dp — 2cm.
+     * One leg of the corner, in dp — 1cm.
      *
-     * A physical size, not a share of the display: "2cm" is the same sliver on every screen, which
-     * is exactly what was asked for and what a fraction of the width can never guarantee.
+     * A physical size, not a share of the display: "1cm" is the same corner on every screen, which a
+     * fraction of the width can never guarantee.
      */
-    const val APEX_INSET_DP = 2f * 160f / 2.54f
+    const val APEX_INSET_DP = 1f * 160f / 2.54f
 
     /** How far inside the view the paper keeps, in dp. */
     const val SHAPE_INSET_DP = 4f

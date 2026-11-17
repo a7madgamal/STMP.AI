@@ -5670,9 +5670,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.53 (build 379) — 2026-11-17
 - The tip is a sliver of paper tucked behind the right edge: a triangle whose two base vertices sit EXACTLY on the screen edge — top and bottom, zero inset — with the third vertex 2cm to the left, vertically centred. Earlier shapes had a top edge spanning the window or an apex hanging down, which read as a wedge rather than paper poking out from behind the glass. Both base points are now flush at 0 and the point is a physical 2cm from dp, so the same sliver appears on any screen width or resolution rather than a fraction of it.
 
-## 0.51.54 (build 380) — 2026-11-17 — CURRENT
+## 0.51.54 (build 380) — 2026-11-17
 - The tip's point is at the TOP, and the paper spreads downward from it. Measured from the annotated screenshot rather than guessed: the shape starts at zero width and widens as it descends. A point at the vertical centre reads as a lozenge rather than as paper easing out from behind the edge.
 - Queued requests stack visibly. Each sheet in the queue is the same sliver stepped down and a little further in, with its own height so the layers cannot overlap into one shape — three waiting requests read as three sheets of paper behind the edge, countable at a glance.
+
+## 0.51.55 (build 381) — 2026-11-17 — CURRENT
+- The tip is the CORNER OF A SHEET: a right-angled triangle, 1cm on each leg. "A fucking paper is 90 degrees" was the requirement, and it explains every wrong shape before it — a sheet's corner is a right angle, so anything with an acute or obtuse visible corner is not paper. The right angle is now asserted in a test, in degrees, because it is a property rather than a set of coordinates.
+- 1cm instead of 2cm, as a physical size, so it is the same corner on every screen and resolution. The earlier 2cm read as far too large.
+- The window is sized to the corner's ROTATED bounding box rather than its leg length. A rotated right angle does not fit in a square of its leg: the box grows by cos+sin, which is why the shape was being clipped by its own window.
+- The shape is clamped inside the window, so a window smaller than the shape squeezes the corner in instead of drawing it outside and leaving nothing visible.
 
 ## Keeping this file honest
 

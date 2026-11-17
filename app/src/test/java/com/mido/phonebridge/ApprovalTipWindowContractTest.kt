@@ -80,7 +80,9 @@ class ApprovalTipWindowContractTest {
             "height ${params.height} is a column, not a sheet (width ${params.width})",
             params.height < params.width * 4f,
         )
-        assertTrue("width ${params.width} is too small to read", params.width > 100)
+        // 1cm at a small density is a genuinely small window; what must hold is that it is not
+        // degenerate — the shape needs a few dozen px to exist at all.
+        assertTrue("width ${params.width} is degenerate", params.width > 40)
     }
 
     @Test
