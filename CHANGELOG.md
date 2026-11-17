@@ -5692,10 +5692,16 @@ devDependencies. `node_modules/` is gitignored.
 - The screenshot tests now position the tip the same way the device does. They were moving the view with a rightward translation while production moved the window the other way, so every capture showed paper flush to the edge and the phone did not.
 - A test asserts the inset is zero, because that is the specific failure those images could not see.
 
-## 0.51.58 (build 384) — 2026-11-17 — CURRENT
+## 0.51.58 (build 384) — 2026-11-17
 - The resting tip carries a countdown: a small stamp-red disc near its point, solid at arrival and draining to empty as the window closes. Visual only, no numbers, and on the front sheet alone so a queue stays readable as paper.
 - The countdown reads the gate's own deadline rather than starting its own timer. A timer inside the overlay assumed a fixed 60 seconds and would have run out while the request still had real time left, restarted from full whenever the sheet folded back, and never retargeted when a queued request became the head.
 - The disc is placed by geometry so it always sits inside the paper, and the ticker stops when nothing is waiting instead of running for the life of the window.
+
+## 0.51.59 (build 385) — 2026-11-17 — CURRENT
+- Every card, button, toggle and input well now wears the same torn-paper edge. The app had two edge treatments in parallel — a torn silhouette and a separately drawn wobbly rectangle — with different stroke weights and different colours, so two cards on one screen had two different borders.
+- Card insets are one value now. They had five across fifteen call sites, so two cards beside each other disagreed about where their text started.
+- The wobbly-edge drawable is deleted; the hand-drawn rule under section headers is kept, because a rule is a line drawn on paper rather than a card silhouette.
+- The two risk-tinted cards keep their tint. A tint is a state, not a different kind of card.
 
 ## Keeping this file honest
 
