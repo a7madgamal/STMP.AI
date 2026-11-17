@@ -5674,11 +5674,18 @@ devDependencies. `node_modules/` is gitignored.
 - The tip's point is at the TOP, and the paper spreads downward from it. Measured from the annotated screenshot rather than guessed: the shape starts at zero width and widens as it descends. A point at the vertical centre reads as a lozenge rather than as paper easing out from behind the edge.
 - Queued requests stack visibly. Each sheet in the queue is the same sliver stepped down and a little further in, with its own height so the layers cannot overlap into one shape — three waiting requests read as three sheets of paper behind the edge, countable at a glance.
 
-## 0.51.55 (build 381) — 2026-11-17 — CURRENT
+## 0.51.55 (build 381) — 2026-11-17
 - The tip is the CORNER OF A SHEET: a right-angled triangle, 1cm on each leg. "A fucking paper is 90 degrees" was the requirement, and it explains every wrong shape before it — a sheet's corner is a right angle, so anything with an acute or obtuse visible corner is not paper. The right angle is now asserted in a test, in degrees, because it is a property rather than a set of coordinates.
 - 1cm instead of 2cm, as a physical size, so it is the same corner on every screen and resolution. The earlier 2cm read as far too large.
 - The window is sized to the corner's ROTATED bounding box rather than its leg length. A rotated right angle does not fit in a square of its leg: the box grows by cos+sin, which is why the shape was being clipped by its own window.
 - The shape is clamped inside the window, so a window smaller than the shape squeezes the corner in instead of drawing it outside and leaving nothing visible.
+
+## 0.51.56 (build 382) — 2026-11-17 — CURRENT
+- Queued requests stack DOWNWARD from under the front sheet, as parallel copies of the same shape. Re-deriving the outline per layer made three different triangles converge on a shared point, so a queue read as a fan instead of paper under paper.
+- The resting corner is a true right angle and stays one. The outline was centred in its window, so any window taller than the paper flattened the corner; it is now measured from its own drop and window height no longer affects the shape.
+- The window is tall enough for the whole stack. Sizing it to the bare shape clipped the last sheet, which is why the bottom of the paper kept being cut off.
+- The tip hangs 32dp past the right edge, as a sheet caught mid-slide rather than a badge stuck on the screen edge.
+- The tip is covered by screenshot tests over the full display, with a centimetre ruler, so its size and shape are reviewable without installing a build.
 
 ## Keeping this file honest
 
