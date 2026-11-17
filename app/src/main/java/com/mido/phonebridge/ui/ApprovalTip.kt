@@ -210,6 +210,27 @@ object ApprovalTip {
     }
 
     /**
+     * How far the paper hangs PAST the right edge of the screen, in dp.
+     *
+     * The tip is a sheet caught mid-slide, not a badge stuck on the edge, so part of it is meant to
+     * be off the display. Chosen by the human from a rendered strip of candidates (0 / 8 / 16 / 24 /
+     * 32 dp), not invented: 32dp hides roughly half of the 1cm reach and leaves 1.1cm of paper
+     * showing.
+     *
+     * This is an OVERSHOOT, so it must be applied by moving the window right (see
+     * `ApprovalTipOverlay`), not by clipping inside it. A view cannot draw outside its own bounds,
+     * so shrinking the window instead would cut the paper at a hard line that is not the screen
+     * edge — which is the "cut off" look this is meant to avoid.
+     */
+    const val EDGE_OVERSHOOT_DP = 32f
+
+    /** [EDGE_OVERSHOOT_DP] in px, as the window's x offset past the right edge. */
+    fun overshootPx(density: Float): Int {
+        require(density > 0f) { "density must be positive, was $density" }
+        return (EDGE_OVERSHOOT_DP * density).toInt()
+    }
+
+    /**
      * The size this shape needs, in px: `2d` wide by `2d` tall, plus the window's own inset.
      *
      * Derived rather than measured, so the window and the shape cannot disagree — a window smaller

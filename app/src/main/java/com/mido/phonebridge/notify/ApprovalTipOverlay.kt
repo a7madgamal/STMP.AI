@@ -238,7 +238,12 @@ object ApprovalTipOverlay {
             // Explicitly zero: a tip must never dim the app the human is using, and the default
             // for a non-dialog window is not guaranteed to be 0 across versions.
             dimAmount = 0f
-            x = 0
+            // **Positive x pushes the window PAST the right edge.** With `Gravity.END`, x is an
+            // offset from the right edge, so a positive value hides that much of the paper off
+            // screen — the sheet is meant to be caught mid-slide, not stuck on the edge. A view
+            // cannot draw outside its own bounds, so this has to be a window offset; shrinking the
+            // window would cut the paper at a hard line that is not the screen edge.
+            x = com.mido.phonebridge.ui.ApprovalTip.overshootPx(density)
             // At the very top: the VIEW applies its own offset for the paper. Moving the window too
             // would offset the sheet twice and clip it at the bottom.
             y = 0

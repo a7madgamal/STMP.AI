@@ -45,6 +45,11 @@ class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
         val tip = ApprovalTipView(ctx).apply {
             screenWidthPx = dm.widthPixels
             this.depth = depth
+            // Production pushes the whole WINDOW past the right edge (ApprovalTipOverlay sets a
+            // positive `x`). A view cannot draw outside its bounds, so the equivalent here is to
+            // translate the view by the same amount — measured in the same dp, from the same
+            // constant, so the golden cannot drift from the phone.
+            translationX = ApprovalTip.overshootPx(density).toFloat()
         }
         root.addView(
             tip,
@@ -71,6 +76,11 @@ class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test
     fun tip_on_screen_stack3() {
         captureTipOnScreen("screen_stack3", 3, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+    }
+
+    @Test
+    fun tip_on_screen_stack2() {
+        captureTipOnScreen("screen_stack2", 2, Robolectric.buildActivity(android.app.Activity::class.java).setup())
     }
 
     /**
