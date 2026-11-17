@@ -187,22 +187,22 @@ class ApprovalTipView(context: Context) : View(context) {
         // The step between two adjacent wedges, which is what a promotion travels.
         stepDropPx = (wedges.getOrNull(1)?.dropPx ?: (ApprovalTip.GHOST_DROP_DP * density)) -
             (wedges.firstOrNull()?.dropPx ?: 0f)
+
+        // **One triangle, translated.** Every sheet in the queue is the SAME shape, moved down.
+        //
+        // The previous version re-derived `outlineFit` per ghost with a shorter height and a
+        // larger `top`, and because that function centred the shape between `top` and the bottom
+        // the apex and the base drifted by different amounts. Three triangles that were not
+        // congruent, all aimed at the same point: the front edge converged instead of stepping.
+        // A stack of paper is parallel. So the outline is computed ONCE and each ghost is a
+        // straight translation of it.
+        val outline = ApprovalTip.outlineFit(
+            w.toFloat(), h.toFloat(), density, topOffset,
+        )
         for (wedge in wedges) {
-            // Each sheet in the queue is the same sliver, stepped DOWN and slightly further in, so
-            // a queue reads as layered paper behind the edge rather than one thicker shape.
-            val top = topOffset + wedge.dropPx
-            // Fitted to THIS view: the sheet must fill the canvas it is painted on, not the screen
-            // it is floating over. Building it from screen proportions put most of it outside a
-            // narrow strip, and only a corner appeared.
-            // The ghost's own bottom is `top` lower than the front's, so its window height must
-            // shrink by the same amount — otherwise every layer fills the view identically and the
-            // stack looks like one shape.
-            val points = ApprovalTip.outlineFit(
-                w.toFloat(), h.toFloat() - (top - topOffset), density, top,
-            )
             val path = Path().apply {
-                moveTo(points[0].x, points[0].y)
-                points.drop(1).forEach { lineTo(it.x, it.y) }
+                moveTo(outline[0].x, outline[0].y + wedge.dropPx)
+                outline.drop(1).forEach { lineTo(it.x, it.y + wedge.dropPx) }
                 close()
             }
             fronts.add(path)

@@ -118,7 +118,7 @@ object ApprovalTip {
         val visible = depth.coerceIn(0, MAX_VISIBLE)
         return (0 until visible).map { i ->
             Wedge(
-                insetPx = i * GHOST_INSET_DP * density,
+                insetPx = 0f,
                 dropPx = i * GHOST_DROP_DP * density,
                 alpha = GHOST_ALPHA[i],
             )
@@ -196,10 +196,12 @@ object ApprovalTip {
     ): List<Point> {
         val d = apexInsetPx(density)
         val right = viewWidthPx
-        // Centre the shape vertically in the window, so the 1cm reach and 2cm base both fit.
-        val mid = (topPx + viewHeightPx) / 2f
-        val top = (mid - d).coerceAtLeast(0f)
-        val bottom = (mid + d).coerceAtMost(viewHeightPx)
+        // The paper occupies exactly [topPx, topPx + 2d] vertically. Measured from the TOP, never
+        // centred in the window: centring made the base depend on the window's height, so the same
+        // 1cm shape came out with a 1.56cm base and a 75.7-degree corner whenever the window was
+        // taller than the paper. The offset is the drop; the shape is fixed.
+        val top = topPx.coerceAtLeast(0f)
+        val bottom = (top + 2f * d).coerceAtMost(viewHeightPx)
         return listOf(
             Point(right, top),          // on the edge
             Point(right, bottom),       // on the edge
@@ -215,7 +217,24 @@ object ApprovalTip {
      */
     fun requiredSize(density: Float): Pair<Float, Float> {
         val d = apexInsetPx(density)
-        return Pair(2f * d, 2f * d)
+        // Tall enough for the paper AND for every offset the stack can carry. Sizing this to the
+        // bare shape is what clipped the paper at the window's bottom edge ("bottom side is cut
+        // off"): the drop above the first sheet and the steps below the last one live outside a
+        // 2d-tall box.
+        return Pair(2f * d, TOP_OFFSET_DP * density + stackDepthPx(density))
+    }
+
+    /**
+     * How far down the last visible sheet's bottom edge sits, from the top of the window.
+     *
+     * The stack grows DOWNWARDS from under the front sheet, so this is the total vertical room a
+     * full queue needs: the front's own drop, the steps of the ghosts behind it, and the last
+     * sheet's 2d body.
+     */
+    fun stackDepthPx(density: Float): Float {
+        val d = apexInsetPx(density)
+        val lastDrop = (MAX_VISIBLE - 1) * GHOST_DROP_DP * density
+        return lastDrop + 2f * d
     }
 
     /** Distance from the right edge to the point, in px — 1cm. */

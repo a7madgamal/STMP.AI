@@ -34,7 +34,7 @@ class ApprovalTipTest {
         winH = h
     }
 
-    private fun tri() = ApprovalTip.outlineFit(winW, winH, density, 0f)
+    private fun tri() = ApprovalTip.outlineFit(winW, winH, density, ApprovalTip.TOP_OFFSET_DP * density)
 
     @Test
     fun `it is a triangle`() {
@@ -127,11 +127,54 @@ class ApprovalTipTest {
         val cy = p.map { it.y }.average().toFloat()
         assertTrue(
             "the centroid must be a hit",
-            ApprovalTip.containsFit(winW, winH, density, 0f, cx, cy),
+            ApprovalTip.containsFit(winW, winH, density, ApprovalTip.TOP_OFFSET_DP * density, cx, cy),
         )
         assertFalse(
             "a point off the paper must not absorb the tap",
-            ApprovalTip.containsFit(winW, winH, density, 0f, 0.5f, 0.5f),
+            ApprovalTip.containsFit(winW, winH, density, ApprovalTip.TOP_OFFSET_DP * density, 0.5f, 0.5f),
+        )
+    }
+
+    @Test
+    fun `the stack grows downwards and the sheets are parallel, not aimed at one point`() {
+        // "stacking should happen from under not top" and "should be parallel not one point".
+        //
+        // Two separate faults, both visible on the device: ghosts that stepped UP put the queue
+        // above the sheet the human can actually open, and ghosts re-derived from a shrinking
+        // height were three different triangles converging on a shared apex. A stack of paper is
+        // congruent copies, each one lower.
+        val wedges = ApprovalTip.stack(3, density)
+        assertEquals("three queued sheets", 3, wedges.size)
+        assertTrue("the front sheet is not offset", wedges[0].dropPx == 0f)
+        wedges.zipWithNext { a, b ->
+            assertTrue(
+                "each sheet steps DOWN from the one in front, not up",
+                b.dropPx > a.dropPx,
+            )
+            assertEquals("sheets do not step inwards", a.insetPx, b.insetPx, 0.01f)
+        }
+
+        // Parallel: translating one outline by a drop must give exactly the next sheet's outline.
+        val front = ApprovalTip.outlineFit(winW, winH, density, ApprovalTip.TOP_OFFSET_DP * density)
+        val drop = wedges[1].dropPx
+        val second = ApprovalTip.outlineFit(
+            winW, winH, density, ApprovalTip.TOP_OFFSET_DP * density + drop,
+        )
+        front.zip(second).forEach { (a, b) ->
+            assertEquals("a translated sheet keeps its x", a.x, b.x, 0.01f)
+            assertEquals("a translated sheet moves down by exactly the drop", a.y + drop, b.y, 0.01f)
+        }
+    }
+
+    @Test
+    fun `the window is tall enough for the whole stack`() {
+        // The recurring "bottom side is cut off": the window has to hold the drop above the front
+        // sheet plus every step below it. Sized to the bare shape it clipped the last sheet.
+        val drop = ApprovalTip.GHOST_DROP_DP * density * (ApprovalTip.MAX_VISIBLE - 1)
+        val lastBottom = ApprovalTip.TOP_OFFSET_DP * density + drop + 2f * d
+        assertTrue(
+            "window $winH must hold the deepest sheet at $lastBottom",
+            winH >= lastBottom - 0.5f,
         )
     }
 
@@ -143,5 +186,18 @@ class ApprovalTipTest {
         val nIn = narrow.minBy { it.x }.x
         val wIn = wide.minBy { it.x }.x
         assertEquals(winW - nIn, winW * 3f - wIn, 1f)
+    }
+
+    @Test
+    fun `a taller window does not change the shape`() {
+        // The bug that made the corner 75.7 degrees: the outline was centred in whatever height it
+        // was given, so the SAME paper came out squat whenever the window was taller than it. Shape
+        // must be a function of the drop and the density only.
+        val short = ApprovalTip.outlineFit(winW, winH, density, 0f)
+        val tall = ApprovalTip.outlineFit(winW, winH * 4f, density, 0f)
+        short.zip(tall).forEach { (a, b) ->
+            assertEquals("x must not move with window height", a.x, b.x, 0.01f)
+            assertEquals("y must not move with window height", a.y, b.y, 0.01f)
+        }
     }
 }
