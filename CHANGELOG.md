@@ -5643,9 +5643,12 @@ devDependencies. `node_modules/` is gitignored.
 - `dimAmount` is set to zero explicitly rather than relying on a default.
 - A new test pins the window's CONTRACT with the system rather than its appearance: overlay type, not full width, not full height, not focusable, not touch-modal, not touchable-blocked, undimmed, translucent, and anchored top-right. The three "touches are blocked" reports were a WindowManager policy that no ordinary unit test could see; this one fails here instead of on the device.
 
-## 0.51.47 (build 373) — 2026-11-17 — CURRENT
+## 0.51.47 (build 373) — 2026-11-17
 - The tip is the part of a sheet that has slid in from the right, not a whole sheet floating in the middle. Its right side runs past the display edge, so what is drawn is a leaning top edge, a leaning left edge and a leaning bottom edge, with no right edge at all. That is the look that was asked for three times, and it is also the reason the shadow kept reading vertical: a shape that ENDS on the screen edge has a straight vertical side in the picture, and a vertical side casts a vertical band.
 - The window is pinned to the right edge, 46% of the display wide, and still capped below full height so Android keeps letting touches through to the app below.
+
+## 0.51.48 (build 374) — 2026-11-17 — CURRENT
+- The tip is a tab about 2cm wide at the top of the screen, not a sheet running down the side. The width is now a PHYSICAL size — 2cm expressed in dp — rather than a share of the display, because "2cm from the right edge" is a size, and treating it as a fraction is what produced a sheet covering half the screen. Its height is a quarter of the display, so what shows is the corner of a sheet that slid in, cut by the right edge.
 
 ## Keeping this file honest
 

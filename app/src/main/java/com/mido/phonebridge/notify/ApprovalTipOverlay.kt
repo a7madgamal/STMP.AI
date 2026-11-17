@@ -37,8 +37,11 @@ object ApprovalTipOverlay {
     /** Breathing room around the paper inside its own window, in dp. */
     private const val WINDOW_MARGIN_DP = 14f
 
-    /** How wide the tip window is, as a share of the display. */
-    private const val WINDOW_WIDTH_FRACTION = 0.46f
+    /** How wide the tip is, in centimetres — the size it should read as on screen. */
+    private const val CENTIMETRES_WIDE = 2f
+
+    /** How tall the tip is, as a share of the display. A tab at the top, not a column. */
+    private const val WINDOW_HEIGHT_FRACTION = 0.25f
 
     /** The paper's length relative to its band. Matches `ApprovalTip.ASPECT`. */
     private const val PAPER_ASPECT = 2.6f
@@ -153,19 +156,19 @@ object ApprovalTipOverlay {
         // window on purpose: the part the human sees is the part that slid in, and the part beyond
         // the display is simply not there. Anchoring the window to the edge is what makes the cut
         // land on the screen edge rather than in mid-air.
-        val width = (dm.widthPixels * WINDOW_WIDTH_FRACTION).toInt()
+        // **Two centimetres, measured in dp.** 1 inch = 2.54cm = 160dp, so a centimetre is about
+        // 63dp. Asking for "2cm from the right side" is a physical size, not a share of the screen,
+        // and treating it as a share is what produced a sheet that covered half the display.
+        val width = (CENTIMETRES_WIDE * 160f / 2.54f * density).toInt()
             .coerceAtMost(dm.widthPixels)
-        // The view itself draws the paper `ApprovalTip.TOP_OFFSET_DP` below the window's top, so
-        // the window has to be that much taller — otherwise the sheet is clipped at the bottom.
-        // The window is NOT also moved down: two offsets would push the paper twice.
-        val innerTop = com.mido.phonebridge.ui.ApprovalTip.TOP_OFFSET_DP * density
-        // **Never full height, even on a short screen.** A window that spans the display is exactly
-        // the case Android 12 refuses to pass touches through, so the cap is a fraction of the
-        // display rather than its whole height. The sheet is fitted to whatever the window ends up
-        // being, so shrinking the window shrinks the paper instead of clipping it.
+        // **A TAB near the top, not a column down the side.** A quarter of the display, so what
+        // shows is the corner of a sheet that slid in — the rest of the sheet is past the edge, and
+        // the paper inside is cut by it.
+        //
+        // Still capped below full height: a window that spans the display is exactly the case
+        // Android 12 refuses to pass touches through.
         val heightCap = (dm.heightPixels * MAX_WINDOW_HEIGHT_FRACTION).toInt()
-        val height = (width * PAPER_ASPECT + innerTop + WINDOW_MARGIN_DP * density).toInt()
-            .coerceAtMost(heightCap)
+        val height = (dm.heightPixels * WINDOW_HEIGHT_FRACTION).toInt().coerceAtMost(heightCap)
         val lp = WindowManager.LayoutParams(
             width,
             height,
