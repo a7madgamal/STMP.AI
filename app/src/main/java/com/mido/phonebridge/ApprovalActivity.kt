@@ -4,8 +4,6 @@ import android.graphics.Typeface
 import androidx.fragment.app.FragmentActivity
 import android.os.Build
 import android.graphics.drawable.ClipDrawable
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -101,7 +99,26 @@ class ApprovalActivity : FragmentActivity() {
      * The DENY button's draining background: the time left to refuse, drawn on the control that
      * refuses. Set during build, driven by the tick.
      */
-    private var denyDrain: android.graphics.drawable.ClipDrawable? = null
+    /**
+     * The DENY control's drain, or null before the card is built.
+     *
+     * Held as the control rather than as a bare `ClipDrawable`: the level that makes a bar appear
+     * has to be set on the LAYER the fill lives in, and setting it on the fill itself paints
+     * nothing while reading exactly like the right thing to do.
+     */
+    private var denyDrain: com.mido.phonebridge.ui.Theme.CountdownControl? = null
+
+    /**
+     * How much of the fill's colour is blended into the DENY trough.
+     *
+     * **A literal `DANGER_SURFACE` fill was the wrong reading of "pale" because it is barely a
+     * different colour from the trough it drains into** — the two are ΔE 11.8 apart, so the bar ran
+     * visually blind: the fill's boundary was about as visible as a subtle rounding artifact. At 40%
+     * the separation is ΔE ≈ 28 (2.4×), the room reads as a wash rather than a solid block, and the
+     * ink label stays at 5.4:1 on the fill and 10.8:1 on the trough, so it is legible at every level
+     * of the countdown without ever changing colour.
+     */
+    private val DENY_WASH_ALPHA = 0.40f
 
     companion object {
         private val entranceRegistry = PaperMotion.EntranceRegistry()
@@ -727,7 +744,6 @@ class ApprovalActivity : FragmentActivity() {
         val countdown = Theme.text(this, "", Theme.TEXT_CAPTION_SP, Theme.WARNING).apply {
             visibility = ViewGroup.GONE
         }
-
         // --- Queue position: only when others are actually waiting. The queue is
         // FIFO, so this request is the one on screen and the rest wait their turn.
         // Never render a "0 waiting" line — an empty statement is noise.
@@ -869,13 +885,16 @@ class ApprovalActivity : FragmentActivity() {
                 val now = System.currentTimeMillis()
                 val enabledAt = ApprovalGate.currentEnabledAtMs()
                 val armed = enabledAt > 0L && ArmGuard.isArmed(enabledAt, now)
+                // The latch's own window, in the unit the meter works in. One conversion, here,
+                // so the bar and the `CountDownLatch.await` cannot disagree about the deadline.
+                val windowMs = timeoutSeconds * 1000L
 
                 when {
                     enabledAt == 0L -> {
                         // No arm time yet: the summary is still being fetched. The bar stays
                         // EMPTY rather than full, because a full bar would read as "you have
                         // all the time in the world" when the clock has not started.
-                        denyDrain?.level = 0
+                        denyDrain?.setLevel(CountdownMeter.level(enabledAt, now, windowMs))
                         countdown.text = "waiting for the summary"
                     }
                     !armed -> {
@@ -889,22 +908,23 @@ class ApprovalActivity : FragmentActivity() {
                         val left = ArmGuard.remainingSeconds(enabledAt, now)
                         // Not the auto-deny clock: the window has not started, so the bar stays
                         // empty and only the spoken label says what is happening.
-                        denyDrain?.level = 0
+                        denyDrain?.setLevel(CountdownMeter.level(enabledAt, now, windowMs))
                         countdown.text = "ready in ${left}s"
                         countdown.contentDescription = "arming in ${left}s"
                     }
                     else -> {
                         // Armed: now the real 60s window, measured from the arm time — so the
-                        // human gets their FULL decision time once the buttons work.
-                        val elapsedSec = (now - enabledAt) / 1000L
-                        val left = (timeoutSeconds - elapsedSec).coerceAtLeast(0L)
-                        val pct = if (timeoutSeconds > 0) (left * 100 / timeoutSeconds) else 0
-                        // The bar IS the countdown: full when the window opens, empty at zero.
-                        denyDrain?.level = pct.coerceIn(0, 100).toInt() * 100
+                        // human gets their FULL decision time once the buttons work. The bar IS
+                        // the countdown: full when the window opens, empty at zero, and the
+                        // mapping lives in CountdownMeter so it can be asserted without a phone.
+                        val left = CountdownMeter.secondsLeft(enabledAt, now, windowMs)
+                        val level = CountdownMeter.level(enabledAt, now, windowMs)
+                        denyDrain?.setLevel(level)
                         // The label stays invisible; it exists so `contentDescription` can still
                         // speak the remaining seconds.
                         countdown.text = "auto-deny in ${left}s"
-                        countdown.contentDescription = "timeout progress ${pct}%"
+                        countdown.contentDescription =
+                            "timeout progress ${level * 100 / CountdownMeter.FULL}%"
                     }
                 }
 
@@ -982,29 +1002,21 @@ class ApprovalActivity : FragmentActivity() {
             ).apply { bottomMargin = Theme.dp(this@ApprovalActivity, 10) }
         }
 
-        // Built as a LayerDrawable so the fill can DRAIN: a tint can only recolour, and a
-        // background TINT would leave nothing for `setLevel` to move.
-        val denyTrack = GradientDrawable().apply {
-            setColor(Theme.SURFACE_VARIANT)
-            cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
-        }
-        denyDrain = ClipDrawable(
-            GradientDrawable().apply {
-                setColor(Theme.DANGER)
-                cornerRadius = Theme.dpF(this@ApprovalActivity, Theme.RADIUS_CONTROL.toFloat())
-            },
-            Gravity.START,
-            ClipDrawable.HORIZONTAL,
-        ).apply { level = 0 }
-
-        val deny = Theme.button(this, "DENY", Theme.ButtonStyle.NEUTRAL) {
-            finishWith(id, approved = false)
-        }.apply {
+        // The DENY control's fill, built by the ONE factory that owns it. It used to be a
+        // `Theme.button` whose background was swapped for a `LayerDrawable` — and MaterialButton
+        // re-applied `backgroundTintList` over that swap, repainting the fill beige before it ever
+        // drew. The armed baseline carried no red pixels at all, which is why the fix is a
+        // factory rather than another assignment.
+        val denyControl = Theme.countdownButton(
+            this,
+            "DENY",
+            Theme.washOverTrough(Theme.DANGER, DENY_WASH_ALPHA),
+            Theme.ButtonStyle.NEUTRAL,
+        ) { finishWith(id, approved = false) }
+        denyDrain = denyControl
+        val deny = denyControl.button.apply {
             isEnabled = false
             alpha = 0.4f
-            // The drain REPLACES the background, so the ripple goes with it. That is correct:
-            // the bar is a readout, and a pressed state on a disabled control would be a lie.
-            background = LayerDrawable(arrayOf(denyTrack, denyDrain))
         }
         // APPROVE on a contacts request asks for the permission FIRST.
         //

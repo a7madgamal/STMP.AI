@@ -33,6 +33,11 @@ class SquiggleCoverageTest {
         // The progress button: its own background is a two-tone track+fill, so the drawn edge is
         // layered on afterwards rather than replacing it.
         "Theme.kt" to "return MaterialButton(ctx).apply",
+        // The countdown button. It is NOT `return MaterialButton(...)` because it hands back the
+        // drain as well, and its own background is the track+fill layer stack that has to stay
+        // tint-free (see the note on `countdownButton`). The drawn edge is layered in its
+        // foreground, exactly like the two factories above.
+        "Theme.kt" to "val button = MaterialButton(ctx).apply {",
         // GHOST buttons keep their hairline stroke under the drawn edge; the wobble sits on top
         // of it so the edge still reads as ink at 1dp.
         "Theme.kt" to "strokeWidth = dp(ctx, 1)",

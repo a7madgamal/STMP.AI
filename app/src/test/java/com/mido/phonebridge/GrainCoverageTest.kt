@@ -52,11 +52,11 @@ class GrainCoverageTest {
         // make the texture shrink with the bar instead of lying on the card, and the card's own
         // grain layer sits above both.
         "NotifyOverlay.kt" to "GradientDrawable().apply {",
-        // The modal's DENY bar. Same reasoning: `denyTrack` is the trough and the fill below it
-        // drains, so neither can carry grain — grain on a bar that shrinks would crawl as it
-        // drains, which is worse than a flat bar. The modal sheet behind it is textured.
-        "ApprovalActivity.kt" to "val denyTrack = GradientDrawable().apply {",
-        "ApprovalActivity.kt" to "GradientDrawable().apply {",
+        // The modal's DENY drain used to build its two `GradientDrawable`s here and carry two
+        // allowlist entries. It does not any more: `Theme.countdownButton` owns them, and `ui` is
+        // excluded from this scan because that is where the sanctioned constructors live. The
+        // bar is a PROGRESS FILL, not a surface, so it stays flat there — grain on a layer that
+        // shrinks would crawl as it drains, which is worse than a plain fill.
         // A 1dp hairline between rows inside the Google card. Grain cannot live in a 1dp strip --
         // there is no surface to texture, and the grain tile is 96px -- so this is deliberately a
         // flat coloured line, the same as `SquiggleRule`'s flat mode.

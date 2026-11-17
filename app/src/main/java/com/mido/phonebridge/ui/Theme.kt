@@ -1031,6 +1031,145 @@ object Theme {
         }
     }
 
+    /**
+     * A button whose own background DRAINS, for a control that shows time running out.
+     *
+     * **Why this cannot be [button] with a swapped background, which is what it used to be.**
+     * [button] sets `backgroundTintList`, and `MaterialButton.setBackgroundDrawable` feeds the new
+     * drawable straight back through `AppCompatBackgroundHelper.onSetBackgroundDrawable`, which
+     * re-applies that tint. A `LayerDrawable(track, drain)` handed to it is therefore repainted in
+     * the tint colour — every layer, including the fill — and the bar renders as flat beige. That
+     * is not a theory: the DENY button shipped like this and the armed baseline carried ZERO red
+     * pixels, because the fill had been washed to `SURFACE_VARIANT` before it ever drew.
+     *
+     * So this factory never sets a tint. The track and the fill are one `background` layer stack,
+     * and the ripple moves to the FOREGROUND as a masked ripple, where grain and the drawn edge
+     * already live — so press feedback survives without a tint that can recolour the fill.
+     *
+     * **The fill is drawn as a translucent wash over the track, not a solid colour.** A solid fill's
+     * boundary crosses the centred label at the halfway point, and no single label colour survives
+     * both ends (ink on the stamp red is 2.1:1; cream on the trough is 1.4:1). A wash keeps the ink
+     * label legible at every level — 5.4:1 on the fill, 10.8:1 on the trough — while the boundary
+     * still reads at arm's length.
+     *
+     * @param fill a colour ALREADY carrying its alpha (the blend strength).
+     */
+    fun countdownButton(
+        ctx: Context,
+        label: String,
+        fill: Int,
+        style: ButtonStyle = ButtonStyle.NEUTRAL,
+        onClick: () -> Unit,
+    ): CountdownControl {
+        val h = dp(ctx, MIN_TARGET_DP)
+        val radius = radiusPx(ctx, RADIUS_CONTROL)
+        // The trough: what the fill drains INTO, so an empty bar still reads as a control.
+        val track = GradientDrawable().apply {
+            setColor(SURFACE_VARIANT)
+            cornerRadius = radius
+        }
+        val drain = ClipDrawable(
+            GradientDrawable().apply {
+                setColor(fill)
+                cornerRadius = radius
+            },
+            Gravity.START,
+            ClipDrawable.HORIZONTAL,
+        ).apply { level = 0 }
+        // The ripple's mask is the button's own rounded rect; without a mask a foreground ripple
+        // bleeds square corners over the paper.
+        val ripple = RippleDrawable(
+            ColorStateList.valueOf(RIPPLE),
+            null,
+            GradientDrawable().apply { cornerRadius = radius },
+        )
+        val (_, fg) = styleColors(style)
+        val button = MaterialButton(ctx).apply {
+            text = label
+            textSize = TEXT_BODY_SP
+            isAllCaps = false
+            typeface = bodyFont(ctx, bold = true)
+            minHeight = h
+            minimumHeight = h
+            // **The label never changes colour.** That is the whole point of the wash: a flip
+            // mid-countdown would be a second animation on a control whose only job is to report.
+            setTextColor(ON_SURFACE)
+            cornerRadius = dp(ctx, RADIUS_CONTROL)
+            insetTop = 0
+            insetBottom = 0
+            setPadding(dp(ctx, 20), 0, dp(ctx, 20), 0)
+            // NOT `backgroundTintList`, and that is the fix rather than a style choice: a tint is
+            // what repaints the drain. See the note above this function before changing it back.
+            background = LayerDrawable(arrayOf(track, drain))
+            foreground = LayerDrawable(
+                arrayOf(
+                    ripple,
+                    GrainOverlay(radius),
+                    SquiggleBorder(
+                        color = BORDER,
+                        strokePx = dpF(ctx, SQUIGGLE_STROKE_DP),
+                        radiusPx = radius,
+                        amplitudePx = dpF(ctx, SQUIGGLE_DP),
+                    ),
+                )
+            )
+            setOnClickListener { onClick() }
+        }
+        if (style == ButtonStyle.GHOST) {
+            // GHOST is text-on-transparent everywhere else, and the wash would erase that meaning,
+            // so the text colour is the one thing a style may still change here.
+            button.setTextColor(fg)
+        }
+        val layer = button.background as LayerDrawable
+        // **The tint has to be CLEARED after the swap, or the swap is pointless.** The Material
+        // style supplies its own `backgroundTintList`, and assigning `background` re-applies it —
+        // measurably: without this line every pixel of the button renders as flat accent red
+        // instead of the track and the wash, because a tint is a colour filter over the whole
+        // layer stack. `setBackgroundDrawable` is not the only trigger either; the helper
+        // re-applies on the next state change, so the list is removed rather than left for a
+        // later pass to restore.
+        button.backgroundTintList = null
+        return CountdownControl(button, layer, drain)
+    }
+
+    /**
+     * The drain handle [countdownButton] hands back, so the caller does not have to find it.
+     *
+     * **Drive [setLevel], not [drain]'s own level.** A `ClipDrawable` inside a `LayerDrawable` is
+     * given its level by the LAYER at draw time; setting it on the child looks correct and paints
+     * nothing, which is one more way this control can be invisible while the code reads right.
+     * [drain] is exposed so a test can assert the fill it belongs to, and so a caller that needs the
+     * drawable itself (pixel assertions, accessibility) has it.
+     */
+    data class CountdownControl(
+        val button: MaterialButton,
+        val layer: LayerDrawable,
+        val drain: ClipDrawable,
+    ) {
+        fun setLevel(level: Int) {
+            layer.level = level
+        }
+    }
+
+    /**
+     * The DENY wash: [color] at [alpha] over the trough, flattened to one opaque colour.
+     *
+     * Returned opaque rather than translucent because a `ClipDrawable`'s fill and the track under
+     * it are two layers of ONE background; blending them at draw time makes the boundary's exact
+     * colour depend on what is behind the button, which is nothing the contrast can be measured
+     * against.
+     */
+    fun washOverTrough(color: Int, alpha: Float): Int {
+        val trough = SURFACE_VARIANT
+        fun mix(from: Int, to: Int, by: Float): Int =
+            (from + ((to - from) * by)).toInt().coerceIn(0, 255)
+        fun ch(shift: Int, from: Int, to: Int) = mix((from shr shift) and 0xFF, (to shr shift) and 0xFF, alpha)
+        return (0xFF shl 24) or
+            (ch(16, trough, color) shl 16) or
+            (ch(8, trough, color) shl 8) or
+            ch(0, trough, color)
+    }
+
     /** A compact filter chip. Same machinery as [button], tighter. */
     fun chip(ctx: Context, label: String, selected: Boolean = false, onClick: () -> Unit): MaterialButton =
         button(ctx, label, if (selected) ButtonStyle.PRIMARY else ButtonStyle.NEUTRAL, small = true, onClick = onClick)

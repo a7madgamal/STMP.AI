@@ -61,6 +61,8 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
         queued: Int = 0,
         endpoint: String = "GET /contacts/search",
         openDetails: Boolean = false,
+        /** Milliseconds already spent in the armed window, so the drain can be captured mid-way. */
+        elapsedMs: Long = 0L,
     ) {
         val now = System.currentTimeMillis()
         val pending = ApprovalGate.Pending(
@@ -72,10 +74,10 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
             endpoint = endpoint,
             summary = "Search contacts for sara",
             account = "me@example.com",
-            createdAtMs = now,
-            shownAtMs = now,
+            createdAtMs = now - elapsedMs,
+            shownAtMs = now - elapsedMs,
             aiState = ai,
-            enabledAtMs = if (ai is ApprovalGate.AiState.Loading) 0L else now - 1,
+            enabledAtMs = if (ai is ApprovalGate.AiState.Loading) 0L else now - 1 - elapsedMs,
             needsPassword = view.needsPassword,
         )
         ApprovalGate.setCurrentForTest(pending)
@@ -111,6 +113,17 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun ai_ready_high() = show("ai_ready_high", ai = summary(Risk.HIGH))
     @Test fun ai_failed() = show("ai_failed", ai = ApprovalGate.AiState.Failed("the model did not answer in time"))
     @Test fun not_needed() = show("not_needed")
+
+    /**
+     * The drain mid-countdown, which no other state can show.
+     *
+     * **This exists because the bar shipped invisible and every baseline stayed green.** The other
+     * states capture the loading and ready phases, where the drain is legitimately empty or nearly
+     * full — so a fill that was being repainted by a background tint had nothing to contradict. A
+     * half-drained window is the only state where "is there red in the button" is a question the
+     * image can answer.
+     */
+    @Test fun draining_half() = show("draining_half", elapsedMs = 30_000L)
     @Test fun password() = show("password", view = view(needsPassword = true))
 
     // bio_not_enrolled and bio_locked_out are not captured: Robolectric 4.14.1's

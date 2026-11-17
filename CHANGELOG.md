@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.7 (build 309)**.
+Current build: **v0.51.64 (build 390)**.
 
 ---
 
@@ -5719,8 +5719,13 @@ devDependencies. `node_modules/` is gitignored.
 - There is one border colour in the app. A `strokeColor` parameter let four call sites pass accent or success, and buttons and switches used a translucent ink instead of the hairline, so lines came in two shades side by side. The parameter is gone, which makes a second shade a compile error rather than a review catch.
 - Switches carry their state in the knob again: green when on, ink when off, amber while the server is still working. The track stays panel-fill paper.
 
-## 0.51.63 (build 389) — 2026-11-17 — CURRENT
+## 0.51.63 (build 389) — 2026-11-17
 - A switch that is off shows a red knob. Ink-grey read as a neutral resting state, but these switches mostly control security features, so "off" is a thing to notice rather than a state to ignore.
+
+## 0.51.64 (build 390) — 2026-11-17 — CURRENT
+- The DENY button's countdown bar is visible. The fill was being repainted beige before it ever drew: the button carried a `backgroundTintList`, and assigning a track-and-fill background re-applies that tint over every layer. The control is now built by one factory that owns the layer stack and clears the tint, so the bar drains from full to empty as the window closes.
+- The fill is a wash rather than the solid stamp red, because a solid fill's boundary crosses the centred label and ink on that red is 2.1:1. The wash keeps the label at 5.4:1 on the fill and 10.8:1 on the trough, so it never has to change colour mid-countdown.
+- The level that drives the drain comes from `CountdownMeter`, a pure function with tests, instead of arithmetic inline in the tick. A level set on the inner fill alone paints nothing, so the handle exposes it and pins that trap with a test.
 
 ## Keeping this file honest
 
