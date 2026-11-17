@@ -53,16 +53,36 @@ class ApprovalTipTest {
     fun `both base vertices sit exactly on the right edge`() {
         // "the top and bottom points MUST be right 0" — no inset, both flush with the edge.
         val p = tri()
-        assertEquals("the top vertex must be ON the edge", tipW, p[0].x, 0.5f)
-        assertEquals("the bottom vertex must be ON the edge", tipW, p[1].x, 0.5f)
+        val onEdge = p.filter { kotlin.math.abs(it.x - tipW) < 0.5f }
+        assertEquals("exactly two vertices lie on the right edge", 2, onEdge.size)
     }
 
     @Test
     fun `the point tapers to 2cm in from the edge`() {
         // The spec, stated by the human: two vertices on the right edge, the third 2cm to the left.
+        // Named by ROLE rather than index: the point is the one that is not on the edge.
         val p = tri()
-        assertEquals("the point must be 2cm in", tipW - ApprovalTip.apexInsetPx(density), p[2].x, 0.5f)
-        assertTrue("the point must taper inward, not outward", p[2].x < p[0].x)
+        val point = p.minBy { it.x }
+        assertEquals(
+            "the point must be 2cm in",
+            tipW - ApprovalTip.apexInsetPx(density),
+            point.x,
+            0.5f,
+        )
+    }
+
+    @Test
+    fun `the point is at the TOP, so the paper spreads downward`() {
+        // Measured from the annotated screenshot: the cream shape starts at zero width and widens
+        // as it descends. A point at the vertical centre reads as a lozenge, not as paper sliding in.
+        val p = tri()
+        val point = p.minBy { it.x }
+        // The window's paper starts at `topPx`, which is where the point must be.
+        assertEquals("the point sits at the top of the paper", topPx, point.y, 0.5f)
+        assertTrue(
+            "the base must be below the point",
+            p.maxOf { it.y } > point.y,
+        )
     }
 
     @Test
@@ -83,8 +103,9 @@ class ApprovalTipTest {
         // producing an inverted shape. What must never happen is a zero-area or flipped triangle.
         val p = ApprovalTip.outlineFit(30f, 30f, density, 0f)
         assertEquals(3, p.size)
-        assertTrue("the base must have height", p[1].y > p[0].y)
-        assertTrue("the point must not invert past the left edge", p[2].x >= 0f)
+        val height = p.maxOf { it.y } - p.minOf { it.y }
+        assertTrue("the base must have height, got $height", height > 0f)
+        assertTrue("no vertex may sit left of the window", p.all { it.x >= -0.5f })
     }
 
     @Test

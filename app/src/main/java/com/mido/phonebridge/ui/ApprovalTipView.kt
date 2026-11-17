@@ -188,12 +188,17 @@ class ApprovalTipView(context: Context) : View(context) {
         stepDropPx = (wedges.getOrNull(1)?.dropPx ?: (ApprovalTip.GHOST_DROP_DP * density)) -
             (wedges.firstOrNull()?.dropPx ?: 0f)
         for (wedge in wedges) {
+            // Each sheet in the queue is the same sliver, stepped DOWN and slightly further in, so
+            // a queue reads as layered paper behind the edge rather than one thicker shape.
             val top = topOffset + wedge.dropPx
             // Fitted to THIS view: the sheet must fill the canvas it is painted on, not the screen
             // it is floating over. Building it from screen proportions put most of it outside a
             // narrow strip, and only a corner appeared.
+            // The ghost's own bottom is `top` lower than the front's, so its window height must
+            // shrink by the same amount — otherwise every layer fills the view identically and the
+            // stack looks like one shape.
             val points = ApprovalTip.outlineFit(
-                w.toFloat(), h.toFloat(), density, top,
+                w.toFloat(), h.toFloat() - (top - topOffset), density, top,
             )
             val path = Path().apply {
                 moveTo(points[0].x, points[0].y)

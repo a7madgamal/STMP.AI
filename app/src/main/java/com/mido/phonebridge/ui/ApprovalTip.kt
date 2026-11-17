@@ -73,8 +73,17 @@ object ApprovalTip {
      * Wide enough to be unmistakable. At 10dp the layers overlapped into what looked like one
      * thicker wedge — a stack nobody can count is not a queue indicator.
      */
-    const val GHOST_INSET_DP = 22f
-    const val GHOST_DROP_DP = 26f
+    /**
+     * How far each queued sheet steps in from the edge.
+     *
+     * Small: the sheets are stacked BEHIND the same edge, so their points line up along the sliver
+     * rather than fanning across the screen. Enough to count them, little enough that they read as
+     * one bundle of paper.
+     */
+    const val GHOST_INSET_DP = 5f
+
+    /** How far each queued sheet steps down, so the stack reads as layers rather than a smear. */
+    const val GHOST_DROP_DP = 34f
 
     /**
      * Alpha per depth, front first: the front wedge is opaque, the two behind it fade.
@@ -82,7 +91,7 @@ object ApprovalTip {
      * Three, not more. A fourth wedge would be a second stack of paper with a stack of its own,
      * and the human cannot act on any of them until one becomes head anyway.
      */
-    val GHOST_ALPHA = floatArrayOf(1f, 0.62f, 0.38f)
+    val GHOST_ALPHA = floatArrayOf(1f, 0.82f, 0.66f)
 
     /** Hard ceiling on how many wedges are ever drawn. */
     const val MAX_VISIBLE = 3
@@ -185,12 +194,16 @@ object ApprovalTip {
         val right = viewWidthPx
         val top = topPx.coerceIn(0f, (viewHeightPx - 1f).coerceAtLeast(0f))
         val bottom = viewHeightPx
+        // **The point is at the TOP.** Measured from the screenshot the human annotated: the cream
+        // shape starts at zero width and widens as it descends, so the sharp end is the upper one
+        // and the paper spreads downward behind the edge. A point at the vertical centre — the
+        // previous shape — reads as a lozenge, not as something sliding in.
         return listOf(
+            // The point, 2cm in from the edge, at the top of the window.
+            Point((right - apexInsetPx(density)).coerceAtLeast(0f), top),
             // Both base vertices exactly on the right edge: "right 0", no inset at all.
             Point(right, top),
             Point(right, bottom),
-            // The point, 2cm to the left and vertically centred.
-            Point((right - apexInsetPx(density)).coerceAtLeast(0f), (top + bottom) / 2f),
         )
     }
 

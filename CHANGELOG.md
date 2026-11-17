@@ -5667,8 +5667,12 @@ devDependencies. `node_modules/` is gitignored.
 - The arrival sound fires once per request, not once per redraw. It had moved into the tip's `show`, which the gate calls on every queue tick to keep the stack depth current — so a request that waited announced itself continuously and produced the reported stream of repeating sounds. The sound is now keyed on the request id and fired from the gate, the one place that knows a NEW request arrived rather than a redraw happening; `show` is idempotent and no longer announces at all.
 - The tip slides in over the distance of its own window. It had been advanced by a screen-proportional metric from a different coordinate system, so the shape was never actually pushed out of its window and appeared in place instead of sliding in from the side.
 
-## 0.51.53 (build 379) — 2026-11-17 — CURRENT
+## 0.51.53 (build 379) — 2026-11-17
 - The tip is a sliver of paper tucked behind the right edge: a triangle whose two base vertices sit EXACTLY on the screen edge — top and bottom, zero inset — with the third vertex 2cm to the left, vertically centred. Earlier shapes had a top edge spanning the window or an apex hanging down, which read as a wedge rather than paper poking out from behind the glass. Both base points are now flush at 0 and the point is a physical 2cm from dp, so the same sliver appears on any screen width or resolution rather than a fraction of it.
+
+## 0.51.54 (build 380) — 2026-11-17 — CURRENT
+- The tip's point is at the TOP, and the paper spreads downward from it. Measured from the annotated screenshot rather than guessed: the shape starts at zero width and widens as it descends. A point at the vertical centre reads as a lozenge rather than as paper easing out from behind the edge.
+- Queued requests stack visibly. Each sheet in the queue is the same sliver stepped down and a little further in, with its own height so the layers cannot overlap into one shape — three waiting requests read as three sheets of paper behind the edge, countable at a glance.
 
 ## Keeping this file honest
 
