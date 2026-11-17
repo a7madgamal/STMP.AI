@@ -107,7 +107,7 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:showOnLockScreen="true"
-            android:theme="@style/Theme.STMP.Approval" />
+            android:theme="@style/Theme.STMP.Approval.Sheet" />
 
         <!--
           The vault-unlock prompt, raised by a blocked request.

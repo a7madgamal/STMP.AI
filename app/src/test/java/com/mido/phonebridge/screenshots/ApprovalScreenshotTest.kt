@@ -12,6 +12,9 @@ import org.junit.After
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 
+/** Matches `ApprovalTipView`'s own content description; the wedge is the only way into the sheet. */
+private const val TIP_DESCRIPTION = "approval waiting — tap to open"
+
 /** The approval modal in every state of WP00 section 5 that can be reached without a keystore. */
 class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
 
@@ -89,6 +92,11 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
             .putExtra(ApprovalActivity.EXTRA_ACCOUNT, "me@example.com")
             .putExtra(ApprovalActivity.EXTRA_CREATED_AT, now)
         val a = org.robolectric.Robolectric.buildActivity(ApprovalActivity::class.java, intent).setup().get()
+        // On an unlocked phone the window opens as the resting wedge, and a baseline named after
+        // the SHEET has to show the sheet: open it the way a human does.
+        val tip = findByDescription(a.window.decorView, TIP_DESCRIPTION)
+        tip?.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
         if (openDetails) findByText(a.window.decorView, "▸ details")?.performClick()
         capture(a, "approval", state)
     }

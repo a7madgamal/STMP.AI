@@ -418,6 +418,25 @@ object ApprovalGate {
             ArmGuard.MISCLICK_GUARD_MS +
                 if (aiFacts == null) TIMEOUT_SECONDS * 1000L
                 else aiFetchCapMs + TIMEOUT_SECONDS * 1000L
+
+        /**
+         * When [latch.await] actually began waiting — the zero point of the countdown.
+         *
+         * Not `createdAtMs` (enqueue can be minutes before anything is shown) and not `shownAtMs`
+         * (the head can be shown, then have its modal closed and reopened). This is the only
+         * instant that means "from here, the request gets [maxWaitMs] and then gives up", so it is
+         * the only honest reference for a dial that claims to show time left.
+         *
+         * 0 until the wait begins.
+         */
+        @Volatile var waitStartedAtMs: Long = 0L
+
+        /** Milliseconds left before this request times out; 0 before the wait starts. */
+        fun remainingMs(nowMs: Long): Long {
+            val started = waitStartedAtMs
+            if (started == 0L) return maxWaitMs()
+            return (started + maxWaitMs() - nowMs).coerceAtLeast(0L)
+        }
     }
 
     @Volatile
@@ -452,6 +471,28 @@ object ApprovalGate {
      * the label never appeared).
      */
     fun waitingBehindCurrent(): Int = synchronized(this) { (queue.size - 1).coerceAtLeast(0) }
+
+    /**
+     * The head request's countdown, as `(remainingMs, totalMs)`, or null when nothing waits.
+     *
+     * **The gate owns the clock; the tip only reads it.** The alternative — the overlay starting
+     * its own timer when it shows — is wrong in three ways that all make the dial lie:
+     *
+     *  - it assumed a 60s window, while the latch actually waits `maxWaitMs()`, which adds the
+     *    misclick guard and the AI fetch budget. The dial would empty seconds before the request
+     *    actually expired.
+     *  - the tip is destroyed and recreated whenever the sheet opens and is folded back, and a
+     *    fresh timer would jump the dial back to full on a request that had already been waiting.
+     *  - with a queue, the head changes while the tip survives, so the dial must retarget without
+     *    the overlay being told.
+     *
+     * Reading the live value every tick fixes all three by construction rather than by being
+     * careful in three places.
+     */
+    fun headCountdown(nowMs: Long = System.currentTimeMillis()): Pair<Long, Long>? {
+        val p = synchronized(this) { current } ?: return null
+        return Pair(p.remainingMs(nowMs), p.maxWaitMs())
+    }
 
     /** Notify after membership settles. Never called under the gate lock. */
     private fun publishPending() {
@@ -738,6 +779,9 @@ object ApprovalGate {
             if (shouldPost) {
                 postApprovalNotification(ctx, pending)
             }
+            // Stamped immediately before the wait, so the countdown and the latch share one zero
+            // point. A dial derived from any other instant would drift from the actual deadline.
+            pending.waitStartedAtMs = System.currentTimeMillis()
             val ok = pending.latch.await(pending.maxWaitMs(), TimeUnit.MILLISECONDS)
             val decidedAt = if (pending.decidedAtMs > 0) pending.decidedAtMs else System.currentTimeMillis()
             return when {
@@ -791,6 +835,8 @@ object ApprovalGate {
                 }
                 if (current != null && current!!.requestId != pending.requestId) current else null
             }
+            com.mido.phonebridge.notify.ApprovalTipOverlay.hide()
+            com.mido.phonebridge.notify.ApprovalTipOverlay.clearAnnouncement()
             cancelNotification(ctx, id)
             if (next != null) {
                 postApprovalNotification(ctx, next)
@@ -821,18 +867,10 @@ object ApprovalGate {
         // Sound and haptics are fired explicitly further down, so removing the notification
         // does not silence the prompt either.
 
-        // Haptic + audible nudge. The sound used to come from the notification channel; it is
-        // now fired explicitly, which is why it survives the notification's removal.
-        com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
-
-        // The paper-creasing sound as the modal ARRIVES — a separate moment from the stamp,
-        // which fires on the decision (Mido, 2026-10-27: *"use this when modal appears"*).
-        // Reported rather than swallowed: a missing sound must never cancel the prompt.
-        try {
-            com.mido.phonebridge.alert.SoundAlerts.modalAppear(ctx)
-        } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
-            android.util.Log.e("ApprovalGate", "MODAL SOUND FAILED: ${e.message}", e)
-        }
+        // Sound and haptics fire where the request becomes VISIBLE, which is the tip overlay —
+        // not here. Putting them here made only the first of a queue audible: a later request
+        // reaches this point while a window is already on screen, and the branch below returns
+        // early. See [ApprovalTipOverlay.show] for the one place that fires them now.
 
         val intent = buildApprovalIntent(ctx, p)
 
@@ -862,11 +900,37 @@ object ApprovalGate {
         // out. On Android 10+ this background start is legal because the app holds
         // SYSTEM_ALERT_WINDOW (a listed background-activity-start exemption), and
         // the Full-screen popup toggle covers the FSI path on Android 14+.
-        try {
-            ctx.startActivity(intent)
-        } catch (e: Exception) {
-            android.util.Log.w("ApprovalGate", "direct activity launch failed: ${e.message}")
+        // **The request rests as an OVERLAY, not as an Activity.**
+        //
+        // An Activity pauses whatever is behind it, so a resting modal — however narrow and
+        // translucent — froze the screen it was supposed to sit on top of. A system overlay window
+        // does not: the app below keeps running and every touch outside the strip reaches it.
+        //
+        // So the flow is: the tip appears here, nothing else launches. Tapping it removes the
+        // overlay and launches the Activity, which opens straight to the sheet. The Activity is
+        // therefore only ever a modal again, which is what it is good at.
+        if (com.mido.phonebridge.notify.ApprovalTipOverlay.isShowing) {
+            Debug.log("gate: tip already showing; growing the stack")
+            // A queued request only needs the stack to grow.
+            com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+                ctx, 1 + waitingBehindCurrent(),
+            )
+            return
         }
+
+        // A window is already on screen (the sheet is open): hand the request to IT. This is what
+        // makes a queue of requests reachable — a fresh launch can land in another task and the
+        // queued request then has no window to appear in.
+        if (deliverToRunningWindow(ctx, intent)) return
+
+        // Nothing is open: rest the request behind the tip. The Activity launches only when the
+        // human touches it.
+        Debug.log("gate: resting the request behind the tip")
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(ctx, 1 + waitingBehindCurrent())
+        // **Once per REQUEST.** `show` above is also the update path and runs on every queue tick,
+        // so announcing from it made the arrival sound repeat while a request waited. Keyed on the
+        // request id here, which names one arrival exactly once.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.announceArrival(ctx, p.requestId)
     }
 
     /**
@@ -944,8 +1008,67 @@ object ApprovalGate {
             putExtra(ApprovalActivity.EXTRA_TIMEOUT_SECONDS, p.view?.timeoutSeconds ?: TIMEOUT_SECONDS)
             putExtra(ApprovalActivity.EXTRA_CREATED_AT, p.createdAtMs)
             putExtra(ApprovalActivity.EXTRA_WAITING_BEHIND, waitingBehindCurrent())
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            // **NEW_TASK without CLEAR_TASK, and that is the whole change.**
+            //
+            // The approval surface is one long-lived window: the next request is delivered to the
+            // Activity already on screen through `onNewIntent`, so the wedge stack that shows the
+            // queue survives the handover instead of dying with the window. `CLEAR_TASK` emptied
+            // the task first, which destroyed the Activity and made the stack re-form from
+            // nothing on every decision.
+            //
+            // `singleTop` in the manifest is what routes the launch to `onNewIntent` rather than
+            // to a new instance; NEW_TASK stays because this is launched from a background
+            // service, where a task is required. Nothing about the request's clock moves: the
+            // intent still carries the ORIGINAL `createdAt`, and the deadline is read from the
+            // gate, not from this Activity.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
+
+    /**
+     * The approval window currently on screen, if any.
+     *
+     * **Why a reference and not a launch flag.** The next request used to be handed over by
+     * launching the Activity again with SINGLE_TOP and hoping the platform routed it to the
+     * existing instance. With an empty `taskAffinity` and NEW_TASK required from a background
+     * service, that second launch can land in a *different* task — so `singleTop` never fires,
+     * `onNewIntent` never runs, and the queued requests simply never appear. Reported from the
+     * device: three requests, only the first surfaced.
+     *
+     * A live reference to the one window that exists is the honest version: if it is on screen the
+     * request goes straight into it; if it is not, the launch path is unchanged.
+     */
+    @Volatile
+    private var runningWindow: java.lang.ref.WeakReference<ApprovalActivity>? = null
+
+    /** Called by the Activity itself, so the gate never guesses which window is live. */
+    fun registerWindow(activity: ApprovalActivity?) {
+        runningWindow = activity?.let { java.lang.ref.WeakReference(it) }
+    }
+
+    /**
+     * Hand [p]'s intent to the running window, or report that there was none.
+     *
+     * Must run on the main thread: it rebuilds the card.
+     */
+    private fun deliverToRunningWindow(ctx: Context, intent: Intent): Boolean {
+        val activity = runningWindow?.get() ?: return false
+        if (activity.isFinishing || activity.isDestroyed) return false
+        // **Only if the sheet is actually ON SCREEN.** A stale reference to an Activity that is
+        // paused behind another app would swallow the request: the tip is torn down and the human
+        // sees nothing at all. `hasWindowFocus` is the honest test of "this window is the one being
+        // looked at", and a paused Activity fails it.
+        if (!activity.hasWindowFocus()) {
+            Debug.log("gate: ignoring a window that is not on screen; resting the tip instead")
+            return false
+        }
+        return try {
+            activity.runOnUiThread { activity.onNewRequest(intent) }
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("ApprovalGate", "handover to the running window failed: ${e.message}")
+            false
+        }
+    }
 
     /** Whether the app may post full-screen intents (Android 14+). */
     fun canUseFullScreenIntent(ctx: Context): Boolean {

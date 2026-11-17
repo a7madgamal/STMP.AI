@@ -78,6 +78,11 @@ class GrainCoverageTest {
         // button's foreground by `Theme.button`.
         "HomeFragment.kt" to "gateFingerprint.backgroundTintList",
         "ApprovalActivity.kt" to "allow.backgroundTintList",
+        // The approval window's own background, and nothing else. In the RESTING shape this window
+        // is a strip against the right edge; a paper fill there would paint a beige rectangle over
+        // whatever app the human is using, and the wedge is drawn on top by the tip view. Grain is
+        // not missing here -- there is no surface, which is exactly the point of a transparent fill.
+        "ApprovalActivity.kt" to "setBackgroundColor(android.graphics.Color.TRANSPARENT)",
     )
 
     @Test

@@ -5576,9 +5576,126 @@ devDependencies. `node_modules/` is gitignored.
 - Seen now decides the door's WEIGHT, never whether it exists. Unseen gets the header and a full-width key above the gate, so a first run meets the explanation before three unexplained mode radios. Seen gets the same key and the same words as a ghost key in the same place — still one tap from Home, no longer the loudest thing on a screen whose question is whether the bridge is running.
 - Rebuilt on every render rather than built once and toggled. It is one header and one key, and toggling visibility is exactly what produced the bug where the door disappeared.
 
-## 0.51.34 (build 360) — 2026-11-16 — CURRENT
+## 0.51.34 (build 360) — 2026-11-16
 - The seen-state `WHAT IS STMP?` key gets the module gap above it. With no "Get started" header to separate it from the hero card it sat flush against the card; unseen already has that header, so the margin is applied only when the header is absent.
 - A screenshot baseline now covers the state that had none. Every Home fixture left the tour UNSEEN, so the baselines described a screen nobody has after the first run — which is exactly why the tour could disappear without a screenshot changing. `home__get_started_seen` captures the returning user: no header, one quiet key, and the gap that keeps it off the card.
+
+## 0.51.35 (build 361) — 2026-11-16
+- The approval request no longer takes the whole screen on arrival. A tilted paper wedge appears against the right edge and everything outside it belongs to whatever the app underneath is doing, so a request no longer interrupts what the human was reading. Touching the wedge opens the full card; tapping beside the card folds it back. The 60-second window starts when the wedge appears, because a request that waits unseen must still expire, and only the wedge is tappable — denying from it was left out deliberately, since a collapse is not a decision.
+- Up to three wedges stack when requests are queued behind each other, the front one alone being interactive: acting on the third sheet would be answering a request nobody has read. When a request is answered its wedge slides away and the one behind it steps forward, which needed the approval surface to stop being one Activity per request — the window now survives the handover, so the stack promotes instead of re-forming.
+- The card rests at half a degree rather than square. The lean is what keeps a sliver of the background visible around the edges and makes it read as paper laid on the screen instead of a page replacing it, and half a degree is as much as a command can afford: a full-height card rotated by theta needs `w·cos(theta) + h·sin(theta)` of width to fit, and every degree of lean is taken from the width of the command being approved.
+- Opening takes 220ms with a small settle, folding back 140ms flat. Leaving is quicker than arriving on purpose — that asymmetry is what reads as a response rather than an animation.
+- The wedge is now a control in the accessibility sense: activation goes through `performClick`, so a screen reader can open the card, and it carries a description that says what it is.
+
+## 0.51.36 (build 362) — 2026-11-16
+- The resting tip no longer takes more of the screen than the paper it draws. Its window was sized as paper plus the full inward touch reach, which on a 720px display meant 394px — 55% of the width — and a window swallows every touch that lands inside it, so the app behind stopped accepting input across half the screen. The margin is now 12dp, which exists only so the wedge's own edge is not clipped by its window: 267px, or 37%.
+- The wedge's outline is built against the window's right edge rather than the display's, and then translated. Both halves were true in different places — the paper's WIDTH is a property of the phone, its ANCHOR is a property of the window it is drawn in — and computing the outline in one space while translating it from another put the paper outside its own view.
+- One diagnostic line is now emitted at the tip's first draw, naming its size, depth, wedge count and paper dimensions. The tip is the only surface whose geometry is invisible from the outside: a wedge that never got a size, never got a depth, or drew itself off the edge all look identical from the rest of the app, and the first report of a blank tip could not be traced to any of them.
+
+## 0.51.37 (build 363) — 2026-11-16
+- The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it.
+- The tip's window is 267px, as intended, and the view inside it still reported no draw at all. A strip that opens correctly and paints nothing is indistinguishable from a strip that never appeared, so this build logs the tip's own lifecycle — constructed, attached, size, first draw, detached — and the shape decision that led to it. The next report will name the missing step instead of requiring another guess.
+
+## 0.51.38 (build 364) — 2026-11-16
+- The sheet now casts a shadow. It rests slightly off-axis so it reads as paper laid on the screen, and paper laid on something has an edge — without one the card looked pasted on rather than lying there. It is the platform's own elevation shadow against a rounded outline, so it costs no drawing of its own; the wedge stack draws three widening copies of its own outline instead, because a shadow layer is silently dropped in some window configurations and this project has already paid for silent visual failures twice.
+- Expanding starts at 2° and settles to half a degree. Starting from the tip's full lean read as a spin; two degrees down to a half is a settle.
+- Opening and closing are single motions. The wedge used to be hidden the instant the sheet appeared, so the eye saw paper vanish and then paper arrive — two events with a gap, which reads as a flicker however short the gap. Both now run on the same beat: the wedge slides out to the right while the sheet rotates in from that edge, and collapsing shows the wedge before the window shrinks so it has a strip to slide into.
+
+## 0.51.39 (build 365) — 2026-11-16
+- The resting wedge is narrower and hangs lower. At a quarter of the display it still read as a panel leaning in rather than a corner of a sheet caught mid-slide, and every dp of it is screen the human cannot see; it is now a fraction under a quarter, with the clamp lowered to match. It also starts 56dp below the top edge, because a wedge pinned to the very corner reads as part of the status bar rather than something slipped in from the side.
+- Opening takes 320ms instead of 220. At the faster setting the sheet arrived before the eye had registered the wedge leaving, which read as a cut rather than a motion. Leaving is unchanged at 140ms — arriving deliberately and departing obediently is the pair that feels responsive rather than sluggish.
+
+## 0.51.40 (build 366) — 2026-11-16
+- The wedge is now genuinely a corner of a leaning sheet. Its top edge was horizontal, so the shape read as a cut-off panel glued to the edge rather than paper seen at an angle — the giveaway being that the top edge ran parallel to the screen. Both visible edges lean, they meet at a true 90 degrees, and the taper length follows from the angle (`w / sin θ`) instead of being stored separately.
+- The shadow falls along the paper's own downward direction, not the screen's. Dropped straight down, a shadow at a fifteen-degree lean fell at an angle to the edge casting it and read as a separate grey shape.
+- The stack is legible. Layers stepped 10dp apart overlapped into what looked like one thicker wedge; they now step 22dp and 26dp and hold more of their opacity, because a stack nobody can count is not a queue indicator.
+- A queued request no longer goes missing. The handover used to rely on the platform routing a second launch to the existing window, which it does not do when that launch lands in a different task — with an empty `taskAffinity` and NEW_TASK required from a background service, three requests surfaced as one. The gate now holds a live reference to the window that is on screen and delivers into it directly, falling back to a launch only when there is no window.
+
+## 0.51.41 (build 367) — 2026-11-16
+- The stamp and the tear are anchored to the sheet by NAME, not to the root's last child. Once the tip became a sibling of the sheet the last child was the 195dp strip, so the stamp anchored to a wedge, drew a mark nobody could see, and — because its animation never reported finished — left a full-screen overlay behind that swallowed every touch. Reported as "after accepting I only see shadow and I can't touch anything", which is exactly what a stamp that never finishes does: it is a shield over the whole screen.
+- The paper's shadow is a real blur now. Offsetting copies of the outline was wrong in a way no offset value could fix: a few copies of a hard-edged path are still hard-edged, so the shadow read as a second grey wedge behind the paper rather than something the paper casts. It is rendered once into a bitmap with a `BlurMaskFilter` over the actual outline, so it follows the paper's lean, and costs one `drawBitmap` per frame.
+
+## 0.51.42 (build 368) — 2026-11-16
+- The stamp can no longer lock the phone. Its frame loop began with `if (finished || !isAttachedToWindow) return` — and `stamp()` posts the first frame immediately after the overlay is added, so a frame that ran before attachment ended the loop for good. Nothing else ever finished the overlay, and an overlay that never finishes covers the whole screen and takes every touch. That is the reported "after accepting I only see shadow and I can't touch anything": not a stuck modal, a dead stamp acting as a shield. A pre-attachment frame now re-posts instead of returning, the overlay carries its own wall-clock deadline, and the Activity carries a second one that closes the screen if the stamp never reports finishing at all.
+- Two independent backstops rather than one, because the failure had two ways to happen: the loop dying, and the overlay never being laid out in the first place. The decision is already recorded before either fires, so closing the screen is always safe.
+
+## 0.51.43 (build 369) — 2026-11-16
+- The resting tip is a SYSTEM OVERLAY window, not an Activity. This is the fix for the one thing that could not be repaired in place: an Activity pauses whatever is behind it, so a 195dp translucent strip still froze the whole screen for input — reported as "the whole point of transparency is interacting with what's behind, it's not happening". `FLAG_NOT_TOUCH_MODAL` decides where this window's own touches go; it cannot un-pause the app underneath. A `TYPE_APPLICATION_OVERLAY` window has no such contract, so the app below keeps running and every touch outside the strip reaches it. The permission was already held — the small notify card has used it since before this feature existed.
+- The Activity is therefore a sheet again, and only a sheet. It launches when the tip is touched and leaves when the sheet is folded back, with the request untouched either way: no resolution, no clock change.
+- The paper floats clear of the screen edge, and no edge of it is parallel to the screen. That is what fixes the shadow. Every earlier version clipped the shape against the right edge, so one side of it was exactly vertical — and the shadow of a vertical edge is a vertical band. Reported twice as "the shadow is still fucking vertical", and the report was right: no shadow parameter can repair a shape that has a vertical edge. The tip is now a rotated rectangle with four leaning sides, and tests assert that no edge is vertical and none is level.
+- The two tests that asserted the old architecture — a resting shape inside the Activity, and a tip view inside it — were removed rather than kept passing. They described a design that has been replaced.
+
+## 0.51.44 (build 370) — 2026-11-17
+- The tip is fitted to its own window instead of being laid out for a screen. The rotated rectangle was built from screen proportions and then drawn into a 195dp strip, so most of it fell outside the view and only a corner appeared — reported as "only a tiny piece of paper is rendered". It now computes the largest sheet of its aspect whose rotated bounding box fits the canvas, and the tests assert both halves of that: every corner inside the window, and the paper filling a real share of it rather than sitting in a corner. A shape laid out for one canvas and painted on another is a defect no amount of shadow tuning can hide.
+- The tip window is the paper plus a 14dp margin, not the paper plus a 40dp touch reach. A window consumes every touch inside it, so that reach was taking screen from the app behind for no gain.
+
+## 0.51.45 (build 371) — 2026-11-17
+- Every request in a queue announces itself. The sound and haptics fired where the SHEET launched, so only the first of a queue was audible: a later request arrived on a branch that returned early because a window was already on screen. They now fire where the request becomes visible — the tip overlay — once per request, on both the first and every queued one.
+- Touches outside the paper reach the app behind it. A window is touch-opaque across its whole rectangle, transparent pixels included, so a full-height strip blocked an empty column down the side of the screen — reported as "touches are still blocked on the right side even the transparent parts". The view now claims a gesture only when it starts on the paper and refuses everything else; claiming ACTION_DOWN before checking the shape was the defect, since it took every gesture in the window and decided afterwards.
+- The sheet is bigger, tipped the other way, and less steeply: 8° with the top edge rising to the left, in a window a third of the display wide. A quarter was too small to read, and the lean of 15° read as a diagonal panel rather than paper.
+- The fitted shape measures its own bounding box from the rotated corners instead of computing where it should land. A mirrored lean flips which corner is topmost, and the earlier formula assumed one direction — it put the sheet off the left edge of its own window.
+
+## 0.51.46 (build 372) — 2026-11-17
+- Touches now reach the app behind the tip. The window was full height, and from Android 12 a tap that would reach another app THROUGH an untrusted overlay is blocked unless the overlay's combined opacity is at most 0.8 — so a tall mostly-transparent surface had every touch beneath it refused. `FLAG_NOT_TOUCH_MODAL` cannot help: it decides where this window's touches go, not whether the system trusts them. The window is now the size of the paper and covers under 30% of the screen, which is the case the rule permits.
+- The window has a hard height ceiling of 80% of the display, so a short screen cannot turn the tip back into a full-height surface.
+- The paper is larger: a window 42% of the display wide instead of 34%, because the sheet is fitted to its window and the window was the real size control.
+- The tip no longer offsets the paper twice. The view draws the sheet below the window's top, so moving the window down as well would push it twice and clip the bottom.
+- `dimAmount` is set to zero explicitly rather than relying on a default.
+- A new test pins the window's CONTRACT with the system rather than its appearance: overlay type, not full width, not full height, not focusable, not touch-modal, not touchable-blocked, undimmed, translucent, and anchored top-right. The three "touches are blocked" reports were a WindowManager policy that no ordinary unit test could see; this one fails here instead of on the device.
+
+## 0.51.47 (build 373) — 2026-11-17
+- The tip is the part of a sheet that has slid in from the right, not a whole sheet floating in the middle. Its right side runs past the display edge, so what is drawn is a leaning top edge, a leaning left edge and a leaning bottom edge, with no right edge at all. That is the look that was asked for three times, and it is also the reason the shadow kept reading vertical: a shape that ENDS on the screen edge has a straight vertical side in the picture, and a vertical side casts a vertical band.
+- The window is pinned to the right edge, 46% of the display wide, and still capped below full height so Android keeps letting touches through to the app below.
+
+## 0.51.48 (build 374) — 2026-11-17
+- The tip is a tab about 2cm wide at the top of the screen, not a sheet running down the side. The width is now a PHYSICAL size — 2cm expressed in dp — rather than a share of the display, because "2cm from the right edge" is a size, and treating it as a fraction is what produced a sheet covering half the screen. Its height is a quarter of the display, so what shows is the corner of a sheet that slid in, cut by the right edge.
+
+## 0.51.49 (build 375) — 2026-11-17
+- The tip sits further off the right edge and leans more: 13 degrees instead of 8, and its cut is deeper so less of the sheet is on screen. Tuned by eye against a render of the device's own numbers rather than by arithmetic.
+
+## 0.51.50 (build 376) — 2026-11-17
+- The tip is a TRIANGLE, by construction. A rectangle whose side is cut by the screen edge shows a band with square corners — which is a broken rectangle however it is positioned, and that is exactly what was reported. Three points cannot look broken: a top edge flush against the screen, then two edges down to a single apex. The window is sized to the triangle, so its point is always finished by the shape rather than clipped by the window, which is what "bottom side is cut off" was.
+- The card now starts ENTIRELY off screen and slides in. Previously it began a sixth of a screen to the right and faded up from 55% opacity, so it read as a card fading in beside the edge rather than one being pulled across. It is opaque from the first frame and travels a full screen width plus a margin, because a rotated view's bounding box is wider than the view.
+- The expand starts at 13 degrees, matching the tip's lean, and settles to half a degree as it arrives — the same sheet straightening as it is laid down.
+- The tip is removed on the card's FIRST DRAWN FRAME rather than on the tap. Hiding on tap left the screen empty for the launch latency, and that gap is why the two motions read as separate events and the expand appeared to have been lost.
+
+## 0.51.51 (build 377) — 2026-11-17
+- A request no longer disappears before it is drawn. The gate hands a new request to any approval window it still holds a reference to — and a window that is merely PAUSED behind another app still counted, so the tip was torn down and the request went into a screen nobody could see. Delivery now requires that window to actually have focus; otherwise the request rests on the tip as intended.
+- The gate logs which branch it took — resting the tip, growing the stack, or handing to a live window. Two rounds of "nothing appeared" could not be attributed to a branch, and a single line settles it.
+
+## 0.51.52 (build 378) — 2026-11-17
+- The arrival sound fires once per request, not once per redraw. It had moved into the tip's `show`, which the gate calls on every queue tick to keep the stack depth current — so a request that waited announced itself continuously and produced the reported stream of repeating sounds. The sound is now keyed on the request id and fired from the gate, the one place that knows a NEW request arrived rather than a redraw happening; `show` is idempotent and no longer announces at all.
+- The tip slides in over the distance of its own window. It had been advanced by a screen-proportional metric from a different coordinate system, so the shape was never actually pushed out of its window and appeared in place instead of sliding in from the side.
+
+## 0.51.53 (build 379) — 2026-11-17
+- The tip is a sliver of paper tucked behind the right edge: a triangle whose two base vertices sit EXACTLY on the screen edge — top and bottom, zero inset — with the third vertex 2cm to the left, vertically centred. Earlier shapes had a top edge spanning the window or an apex hanging down, which read as a wedge rather than paper poking out from behind the glass. Both base points are now flush at 0 and the point is a physical 2cm from dp, so the same sliver appears on any screen width or resolution rather than a fraction of it.
+
+## 0.51.54 (build 380) — 2026-11-17
+- The tip's point is at the TOP, and the paper spreads downward from it. Measured from the annotated screenshot rather than guessed: the shape starts at zero width and widens as it descends. A point at the vertical centre reads as a lozenge rather than as paper easing out from behind the edge.
+- Queued requests stack visibly. Each sheet in the queue is the same sliver stepped down and a little further in, with its own height so the layers cannot overlap into one shape — three waiting requests read as three sheets of paper behind the edge, countable at a glance.
+
+## 0.51.55 (build 381) — 2026-11-17
+- The tip is the CORNER OF A SHEET: a right-angled triangle, 1cm on each leg. "A fucking paper is 90 degrees" was the requirement, and it explains every wrong shape before it — a sheet's corner is a right angle, so anything with an acute or obtuse visible corner is not paper. The right angle is now asserted in a test, in degrees, because it is a property rather than a set of coordinates.
+- 1cm instead of 2cm, as a physical size, so it is the same corner on every screen and resolution. The earlier 2cm read as far too large.
+- The window is sized to the corner's ROTATED bounding box rather than its leg length. A rotated right angle does not fit in a square of its leg: the box grows by cos+sin, which is why the shape was being clipped by its own window.
+- The shape is clamped inside the window, so a window smaller than the shape squeezes the corner in instead of drawing it outside and leaving nothing visible.
+
+## 0.51.56 (build 382) — 2026-11-17
+- Queued requests stack DOWNWARD from under the front sheet, as parallel copies of the same shape. Re-deriving the outline per layer made three different triangles converge on a shared point, so a queue read as a fan instead of paper under paper.
+- The resting corner is a true right angle and stays one. The outline was centred in its window, so any window taller than the paper flattened the corner; it is now measured from its own drop and window height no longer affects the shape.
+- The window is tall enough for the whole stack. Sizing it to the bare shape clipped the last sheet, which is why the bottom of the paper kept being cut off.
+- The tip hangs 32dp past the right edge, as a sheet caught mid-slide rather than a badge stuck on the screen edge.
+- The tip is covered by screenshot tests over the full display, with a centimetre ruler, so its size and shape are reviewable without installing a build.
+
+## 0.51.57 (build 383) — 2026-11-17
+- The tips touch the right edge. The resting window had a positive x offset under end gravity, which pushes a window AWAY from that edge rather than past it, so every tip floated a few millimetres in from the side instead of reading as paper caught at the boundary.
+- The screenshot tests now position the tip the same way the device does. They were moving the view with a rightward translation while production moved the window the other way, so every capture showed paper flush to the edge and the phone did not.
+- A test asserts the inset is zero, because that is the specific failure those images could not see.
+
+## 0.51.58 (build 384) — 2026-11-17 — CURRENT
+- The resting tip carries a countdown: a small stamp-red disc near its point, solid at arrival and draining to empty as the window closes. Visual only, no numbers, and on the front sheet alone so a queue stays readable as paper.
+- The countdown reads the gate's own deadline rather than starting its own timer. A timer inside the overlay assumed a fixed 60 seconds and would have run out while the request still had real time left, restarted from full whenever the sheet folded back, and never retargeted when a queued request became the head.
+- The disc is placed by geometry so it always sits inside the paper, and the ticker stops when nothing is waiting instead of running for the life of the window.
 
 ## Keeping this file honest
 

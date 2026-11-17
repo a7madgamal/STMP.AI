@@ -105,6 +105,24 @@ class ApprovalActivity : FragmentActivity() {
 
     companion object {
         private val entranceRegistry = PaperMotion.EntranceRegistry()
+
+        /**
+         * Breathing room between the paper and the window edge, in dp.
+         *
+         * Small on purpose: the window is a strip that swallows touches, so this is the only part
+         * of the screen it takes beyond what the wedge actually draws. It exists so the anti-
+         * aliased edge of the wedge is not clipped by the window itself.
+         */
+        private const val TIP_WINDOW_MARGIN_DP = 12F
+
+        /**
+         * How long the stamp may cover the screen before the Activity closes regardless.
+         *
+         * Generous compared with the stamp's own sequence (~1.6s total). It exists only for the
+         * case where the stamp never reports finishing — which is not hypothetical: a frame loop
+         * that returned instead of re-posting left a full-screen overlay taking every touch.
+         */
+        private const val STAMP_DEADLINE_MS = 4_000L
         const val EXTRA_ID = "id"
         const val EXTRA_REMOTE = "remote"
         const val EXTRA_ENDPOINT = "endpoint"
@@ -136,6 +154,138 @@ class ApprovalActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ApprovalGate.registerWindow(this)
+        applyIntent(intent)
+    }
+
+    override fun onDestroy() {
+        ApprovalGate.registerWindow(null)
+        forcedExit.removeCallbacksAndMessages(null)
+        passwordField?.text?.clear()
+        passwordField = null
+        super.onDestroy()
+    }
+
+    /**
+     * The two shapes this window has, and the only two.
+     *
+     * `RESTING` is the paper wedge against the right edge: a strip window, no dim, not focusable,
+     * and every touch outside it belongs to whatever is underneath. `OPEN` is the sheet as it has
+     * always been — full screen, dimmed, focused, so the password field and the buttons work.
+     *
+     * A named state rather than a pair of booleans because the transitions are the thing that can
+     * go wrong: an explicit list of which flag belongs in which shape cannot drift, while two
+     * booleans can encode four states of which two are meaningless.
+     */
+    private enum class WindowShape { RESTING, OPEN }
+
+    private var shape: WindowShape? = null
+
+    /** The sheet (paper + controls). Present for the life of the request, visible only when open. */
+    /**
+     * The tick loop for the request currently on screen.
+     *
+     * One handler for the life of the Activity rather than one per request: a swap must be able to
+     * cancel the outgoing tick, and a handler created inside `render` is not reachable from the
+     * swap path.
+     */
+    private val requestTicker = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private var sheetRoot: View? = null
+
+    /**
+     * The sheet's shape-change wrapper.
+     *
+     * Held as a field because the stamp and the tear anchor to it. They used to take the root's
+     * last child, which was the sheet; once the tip became a sibling, the last child was the
+     * 195px strip, so the stamp anchored to a wedge, drew nothing recognisable, and — because its
+     * animation never reported finished — left a full-screen overlay behind that swallowed every
+     * touch. Naming the sheet directly is the fix, not reordering the children.
+     */
+    private var paperWrapper: com.mido.phonebridge.ui.PaperSheetView? = null
+
+    /** The resting wedge stack. Visible only while resting. */
+    /**
+     * Resize the window for [next] and apply that shape's flags.
+     *
+     * **Why a strip, not a full-screen transparent window.** A full-screen translucent window
+     * sits ON TOP of the app behind it, and Android 12+ blocks touches that would pass through a
+     * window opaque enough to hide what it covers. A strip that is only as wide as the paper
+     * never covers the screen, so nothing needs passing through and the rule never applies.
+     *
+     * **Why `setAttributes` rather than the theme.** `windowIsTranslucent` is fixed when the
+     * window is created, which is before `onCreate`; the theme is therefore always translucent
+     * (`Theme.STMP.Approval.Sheet`) and only the geometry, dim and focus change here.
+     */
+    private fun applyWindowShape(next: WindowShape) {
+        if (shape == next) return
+        shape = next
+
+        val attrs = window.attributes
+        val dm = resources.displayMetrics
+        when (next) {
+            WindowShape.RESTING -> {
+                // **The strip is the PAPER, plus a margin. Not paper plus a long reach.**
+                //
+                // A window eats every touch that lands inside it, and FLAG_NOT_TOUCH_MODAL only
+                // passes through what falls OUTSIDE it. So each extra dp of window width is a dp
+                // of the screen the human cannot use while a request waits — the first build of
+                // this took 55% of the display for a wedge that is only 34% wide, and the app
+                // behind stopped accepting taps across half the screen.
+                //
+                // The paper is already ~130dp wide on a phone, which is a generous target on its
+                // own, so it does not need a margin wide enough to be a second target.
+                val metrics = com.mido.phonebridge.ui.ApprovalTip.metrics(dm.widthPixels, dm.density)
+                val tipWidth = metrics.topWidthPx + TIP_WINDOW_MARGIN_DP * dm.density
+                attrs.width = tipWidth.toInt().coerceAtMost(dm.widthPixels)
+                attrs.height = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.gravity = Gravity.END or Gravity.TOP
+                attrs.dimAmount = 0f
+                attrs.flags = attrs.flags or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                // Keep the screen awake for the whole life of the prompt, both shapes: a request
+                // that expires while the phone sleeps is a decision nobody was given.
+                attrs.flags = attrs.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            }
+            WindowShape.OPEN -> {
+                attrs.width = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.height = WindowManager.LayoutParams.MATCH_PARENT
+                attrs.gravity = Gravity.TOP or Gravity.START
+                attrs.dimAmount = 0.45f
+                // Focus and touch-modality come BACK: the password field needs the IME, and the
+                // sheet owns the whole screen so there is nothing behind it to pass taps to.
+                attrs.flags = attrs.flags and
+                    (WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL).inv()
+                attrs.flags = attrs.flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            }
+        }
+        window.attributes = attrs
+        window.setDimAmount(attrs.dimAmount)
+    }
+
+    /**
+     * The one place an intent becomes screen state.
+     *
+     * `onCreate` and (once the tip lands) `onNewIntent` both call this, so a swap and a rotation
+     * take the same path. That is the whole point of the split: two entry points building the
+     * card separately is how a re-shown request ends up described by the previous one.
+     *
+     * `setIntent` is FIRST, before anything reads the extras — `getIntent()` keeps returning the
+     * ORIGINAL intent until it is set, so a rotation after a swap would otherwise rebuild the
+     * wrong request, silently.
+     */
+    private fun applyIntent(intent: android.content.Intent) {
+        setIntent(intent)
+
+        val header = RequestHeader(
+            id = intent.getLongExtra(EXTRA_ID, -1L),
+            remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?",
+            endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?",
+            summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?",
+            timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS),
+        )
 
         // Draw over other apps / show over the lockscreen, turn the screen on,
         // and keep it on while the human decides. This is what makes the modal
@@ -152,21 +302,108 @@ class ApprovalActivity : FragmentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        val view = ApprovalGate.currentView()
+
         // FLAG_SECURE whenever this modal can hold a password: without it the typed
         // password appears in the recents thumbnail and is capturable by a screen
         // recorder. Set unconditionally for a password request — the flag cannot be
         // added later without re-creating the window.
-        val wantsPassword = ApprovalGate.currentView()?.needsPassword == true
-        if (wantsPassword) {
+        if (view?.needsPassword == true) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
 
-        val id = intent.getLongExtra(EXTRA_ID, -1L)
-        val remote = intent.getStringExtra(EXTRA_REMOTE) ?: "?"
-        val endpoint = intent.getStringExtra(EXTRA_ENDPOINT) ?: "?"
-        val summary = intent.getStringExtra(EXTRA_SUMMARY) ?: "?"
-        val timeoutSeconds = intent.getLongExtra(EXTRA_TIMEOUT_SECONDS, ApprovalGate.TIMEOUT_SECONDS)
-        val createdAtMs = intent.getLongExtra(EXTRA_CREATED_AT, System.currentTimeMillis())
+        render(header)
+    }
+
+    /**
+     * A second request arrives while this Activity is already on screen.
+     *
+     * **Why the window survives a handover.** The gate used to launch a NEW Activity per request
+     * with `FLAG_ACTIVITY_CLEAR_TASK`, which destroyed the window, so the wedge stack could never
+     * visibly move forward: the ghosts died with the window and the next tip slid in beside
+     * nothing. One long-lived Activity means the paper that carries the queue is the paper that
+     * shows the next request, and a promotion can be an animation instead of a re-entry.
+     *
+     * **The clock is not reset here, and must not be.** Everything time-related is read from the
+     * gate (`currentEnabledAtMs`, `waitingBehindCurrent`), not from anything stamped in this
+     * Activity, and the intent carries the ORIGINAL `createdAt`. A swap therefore inherits exactly
+     * the deadline the request actually has.
+     */
+    /**
+     * A new request arrived while this window is already on screen.
+     *
+     * **Called directly by the gate**, not only through `onNewIntent`. A re-launch relies on the
+     * platform routing to this instance, which it does not do when the second launch lands in a
+     * different task — the reason three queued requests showed only one. The gate holds a live
+     * reference to this window instead, so delivery cannot be lost.
+     */
+    fun onNewRequest(intent: android.content.Intent) = handleNewRequest(intent)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleNewRequest(intent)
+    }
+
+    private fun handleNewRequest(intent: android.content.Intent) {
+
+        // Everything the outgoing request bound to this Activity goes first: its tick, its
+        // password field, its "a decision is happening" flag. A swap that forgot one would let the
+        // previous request's countdown keep running behind the new request's card.
+        releaseRequestScopedState()
+        applyIntent(intent)
+
+        // The stack itself lives in the overlay now; refresh its depth for this request.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(this, visibleWedgeCount())
+    }
+
+    /**
+     * Drop everything that belonged to the request being replaced.
+     *
+     * Named as one act rather than seven resets scattered where each field is declared: the
+     * failure this prevents is a forgotten field, and a forgotten field is invisible until it
+     * leaks. Anything bound to one request belongs in here.
+     */
+    private fun releaseRequestScopedState() {
+        requestTicker.removeCallbacksAndMessages(null)
+        forcedExit.removeCallbacksAndMessages(null)
+        passwordField?.text?.clear()
+        passwordField = null
+        needsPassword = false
+        needsContactsPermission = false
+        contactsPromptRunning = false
+        commandsSeen.clear()
+        // Not reset to a shape: the incoming request decides that from the keyguard, in render.
+        shape = null
+        stamping = false
+    }
+
+    /**
+     * Everything this request needs off the intent, read once.
+     *
+     * A tiny immutable carrier rather than six more fields: the renderer below takes it as a
+     * parameter, so "which request is this screen describing" has exactly one answer and no
+     * `getIntent()` call can disagree with the views already on screen.
+     */
+    private data class RequestHeader(
+        val id: Long,
+        val remote: String,
+        val endpoint: String,
+        val summary: String,
+        val timeoutSeconds: Long,
+    )
+
+    /**
+     * Build the card for one request. Called once per presented request.
+     *
+     * Everything below is a consequence of [header] plus the gate's live state: the request
+     * itself is never read from an intent here.
+     */
+    private fun render(header: RequestHeader) {
+        val id = header.id
+        val remote = header.remote
+        val endpoint = header.endpoint
+        val summary = header.summary
+        val timeoutSeconds = header.timeoutSeconds
 
         // Two sources of truth:
         //  - view:  the RESOLVED, human-readable WHAT/ON (built by the caller
@@ -499,7 +736,11 @@ class ApprovalActivity : FragmentActivity() {
             visibility = ViewGroup.GONE
         }
 
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        // Hoisted from a local so a swap can cancel the PREVIOUS request's tick. A local handler
+        // would keep ticking against views that no longer exist, and its `isCurrent(id)` check
+        // would be testing an id nothing displays any more.
+        val handler = requestTicker
+        handler.removeCallbacksAndMessages(null)
         // Loading-word + dot animation state. Advanced only while the fetch is running.
         var wordIdx = 0
         var dotCount = 0
@@ -679,6 +920,20 @@ class ApprovalActivity : FragmentActivity() {
                 queueLine.visibility = if (behind > 0) ViewGroup.VISIBLE else ViewGroup.GONE
                 if (behind > 0) {
                     queueLine.text = "≡ $behind waiting behind this one"
+                }
+
+                // The wedge stack reads the SAME live value, on the same tick.
+                //
+                // Not a second source of truth: a stack that disagreed with the line above would
+                // be two answers to "is anything waiting" on one screen, and the number the human
+                // can act on is the one that is also visible while the sheet is closed. Fed here
+                // rather than in its own timer so a queue change can never arrive in one place
+                // before the other.
+                // The resting stack is an overlay window; keep its depth in step with the queue.
+                if (com.mido.phonebridge.notify.ApprovalTipOverlay.isShowing) {
+                    com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+                        this@ApprovalActivity, visibleWedgeCount(),
+                    )
                 }
 
                 // Keep ticking while the modal is live. A loading modal has no countdown to
@@ -1089,16 +1344,124 @@ class ApprovalActivity : FragmentActivity() {
             v.setPadding(0, bars.top, 0, bars.bottom)
             insets
         }
-        val presentation = PaperEntranceView(this)
+        sheetRoot = outer
+        val presentation = com.mido.phonebridge.ui.PaperSheetView(this)
+        paperWrapper = presentation
         presentation.addView(outer, ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
-        setContentView(presentation)
+
+        // The tip is a SIBLING of the sheet, not a replacement for it: both live in the window for
+        // the whole life of the request, and the shape decides which one is visible. Swapping the
+        // content view per shape would rebuild the card — and the card's tick, its handlers and
+        // its countdown are all bound to the views built here.
+        // A tap beside the sheet folds it back to the wedge. It deliberately does NOT reach the
+        // app underneath: a request is in flight, and stray taps landing on the app behind a
+        // half-open approval is how someone approves by accident.
+        val scrim = View(this).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            isClickable = true
+            setOnClickListener { collapseToTip() }
+        }
+
+        // A tap beside the sheet folds it back to the tip overlay rather than reaching the app
+        // behind: a request is in flight, and stray taps landing behind a half-open approval is
+        // how someone approves by accident.
+        scrim.setOnClickListener { collapseToTip() }
+
+        val root = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            addView(scrim, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            addView(presentation, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
+        setContentView(root)
+
+        // **This Activity is only ever the SHEET now.**
+        //
+        // The resting wedge moved to `ApprovalTipOverlay`, a system overlay window, because an
+        // Activity pauses whatever is behind it — so a translucent strip still froze the screen.
+        // A sheet is a full-screen decision surface, which is exactly what an Activity is for, so
+        // there is no longer a "resting shape" to choose here.
+        openSheet(animateEntrance = true)
+
         val entrance = PaperMotion.entrance(
             alreadyPresented = !entranceRegistry.claim(id),
         )
-        if (entrance.durationMs > 0L) presentation.present()
+        if (entrance.durationMs > 0L && shape == WindowShape.OPEN) presentation.present()
     }
+
+    /**
+     * The sheet, full screen, with everything a decision needs.
+     *
+     * [animateEntrance] distinguishes the two ways in: a locked phone opens straight to the sheet
+     * (nothing was ever resting), while a tap on the tip is a change of shape and animates.
+     */
+    private fun openSheet(animateEntrance: Boolean = false) {
+        // **One motion, not two.**
+        //
+        // The tip used to be hidden the instant the sheet appeared, so the eye saw paper vanish
+        // and then paper arrive — two events with a gap, which reads as a flicker no matter how
+        // short the gap is. Both now run on the same beat: the wedge slides out to the right while
+        // the sheet rotates in from that same edge, so the surface looks like one sheet of paper
+        // changing shape rather than one leaving and another arriving.
+        //
+        // The window grows FIRST: the sheet cannot animate into area the window does not have yet,
+        // and growing it afterwards would show the wedge jump.
+        applyWindowShape(WindowShape.OPEN)
+        sheetRoot?.visibility = View.VISIBLE
+
+        // The tip overlay is removed on the card's FIRST DRAWN FRAME, not on the tap: the two
+        // surfaces must overlap for one frame or the screen is briefly empty and the slide reads
+        // as two events instead of one.
+        sheet()?.onFirstFrame = {
+            com.mido.phonebridge.notify.ApprovalTipOverlay.hideForCard()
+        }
+        if (animateEntrance) sheet()?.present() else sheet()?.settle()
+    }
+
+    /**
+     * Fold the sheet back to the wedge.
+     *
+     * The request stays exactly where it was: nothing is resolved, the clock keeps running, and
+     * the sheet comes back on the next tap with its countdown already in the right place — the
+     * DENY drain is driven from the gate's arm time, not from a local timer, so collapsing cannot
+     * buy the human extra seconds.
+     */
+    private fun collapseToTip() {
+        if (shape != WindowShape.OPEN || stamping) return
+        // Fold first, then shrink the window: hiding the sheet before the motion finishes would
+        // turn a 140ms fold into a single frame of nothing.
+        // The tip overlay is shown BEFORE this window goes, so there is something to hand back to
+        // while the sheet is still folding — one continuous motion rather than fold, blank, appear.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.show(
+            this, visibleWedgeCount(),
+        )
+        sheet()?.dismiss {
+            // The request is untouched: no resolution, no clock change. This window simply leaves
+            // and the overlay carries the tip.
+            finish()
+        }
+    }
+
+    /**
+     * How many wedges the tip should draw: this request plus whoever is behind it, capped.
+     *
+     * The cap lives here as well as in `ApprovalTip.stack` because the two answer different
+     * questions: this one says how many the queue HOLDS for the view, the view's says how many it
+     * will DRAW. A fourth request is real and must still be counted by the sheet's own line.
+     */
+    private fun visibleWedgeCount(): Int =
+        (1 + ApprovalGate.waitingBehindCurrent())
+            .coerceAtMost(com.mido.phonebridge.ui.ApprovalTip.MAX_VISIBLE)
+
+    /** The sheet's own shape-change wrapper, when it exists. */
+    private fun sheet(): com.mido.phonebridge.ui.PaperSheetView? =
+        sheetRoot?.parent as? com.mido.phonebridge.ui.PaperSheetView
+
 
     /**
      * True from the moment a decision is taken until the stamp has finished.
@@ -1157,11 +1520,16 @@ class ApprovalActivity : FragmentActivity() {
         // the human has decided, it must not reappear behind the stamp.
         armBar.visibility = ViewGroup.GONE
         val root = (findViewById<android.view.ViewGroup>(android.R.id.content))
-        val sheet = root.getChildAt(root.childCount - 1)
+        // The SHEET, named — not "whatever happens to be last". See [paperWrapper].
+        val sheet: View = paperWrapper ?: sheetRoot ?: root
         val overlay = StampOverlay(this).apply {
             onFinished = {
                 if (!approved) showDenialTear(root, sheet) else finish()
             }
+            // **A stamp that cannot finish must not become a shield.** While it is on screen it
+            // covers everything and takes every touch, so a stamp that never calls back is a locked
+            // phone. This is the same backstop the overlay's own window carries.
+            
             onImpact = {
                 playStampImpact()
                 sheet.animate().scaleY(0.985f).setDuration(70L).withEndAction {
@@ -1182,6 +1550,18 @@ class ApprovalActivity : FragmentActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         overlay.stamp(if (approved) StampOverlay.Verdict.APPROVED else StampOverlay.Verdict.DENIED)
+        // **A second, independent backstop.**
+        //
+        // The overlay owns its own deadline now, but this screen must come back even if the overlay
+        // itself is never laid out, never attached, or throws inside its own frame loop. The decision
+        // is already recorded above; the only thing left is to stop covering the phone.
+        forcedExit.removeCallbacksAndMessages(null)
+        forcedExit.postDelayed({
+            if (stamping && !isFinishing) {
+                Log.w("ApprovalActivity", "stamp never finished; closing the approval screen")
+                finish()
+            }
+        }, STAMP_DEADLINE_MS)
         // **No timed exit any more.**
         //
         // The stamp is dismissed by the human, so a wall-clock backstop would recreate exactly
@@ -1559,11 +1939,4 @@ class ApprovalActivity : FragmentActivity() {
      * first means the chars are gone even if a view reference survives somewhere; dropping
      * the field then removes the last easy path to them.
      */
-    override fun onDestroy() {
-        forcedExit.removeCallbacksAndMessages(null)
-
-        passwordField?.text?.clear()
-        passwordField = null
-        super.onDestroy()
-    }
 }
