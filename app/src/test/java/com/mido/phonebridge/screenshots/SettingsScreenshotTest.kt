@@ -21,6 +21,23 @@ class SettingsScreenshotTest(variant: Variant) : ShotTest(variant) {
         shoot("ai_remote")
     }
 
+    /**
+     * The BOTTOM of the screen, scrolled into view.
+     *
+     * The bottom half of Preferences — DEVELOPER, About & updates — never appears in the normal
+     * capture because the content is taller than the window, and `Shots.full` only grows the image
+     * by the overflow. That left the one section the human complained about ("no space") with no
+     * pixel coverage at all, so a flush button there could only be found by installing a build.
+     */
+    @Test fun developer_section() {
+        val activity = hostTab(OptionsFragment::class.java, Theme.Tab.PREFERENCES)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        val scroll = firstScroll(activity.window.decorView)
+        scroll?.scrollTo(0, scroll.getChildAt(0)?.height ?: 0)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        Shots.window(activity, "settings", "bottom")
+    }
+
     @Test fun debug_log_open() {
         Fixtures.debugLog(listOf(
             "09:40:00  server started on 192.168.1.100:8787",

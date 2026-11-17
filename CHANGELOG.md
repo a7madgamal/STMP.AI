@@ -5703,11 +5703,17 @@ devDependencies. `node_modules/` is gitignored.
 - The wobbly-edge drawable is deleted; the hand-drawn rule under section headers is kept, because a rule is a line drawn on paper rather than a card silhouette.
 - The two risk-tinted cards keep their tint. A tint is a state, not a different kind of card.
 
-## 0.51.60 (build 386) — 2026-11-17 — CURRENT
+## 0.51.60 (build 386) — 2026-11-17
 - Cards, buttons, switches and input wells all wear the same hand-drawn wobbly edge. A previous change had moved everything to the torn-bottom silhouette and the torn edge was the wrong look, so this restores the wobble everywhere and removes the torn card wrapper entirely. The bottom bar keeps its torn top edge: it is a bar, not a card.
 - Buttons no longer draw two borders. The accent style was setting a straight platform outline AND the drawn wobbly one, so the same button showed both.
 - Switches use the same slightly-darker panel fill as cards. A switch painted in the page colour read as a hole rather than as a control.
 - Nothing touches the screen edge. There was no gutter constant, so screens used 16, 20 or 24 depending on the file and content sat a different distance from the side on each one.
+
+## 0.51.61 (build 387) — 2026-11-17 — CURRENT
+- Rows added straight into a settings section keep the screen margin. The section container discarded a child's own layout margins, so the Diagnostics row and the Show Log button rendered flush against the screen edge while every card beside them was inset.
+- Switches use the panel fill for both track and knob. The knob had been painted in body ink, which read as a dark blob punched into the switch rather than as a part of it.
+- Plugin rows are the panel fill. The standalone rows were painted in the page colour, so they drew a border around empty paper and looked like translucent boxes.
+- The bottom of Preferences has screenshot coverage. That section is below the fold, so nothing there was ever checked in a golden — which is why a flush button there needed an install to find.
 
 ## Keeping this file honest
 

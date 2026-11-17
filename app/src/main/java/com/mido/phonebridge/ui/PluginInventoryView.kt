@@ -72,7 +72,15 @@ class PluginInventoryView(
 
     fun add(group: String, view: android.view.View, params: LayoutParams? = null) {
         val host = groupFor(group)
-        if (params == null) host.addView(view) else host.addView(view, params)
+        // **Pass the view's OWN params when none are given.**
+        //
+        // `addView(child)` builds a fresh set of default LayoutParams and DISCARDS whatever the
+        // child already carried, so a row that set its own margins to match the card gutter had
+        // them silently thrown away: the DIAGNOSTICS row and the SHOW LOG button rendered flush to
+        // the screen edge no matter what they asked for. Honouring `view.layoutParams` is what makes
+        // a self-inset row actually inset.
+        val lp = params ?: view.layoutParams
+        if (lp == null) host.addView(view) else host.addView(view, lp)
     }
 
     /** Inventory-owned rows are replaced on refresh; global settings added by Preferences are not. */
@@ -311,7 +319,10 @@ class PluginInventoryView(
                 Theme.dp(context, 14), Theme.dp(context, if (bare) 8 else 12),
                 Theme.dp(context, 14), Theme.dp(context, if (bare) 8 else 12),
             )
-            background = Theme.rippled(context, if (bare) Theme.SURFACE else Theme.BG, Theme.RADIUS_CONTROL)
+            // **SURFACE either way.** A non-bare row was painted Theme.BG — the page colour — so
+            // it carried a drawn border around empty paper and read as a translucent box rather
+            // than a card. On this screen the only thing allowed to be BG is the PAGE.
+            background = Theme.rippled(context, Theme.SURFACE, Theme.RADIUS_CONTROL)
             isClickable = true
             isFocusable = true
             minimumHeight = Theme.dp(context, Theme.MIN_TARGET_DP)

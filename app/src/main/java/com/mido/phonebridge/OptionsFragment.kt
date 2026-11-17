@@ -274,11 +274,26 @@ class OptionsFragment : BridgeFragment() {
         pluginInventory.add("Developer", Theme.button(ctx, "SHOW LOG", Theme.ButtonStyle.GHOST) {
             DebugLogOpen.open = !DebugLogOpen.open
             logView.visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
+        }.apply {
+            // Same gutters as a card, for the same reason as `toolRow`: a bare button in a section
+            // container has no card to pad it.
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                val g = Theme.dp(ctx, Theme.CARD_PAD_H)
+                marginStart = g
+                marginEnd = g
+                topMargin = Theme.dp(ctx, 6)
+            }
         })
         logView = TextView(ctx).apply {
             textSize = Theme.TEXT_CAPTION_SP
             setTextColor(Theme.ON_SURFACE_VARIANT)
             typeface = Theme.monoFont(ctx)
+            // The log body keeps the card gutter too, so the text does not run edge to edge.
+            val g = Theme.dp(ctx, Theme.CARD_PAD_H)
+            setPadding(g, Theme.dp(ctx, Theme.CARD_PAD_V), g, 0)
             setTextIsSelectable(true)
             visibility = if (DebugLogOpen.open) TextView.VISIBLE else TextView.GONE
             text = Debug.dump()
@@ -821,10 +836,19 @@ class OptionsFragment : BridgeFragment() {
     /** One full-width destination row. Vertical, because five across truncated their labels. */
     private fun toolRow(label: String, onClick: () -> Unit): android.view.View =
         Theme.button(ctx, label.uppercase(), Theme.ButtonStyle.NEUTRAL, onClick = onClick).apply {
+            // **The same gutters a card gets.** This row is added straight into the section
+            // container, which has no inset of its own, so it sat flush against the screen edge
+            // while every card around it was inset — the DIAGNOSTICS row looked like it had escaped
+            // the layout. Cards pad themselves; a bare row has to ask.
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = Theme.dp(ctx, 6) }
+            ).apply {
+                val g = Theme.dp(ctx, Theme.CARD_PAD_H)
+                marginStart = g
+                marginEnd = g
+                topMargin = Theme.dp(ctx, 6)
+            }
         }
 
     /**

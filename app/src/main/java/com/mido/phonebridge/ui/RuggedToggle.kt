@@ -249,11 +249,12 @@ class RuggedToggle(context: Context) : View(context) {
         val knobTop = rect.top + insetPx
         knobRect.set(knobLeft, knobTop, knobLeft + knobSizePx, knobTop + knobSizePx)
 
-        val color = when {
-            pending -> withAlpha(Theme.WARNING, 0xB0)
-            checked -> Theme.SUCCESS
-            else -> Theme.ON_SURFACE
-        }
+        // **The knob is paper, not ink.** It used to be ON_SURFACE — near-black — which on a light
+        // track read as a dark blob punched into the switch rather than as a slider you could push.
+        // One colour, always: the switch is made of the same material as the cards around it, and
+        // state is carried by which side the knob sits on plus the track fill, not by painting the
+        // knob a foreign colour.
+        val color = Theme.SURFACE
         // Rebuilt only on an actual colour change, so a repaint that changed nothing reuses it.
         val current = knob.let { if (it != null && knobColorKey == color) it else null }
         val drawable = current ?: surfaceDrawable(color, 2).also {
