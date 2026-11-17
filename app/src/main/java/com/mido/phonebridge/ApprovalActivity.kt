@@ -1414,6 +1414,12 @@ class ApprovalActivity : FragmentActivity() {
         applyWindowShape(WindowShape.OPEN)
         sheetRoot?.visibility = View.VISIBLE
 
+        // The tip overlay is removed on the card's FIRST DRAWN FRAME, not on the tap: the two
+        // surfaces must overlap for one frame or the screen is briefly empty and the slide reads
+        // as two events instead of one.
+        sheet()?.onFirstFrame = {
+            com.mido.phonebridge.notify.ApprovalTipOverlay.hideForCard()
+        }
         if (animateEntrance) sheet()?.present() else sheet()?.settle()
     }
 

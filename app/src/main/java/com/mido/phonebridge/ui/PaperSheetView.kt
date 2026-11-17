@@ -93,7 +93,19 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
      *   collapsing no: arriving with a tiny overshoot reads as a sheet being laid down, while
      *   leaving with one reads as a bounce nobody asked for.
      */
+    /**
+     * Fired once, on the first frame this sheet draws after [present] is called.
+     *
+     * The tip overlay is removed from here rather than from the tap handler: the two surfaces must
+     * overlap for exactly one frame, or the screen is briefly empty between them and the slide
+     * reads as two events.
+     */
+    var onFirstFrame: (() -> Unit)? = null
+
+    private var firstFramePending = false
+
     fun present(overshoot: Boolean = true, onDone: (() -> Unit)? = null) {
+        firstFramePending = true
         // No window means no frames: snap to the end rather than park the sheet mid-transform.
         if (!isAttachedToWindow) {
             progress = 1f
@@ -191,6 +203,16 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
      * with [REST_SCALE] so the background shows around its edges. Both are expressed as fractions
      * of the view's own size, so the geometry is the same on a phone and a tablet.
      */
+    override fun dispatchDraw(canvas: android.graphics.Canvas) {
+        super.dispatchDraw(canvas)
+        if (firstFramePending) {
+            firstFramePending = false
+            // Posted, not invoked inline: removing another window's view during this window's draw
+            // traversal is the kind of re-entrancy that shows up as a blank frame.
+            post { onFirstFrame?.invoke() }
+        }
+    }
+
     private fun applyTransform() {
         val p = progress.coerceIn(0f, 1f + EXPAND_OVERSHOOT)
         val tilt = START_TILT_DEGREES + (restTiltDegrees - START_TILT_DEGREES) * p
@@ -198,10 +220,17 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
         rotation = tilt
         scaleX = scale
         scaleY = scale
-        // Slides in from the edge the tip was leaning on.
-        translationX = width * START_X_FRACTION * (1f - p)
+        // **The card starts ENTIRELY off-screen.** Not a nudge from the edge: at p = 0 the whole
+        // sheet is past the right edge, so the first thing the eye sees is it sliding in. The tip
+        // it hands over from is a triangle at the edge, so the two read as one object arriving.
+        //
+        // `width` plus a margin, because a rotated view's bounding box is wider than itself —
+        // translating by exactly `width` would leave a corner peeking in.
+        translationX = (width * 1.08f + 1f) * (1f - p)
         translationY = height * START_Y_FRACTION * (1f - p)
-        alpha = (0.55f + 0.45f * p).coerceAtMost(1f)
+        // Opaque throughout: a half-transparent card sliding in reads as a fade, not a slide, and
+        // the human is being asked to approve something — it should look solid from frame one.
+        alpha = 1f
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -214,11 +243,6 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
         tick?.let { removeCallbacks(it) }
         tick = null
         super.onDetachedFromWindow()
-    }
-
-    /** Draw the paper's own shadow so a tilted sheet lifts off what is behind it. */
-    override fun dispatchDraw(canvas: Canvas) {
-        super.dispatchDraw(canvas)
     }
 
     private companion object {
@@ -244,11 +268,10 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
         /**
          * Where the expand STARTS, in degrees.
          *
-         * Two, not the tip's fifteen. The tip's lean belongs to the tip; making the sheet begin at
-         * that angle and unwind to its rest tilt reads as a spin rather than paper settling. Two
-         * degrees down to half a degree is a settle you feel instead of one you watch.
+         * The tab leans at 13, so the card starts near that and unwinds to its resting half a
+         * degree as it arrives — the same sheet, straightening as it is laid down.
          */
-        const val START_TILT_DEGREES = 2f
+        const val START_TILT_DEGREES = 13f
 
         /**
          * The sheet's resting lean: half a degree.
@@ -271,7 +294,7 @@ class PaperSheetView(context: Context) : android.widget.FrameLayout(context) {
          * display edge and the sheet would look cut rather than lifted.
          */
         const val REST_SCALE = 0.985f
-        const val START_X_FRACTION = 0.14f
+        /** Kept for the vertical settle only; the horizontal start is a full screen off to the right. */
         const val START_Y_FRACTION = 0.02f
 
         /** 2 % past the rest position, then back. Enough to feel laid down, not thrown. */

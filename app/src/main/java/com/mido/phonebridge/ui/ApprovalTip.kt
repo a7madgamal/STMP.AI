@@ -160,19 +160,23 @@ object ApprovalTip {
     }
 
     /**
-     * The corners of a rotated sheet that runs OFF the right edge of the screen.
+     * A TRIANGLE, by construction. Three points, nothing clipped.
      *
-     * **This is the look, and it also solves the shadow.** The sheet is a rectangle lying at a
-     * slight angle, whose right side extends past the display edge — so what the human sees is the
-     * part that has slid in from the right, with visible top, left and bottom edges and NO visible
-     * right edge. That last point matters: an earlier version closed the shape ON the screen edge,
-     * which put a straight vertical side in the picture, and the shadow of a vertical side is a
-     * vertical band. Reported three times. Nothing about the shadow needed changing; the shape did.
+     * Three reports shaped this:
      *
-     * Geometry: build the rectangle in its own frame, rotate it, then translate so its right side
-     * lands past the display and its top lands at [topPx]. Everything outside the view is clipped by
-     * the view itself, which is exactly where the "no vertical edge" comes from — the edge is not
-     * drawn, it is merely not in the window.
+     * 1. "It should ALWAYS appear as a triangle, not a broken rectangle." A rectangle whose side is
+     *    cut by the screen edge shows a band with two square corners — which is a broken rectangle
+     *    however it is positioned. A triangle cannot look broken: it has one vertex and two edges
+     *    that both run to the edge.
+     * 2. "Bottom side is cut off." The previous shape was a long sheet inside a short window, so its
+     *    lower end was clipped by the window rather than finished by the shape. This one is sized to
+     *    fit the window exactly, so the point is always visible and always the paper's own point.
+     * 3. "Still too far in." The taper's tip is what makes it read as tucked behind the edge, so the
+     *    apex leans in only as far as the touch target needs.
+     *
+     * The apex is at [apexInsetPx] from the right edge; the two top corners sit ON the edge, so the
+     * shape is flush against the screen and there is no vertical side of its own to cast a vertical
+     * shadow — the edge it meets belongs to the screen.
      */
     fun outlineFit(
         viewWidthPx: Float,
@@ -180,55 +184,32 @@ object ApprovalTip {
         density: Float,
         topPx: Float,
     ): List<Point> {
-        val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
-        val cos = kotlin.math.cos(t)
-        val sin = kotlin.math.sin(t)
         val inset = SHAPE_INSET_DP * density
+        val top = topPx.coerceIn(inset, (viewHeightPx - inset).coerceAtLeast(inset + 1f))
+        val bottom = (viewHeightPx - inset).coerceAtLeast(top + 1f)
+        val right = viewWidthPx
 
+        // A horizontal top edge of [bandPx], then two edges down to a single apex: a stalactite of
+        // paper hanging from the top edge, widest at the edge and tapering to nothing.
         val band = (viewWidthPx * BAND_FRACTION).coerceAtLeast(1f)
-        val length = band * ASPECT
+        val apexX = (right - apexInsetPx(density)).coerceAtLeast(band * 0.2f)
 
-        // Local corners: u across the band, v along the sheet's length.
-        fun rotate(u: Float, v: Float) = Point(u * cos - v * sin, u * sin + v * cos)
-        val local = listOf(
-            rotate(0f, 0f),
-            rotate(band, 0f),
-            rotate(band, length),
-            rotate(0f, length),
+        return listOf(
+            Point(right - band, top),
+            Point(right, top),
+            Point(apexX, bottom),
         )
-
-        val maxX = local.maxOf { it.x }
-        val minY = local.minOf { it.y }
-
-        // Push the sheet so its right side is past the display edge by [OVERSHOOT_FRACTION] of the
-        // window width, and its topmost corner sits at [topPx].
-        val overshoot = viewWidthPx * OVERSHOOT_FRACTION
-        val dx = viewWidthPx + overshoot - maxX
-        val dy = topPx.coerceIn(inset, viewHeightPx) - minY
-        return local.map { Point(it.x + dx, it.y + dy) }
     }
 
-    /** How far inside the view the paper keeps, in dp. */
-    const val SHAPE_INSET_DP = 4f
-
-    /** Length as a multiple of the visible band. A sheet, not a card. */
-    const val ASPECT = 2.6f
-
-    /** How wide the sheet's band is, relative to the window it is drawn in. */
-    const val BAND_FRACTION = 0.95f
+    /** How far the point of the taper reaches in from the right edge, in px. */
+    fun apexInsetPx(density: Float): Float = APEX_INSET_DP * density
 
     /**
-     * How far past the display edge the sheet continues.
+     * Whether [x],[y] is inside the triangle.
      *
-     * The sheet must be CUT by the edge, not finished at it: a shape that ends on the screen edge
-     * has a vertical side, and a vertical side casts a vertical shadow.
+     * Convex test: the point must be on the same side of all three edges. Order-independent, so a
+     * shape change cannot silently invert it.
      */
-    const val OVERSHOOT_FRACTION = 0.63f
-
-    /** A ceiling so a very tall window does not produce an absurd sheet. */
-    const val MAX_BAND_DP = 260f
-
-    /** Whether [x],[y] is inside the fitted sheet. Convex-polygon test. */
     fun containsFit(
         viewWidthPx: Float,
         viewHeightPx: Float,
@@ -249,4 +230,13 @@ object ApprovalTip {
         }
         return !(hasNeg && hasPos)
     }
+
+    /** How wide the top edge is, relative to the window it hangs in. */
+    const val BAND_FRACTION = 1f
+
+    /** How far the apex reaches in from the right edge, in dp. A comfortable target, not a sheet. */
+    const val APEX_INSET_DP = 84f
+
+    /** How far inside the view the paper keeps, in dp. */
+    const val SHAPE_INSET_DP = 4f
 }

@@ -40,11 +40,13 @@ object ApprovalTipOverlay {
     /** How wide the tip is, in centimetres — the size it should read as on screen. */
     private const val CENTIMETRES_WIDE = 2f
 
-    /** How tall the tip is, as a share of the display. A tab at the top, not a column. */
-    private const val WINDOW_HEIGHT_FRACTION = 0.25f
-
-    /** The paper's length relative to its band. Matches `ApprovalTip.ASPECT`. */
-    private const val PAPER_ASPECT = 2.6f
+    /**
+     * Window height as a multiple of its width.
+     *
+     * A triangle that is twice as tall as it is wide reads as a spike; one a little taller than
+     * wide reads as a corner of paper. The taper's angle is what the eye judges, not its length.
+     */
+    private const val TRIANGLE_HEIGHT_RATIO = 1.35f
 
     /**
      * The tallest the tip window may be, as a share of the display.
@@ -133,10 +135,20 @@ object ApprovalTipOverlay {
             screenWidthPx = dm.widthPixels
             this.depth = depth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
             onOpen = {
-                // Ask the gate, not this view: the window that can show the sheet is the Activity,
-                // and this overlay must never be a second owner of the request.
-                hide()
-                ApprovalGate.relaunchCurrent(ctx)
+                // **The tip stays until the card has actually painted.**
+                //
+                // Hiding it on the tap leaves the screen empty for however long the Activity takes
+                // to launch and draw — on a debug build that is a visible gap, and the two motions
+                // then read as two separate events instead of one slide. The tip is removed from
+                // the card's side, on its first drawn frame; see `ApprovalActivity.onFirstFrame`.
+                //
+                // The tap still asks the gate, because the window that can show the sheet is the
+                // Activity and this overlay must never be a second owner of the request.
+                if (!ApprovalGate.relaunchCurrent(ctx)) {
+                    // Nothing launched: keep the tip rather than leave the human with an empty
+                    // edge and no idea what happened.
+                    Log.w(TAG, "the sheet did not launch; keeping the tip")
+                }
             }
         }
 
@@ -167,8 +179,9 @@ object ApprovalTipOverlay {
         //
         // Still capped below full height: a window that spans the display is exactly the case
         // Android 12 refuses to pass touches through.
+        // A TRIANGLE wider than it is tall, so the taper reads as a corner rather than a spike.
         val heightCap = (dm.heightPixels * MAX_WINDOW_HEIGHT_FRACTION).toInt()
-        val height = (dm.heightPixels * WINDOW_HEIGHT_FRACTION).toInt().coerceAtMost(heightCap)
+        val height = (width * TRIANGLE_HEIGHT_RATIO).toInt().coerceAtMost(heightCap)
         val lp = WindowManager.LayoutParams(
             width,
             height,
@@ -202,6 +215,15 @@ object ApprovalTipOverlay {
         isShowing = true
         tip.present()
     }
+
+    /**
+     * Hide the tip because the CARD is now on screen.
+     *
+     * Called from the card's first drawn frame, not from the tap: that ordering is what makes the
+     * slide continuous. Hiding on tap leaves an empty screen for the launch latency, and the eye
+     * reads two motions where there should be one.
+     */
+    fun hideForCard() = hide()
 
     /** Remove the tip window. Idempotent; safe to call when nothing is shown. */
     fun hide() {

@@ -5650,8 +5650,14 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.48 (build 374) — 2026-11-17
 - The tip is a tab about 2cm wide at the top of the screen, not a sheet running down the side. The width is now a PHYSICAL size — 2cm expressed in dp — rather than a share of the display, because "2cm from the right edge" is a size, and treating it as a fraction is what produced a sheet covering half the screen. Its height is a quarter of the display, so what shows is the corner of a sheet that slid in, cut by the right edge.
 
-## 0.51.49 (build 375) — 2026-11-17 — CURRENT
+## 0.51.49 (build 375) — 2026-11-17
 - The tip sits further off the right edge and leans more: 13 degrees instead of 8, and its cut is deeper so less of the sheet is on screen. Tuned by eye against a render of the device's own numbers rather than by arithmetic.
+
+## 0.51.50 (build 376) — 2026-11-17 — CURRENT
+- The tip is a TRIANGLE, by construction. A rectangle whose side is cut by the screen edge shows a band with square corners — which is a broken rectangle however it is positioned, and that is exactly what was reported. Three points cannot look broken: a top edge flush against the screen, then two edges down to a single apex. The window is sized to the triangle, so its point is always finished by the shape rather than clipped by the window, which is what "bottom side is cut off" was.
+- The card now starts ENTIRELY off screen and slides in. Previously it began a sixth of a screen to the right and faded up from 55% opacity, so it read as a card fading in beside the edge rather than one being pulled across. It is opaque from the first frame and travels a full screen width plus a margin, because a rotated view's bounding box is wider than the view.
+- The expand starts at 13 degrees, matching the tip's lean, and settles to half a degree as it arrives — the same sheet straightening as it is laid down.
+- The tip is removed on the card's FIRST DRAWN FRAME rather than on the tap. Hiding on tap left the screen empty for the launch latency, and that gap is why the two motions read as separate events and the expand appeared to have been lost.
 
 ## Keeping this file honest
 

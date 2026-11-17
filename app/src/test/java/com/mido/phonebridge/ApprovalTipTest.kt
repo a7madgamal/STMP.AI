@@ -5,140 +5,100 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
 
 /**
- * The tip's SHAPE, which is what its shadow is made of, and that it FITS the view it is drawn in.
+ * The tip is a TRIANGLE, and these pin what makes it look like one.
  *
- * Two defects are pinned here.
- *
- * 1. Every early shape had an edge lying along the screen edge, so its shadow ran vertical —
- *    reported twice as "the shadow is still vertical". The report was always right: no shadow
- *    parameter can repair a shape with a vertical edge.
- * 2. The first rotated rectangle was built from SCREEN proportions and drawn into a ~195px strip,
- *    so most of it fell outside the view — "only a tiny piece of paper is rendered".
+ * The report that produced this file: "it should ALWAYS appear as a triangle, not a fucking broken
+ * rectangle", plus "bottom side is cut off". Those were two symptoms of one mistake — the shape was a
+ * long rectangle inside a short window, so its side was cut by the window edge (a broken rectangle)
+ * and its lower end was clipped (a cut bottom). A triangle with three points cannot fail either way,
+ * so the assertions are about the properties that make it a triangle rather than about coordinates.
  */
 class ApprovalTipTest {
 
     private val density = 2.75f
 
-    /** The real resting window on the device this shipped to. */
-    private val stripW = 195f
-    private val stripH = 1544f
+    /** The real tip window on the device this ships to: 2cm wide, sized to the triangle. */
+    private val tipW = 236f
+    private val tipH = 318f
     private val topPx = ApprovalTip.TOP_OFFSET_DP * density
 
-    private fun fit(w: Float = stripW, h: Float = stripH, top: Float = topPx) =
+    private fun tri(w: Float = tipW, h: Float = tipH, top: Float = topPx) =
         ApprovalTip.outlineFit(w, h, density, top)
 
     @Test
-    fun `the sheet runs OFF the right edge rather than stopping at it`() {
-        // This is the look: the human sees the part of the paper that has slid in from the right,
-        // and the rest is past the display. It is also what removes the vertical shadow — a shape
-        // that ENDS on the screen edge has a vertical side, and that side casts a vertical band.
-        val p = fit()
-        val maxX = p.maxOf { it.x }
-        assertTrue(
-            "the sheet must extend past the right edge (maxX=$maxX of $stripW)",
-            maxX > stripW,
-        )
+    fun `it is a triangle`() {
+        assertEquals("a triangle has three points, not four", 3, tri().size)
     }
 
     @Test
-    fun `the visible part of the sheet starts inside the window`() {
-        // It must not be entirely off-screen either: something has to be drawn to tap.
-        val p = fit()
-        assertTrue("the sheet must reach into the window", p.minOf { it.x } < stripW * 0.5f)
-        assertTrue("the sheet must be inside the top", p.minOf { it.y } >= 0f)
+    fun `the apex is a single point inside the window`() {
+        val p = tri()
+        // The last vertex is the apex: below the other two, and inside the window so it is never
+        // clipped. "Bottom side is cut off" was the rectangle being longer than its window.
+        val apex = p[2]
+        assertTrue("the apex must be below the top edge", apex.y > p[0].y)
+        assertTrue("the apex must be inside the window height", apex.y <= tipH)
+        assertTrue("the apex must be inside the window width", apex.x >= 0f && apex.x <= tipW)
     }
 
     @Test
-    fun `the visible part of the sheet is worth looking at`() {
-        val p = fit()
-        val visibleW = stripW - p.minOf { it.x }
-        val height = p.maxOf { it.y } - p.minOf { it.y }
-        assertTrue("only ${visibleW}px of sheet is visible", visibleW > stripW * 0.5f)
-        assertTrue("the sheet is only ${height}px tall", height > stripH * 0.2f)
+    fun `the top edge reaches the right edge of the window`() {
+        // Flush against the screen edge, so the shape is anchored there rather than floating.
+        val p = tri()
+        assertEquals("the top edge must end at the window's right edge", tipW, p[1].x, 0.5f)
     }
 
     @Test
-    fun `no edge is vertical`() {
-        val p = fit()
-        p.indices.forEach { i ->
-            val a = p[i]
-            val b = p[(i + 1) % p.size]
-            assertTrue(
-                "edge $i runs straight up-down (dx=${b.x - a.x}) — a vertical edge casts a " +
-                    "vertical shadow, which is the reported defect",
-                abs(b.x - a.x) > 0.01f,
-            )
-        }
+    fun `two edges run to the apex, so the outline tapers`() {
+        val p = tri()
+        // Edge 1 goes apex-ward from the top-right, edge 2 comes back to the top-left.
+        assertTrue("the shape must taper, not stay a band", p[2].x < p[1].x)
+        assertTrue("the shape must taper on both sides", p[2].x > p[0].x - 1f)
     }
 
     @Test
-    fun `no edge is horizontal either`() {
-        val p = fit()
-        p.indices.forEach { i ->
-            val a = p[i]
-            val b = p[(i + 1) % p.size]
-            assertTrue("edge $i runs exactly level (dy=${b.y - a.y})", abs(b.y - a.y) > 0.01f)
-        }
-    }
-
-    @Test
-    fun `all four corners are square`() {
-        val p = fit()
-        for (i in p.indices) {
-            val prev = p[(i + p.size - 1) % p.size]
-            val curr = p[i]
-            val next = p[(i + 1) % p.size]
-            val e1x = prev.x - curr.x; val e1y = prev.y - curr.y
-            val e2x = next.x - curr.x; val e2y = next.y - curr.y
-            val dot = e1x * e2x + e1y * e2y
-            val n = kotlin.math.hypot(e1x, e1y) * kotlin.math.hypot(e2x, e2y)
-            assertEquals("corner $i must be square", 0.0, (dot / n).toDouble(), 0.02)
-        }
-    }
-
-    @Test
-    fun `every window size gets a sheet with visible area`() {
-        listOf(195f to 1544f, 302f to 1097f, 500f to 900f).forEach { (w, h) ->
+    fun `it fits any window without clipping`() {
+        listOf(236f to 318f, 180f to 240f, 400f to 540f).forEach { (w, h) ->
             val p = ApprovalTip.outlineFit(w, h, density, topPx)
-            assertEquals(4, p.size)
-            assertTrue("x=${w}: nothing visible", p.minOf { it.x } < w)
-            assertTrue("x=${w}: nothing is cut off, so the edge shows", p.maxOf { it.x } > w * 0.9f)
-            assertTrue("y=${h}: sheet starts above the view", p.minOf { it.y } >= 0f)
+            assertEquals("w=$w h=$h", 3, p.size)
+            p.forEach { pt ->
+                assertTrue("x=${pt.x} outside $w", pt.x >= -0.5f && pt.x <= w + 0.5f)
+                assertTrue("y=${pt.y} outside $h", pt.y >= -0.5f && pt.y <= h + 0.5f)
+            }
         }
     }
 
     @Test
-    fun `a tiny view still yields a usable shape`() {
-        // A window that arrives with almost no size must not produce an inverted or empty shape.
-        val p = ApprovalTip.outlineFit(40f, 60f, density, 4f)
-        assertEquals(4, p.size)
-        val w = p.maxOf { it.x } - p.minOf { it.x }
-        assertTrue("a small view must still have a shape", w > 0f)
+    fun `a tiny window still yields a usable triangle`() {
+        val p = ApprovalTip.outlineFit(30f, 30f, density, 4f)
+        assertEquals(3, p.size)
+        assertTrue("a small window must still produce an area", p[1].x > p[0].x)
     }
 
     @Test
-    fun `a tap inside the paper hits and a tap below it does not`() {
-        val p = fit()
-        val cx = p.map { it.x }.average().toFloat()
-        val cy = p.map { it.y }.average().toFloat()
-        assertTrue(ApprovalTip.containsFit(stripW, stripH, density, topPx, cx, cy))
-        assertFalse(
-            "empty screen below the paper must not absorb the tap",
-            ApprovalTip.containsFit(stripW, stripH, density, topPx, stripW / 2f, stripH - 2f),
-        )
-    }
-
-    @Test
-    fun `the paper starts below the top of the strip`() {
-        val minY = fit().minOf { it.y }
+    fun `a tap inside hits and a tap in the empty corner does not`() {
+        val p = tri()
+        val cx = (p[0].x + p[1].x + p[2].x) / 3f
+        val cy = (p[0].y + p[1].y + p[2].y) / 3f
         assertTrue(
-            "the paper starts at y=$minY; a sheet pinned to the very corner reads as part of the " +
-                "status bar",
-            minY >= topPx - 1f,
+            "the centroid of the triangle must be a hit",
+            ApprovalTip.containsFit(tipW, tipH, density, topPx, cx, cy),
+        )
+        // Bottom-LEFT of the bounding box: outside a triangle that tapers to the right.
+        assertFalse(
+            "the empty corner beside the taper must not absorb the tap",
+            ApprovalTip.containsFit(tipW, tipH, density, topPx, 1f, tipH - 2f),
         )
     }
 
+    @Test
+    fun `the apex stays a comfortable target`() {
+        // The visible point is what makes it read as tucked behind the edge, and the touch area is
+        // the whole triangle — so this only needs to confirm it is not vanishingly thin.
+        val p = tri()
+        val widthAtApexHalfway = (p[1].x + p[2].x) / 2f
+        assertTrue("the taper is too steep to hit", widthAtApexHalfway > tipW * 0.3f)
+    }
 }
