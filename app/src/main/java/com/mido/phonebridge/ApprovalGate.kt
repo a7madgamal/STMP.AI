@@ -865,6 +865,7 @@ object ApprovalGate {
         // overlay and launches the Activity, which opens straight to the sheet. The Activity is
         // therefore only ever a modal again, which is what it is good at.
         if (com.mido.phonebridge.notify.ApprovalTipOverlay.isShowing) {
+            Debug.log("gate: tip already showing; growing the stack")
             // A queued request only needs the stack to grow.
             com.mido.phonebridge.notify.ApprovalTipOverlay.show(
                 ctx, 1 + waitingBehindCurrent(),
@@ -879,6 +880,7 @@ object ApprovalGate {
 
         // Nothing is open: rest the request behind the tip. The Activity launches only when the
         // human touches it.
+        Debug.log("gate: resting the request behind the tip")
         com.mido.phonebridge.notify.ApprovalTipOverlay.show(ctx, 1 + waitingBehindCurrent())
     }
 
@@ -1002,6 +1004,14 @@ object ApprovalGate {
     private fun deliverToRunningWindow(ctx: Context, intent: Intent): Boolean {
         val activity = runningWindow?.get() ?: return false
         if (activity.isFinishing || activity.isDestroyed) return false
+        // **Only if the sheet is actually ON SCREEN.** A stale reference to an Activity that is
+        // paused behind another app would swallow the request: the tip is torn down and the human
+        // sees nothing at all. `hasWindowFocus` is the honest test of "this window is the one being
+        // looked at", and a paused Activity fails it.
+        if (!activity.hasWindowFocus()) {
+            Debug.log("gate: ignoring a window that is not on screen; resting the tip instead")
+            return false
+        }
         return try {
             activity.runOnUiThread { activity.onNewRequest(intent) }
             true
