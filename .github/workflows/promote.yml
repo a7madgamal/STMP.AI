@@ -11,14 +11,18 @@ name: Promote
 # That is the pattern established projects use (Electron, Flutter, Rust): one
 # immutable artifact per version, a mutable marker saying which channel it is in.
 #
-# Designed to be driven by an agent or a human: it takes a tag, verifies the
-# preconditions, and fails loudly rather than guessing.
+# **No helper script.** This used to call `tools/promote.ts`, which carried its own
+# APK signer check built on `keytool -printcert -jarfile`. That tool reads only the
+# JAR (v1) signature, and every APK this repo builds is signed with APK Signature
+# Scheme v2/v3 — so the check found zero certificates and failed every run. The
+# workflow had exactly one execution in its history and it failed. The steps below
+# are the whole job, using `gh`'s own commands.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to promote, e.g. v0.43.66'
+        description: 'Release tag to promote, e.g. v0.51.63'
         required: true
         type: string
 
@@ -29,34 +33,98 @@ concurrency:
   group: promote
   cancel-in-progress: false
 
+# The signing key a release must carry. Same constant `release.yml` checks the
+# build against, so a promoted asset is verified by the same rule that produced it.
+env:
+  EXPECTED_SHA1: "87DDD5DEFA068933F44EC699533A1B00ED313103"
+
 jobs:
   promote:
     name: promote beta to stable
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # --- Preconditions. Every one of these fails the run rather than guessing. ---
 
-      - name: Set up Node 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
+      - name: Read the release
+        id: read
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets > release.json
+          cat release.json
+          DRAFT=$(python3 -c 'import json;print(str(json.load(open("release.json"))["isDraft"]).lower())')
+          PRE=$(python3 -c 'import json;print(str(json.load(open("release.json"))["isPrerelease"]).lower())')
+          COUNT=$(python3 -c 'import json;print(len(json.load(open("release.json"))["assets"]))')
+          echo "draft=$DRAFT prerelease=$PRE assets=$COUNT"
+          if [ "$DRAFT" = "true" ]; then
+            echo "::error::$TAG is a DRAFT. Drafts are invisible to the updater, so promoting one ships nothing."
+            exit 1
+          fi
+          if [ "$PRE" = "false" ]; then
+            echo "::error::$TAG is already stable — refusing to promote it twice."
+            exit 1
+          fi
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::$TAG carries $COUNT assets; expected exactly 1 APK."
+            exit 1
+          fi
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
+      # The signer check, done with the tool that can actually see a v2/v3
+      # signature. Same command `release.yml` uses to verify the APK it just built,
+      # so a promoted asset is checked by the same rule as the one that produced it.
+      - name: Verify the APK is signed by the expected key
+        run: |
+          set -euo pipefail
+          WORK=$(mktemp -d)
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.apk' --dir "$WORK" --clobber
+          mapfile -t APKS < <(find "$WORK" -name '*.apk')
+          if [ "${#APKS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 APK in $TAG, downloaded ${#APKS[@]}"
+            exit 1
+          fi
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK" ]; then
+            echo "::error::no Android SDK: neither ANDROID_SDK_ROOT nor ANDROID_HOME is set"
+            exit 1
+          fi
+          APKSIGNER="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then
+            echo "::error::no apksigner at $APKSIGNER"
+            exit 1
+          fi
+          mapfile -t SIGNERS < <("$APKSIGNER" verify --print-certs "${APKS[0]}" \
+            | grep -oE 'certificate SHA-1 digest: [0-9a-f]+' | awk '{print toupper($NF)}' || true)
+          if [ "${#SIGNERS[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 signing certificate in the APK, found ${#SIGNERS[@]}"
+            exit 1
+          fi
+          echo "signer SHA-1: ${SIGNERS[0]}"
+          if [ "${SIGNERS[0]}" != "$EXPECTED_SHA1" ]; then
+            echo "::error::APK is not signed by the expected key (got ${SIGNERS[0]}, expected $EXPECTED_SHA1)"
+            exit 1
+          fi
 
-      # ONE implementation, in TypeScript, shared with the local path.
-      #
-      # `tools/promote.ts` performs every precondition check (draft, already-stable,
-      # exactly one APK), verifies the APK's signer, sends the REST PATCH and re-reads
-      # the state to prove it took. Duplicating that logic in YAML is how the workflow
-      # and the script drift into disagreeing about what "promotable" means — and the
-      # version of it that ran fewer checks is the one nobody notices.
+      # --- The promotion itself, which is one field. ---
+
       - name: Promote
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/promote.ts "${{ inputs.tag }}"
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false
+
+      # Re-read rather than trust the previous step's exit code: an edit that
+      # reported success without changing anything is exactly the failure this
+      # proof exists to catch.
+      - name: Prove it took
+        run: |
+          set -euo pipefail
+          PRE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease \
+            | python3 -c 'import json,sys;print(str(json.load(sys.stdin)["isPrerelease"]).lower())')
+          echo "$TAG prerelease=$PRE"
+          if [ "$PRE" != "false" ]; then
+            echo "::error::promotion did not take — $TAG is still marked prerelease."
+            exit 1
+          fi
