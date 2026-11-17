@@ -5687,10 +5687,15 @@ devDependencies. `node_modules/` is gitignored.
 - The tip hangs 32dp past the right edge, as a sheet caught mid-slide rather than a badge stuck on the screen edge.
 - The tip is covered by screenshot tests over the full display, with a centimetre ruler, so its size and shape are reviewable without installing a build.
 
-## 0.51.57 (build 383) — 2026-11-17 — CURRENT
+## 0.51.57 (build 383) — 2026-11-17
 - The tips touch the right edge. The resting window had a positive x offset under end gravity, which pushes a window AWAY from that edge rather than past it, so every tip floated a few millimetres in from the side instead of reading as paper caught at the boundary.
 - The screenshot tests now position the tip the same way the device does. They were moving the view with a rightward translation while production moved the window the other way, so every capture showed paper flush to the edge and the phone did not.
 - A test asserts the inset is zero, because that is the specific failure those images could not see.
+
+## 0.51.58 (build 384) — 2026-11-17 — CURRENT
+- The resting tip carries a countdown: a small stamp-red disc near its point, solid at arrival and draining to empty as the window closes. Visual only, no numbers, and on the front sheet alone so a queue stays readable as paper.
+- The countdown reads the gate's own deadline rather than starting its own timer. A timer inside the overlay assumed a fixed 60 seconds and would have run out while the request still had real time left, restarted from full whenever the sheet folded back, and never retargeted when a queued request became the head.
+- The disc is placed by geometry so it always sits inside the paper, and the ticker stops when nothing is waiting instead of running for the life of the window.
 
 ## Keeping this file honest
 
