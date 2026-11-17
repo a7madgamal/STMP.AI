@@ -160,37 +160,56 @@ object ApprovalTip {
     }
 
     /**
-     * The four corners of a ROTATED RECTANGLE that floats clear of the screen edge.
+     * The four corners of a rotated sheet, SIZED TO FIT the view it is drawn in.
      *
-     * **No edge of this shape touches the screen edge, and that is the entire point.** Every earlier
-     * version clipped the paper against the right edge, so one side of it was exactly vertical — and
-     * the shadow of a vertical side is a vertical band. Reported twice as "the shadow is still
-     * vertical", and the report was right: no shadow parameter can fix a shape with a vertical edge.
+     * **Two defects are answered here.**
      *
-     * A sheet lying at an angle has four leaning edges and no vertical one, so this is a floating
-     * rectangle, rotated, with a corner reaching in towards the screen edge without touching it.
+     * 1. The paper had an edge lying exactly along the screen edge, so its shadow ran vertical —
+     *    reported twice. A rotated rectangle has four leaning edges and no vertical one.
+     *
+     * 2. The first attempt at that rectangle was built from SCREEN proportions and then drawn into a
+     *    ~195px strip, so most of it fell outside the view and only a corner appeared ("only a tiny
+     *    piece of paper is rendered"). A shape has to be fitted to the canvas it is painted on.
+     *
+     * So the rectangle is derived from [viewWidthPx] and [viewHeightPx]: the largest sheet of the
+     * chosen aspect whose ROTATED bounding box fits, placed at [topPx] and centred horizontally.
      */
-    fun outline(m: Metrics, screenWidthPx: Int, topPx: Float): List<Point> {
+    fun outlineFit(
+        viewWidthPx: Float,
+        viewHeightPx: Float,
+        density: Float,
+        topPx: Float,
+    ): List<Point> {
         val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
         val sin = kotlin.math.sin(t)
         val cos = kotlin.math.cos(t)
+        val inset = SHAPE_INSET_DP * density
 
-        // The rectangle's own axes in screen space. `along` runs down-left (the sheet's length),
-        // `across` runs down-right (its visible band). Neither is horizontal or vertical.
-        val alongX = -cos; val alongY = sin
-        val acrossX = sin; val acrossY = cos
+        val availW = (viewWidthPx - inset * 2f).coerceAtLeast(1f)
+        val availH = (viewHeightPx - inset * 2f).coerceAtLeast(1f)
 
-        val length = m.heightPx
-        val band = m.topWidthPx
+        // Largest band whose rotated bounding box fits both dimensions, at the chosen aspect.
+        val bandByWidth = availW / (cos + ASPECT * sin)
+        val bandByHeight = availH / (sin + ASPECT * cos)
+        val band = minOf(bandByWidth, bandByHeight, MAX_BAND_DP * density)
+        val length = band * ASPECT
 
-        // Anchor the topmost corner so the whole rectangle sits inside the view, clear of the edge.
-        val margin = band * EDGE_CLEARANCE_FRACTION
-        val ax = screenWidthPx - margin - band * acrossX
-        val ay = topPx
+        // Rotated bounding box, for centring.
+        val bboxW = band * cos + length * sin
+        val bboxH = band * sin + length * cos
+        val left = (viewWidthPx - bboxW) / 2f
+        val top = (topPx + inset).coerceAtMost((viewHeightPx - bboxH - inset).coerceAtLeast(inset))
 
+        // Local axes in screen space: `along` runs down (drifting left), `across` is perpendicular.
+        val alongX = -sin; val alongY = cos
+        val acrossX = cos; val acrossY = sin
+
+        // Origin = the rotated box's topmost-leftish corner, adjusted so the box sits at `left`.
+        val originX = left + length * sin
+        val originY = top
         fun at(la: Float, lb: Float) = Point(
-            ax + alongX * la + acrossX * lb,
-            ay + alongY * la + acrossY * lb,
+            originX + alongX * la + acrossX * lb,
+            originY + alongY * la + acrossY * lb,
         )
         return listOf(
             at(0f, 0f),
@@ -200,14 +219,25 @@ object ApprovalTip {
         )
     }
 
-    /**
-     * Whether [x],[y] is inside the rotated rectangle.
-     *
-     * Convex-polygon test: same side of every edge. Path-independent and order-independent, so a
-     * shape change cannot silently invert it.
-     */
-    fun contains(m: Metrics, screenWidthPx: Int, topPx: Float, x: Float, y: Float): Boolean {
-        val pts = outline(m, screenWidthPx, topPx)
+    /** How far inside the view the paper keeps, in dp. */
+    const val SHAPE_INSET_DP = 4f
+
+    /** Length as a multiple of the visible band. A sheet, not a card. */
+    const val ASPECT = 3.2f
+
+    /** A ceiling so a very tall window does not produce an absurd sheet. */
+    const val MAX_BAND_DP = 120f
+
+    /** Whether [x],[y] is inside the fitted sheet. Convex-polygon test. */
+    fun containsFit(
+        viewWidthPx: Float,
+        viewHeightPx: Float,
+        density: Float,
+        topPx: Float,
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val pts = outlineFit(viewWidthPx, viewHeightPx, density, topPx)
         var hasNeg = false
         var hasPos = false
         for (i in pts.indices) {
@@ -219,23 +249,4 @@ object ApprovalTip {
         }
         return !(hasNeg && hasPos)
     }
-
-    /**
-     * Control point that bows the paper's long edge outwards.
-     *
-     * Kept from the earlier shape because it is the detail that makes the edge read as flexed paper
-     * rather than a cut rectangle. Applied to the long edge between the two far corners.
-     */
-    fun bowControl(m: Metrics, screenWidthPx: Int, topPx: Float): Point {
-        val pts = outline(m, screenWidthPx, topPx)
-        val b = pts[1]
-        val c = pts[2]
-        val midX = (b.x + c.x) / 2f
-        val midY = (b.y + c.y) / 2f
-        // Push outwards, away from the paper's own centre (which lies to the right of this edge).
-        return Point((midX - m.bowPx).coerceAtLeast(0f), midY)
-    }
-
-    /** How much clear screen the paper keeps from the edge, as a fraction of its band. */
-    private const val EDGE_CLEARANCE_FRACTION = 0.45f
 }

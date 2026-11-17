@@ -34,6 +34,9 @@ object ApprovalTipOverlay {
 
     private const val TAG = "ApprovalTip"
 
+    /** Breathing room around the paper inside its own window, in dp. */
+    private const val WINDOW_MARGIN_DP = 14f
+
     private var view: ApprovalTipView? = null
     private var params: WindowManager.LayoutParams? = null
     private val main = Handler(Looper.getMainLooper())
@@ -90,7 +93,13 @@ object ApprovalTipOverlay {
             }
         }
 
-        val width = (metrics.topWidthPx + ApprovalTip.TOUCH_REACH_DP * density).toInt()
+        // **The window is the PAPER, plus a small margin — not the paper plus a long reach.**
+        //
+        // A window eats every touch that lands inside it, and `NOT_TOUCH_MODAL` only passes what
+        // falls outside. So each dp of window width is a dp of the screen the human cannot use
+        // while a request waits. The paper is already a generous target; a wide margin just takes
+        // screen away.
+        val width = (metrics.topWidthPx + WINDOW_MARGIN_DP * density).toInt()
             .coerceAtMost(dm.widthPixels)
         val lp = WindowManager.LayoutParams(
             width,

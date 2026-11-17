@@ -189,13 +189,15 @@ class ApprovalTipView(context: Context) : View(context) {
             (wedges.firstOrNull()?.dropPx ?: 0f)
         for (wedge in wedges) {
             val top = topOffset + wedge.dropPx
-            val points = ApprovalTip.outline(m, w, top)
-            val control = ApprovalTip.bowControl(m, w, top)
+            // Fitted to THIS view: the sheet must fill the canvas it is painted on, not the screen
+            // it is floating over. Building it from screen proportions put most of it outside a
+            // narrow strip, and only a corner appeared.
+            val points = ApprovalTip.outlineFit(
+                w.toFloat(), h.toFloat(), density, top,
+            )
             val path = Path().apply {
                 moveTo(points[0].x, points[0].y)
-                lineTo(points[1].x, points[1].y)
-                // Leaning edge, bowed. from top-left down to the point.
-                quadTo(control.x, control.y, points[2].x, points[2].y)
+                points.drop(1).forEach { lineTo(it.x, it.y) }
                 close()
             }
             fronts.add(path)
@@ -492,8 +494,11 @@ class ApprovalTipView(context: Context) : View(context) {
         val m = metrics
         // The drawn stack is shifted by the un-slid part, so the hit target moves with it.
         val offset = m?.let { (1f - slide) * it.topWidthPx } ?: 0f
-        val hit = m != null &&
-            ApprovalTip.contains(m, width, frontTopPx, event.x - offset, event.y)
+        val hit = ApprovalTip.containsFit(
+            width.toFloat(), height.toFloat(), density,
+            ApprovalTip.TOP_OFFSET_DP * density,
+            event.x - offset, event.y,
+        )
         if (hit) performClick()
         return true
     }

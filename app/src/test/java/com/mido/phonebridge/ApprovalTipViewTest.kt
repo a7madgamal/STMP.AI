@@ -37,8 +37,10 @@ class ApprovalTipViewTest {
 
     /** Centre of the paper, which is where the geometry says a tap should land. */
     private fun paperCentre(v: ApprovalTipView, height: Int = 470): Pair<Float, Float> {
-        val m = ApprovalTip.metrics(v.width, RuntimeEnvironment.getApplication().resources.displayMetrics.density)
-        val pts = ApprovalTip.outline(m, v.width, ApprovalTip.TOP_OFFSET_DP)
+        val d = RuntimeEnvironment.getApplication().resources.displayMetrics.density
+        val pts = ApprovalTip.outlineFit(
+            v.width.toFloat(), v.height.toFloat(), d, ApprovalTip.TOP_OFFSET_DP * d,
+        )
         return Pair(
             pts.map { it.x }.average().toFloat(),
             pts.map { it.y }.average().toFloat().coerceIn(1f, (height - 2).toFloat()),
