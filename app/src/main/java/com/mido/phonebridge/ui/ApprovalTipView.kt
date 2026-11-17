@@ -487,21 +487,36 @@ class ApprovalTipView(context: Context) : View(context) {
         return true
     }
 
+    /**
+     * Claim a gesture ONLY when it starts on the paper.
+     *
+     * **A window is touch-opaque across its whole rectangle**, transparent pixels included, so a
+     * full-height strip blocked an empty column down the side of the screen — reported as "touches
+     * are still blocked on the right side even the transparent parts". `FLAG_NOT_TOUCH_MODAL` only
+     * helps OUTSIDE the window; inside it, the only way a touch reaches the app below is to refuse
+     * it. So the decision happens on ACTION_DOWN and everything else is declined.
+     *
+     * Returning `true` for ACTION_DOWN before checking the shape was the defect: it claimed every
+     * gesture in the window, then decided where it was.
+     */
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
-        if (event.actionMasked != android.view.MotionEvent.ACTION_UP) {
-            return event.actionMasked == android.view.MotionEvent.ACTION_DOWN
-        }
         val m = metrics
-        // The drawn stack is shifted by the un-slid part, so the hit target moves with it.
         val offset = m?.let { (1f - slide) * it.topWidthPx } ?: 0f
         val hit = ApprovalTip.containsFit(
             width.toFloat(), height.toFloat(), density,
             ApprovalTip.TOP_OFFSET_DP * density,
             event.x - offset, event.y,
         )
-        if (hit) performClick()
-        return true
+        return when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> hit
+            android.view.MotionEvent.ACTION_UP -> {
+                if (hit) performClick()
+                hit
+            }
+            else -> hit
+        }
     }
+
 
     /** Whether the stack is currently fully at rest. Used by tests and the Activity. */
     val isAtRest: Boolean get() = slide >= 1f

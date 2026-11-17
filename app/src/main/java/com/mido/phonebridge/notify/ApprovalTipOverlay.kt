@@ -37,6 +37,9 @@ object ApprovalTipOverlay {
     /** Breathing room around the paper inside its own window, in dp. */
     private const val WINDOW_MARGIN_DP = 14f
 
+    /** The youngest the tip window may be to still read as a sheet, as a share of the display. */
+    private const val WINDOW_WIDTH_FRACTION = 0.34f
+
     private var view: ApprovalTipView? = null
     private var params: WindowManager.LayoutParams? = null
     private val main = Handler(Looper.getMainLooper())
@@ -60,13 +63,43 @@ object ApprovalTipOverlay {
             try {
                 val existing = view
                 if (existing != null) {
+                    // A queued request still ANNOUNCES itself. Both branches below reach
+                    // [announce], and it is reached exactly once per request — the whole reason
+                    // the sound moved here: a request that arrived while a window was already
+                    // open used to be silent.
                     existing.depth = depth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
+                    announce(ctx)
                     return@post
                 }
                 addWindow(ctx, depth)
+                announce(ctx)
             } catch (e: Exception) {
                 Log.e(TAG, "tip overlay could not be shown: ${e.message}", e)
             }
+        }
+    }
+
+    /**
+     * Haptic plus the paper-crease sound for a request that has just become visible.
+     *
+     * **Once per request, where the request is SEEN.** The gate used to fire this as it launched
+     * the sheet, so only the head of a queue made a noise: every later request arrived on a branch
+     * that returned early because a window was already up. Reported as "each queued request should
+     * make a sound, not just the first".
+     *
+     * Best-effort by design: a device with no audio must still show the prompt, so a failure here
+     * is logged and never propagates.
+     */
+    private fun announce(ctx: Context) {
+        try {
+            com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
+        } catch (e: Exception) {
+            Log.w(TAG, "vibration failed: ${e.message}")
+        }
+        try {
+            com.mido.phonebridge.alert.SoundAlerts.modalAppear(ctx)
+        } catch (e: Exception) {
+            Log.e(TAG, "arrival sound failed: ${e.message}", e)
         }
     }
 
@@ -99,8 +132,15 @@ object ApprovalTipOverlay {
         // falls outside. So each dp of window width is a dp of the screen the human cannot use
         // while a request waits. The paper is already a generous target; a wide margin just takes
         // screen away.
-        val width = (metrics.topWidthPx + WINDOW_MARGIN_DP * density).toInt()
-            .coerceAtMost(dm.widthPixels)
+        // **Wide enough for the sheet to be read, and no wider.**
+        //
+        // The paper is fitted to this window, so the window is the real size control: a paper-plus-
+        // margin window produced a sheet small enough to be useless. A share of the display is the
+        // honest measure of "big enough to see", and it is still far less than the screen — the app
+        // behind stays usable everywhere outside this strip.
+        val byFraction = (dm.widthPixels * WINDOW_WIDTH_FRACTION).toInt()
+        val byMargin = (metrics.topWidthPx + WINDOW_MARGIN_DP * density).toInt()
+        val width = maxOf(byFraction, byMargin).coerceAtMost(dm.widthPixels)
         val lp = WindowManager.LayoutParams(
             width,
             WindowManager.LayoutParams.MATCH_PARENT,

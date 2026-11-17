@@ -19,7 +19,7 @@ import kotlin.math.tan
 object ApprovalTip {
 
     /** Lean of the long edge, in degrees from vertical. The taper follows from this. */
-    const val TILT_DEGREES = 15f
+    const val TILT_DEGREES = -8f
 
     /**
      * Top width as a fraction of screen width, before clamping.
@@ -162,17 +162,16 @@ object ApprovalTip {
     /**
      * The four corners of a rotated sheet, SIZED TO FIT the view it is drawn in.
      *
-     * **Two defects are answered here.**
+     * Three defects meet here, so the method is written to make all three impossible at once.
      *
-     * 1. The paper had an edge lying exactly along the screen edge, so its shadow ran vertical —
-     *    reported twice. A rotated rectangle has four leaning edges and no vertical one.
-     *
-     * 2. The first attempt at that rectangle was built from SCREEN proportions and then drawn into a
-     *    ~195px strip, so most of it fell outside the view and only a corner appeared ("only a tiny
-     *    piece of paper is rendered"). A shape has to be fitted to the canvas it is painted on.
-     *
-     * So the rectangle is derived from [viewWidthPx] and [viewHeightPx]: the largest sheet of the
-     * chosen aspect whose ROTATED bounding box fits, placed at [topPx] and centred horizontally.
+     * 1. An edge lying along the screen edge casts a vertical shadow — reported twice. A rotated
+     *    rectangle has four leaning edges and none parallel to anything.
+     * 2. A shape built from SCREEN proportions and painted into a narrow strip falls mostly
+     *    outside it, so only a corner appears. This takes the view's own size.
+     * 3. A mirrored lean (the sheet tipping the other way) flips which corner is topmost, and the
+     *    earlier centring maths silently assumed one direction. So the corners are rotated FIRST and
+     *    the bounding box is measured FROM THE POINTS, then translated into place. No formula can
+     *    disagree with the shape it is placing.
      */
     fun outlineFit(
         viewWidthPx: Float,
@@ -188,36 +187,37 @@ object ApprovalTip {
         val availW = (viewWidthPx - inset * 2f).coerceAtLeast(1f)
         val availH = (viewHeightPx - inset * 2f).coerceAtLeast(1f)
 
-        // Largest band whose rotated bounding box fits both dimensions, at the chosen aspect.
-        val bandByWidth = availW / (cos + ASPECT * sin)
-        val bandByHeight = availH / (sin + ASPECT * cos)
-        val band = minOf(bandByWidth, bandByHeight, MAX_BAND_DP * density)
+        // The largest band whose ROTATED bounding box fits, at the chosen aspect. |sin| and |cos|
+        // because a mirrored tilt must cost exactly the same space as the normal one.
+        val absSin = kotlin.math.abs(sin)
+        val absCos = kotlin.math.abs(cos)
+        val bandByWidth = availW / (absCos + ASPECT * absSin)
+        val bandByHeight = availH / (absSin + ASPECT * absCos)
+        val band = minOf(bandByWidth, bandByHeight, MAX_BAND_DP * density).coerceAtLeast(1f)
         val length = band * ASPECT
 
-        // Rotated bounding box, for centring.
-        val bboxW = band * cos + length * sin
-        val bboxH = band * sin + length * cos
-        val left = (viewWidthPx - bboxW) / 2f
-        val top = (topPx + inset).coerceAtMost((viewHeightPx - bboxH - inset).coerceAtLeast(inset))
-
-        // Local axes in screen space: `along` runs down (drifting left), `across` is perpendicular.
-        val alongX = -sin; val alongY = cos
-        val acrossX = cos; val acrossY = sin
-
-        // Origin = the rotated box's topmost-leftish corner, adjusted so the box sits at `left`.
-        val originX = left + length * sin
-        val originY = top
-        fun at(la: Float, lb: Float) = Point(
-            originX + alongX * la + acrossX * lb,
-            originY + alongY * la + acrossY * lb,
+        // Corners in the sheet's own frame, then rotated into screen space.
+        val local = listOf(
+            Point(0f, 0f),
+            Point(-sin * length, cos * length),
+            Point(-sin * length + cos * band, cos * length + sin * band),
+            Point(cos * band, sin * band),
         )
-        return listOf(
-            at(0f, 0f),
-            at(length, 0f),
-            at(length, band),
-            at(0f, band),
-        )
+
+        // Measure what was actually produced, then move it to where it belongs.
+        val minX = local.minOf { it.x }
+        val maxX = local.maxOf { it.x }
+        val minY = local.minOf { it.y }
+        val maxY = local.maxOf { it.y }
+        val boxW = maxX - minX
+        val boxH = maxY - minY
+
+        val targetX = (viewWidthPx - boxW) / 2f
+        val targetY = topPx.coerceAtMost((viewHeightPx - boxH - inset).coerceAtLeast(inset))
+
+        return local.map { Point(it.x - minX + targetX, it.y - minY + targetY) }
     }
+
 
     /** How far inside the view the paper keeps, in dp. */
     const val SHAPE_INSET_DP = 4f
@@ -226,7 +226,7 @@ object ApprovalTip {
     const val ASPECT = 3.2f
 
     /** A ceiling so a very tall window does not produce an absurd sheet. */
-    const val MAX_BAND_DP = 120f
+    const val MAX_BAND_DP = 260f
 
     /** Whether [x],[y] is inside the fitted sheet. Convex-polygon test. */
     fun containsFit(

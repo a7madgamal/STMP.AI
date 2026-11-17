@@ -822,18 +822,10 @@ object ApprovalGate {
         // Sound and haptics are fired explicitly further down, so removing the notification
         // does not silence the prompt either.
 
-        // Haptic + audible nudge. The sound used to come from the notification channel; it is
-        // now fired explicitly, which is why it survives the notification's removal.
-        com.mido.phonebridge.alert.SoundAlerts.secureVibration(ctx)
-
-        // The paper-creasing sound as the modal ARRIVES — a separate moment from the stamp,
-        // which fires on the decision (Mido, 2026-10-27: *"use this when modal appears"*).
-        // Reported rather than swallowed: a missing sound must never cancel the prompt.
-        try {
-            com.mido.phonebridge.alert.SoundAlerts.modalAppear(ctx)
-        } catch (e: com.mido.phonebridge.alert.SoundAlerts.SoundUnavailable) {
-            android.util.Log.e("ApprovalGate", "MODAL SOUND FAILED: ${e.message}", e)
-        }
+        // Sound and haptics fire where the request becomes VISIBLE, which is the tip overlay —
+        // not here. Putting them here made only the first of a queue audible: a later request
+        // reaches this point while a window is already on screen, and the branch below returns
+        // early. See [ApprovalTipOverlay.show] for the one place that fires them now.
 
         val intent = buildApprovalIntent(ctx, p)
 

@@ -80,13 +80,22 @@ class ApprovalTipViewTest {
     }
 
     @Test
-    fun `a tap on empty screen does not open`() {
+    fun `a tap on empty screen is NOT consumed, so it reaches the app below`() {
+        // The reported defect: "touches are still blocked on the right side even the transparent
+        // parts". A window is touch-opaque across its whole rectangle, so the only way to let a
+        // touch through is to refuse it. Asserting `opened == false` would also pass if the view
+        // swallowed the tap, which is exactly the bug — so this asserts non-consumption.
         val v = tip(width = 700, height = 900)
         var opened = false
         v.onOpen = { opened = true }
-        // Far below the paper, in the empty part of the strip.
-        tap(v, 350f, 880f)
-        assertFalse("empty screen must not open the sheet", opened)
+        // The paper fills most of this view, so the empty area is the top-LEFT corner, above and
+        // left of the sheet. A point below it would be inside the paper and the test would be
+        // asserting the opposite of what it reads.
+        val down = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, 2f, 2f, 0)
+        val handled = v.dispatchTouchEvent(down)
+        down.recycle()
+        assertFalse("an empty part of the strip must not consume the touch", handled)
+        assertFalse("and must not open the sheet", opened)
     }
 
     @Test
