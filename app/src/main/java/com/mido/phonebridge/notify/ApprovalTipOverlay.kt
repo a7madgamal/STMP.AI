@@ -74,25 +74,57 @@ object ApprovalTipOverlay {
      * Safe to call from any thread and on every gate tick: adding a window twice would throw, and
      * a tip that threw once would silently stop appearing for the rest of the process.
      */
+    /**
+     * Show the tip, or update the stack it is displaying.
+     *
+     * **`show` is both "appear" and "update".** The gate calls it on every queue tick to keep the
+     * depth current, so this function must be idempotent in the strongest sense: calling it again
+     * with a deeper stack changes the picture and nothing else. Announcing here made the arrival
+     * sound repeat for as long as a request waited — reported as "a stream of sounds repeating".
+     *
+     * The sound belongs to a REQUEST ARRIVING, so it is fired by [announcedFor] below, keyed on the
+     * request id: a request announces once, no matter how many times the stack is redrawn.
+     */
     fun show(ctx: Context, depth: Int) {
         main.post {
             try {
                 val existing = view
                 if (existing != null) {
-                    // A queued request still ANNOUNCES itself. Both branches below reach
-                    // [announce], and it is reached exactly once per request — the whole reason
-                    // the sound moved here: a request that arrived while a window was already
-                    // open used to be silent.
                     existing.depth = depth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
-                    announce(ctx)
                     return@post
                 }
                 addWindow(ctx, depth)
-                announce(ctx)
             } catch (e: Exception) {
                 Log.e(TAG, "tip overlay could not be shown: ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * The request id already announced, so a redraw cannot repeat the sound.
+     *
+     * `0` means "nothing announced yet". Compared by id rather than by depth because depth can
+     * legitimately rise and fall as requests are answered, while an id names one arrival exactly
+     * once.
+     */
+    @Volatile
+    private var announcedFor: Long = 0L
+
+    /**
+     * Announce [requestId] once, when it first becomes visible.
+     *
+     * Called from the gate, which is the only place that knows a NEW request has arrived rather
+     * than a redraw having happened.
+     */
+    fun announceArrival(ctx: Context, requestId: Long) {
+        if (announcedFor == requestId) return
+        announcedFor = requestId
+        main.post { announce(ctx) }
+    }
+
+    /** Forget the announced request, so the next one announces again after a quiet period. */
+    fun clearAnnouncement() {
+        announcedFor = 0L
     }
 
     /**

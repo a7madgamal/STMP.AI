@@ -5659,9 +5659,13 @@ devDependencies. `node_modules/` is gitignored.
 - The expand starts at 13 degrees, matching the tip's lean, and settles to half a degree as it arrives — the same sheet straightening as it is laid down.
 - The tip is removed on the card's FIRST DRAWN FRAME rather than on the tap. Hiding on tap left the screen empty for the launch latency, and that gap is why the two motions read as separate events and the expand appeared to have been lost.
 
-## 0.51.51 (build 377) — 2026-11-17 — CURRENT
+## 0.51.51 (build 377) — 2026-11-17
 - A request no longer disappears before it is drawn. The gate hands a new request to any approval window it still holds a reference to — and a window that is merely PAUSED behind another app still counted, so the tip was torn down and the request went into a screen nobody could see. Delivery now requires that window to actually have focus; otherwise the request rests on the tip as intended.
 - The gate logs which branch it took — resting the tip, growing the stack, or handing to a live window. Two rounds of "nothing appeared" could not be attributed to a branch, and a single line settles it.
+
+## 0.51.52 (build 378) — 2026-11-17 — CURRENT
+- The arrival sound fires once per request, not once per redraw. It had moved into the tip's `show`, which the gate calls on every queue tick to keep the stack depth current — so a request that waited announced itself continuously and produced the reported stream of repeating sounds. The sound is now keyed on the request id and fired from the gate, the one place that knows a NEW request arrived rather than a redraw happening; `show` is idempotent and no longer announces at all.
+- The tip slides in over the distance of its own window. It had been advanced by a screen-proportional metric from a different coordinate system, so the shape was never actually pushed out of its window and appeared in place instead of sliding in from the side.
 
 ## Keeping this file honest
 

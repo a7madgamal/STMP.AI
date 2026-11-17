@@ -792,6 +792,7 @@ object ApprovalGate {
                 if (current != null && current!!.requestId != pending.requestId) current else null
             }
             com.mido.phonebridge.notify.ApprovalTipOverlay.hide()
+            com.mido.phonebridge.notify.ApprovalTipOverlay.clearAnnouncement()
             cancelNotification(ctx, id)
             if (next != null) {
                 postApprovalNotification(ctx, next)
@@ -882,6 +883,10 @@ object ApprovalGate {
         // human touches it.
         Debug.log("gate: resting the request behind the tip")
         com.mido.phonebridge.notify.ApprovalTipOverlay.show(ctx, 1 + waitingBehindCurrent())
+        // **Once per REQUEST.** `show` above is also the update path and runs on every queue tick,
+        // so announcing from it made the arrival sound repeat while a request waited. Keyed on the
+        // request id here, which names one arrival exactly once.
+        com.mido.phonebridge.notify.ApprovalTipOverlay.announceArrival(ctx, p.requestId)
     }
 
     /**

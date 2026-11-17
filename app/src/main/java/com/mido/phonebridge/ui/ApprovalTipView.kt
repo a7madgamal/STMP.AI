@@ -409,7 +409,12 @@ class ApprovalTipView(context: Context) : View(context) {
         if (m == null || fronts.isEmpty()) return
 
         // Everything shifts right by the un-slid part, so the paper reads as still arriving.
-        val offset = (1f - slide) * m.topWidthPx
+        //
+        // **The distance is the VIEW's width**, because that is what it has to travel to be fully
+        // off screen. It used to be a screen-proportional metric — a number from a different
+        // coordinate system — so the shape was never actually pushed out of its own window and
+        // appeared in place instead of sliding in.
+        val offset = (1f - slide) * width
         canvas.save()
         // The baked shadow travels with the paper.
         shadowBitmap?.let { canvas.drawBitmap(it, offset, 0f, null) }
@@ -501,7 +506,7 @@ class ApprovalTipView(context: Context) : View(context) {
      */
     override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
         val m = metrics
-        val offset = m?.let { (1f - slide) * it.topWidthPx } ?: 0f
+        val offset = (1f - slide) * width
         val hit = ApprovalTip.containsFit(
             width.toFloat(), height.toFloat(), density,
             ApprovalTip.TOP_OFFSET_DP * density,
