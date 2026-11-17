@@ -210,24 +210,26 @@ object ApprovalTip {
     }
 
     /**
-     * How far the paper hangs PAST the right edge of the screen, in dp.
+     * How far the paper sits from the right edge of the screen, in dp.
      *
-     * The tip is a sheet caught mid-slide, not a badge stuck on the edge, so part of it is meant to
-     * be off the display. Chosen by the human from a rendered strip of candidates (0 / 8 / 16 / 24 /
-     * 32 dp), not invented: 32dp hides roughly half of the 1cm reach and leaves 1.1cm of paper
-     * showing.
+     * **Zero: the tips TOUCH the edge.** The sheet is meant to read as paper caught at the screen
+     * boundary, so any gap between it and the edge reads as a floating shape rather than something
+     * slipped in from the side.
      *
-     * This is an OVERSHOOT, so it must be applied by moving the window right (see
-     * `ApprovalTipOverlay`), not by clipping inside it. A view cannot draw outside its own bounds,
-     * so shrinking the window instead would cut the paper at a hard line that is not the screen
-     * edge — which is the "cut off" look this is meant to avoid.
+     * This used to be 32, applied as a positive `x` on a `Gravity.END` window — and that is the
+     * trap: for end/right gravity a POSITIVE x moves the window AWAY from the edge, inwards. The
+     * intent was to hide part of the paper off screen, but the sign did the opposite and opened a
+     * 32dp gutter against the edge on the device, while the screenshot test (which moved the view
+     * the other way with `translationX`) showed it flush. The picture and the phone disagreed
+     * because they were moving in opposite directions. Keep this at 0 unless the window offset is
+     * re-derived and the sign proven on a device.
      */
-    const val EDGE_OVERSHOOT_DP = 32f
+    const val EDGE_INSET_DP = 0f
 
-    /** [EDGE_OVERSHOOT_DP] in px, as the window's x offset past the right edge. */
-    fun overshootPx(density: Float): Int {
+    /** [EDGE_INSET_DP] in px: how far in from the right edge the window sits. Always positive. */
+    fun edgeInsetPx(density: Float): Int {
         require(density > 0f) { "density must be positive, was $density" }
-        return (EDGE_OVERSHOOT_DP * density).toInt()
+        return (EDGE_INSET_DP * density).toInt()
     }
 
     /**

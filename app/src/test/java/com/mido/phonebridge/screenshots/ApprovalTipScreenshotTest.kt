@@ -45,15 +45,22 @@ class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
         val tip = ApprovalTipView(ctx).apply {
             screenWidthPx = dm.widthPixels
             this.depth = depth
-            // Production pushes the whole WINDOW past the right edge (ApprovalTipOverlay sets a
-            // positive `x`). A view cannot draw outside its bounds, so the equivalent here is to
-            // translate the view by the same amount — measured in the same dp, from the same
-            // constant, so the golden cannot drift from the phone.
-            translationX = ApprovalTip.overshootPx(density).toFloat()
+            // Mirror production EXACTLY: the overlay window is `Gravity.END` with x =
+            // edgeInsetPx. A LAYOUT_MARGIN_END inset reproduces that same gutter. This is the
+            // line that was wrong before: the test used a positive `translationX`, which moves the
+            // view right (past the edge) while a positive window `x` under END gravity moves it
+            // LEFT (away from the edge). The two moved in opposite directions, so the goldens
+            // showed paper flush to the edge while the phone showed it 32dp in from it.
+            layoutParams = FrameLayout.LayoutParams(
+                winW, winH,
+                android.view.Gravity.END or android.view.Gravity.TOP,
+            ).apply {
+                marginEnd = ApprovalTip.edgeInsetPx(density)
+            }
         }
         root.addView(
             tip,
-            FrameLayout.LayoutParams(winW, winH, android.view.Gravity.END or android.view.Gravity.TOP),
+            tip.layoutParams as FrameLayout.LayoutParams,
         )
 
         val activity = controller.get()

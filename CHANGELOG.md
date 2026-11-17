@@ -5680,12 +5680,17 @@ devDependencies. `node_modules/` is gitignored.
 - The window is sized to the corner's ROTATED bounding box rather than its leg length. A rotated right angle does not fit in a square of its leg: the box grows by cos+sin, which is why the shape was being clipped by its own window.
 - The shape is clamped inside the window, so a window smaller than the shape squeezes the corner in instead of drawing it outside and leaving nothing visible.
 
-## 0.51.56 (build 382) — 2026-11-17 — CURRENT
+## 0.51.56 (build 382) — 2026-11-17
 - Queued requests stack DOWNWARD from under the front sheet, as parallel copies of the same shape. Re-deriving the outline per layer made three different triangles converge on a shared point, so a queue read as a fan instead of paper under paper.
 - The resting corner is a true right angle and stays one. The outline was centred in its window, so any window taller than the paper flattened the corner; it is now measured from its own drop and window height no longer affects the shape.
 - The window is tall enough for the whole stack. Sizing it to the bare shape clipped the last sheet, which is why the bottom of the paper kept being cut off.
 - The tip hangs 32dp past the right edge, as a sheet caught mid-slide rather than a badge stuck on the screen edge.
 - The tip is covered by screenshot tests over the full display, with a centimetre ruler, so its size and shape are reviewable without installing a build.
+
+## 0.51.57 (build 383) — 2026-11-17 — CURRENT
+- The tips touch the right edge. The resting window had a positive x offset under end gravity, which pushes a window AWAY from that edge rather than past it, so every tip floated a few millimetres in from the side instead of reading as paper caught at the boundary.
+- The screenshot tests now position the tip the same way the device does. They were moving the view with a rightward translation while production moved the window the other way, so every capture showed paper flush to the edge and the phone did not.
+- A test asserts the inset is zero, because that is the specific failure those images could not see.
 
 ## Keeping this file honest
 

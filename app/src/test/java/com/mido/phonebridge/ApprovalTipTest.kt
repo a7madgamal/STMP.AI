@@ -200,4 +200,18 @@ class ApprovalTipTest {
             assertEquals("y must not move with window height", a.y, b.y, 0.01f)
         }
     }
+
+    @Test
+    fun `the tips touch the right edge, with no gutter`() {
+        // The failure this exists to catch: the window sat 32dp in from the edge and every tip
+        // floated. The screenshot test did not catch it because it moved the view with a positive
+        // `translationX` while production moved the window with a positive `x` under END gravity --
+        // opposite directions. An assertion on the INSET cannot be fooled by either.
+        assertEquals("the paper must sit flush against the edge", 0, ApprovalTip.edgeInsetPx(density))
+
+        // And the shape's edge-side vertices must land on the window's right boundary, which is
+        // where the screen edge is.
+        val onEdge = tri().filter { abs(it.x - winW) < 0.5f }
+        assertEquals("two vertices define the edge side", 2, onEdge.size)
+    }
 }
