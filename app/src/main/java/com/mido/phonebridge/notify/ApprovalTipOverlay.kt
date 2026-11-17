@@ -38,10 +38,10 @@ object ApprovalTipOverlay {
     private const val WINDOW_MARGIN_DP = 14f
 
     /** How wide the tip window is, as a share of the display. */
-    private const val WINDOW_WIDTH_FRACTION = 0.42f
+    private const val WINDOW_WIDTH_FRACTION = 0.46f
 
     /** The paper's length relative to its band. Matches `ApprovalTip.ASPECT`. */
-    private const val PAPER_ASPECT = 3.2f
+    private const val PAPER_ASPECT = 2.6f
 
     /**
      * The tallest the tip window may be, as a share of the display.
@@ -149,6 +149,10 @@ object ApprovalTipOverlay {
         //
         // Sizing the window to the paper means the untrusted surface only covers pixels the human
         // can actually see, which is precisely the case the rule permits.
+        // **The window's right edge IS the screen's right edge.** The sheet overshoots past the
+        // window on purpose: the part the human sees is the part that slid in, and the part beyond
+        // the display is simply not there. Anchoring the window to the edge is what makes the cut
+        // land on the screen edge rather than in mid-air.
         val width = (dm.widthPixels * WINDOW_WIDTH_FRACTION).toInt()
             .coerceAtMost(dm.widthPixels)
         // The view itself draws the paper `ApprovalTip.TOP_OFFSET_DP` below the window's top, so

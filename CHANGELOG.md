@@ -5635,13 +5635,17 @@ devDependencies. `node_modules/` is gitignored.
 - The sheet is bigger, tipped the other way, and less steeply: 8° with the top edge rising to the left, in a window a third of the display wide. A quarter was too small to read, and the lean of 15° read as a diagonal panel rather than paper.
 - The fitted shape measures its own bounding box from the rotated corners instead of computing where it should land. A mirrored lean flips which corner is topmost, and the earlier formula assumed one direction — it put the sheet off the left edge of its own window.
 
-## 0.51.46 (build 372) — 2026-11-17 — CURRENT
+## 0.51.46 (build 372) — 2026-11-17
 - Touches now reach the app behind the tip. The window was full height, and from Android 12 a tap that would reach another app THROUGH an untrusted overlay is blocked unless the overlay's combined opacity is at most 0.8 — so a tall mostly-transparent surface had every touch beneath it refused. `FLAG_NOT_TOUCH_MODAL` cannot help: it decides where this window's touches go, not whether the system trusts them. The window is now the size of the paper and covers under 30% of the screen, which is the case the rule permits.
 - The window has a hard height ceiling of 80% of the display, so a short screen cannot turn the tip back into a full-height surface.
 - The paper is larger: a window 42% of the display wide instead of 34%, because the sheet is fitted to its window and the window was the real size control.
 - The tip no longer offsets the paper twice. The view draws the sheet below the window's top, so moving the window down as well would push it twice and clip the bottom.
 - `dimAmount` is set to zero explicitly rather than relying on a default.
 - A new test pins the window's CONTRACT with the system rather than its appearance: overlay type, not full width, not full height, not focusable, not touch-modal, not touchable-blocked, undimmed, translucent, and anchored top-right. The three "touches are blocked" reports were a WindowManager policy that no ordinary unit test could see; this one fails here instead of on the device.
+
+## 0.51.47 (build 373) — 2026-11-17 — CURRENT
+- The tip is the part of a sheet that has slid in from the right, not a whole sheet floating in the middle. Its right side runs past the display edge, so what is drawn is a leaning top edge, a leaning left edge and a leaning bottom edge, with no right edge at all. That is the look that was asked for three times, and it is also the reason the shadow kept reading vertical: a shape that ENDS on the screen edge has a straight vertical side in the picture, and a vertical side casts a vertical band.
+- The window is pinned to the right edge, 46% of the display wide, and still capped below full height so Android keeps letting touches through to the app below.
 
 ## Keeping this file honest
 

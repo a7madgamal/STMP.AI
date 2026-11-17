@@ -160,18 +160,19 @@ object ApprovalTip {
     }
 
     /**
-     * The four corners of a rotated sheet, SIZED TO FIT the view it is drawn in.
+     * The corners of a rotated sheet that runs OFF the right edge of the screen.
      *
-     * Three defects meet here, so the method is written to make all three impossible at once.
+     * **This is the look, and it also solves the shadow.** The sheet is a rectangle lying at a
+     * slight angle, whose right side extends past the display edge — so what the human sees is the
+     * part that has slid in from the right, with visible top, left and bottom edges and NO visible
+     * right edge. That last point matters: an earlier version closed the shape ON the screen edge,
+     * which put a straight vertical side in the picture, and the shadow of a vertical side is a
+     * vertical band. Reported three times. Nothing about the shadow needed changing; the shape did.
      *
-     * 1. An edge lying along the screen edge casts a vertical shadow — reported twice. A rotated
-     *    rectangle has four leaning edges and none parallel to anything.
-     * 2. A shape built from SCREEN proportions and painted into a narrow strip falls mostly
-     *    outside it, so only a corner appears. This takes the view's own size.
-     * 3. A mirrored lean (the sheet tipping the other way) flips which corner is topmost, and the
-     *    earlier centring maths silently assumed one direction. So the corners are rotated FIRST and
-     *    the bounding box is measured FROM THE POINTS, then translated into place. No formula can
-     *    disagree with the shape it is placing.
+     * Geometry: build the rectangle in its own frame, rotate it, then translate so its right side
+     * lands past the display and its top lands at [topPx]. Everything outside the view is clipped by
+     * the view itself, which is exactly where the "no vertical edge" comes from — the edge is not
+     * drawn, it is merely not in the window.
      */
     fun outlineFit(
         viewWidthPx: Float,
@@ -180,50 +181,49 @@ object ApprovalTip {
         topPx: Float,
     ): List<Point> {
         val t = Math.toRadians(TILT_DEGREES.toDouble()).toFloat()
-        val sin = kotlin.math.sin(t)
         val cos = kotlin.math.cos(t)
+        val sin = kotlin.math.sin(t)
         val inset = SHAPE_INSET_DP * density
 
-        val availW = (viewWidthPx - inset * 2f).coerceAtLeast(1f)
-        val availH = (viewHeightPx - inset * 2f).coerceAtLeast(1f)
-
-        // The largest band whose ROTATED bounding box fits, at the chosen aspect. |sin| and |cos|
-        // because a mirrored tilt must cost exactly the same space as the normal one.
-        val absSin = kotlin.math.abs(sin)
-        val absCos = kotlin.math.abs(cos)
-        val bandByWidth = availW / (absCos + ASPECT * absSin)
-        val bandByHeight = availH / (absSin + ASPECT * absCos)
-        val band = minOf(bandByWidth, bandByHeight, MAX_BAND_DP * density).coerceAtLeast(1f)
+        val band = (viewWidthPx * BAND_FRACTION).coerceAtLeast(1f)
         val length = band * ASPECT
 
-        // Corners in the sheet's own frame, then rotated into screen space.
+        // Local corners: u across the band, v along the sheet's length.
+        fun rotate(u: Float, v: Float) = Point(u * cos - v * sin, u * sin + v * cos)
         val local = listOf(
-            Point(0f, 0f),
-            Point(-sin * length, cos * length),
-            Point(-sin * length + cos * band, cos * length + sin * band),
-            Point(cos * band, sin * band),
+            rotate(0f, 0f),
+            rotate(band, 0f),
+            rotate(band, length),
+            rotate(0f, length),
         )
 
-        // Measure what was actually produced, then move it to where it belongs.
-        val minX = local.minOf { it.x }
         val maxX = local.maxOf { it.x }
         val minY = local.minOf { it.y }
-        val maxY = local.maxOf { it.y }
-        val boxW = maxX - minX
-        val boxH = maxY - minY
 
-        val targetX = (viewWidthPx - boxW) / 2f
-        val targetY = topPx.coerceAtMost((viewHeightPx - boxH - inset).coerceAtLeast(inset))
-
-        return local.map { Point(it.x - minX + targetX, it.y - minY + targetY) }
+        // Push the sheet so its right side is past the display edge by [OVERSHOOT_FRACTION] of the
+        // window width, and its topmost corner sits at [topPx].
+        val overshoot = viewWidthPx * OVERSHOOT_FRACTION
+        val dx = viewWidthPx + overshoot - maxX
+        val dy = topPx.coerceIn(inset, viewHeightPx) - minY
+        return local.map { Point(it.x + dx, it.y + dy) }
     }
-
 
     /** How far inside the view the paper keeps, in dp. */
     const val SHAPE_INSET_DP = 4f
 
     /** Length as a multiple of the visible band. A sheet, not a card. */
-    const val ASPECT = 3.2f
+    const val ASPECT = 2.6f
+
+    /** How wide the sheet's band is, relative to the window it is drawn in. */
+    const val BAND_FRACTION = 0.95f
+
+    /**
+     * How far past the display edge the sheet continues.
+     *
+     * The sheet must be CUT by the edge, not finished at it: a shape that ends on the screen edge
+     * has a vertical side, and a vertical side casts a vertical shadow.
+     */
+    const val OVERSHOOT_FRACTION = 0.35f
 
     /** A ceiling so a very tall window does not produce an absurd sheet. */
     const val MAX_BAND_DP = 260f

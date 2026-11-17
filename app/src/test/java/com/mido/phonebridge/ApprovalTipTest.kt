@@ -31,28 +31,33 @@ class ApprovalTipTest {
         ApprovalTip.outlineFit(w, h, density, top)
 
     @Test
-    fun `the paper fits inside a narrow strip window`() {
-        // The reported defect: only a corner appeared because the shape was laid out for a screen.
-        fit().forEach { p ->
-            assertTrue("corner x=${p.x} is off the left of a ${stripW}px strip", p.x >= 0f)
-            assertTrue("corner x=${p.x} is off the right of a ${stripW}px strip", p.x <= stripW)
-            assertTrue("corner y=${p.y} is above the view", p.y >= 0f)
-            assertTrue("corner y=${p.y} is below the view", p.y <= stripH)
-        }
+    fun `the sheet runs OFF the right edge rather than stopping at it`() {
+        // This is the look: the human sees the part of the paper that has slid in from the right,
+        // and the rest is past the display. It is also what removes the vertical shadow — a shape
+        // that ENDS on the screen edge has a vertical side, and that side casts a vertical band.
+        val p = fit()
+        val maxX = p.maxOf { it.x }
+        assertTrue(
+            "the sheet must extend past the right edge (maxX=$maxX of $stripW)",
+            maxX > stripW,
+        )
     }
 
     @Test
-    fun `the paper fills a decent share of the strip`() {
-        // "A tiny piece" is as wrong as "off screen": the sheet must be the reason the window
-        // exists, not a sliver in one corner.
+    fun `the visible part of the sheet starts inside the window`() {
+        // It must not be entirely off-screen either: something has to be drawn to tap.
         val p = fit()
-        val width = p.maxOf { it.x } - p.minOf { it.x }
+        assertTrue("the sheet must reach into the window", p.minOf { it.x } < stripW * 0.5f)
+        assertTrue("the sheet must be inside the top", p.minOf { it.y } >= 0f)
+    }
+
+    @Test
+    fun `the visible part of the sheet is worth looking at`() {
+        val p = fit()
+        val visibleW = stripW - p.minOf { it.x }
         val height = p.maxOf { it.y } - p.minOf { it.y }
-        assertTrue(
-            "the paper is only ${width}px of a ${stripW}px strip wide",
-            width > stripW * 0.5f,
-        )
-        assertTrue("the paper is only ${height}px tall", height > stripH * 0.2f)
+        assertTrue("only ${visibleW}px of sheet is visible", visibleW > stripW * 0.5f)
+        assertTrue("the sheet is only ${height}px tall", height > stripH * 0.2f)
     }
 
     @Test
@@ -95,12 +100,13 @@ class ApprovalTipTest {
     }
 
     @Test
-    fun `it fits a wide view as well as a strip`() {
-        listOf(195f to 1544f, 720f to 1544f, 1080f to 2400f).forEach { (w, h) ->
-            ApprovalTip.outlineFit(w, h, density, topPx).forEach { p ->
-                assertTrue("x=${p.x} outside $w", p.x >= 0f && p.x <= w)
-                assertTrue("y=${p.y} outside $h", p.y >= 0f && p.y <= h)
-            }
+    fun `every window size gets a sheet with visible area`() {
+        listOf(195f to 1544f, 302f to 1097f, 500f to 900f).forEach { (w, h) ->
+            val p = ApprovalTip.outlineFit(w, h, density, topPx)
+            assertEquals(4, p.size)
+            assertTrue("x=${w}: nothing visible", p.minOf { it.x } < w)
+            assertTrue("x=${w}: nothing is cut off, so the edge shows", p.maxOf { it.x } > w * 0.9f)
+            assertTrue("y=${h}: sheet starts above the view", p.minOf { it.y } >= 0f)
         }
     }
 
