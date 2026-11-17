@@ -68,6 +68,61 @@ class ApprovalTipView(context: Context) : View(context) {
             invalidate()
         }
 
+    /**
+     * The countdown, as a fraction of the request's window remaining: 1 at arrival, 0 at expiry.
+     *
+     * Set from the clock by whoever owns the deadline; this view only draws it. Defaults to 1 so a
+     * tip that never hears about a deadline shows a full ring rather than an empty one — an empty
+     * ring would look like an expiring request, which is a claim the view has no business making.
+     */
+    var countdown: Float = 1f
+        set(value) {
+            val clamped = value.coerceIn(0f, 1f)
+            if (field == clamped) return
+            field = clamped
+            invalidate()
+        }
+
+    /**
+     * The rim around the disc: a hairline, not a second ring.
+     *
+     * The opacity is baked into the COLOUR rather than set through `Paint.alpha`. That property is
+     * an Int in 0..255 to Kotlin and lint insists it be 0f..1f, so any value you write is either a
+     * compile error or a lint error — and the range lint wants would silently mean "fully opaque"
+     * for every value above 1. `withAlpha` sidesteps the disagreement and says what it means.
+     */
+    private val ringTrack = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = withAlpha(Theme.BORDER, 0.7f)
+        style = Paint.Style.STROKE
+    }
+
+    /**
+     * The countdown as a FILLED PIE, not a stroked arc.
+     *
+     * A ring reads as a gauge — UI furniture borrowed from a watch. A solid wedge of ink filling a
+     * disc reads as a blot spreading on paper, which is what it should look like at 1cm. `FILL`
+     * plus a sector arc also means the shape grows from the centre, so at 5% there is still a
+     * visible mark instead of a hairline that antialiases away.
+     */
+    private val ringInk = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Theme.ACCENT
+        style = Paint.Style.FILL
+    }
+
+    /** The faint disc the ink fills, so an empty pie still shows where it will draw. */
+    private val ringWell = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = withAlpha(Theme.BORDER, 0.22f)
+        style = Paint.Style.FILL
+    }
+
+    /**
+     * The ring's arc bounds, recomputed with the paths.
+     *
+     * A bare `RectF` reused rather than allocated per frame: `onDraw` runs on the animation loop,
+     * and this is the same reason the paths are built in `rebuildPaths`.
+     */
+    private val ringRect = android.graphics.RectF()
+
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Theme.BG }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Theme.BORDER
@@ -207,6 +262,16 @@ class ApprovalTipView(context: Context) : View(context) {
             }
             fronts.add(path)
         }
+
+        // The countdown ring's geometry, derived from the FRONT sheet's outline.
+        val centre = ApprovalTip.ringCenter(outline, density)
+        val r = ApprovalTip.ringRadiusPx(density)
+        ringRect.set(centre.x - r, centre.y - r, centre.x + r, centre.y + r)
+        ringStroke = ApprovalTip.ringStrokePx(density)
+        // Only the RIM is stroked. `ringInk` is a fill paint, and setting `strokeWidth` on it is
+        // meaningless — it also collided with the `Paint.strokeWidth` property in overload
+        // resolution and broke the build.
+        ringTrack.strokeWidth = ringStroke
         buildShadow()
     }
 
@@ -393,8 +458,10 @@ class ApprovalTipView(context: Context) : View(context) {
         postOnAnimation(frame)
     }
 
-    override fun onDraw(canvas: Canvas) {
-        val m = metrics
+    /** The countdown ring's stroke width, in px, from the last rebuild. */
+    private var ringStroke: Float = 0f
+
+    override fun onDraw(canvas: Canvas) {        val m = metrics
         com.mido.phonebridge.Debug.log("tip: onDraw called")
         if (drawnOnce == 0) {
             // One line, once, at the first real draw. The window geometry is invisible from
@@ -466,6 +533,31 @@ class ApprovalTipView(context: Context) : View(context) {
             canvas.restoreToCount(layer)
         }
 
+        // **The countdown dish: a thin ring on the FRONT sheet only.**
+        //
+        // Front sheet only, deliberately. Three rings on three sheets would be three deadlines
+        // competing for the eye on a strip of paper 1cm wide, and the human can only act on the
+        // front one anyway — the sheets behind are decoration until one becomes head.
+        //
+        // Drawn INSIDE the translated/alpha region so it slides in with the paper and fades with
+        // it, and after the loop so it sits on top of the front path rather than under a ghost.
+        if (ringStroke > 0f && !ringRect.isEmpty) {
+            val r = ringRect.width() / 2f
+            val cx = ringRect.centerX()
+            val cy = ringRect.centerY()
+            // The well: a flat disc of paper-shade so an empty pie still reads as a place where
+            // something will happen, rather than a gap in the grain.
+            canvas.drawCircle(cx, cy, r, ringWell)
+            // The ink: a filled sector, clockwise from 12 o'clock. `useCenter = true` makes it a
+            // pie wedge rather than a crescent, so the filled area is proportional to time and the
+            // mark stays solid down to a few percent.
+            if (countdown > 0f) {
+                canvas.drawArc(ringRect, -90f, 360f * countdown, true, ringInk)
+            }
+            // A hairline rim so the disc has an edge against the paper grain at this size.
+            canvas.drawCircle(cx, cy, r, ringTrack)
+        }
+
         canvas.restore()
     }
 
@@ -533,4 +625,10 @@ class ApprovalTipView(context: Context) : View(context) {
 
     /** The wedge count actually drawn, which is the queue depth capped at three. */
     val drawnWedges: Int get() = fronts.size
+    /** [color] at [fraction] opacity (0f..1f), as an ARGB int. */
+    private fun withAlpha(color: Int, fraction: Float): Int {
+        val a = (fraction.coerceIn(0f, 1f) * 255f).toInt()
+        return (a shl 24) or (color and 0x00FFFFFF)
+    }
+
 }

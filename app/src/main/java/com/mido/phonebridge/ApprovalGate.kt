@@ -418,6 +418,25 @@ object ApprovalGate {
             ArmGuard.MISCLICK_GUARD_MS +
                 if (aiFacts == null) TIMEOUT_SECONDS * 1000L
                 else aiFetchCapMs + TIMEOUT_SECONDS * 1000L
+
+        /**
+         * When [latch.await] actually began waiting — the zero point of the countdown.
+         *
+         * Not `createdAtMs` (enqueue can be minutes before anything is shown) and not `shownAtMs`
+         * (the head can be shown, then have its modal closed and reopened). This is the only
+         * instant that means "from here, the request gets [maxWaitMs] and then gives up", so it is
+         * the only honest reference for a dial that claims to show time left.
+         *
+         * 0 until the wait begins.
+         */
+        @Volatile var waitStartedAtMs: Long = 0L
+
+        /** Milliseconds left before this request times out; 0 before the wait starts. */
+        fun remainingMs(nowMs: Long): Long {
+            val started = waitStartedAtMs
+            if (started == 0L) return maxWaitMs()
+            return (started + maxWaitMs() - nowMs).coerceAtLeast(0L)
+        }
     }
 
     @Volatile
@@ -452,6 +471,28 @@ object ApprovalGate {
      * the label never appeared).
      */
     fun waitingBehindCurrent(): Int = synchronized(this) { (queue.size - 1).coerceAtLeast(0) }
+
+    /**
+     * The head request's countdown, as `(remainingMs, totalMs)`, or null when nothing waits.
+     *
+     * **The gate owns the clock; the tip only reads it.** The alternative — the overlay starting
+     * its own timer when it shows — is wrong in three ways that all make the dial lie:
+     *
+     *  - it assumed a 60s window, while the latch actually waits `maxWaitMs()`, which adds the
+     *    misclick guard and the AI fetch budget. The dial would empty seconds before the request
+     *    actually expired.
+     *  - the tip is destroyed and recreated whenever the sheet opens and is folded back, and a
+     *    fresh timer would jump the dial back to full on a request that had already been waiting.
+     *  - with a queue, the head changes while the tip survives, so the dial must retarget without
+     *    the overlay being told.
+     *
+     * Reading the live value every tick fixes all three by construction rather than by being
+     * careful in three places.
+     */
+    fun headCountdown(nowMs: Long = System.currentTimeMillis()): Pair<Long, Long>? {
+        val p = synchronized(this) { current } ?: return null
+        return Pair(p.remainingMs(nowMs), p.maxWaitMs())
+    }
 
     /** Notify after membership settles. Never called under the gate lock. */
     private fun publishPending() {
@@ -738,6 +779,9 @@ object ApprovalGate {
             if (shouldPost) {
                 postApprovalNotification(ctx, pending)
             }
+            // Stamped immediately before the wait, so the countdown and the latch share one zero
+            // point. A dial derived from any other instant would drift from the actual deadline.
+            pending.waitStartedAtMs = System.currentTimeMillis()
             val ok = pending.latch.await(pending.maxWaitMs(), TimeUnit.MILLISECONDS)
             val decidedAt = if (pending.decidedAtMs > 0) pending.decidedAtMs else System.currentTimeMillis()
             return when {

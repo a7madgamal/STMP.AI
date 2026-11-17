@@ -28,7 +28,7 @@ import org.robolectric.shadows.ShadowLooper
  */
 class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
 
-    private fun captureTipOnScreen(state: String, depth: Int, controller: ActivityController<android.app.Activity>) {
+    private fun captureTipOnScreen(state: String, depth: Int, countdown: Float, controller: ActivityController<android.app.Activity>) {
         val ctx = Fixtures.app
         val dm = ctx.resources.displayMetrics
         val density = dm.density
@@ -45,6 +45,7 @@ class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
         val tip = ApprovalTipView(ctx).apply {
             screenWidthPx = dm.widthPixels
             this.depth = depth
+            this.countdown = countdown
             // Mirror production EXACTLY: the overlay window is `Gravity.END` with x =
             // edgeInsetPx. A LAYOUT_MARGIN_END inset reproduces that same gutter. This is the
             // line that was wrong before: the test used a positive `translationX`, which moves the
@@ -77,17 +78,36 @@ class ApprovalTipScreenshotTest(variant: Variant) : ShotTest(variant) {
 
     @Test
     fun tip_on_screen_rest() {
-        captureTipOnScreen("screen_rest", 1, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+        captureTipOnScreen("screen_rest", 1, 1f, Robolectric.buildActivity(android.app.Activity::class.java).setup())
     }
 
     @Test
     fun tip_on_screen_stack3() {
-        captureTipOnScreen("screen_stack3", 3, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+        captureTipOnScreen("screen_stack3", 3, 1f, Robolectric.buildActivity(android.app.Activity::class.java).setup())
     }
 
     @Test
     fun tip_on_screen_stack2() {
-        captureTipOnScreen("screen_stack2", 2, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+        captureTipOnScreen("screen_stack2", 2, 1f, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+    }
+
+    /**
+     * The countdown dial at a part-spent window.
+     *
+     * Asserted as pixels because the dial is a claim about time: a refactor that silently made it
+     * draw full forever would pass every unit test of the arithmetic while lying on the phone. The
+     * fraction is fed directly — the clock itself is covered by ApprovalTipCountdownTest, which
+     * tests the gate's real deadline rather than a timer this view invents.
+     */
+    @Test
+    fun tip_on_screen_midway() {
+        captureTipOnScreen("screen_midway", 1, 0.5f, Robolectric.buildActivity(android.app.Activity::class.java).setup())
+    }
+
+    /** Nearly expired: the wedge must still be visible, not thinned to nothing. */
+    @Test
+    fun tip_on_screen_almost_gone() {
+        captureTipOnScreen("screen_almost", 1, 0.08f, Robolectric.buildActivity(android.app.Activity::class.java).setup())
     }
 
     /**

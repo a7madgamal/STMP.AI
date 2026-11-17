@@ -97,6 +97,11 @@ object ApprovalTipOverlay {
                 val existing = view
                 if (existing != null) {
                     existing.depth = depth.coerceIn(1, ApprovalTip.MAX_VISIBLE)
+                    // `show` is also the update path, called on every queue tick and when a
+                    // request arrives behind a showing tip. The countdown may have been stopped
+                    // (it stops itself when the gate reports no head), so restart it here rather
+                    // than assume it is still running.
+                    startCountdown(existing)
                     return@post
                 }
                 addWindow(ctx, depth)
@@ -256,7 +261,67 @@ object ApprovalTipOverlay {
         view = tip
         params = lp
         isShowing = true
+        // A tip removed by the SYSTEM (not through `hide`) must not leave the ticker running
+        // against a detached view, and must not leave `isShowing` true — the gate trusts that flag
+        // to decide whether a new request grows the stack or opens a fresh window.
+        tip.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) {
+                if (view === v) {
+                    countdownTask?.let { main.removeCallbacks(it) }
+                    countdownTask = null
+                    view = null
+                    params = null
+                    isShowing = false
+                }
+            }
+        })
         tip.present()
+        startCountdown(tip)
+    }
+
+    /**
+     * Drive the tip's dial from the GATE's live countdown, not from a timer started here.
+     *
+     * **Frames come from `SystemClock`, never from an `ValueAnimator`.** Three silent animation
+     * failures in this app traced to animators not running on the target device, so a dial that
+     * relied on one would freeze at full and the request would then simply vanish — the tip lying
+     * about how long was left.
+     *
+     * The fraction is re-READ from the gate each tick rather than counted down locally. That is
+     * what makes these cases correct without special-casing them:
+     *  - the real window is `maxWaitMs()` (guard + AI budget + 60s), not a 60s constant;
+     *  - the tip is recreated whenever the sheet folds back, and a local timer would restart at
+     *    full on a request that had already been waiting;
+     *  - with a queue the head changes underneath the tip, and re-reading retargets the dial for
+     *    free.
+     *
+     * If the gate reports nothing (no head: resolved, or between requests) the dial holds its last
+     * value instead of snapping to empty, because "no request" is not the same claim as "expired".
+     */
+    private fun startCountdown(tip: ApprovalTipView) {
+        countdownTask?.let { main.removeCallbacks(it) }
+        val tick = object : Runnable {
+            override fun run() {
+                if (view !== tip) return
+                val held = ApprovalGate.headCountdown()
+                if (held == null) {
+                    // **Stop, do not spin.** With nothing waiting there is no countdown to draw,
+                    // and a 8fps `postDelayed` loop that outlived the queue would burn battery for
+                    // as long as the tip stayed on screen. `show` restarts this when a request
+                    // arrives.
+                    countdownTask = null
+                    return
+                }
+                val (remaining, total) = held
+                tip.countdown = ApprovalTip.ringFraction(remaining, total)
+                main.postDelayed(this, COUNTDOWN_TICK_MS)
+            }
+        }
+        countdownTask = tick
+        val held = ApprovalGate.headCountdown()
+        if (held != null) tip.countdown = ApprovalTip.ringFraction(held.first, held.second)
+        main.postDelayed(tick, COUNTDOWN_TICK_MS)
     }
 
     /**
@@ -271,6 +336,8 @@ object ApprovalTipOverlay {
     /** Remove the tip window. Idempotent; safe to call when nothing is shown. */
     fun hide() {
         main.post {
+            countdownTask?.let { main.removeCallbacks(it) }
+            countdownTask = null
             val v = view ?: return@post
             view = null
             params = null
@@ -289,4 +356,10 @@ object ApprovalTipOverlay {
 
     /** The live view, for tests and for the queue-depth updates. */
     fun currentView(): View? = view
+
+    /** The running countdown tick, so a new tip or a hide can stop the old one. */
+    private var countdownTask: Runnable? = null
+
+    /** ~8 fps: smooth enough for a disc at this size, cheap enough to ignore on a battery. */
+    private const val COUNTDOWN_TICK_MS = 120L
 }

@@ -264,6 +264,56 @@ object ApprovalTip {
     fun apexInsetPx(density: Float): Float = APEX_INSET_DP * density
 
     /**
+     * Radius of the countdown ring, in px.
+     *
+     * Deliberately tiny — this is a mark on a 1cm slip of paper, not a dial. Small enough that it
+     * reads as a blot or a wax-seal ring at a glance while still having enough perimeter to show
+     * progress: at 0.16cm it is about 9dp wide, which is roughly the smallest circle that survives
+     * an antialiased arc without becoming a smudge.
+     */
+    fun ringRadiusPx(density: Float): Float = RING_RADIUS_DP * density
+
+    /** Stroke width of the ring, in px. Thin enough to read as ink, thick enough not to vanish. */
+    fun ringStrokePx(density: Float): Float = RING_STROKE_DP * density
+
+    /**
+     * Where the countdown ring sits: just inside the paper's inner point, on its bisector.
+     *
+     * The point is the narrowest part of the sheet, so a circle centred ON it would hang off both
+     * edges. The 90° corner's bisector runs horizontally towards the screen edge, and the paper's
+     * half-height at distance `t` from the point is exactly `t` (the edges are at 45°). So placing
+     * the centre `radius + gap` along the bisector keeps the whole ring inside the paper by
+     * construction — no magic inset, and it stays correct if the 1cm ever changes.
+     */
+    fun ringCenter(outline: List<Point>, density: Float): Point {
+        require(outline.size == 3) { "the tip is a triangle, got ${outline.size} points" }
+        // The point is the vertex furthest from the screen edge. With the base on the right edge
+        // that is the vertex with the smallest x.
+        val apex = outline.minBy { it.x }
+        // **sqrt(2), not 1.** This is a circle sitting in a 90° wedge: its distance from each edge is
+        // the centre's distance from the point divided by sqrt(2). So to keep `gap` clearance from
+        // BOTH edges the centre must sit (r + gap) * sqrt(2) along the horizontal bisector. Using
+        // plain `r + gap` put the circle too close to the corner and its outer edge crossed the
+        // paper's edge at the point — visible as the ring being shaved off at 1cm.
+        val offset = (ringRadiusPx(density) + ringGapPx(density)) * kotlin.math.sqrt(2f)
+        return Point(apex.x + offset, apex.y)
+    }
+
+    /** How far the ring's centre sits from the point, in px. */
+    fun ringGapPx(density: Float): Float = RING_GAP_DP * density
+
+    /**
+     * The ring's filled fraction for a request that has [remainingMs] left of [totalMs].
+     *
+     * Clamped to 0..1 and derived from time rather than counted in frames, so a slow frame cannot
+     * make the countdown lie. 1 means "the full window remains", 0 means "expired".
+     */
+    fun ringFraction(remainingMs: Long, totalMs: Long): Float {
+        require(totalMs > 0L) { "totalMs must be positive, was $totalMs" }
+        return (remainingMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
+    }
+
+    /**
      * Whether [x],[y] is inside the triangle.
      *
      * Convex test: same side of every edge. Order-independent, so a shape change cannot invert it.
@@ -291,6 +341,15 @@ object ApprovalTip {
 
     /** The 1cm reach, in dp. A physical size, so it is 1cm on every screen and resolution. */
     const val APEX_INSET_DP = 1f * 160f / 2.54f
+
+    /** Countdown ring radius, in dp. About 0.11cm: a mark, not a dial. */
+    const val RING_RADIUS_DP = 7f
+
+    /** Countdown ring stroke, in dp. Ink weight, not UI furniture. */
+    const val RING_STROKE_DP = 1.5f
+
+    /** Gap between the ring and the paper's point, in dp. */
+    const val RING_GAP_DP = 2.5f
 
     /** How far inside the view the paper keeps, in dp. */
     const val SHAPE_INSET_DP = 4f
