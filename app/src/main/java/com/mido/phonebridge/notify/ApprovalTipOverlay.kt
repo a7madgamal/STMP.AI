@@ -37,8 +37,19 @@ object ApprovalTipOverlay {
     /** Breathing room around the paper inside its own window, in dp. */
     private const val WINDOW_MARGIN_DP = 14f
 
-    /** The youngest the tip window may be to still read as a sheet, as a share of the display. */
-    private const val WINDOW_WIDTH_FRACTION = 0.34f
+    /** How wide the tip window is, as a share of the display. */
+    private const val WINDOW_WIDTH_FRACTION = 0.42f
+
+    /** The paper's length relative to its band. Matches `ApprovalTip.ASPECT`. */
+    private const val PAPER_ASPECT = 3.2f
+
+    /**
+     * The tallest the tip window may be, as a share of the display.
+     *
+     * A hard ceiling, not a preference: from Android 12 an untrusted overlay that covers the
+     * display has every touch beneath it blocked. Staying under this keeps the window a sheet.
+     */
+    private const val MAX_WINDOW_HEIGHT_FRACTION = 0.8f
 
     private var view: ApprovalTipView? = null
     private var params: WindowManager.LayoutParams? = null
@@ -126,24 +137,34 @@ object ApprovalTipOverlay {
             }
         }
 
-        // **The window is the PAPER, plus a small margin — not the paper plus a long reach.**
+        // **The window is the SIZE OF THE PAPER, not a column.**
         //
-        // A window eats every touch that lands inside it, and `NOT_TOUCH_MODAL` only passes what
-        // falls outside. So each dp of window width is a dp of the screen the human cannot use
-        // while a request waits. The paper is already a generous target; a wide margin just takes
-        // screen away.
-        // **Wide enough for the sheet to be read, and no wider.**
+        // This is the fix for touches, and it is a platform rule rather than a preference: from
+        // Android 12, a tap that would reach another app THROUGH an untrusted overlay is blocked
+        // unless the overlay's combined opacity is <= 0.8. A `MATCH_PARENT`-height window counts as
+        // a large, mostly-transparent surface over the screen, so the system refused every touch
+        // beneath it — reported three times as "touches are blocked even on the transparent parts".
+        // `FLAG_NOT_TOUCH_MODAL` cannot help: it decides where THIS window's touches go, not
+        // whether the system trusts them.
         //
-        // The paper is fitted to this window, so the window is the real size control: a paper-plus-
-        // margin window produced a sheet small enough to be useless. A share of the display is the
-        // honest measure of "big enough to see", and it is still far less than the screen — the app
-        // behind stays usable everywhere outside this strip.
-        val byFraction = (dm.widthPixels * WINDOW_WIDTH_FRACTION).toInt()
-        val byMargin = (metrics.topWidthPx + WINDOW_MARGIN_DP * density).toInt()
-        val width = maxOf(byFraction, byMargin).coerceAtMost(dm.widthPixels)
+        // Sizing the window to the paper means the untrusted surface only covers pixels the human
+        // can actually see, which is precisely the case the rule permits.
+        val width = (dm.widthPixels * WINDOW_WIDTH_FRACTION).toInt()
+            .coerceAtMost(dm.widthPixels)
+        // The view itself draws the paper `ApprovalTip.TOP_OFFSET_DP` below the window's top, so
+        // the window has to be that much taller — otherwise the sheet is clipped at the bottom.
+        // The window is NOT also moved down: two offsets would push the paper twice.
+        val innerTop = com.mido.phonebridge.ui.ApprovalTip.TOP_OFFSET_DP * density
+        // **Never full height, even on a short screen.** A window that spans the display is exactly
+        // the case Android 12 refuses to pass touches through, so the cap is a fraction of the
+        // display rather than its whole height. The sheet is fitted to whatever the window ends up
+        // being, so shrinking the window shrinks the paper instead of clipping it.
+        val heightCap = (dm.heightPixels * MAX_WINDOW_HEIGHT_FRACTION).toInt()
+        val height = (width * PAPER_ASPECT + innerTop + WINDOW_MARGIN_DP * density).toInt()
+            .coerceAtMost(heightCap)
         val lp = WindowManager.LayoutParams(
             width,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            height,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // NOT_FOCUSABLE: never takes the keyboard.
             // NOT_TOUCH_MODAL: every touch outside the strip goes to the app below. This is the
@@ -154,7 +175,12 @@ object ApprovalTipOverlay {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.END or Gravity.TOP
+            // Explicitly zero: a tip must never dim the app the human is using, and the default
+            // for a non-dialog window is not guaranteed to be 0 across versions.
+            dimAmount = 0f
             x = 0
+            // At the very top: the VIEW applies its own offset for the paper. Moving the window too
+            // would offset the sheet twice and clip it at the bottom.
             y = 0
         }
 

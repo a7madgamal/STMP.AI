@@ -5629,11 +5629,19 @@ devDependencies. `node_modules/` is gitignored.
 - The tip is fitted to its own window instead of being laid out for a screen. The rotated rectangle was built from screen proportions and then drawn into a 195dp strip, so most of it fell outside the view and only a corner appeared — reported as "only a tiny piece of paper is rendered". It now computes the largest sheet of its aspect whose rotated bounding box fits the canvas, and the tests assert both halves of that: every corner inside the window, and the paper filling a real share of it rather than sitting in a corner. A shape laid out for one canvas and painted on another is a defect no amount of shadow tuning can hide.
 - The tip window is the paper plus a 14dp margin, not the paper plus a 40dp touch reach. A window consumes every touch inside it, so that reach was taking screen from the app behind for no gain.
 
-## 0.51.45 (build 371) — 2026-11-17 — CURRENT
+## 0.51.45 (build 371) — 2026-11-17
 - Every request in a queue announces itself. The sound and haptics fired where the SHEET launched, so only the first of a queue was audible: a later request arrived on a branch that returned early because a window was already on screen. They now fire where the request becomes visible — the tip overlay — once per request, on both the first and every queued one.
 - Touches outside the paper reach the app behind it. A window is touch-opaque across its whole rectangle, transparent pixels included, so a full-height strip blocked an empty column down the side of the screen — reported as "touches are still blocked on the right side even the transparent parts". The view now claims a gesture only when it starts on the paper and refuses everything else; claiming ACTION_DOWN before checking the shape was the defect, since it took every gesture in the window and decided afterwards.
 - The sheet is bigger, tipped the other way, and less steeply: 8° with the top edge rising to the left, in a window a third of the display wide. A quarter was too small to read, and the lean of 15° read as a diagonal panel rather than paper.
 - The fitted shape measures its own bounding box from the rotated corners instead of computing where it should land. A mirrored lean flips which corner is topmost, and the earlier formula assumed one direction — it put the sheet off the left edge of its own window.
+
+## 0.51.46 (build 372) — 2026-11-17 — CURRENT
+- Touches now reach the app behind the tip. The window was full height, and from Android 12 a tap that would reach another app THROUGH an untrusted overlay is blocked unless the overlay's combined opacity is at most 0.8 — so a tall mostly-transparent surface had every touch beneath it refused. `FLAG_NOT_TOUCH_MODAL` cannot help: it decides where this window's touches go, not whether the system trusts them. The window is now the size of the paper and covers under 30% of the screen, which is the case the rule permits.
+- The window has a hard height ceiling of 80% of the display, so a short screen cannot turn the tip back into a full-height surface.
+- The paper is larger: a window 42% of the display wide instead of 34%, because the sheet is fitted to its window and the window was the real size control.
+- The tip no longer offsets the paper twice. The view draws the sheet below the window's top, so moving the window down as well would push it twice and clip the bottom.
+- `dimAmount` is set to zero explicitly rather than relying on a default.
+- A new test pins the window's CONTRACT with the system rather than its appearance: overlay type, not full width, not full height, not focusable, not touch-modal, not touchable-blocked, undimmed, translucent, and anchored top-right. The three "touches are blocked" reports were a WindowManager policy that no ordinary unit test could see; this one fails here instead of on the device.
 
 ## Keeping this file honest
 
