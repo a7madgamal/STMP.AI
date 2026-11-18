@@ -1,116 +1,135 @@
 # `files` — the phone's own storage, behind the gate
 
-Read and write files in a fixed sandbox on the phone, through the same approval gate as every
-other route. Drive already covers cloud files; this covers the case where the file should land on
-the device and never leave it.
+Read and write files in a folder you choose, through the same approval gate as every other route.
+Drive covers cloud files; this covers the case where the file should land on the device and never
+leave it.
 
-Every decision below was asked and answered before any code existed. This file is the argument the
-next change has to beat, not a description of what was convenient.
+Every decision below was asked and answered before any code existed. **The first version of this
+plan was wrong in its core** and the review that caught it is recorded here, because the next change
+needs to beat the reasoning rather than the shape.
 
 ---
 
-## Scope — one folder, resolved then checked
+## What went wrong in the first draft
 
-`Downloads/STMP/` and nothing else.
+The plan said "permission-free, like Drive's `?to=phone`". That was true of **writing** and false of
+everything else: Drive inserts a row through MediaStore and never reads one back, so its mechanism
+proves nothing about reading. Three consequences, and the third decides the design:
 
-**Rejected, not merely cleaned.** The path is resolved with `getCanonicalFile()` and then compared
-against the resolved root with `Path.startsWith`. A `..` that was removed by normalisation would
-make `../../data/data/com.mido.phonebridge/` *look* safe; resolving first means the traversal is
-visible at its destination and can be refused. A symlink pointing out of the sandbox resolves to
-its target and is refused for the same reason — `getCanonicalFile()` is the only thing that catches
-that, which is why it is not optional here.
+1. MediaStore is not a filesystem — `list`/`download` become `query`/`openInputStream`, so a
+   `getCanonicalFile` traversal check has nothing to run against.
+2. `DISPLAY_NAME` can contain `/`, which MediaStore will happily expand into a subdirectory — a
+   path-injection point that the filesystem version never had.
+3. **On API 29+ without a storage grant, a MediaStore query returns only rows your own app
+   contributed.** A file dropped into the folder with a file manager — the main reason to want this
+   plugin — would be invisible to `list`.
 
-**Why not the whole card.** This app holds a vault key and can run sudo commands. A `path`
-parameter that reaches anything turns the API token into a file-read primitive over every photo and
-every other app's exports.
+So MediaStore-only cannot do the job.
 
-**Drive writes to a different folder.** `PhoneSave.RELATIVE_SUBDIR` is `STMP` now, so `?to=phone`
-and `/files` share a root. Older Drive saves sit in `Downloads/PhoneBridge/` and are left there:
-the app never moves or deletes a file it did not just create.
+## Access: SAF, one folder, granted once
 
-## Routes and verbs
+The user picks the folder in the system picker; the app keeps the grant with
+`takePersistableUriPermission`. Everything then goes through `DocumentsContract` and
+`ContentResolver`.
+
+- Works from **API 26**, so the `unsupported_storage` floor Drive needs disappears.
+- The boundary is **the URI the human chose**, which is stronger than any path string: there is no
+  root to escape from, because there is no path arithmetic at all.
+- `list` sees every file in the folder, including ones put there outside the app.
+- The grant can be revoked in system settings, so an unreachable folder is a normal state:
+  `503 folder_not_granted`, with the fix named in the message.
+
+## Routes: READ and WRITE only
 
 | Route | Verb | Notes |
 |---|---|---|
 | `GET /files?path=<dir>` | READ | listing: name, size, mtime, isDir |
 | `GET /files/content?path=<file>` | READ | raw bytes, the file's own content type |
 | `POST /files/upload?path=<file>&type=<mime>` | WRITE | the body IS the file |
-| `DELETE /files?path=<file>` | DELETE | the target is named in the modal |
 
-**Every route opens a card, including the listing.** Browsing is a read of the device, and this
-app treats reads as things a human approves. Accepting the cost of a tap per call is the price of
-not having a route that answers without one.
+**Every route opens a card**, listing included. Browsing is a read of the device and this app treats
+reads as things a human approves.
 
-A plugin that is switched off answers `503 plugin_disabled` — never `404`. "No such route" and
-"you turned this off" are different facts and the log should be able to tell them apart.
+**There is no DELETE.** It was the only irreversible action in the plugin, and the review found its
+card could not honestly describe itself: `Downloads` has no trash, so the words would have to be
+"permanently, no undo, no backup". Dropping the route removes the problem instead of wording around
+it. **`files` can add files and read files; it cannot destroy one.** Adding delete later is a
+separate decision with its own card, not a quiet extension.
 
-## Bytes
+A disabled plugin answers `503 plugin_disabled`, never `404` — "no such route" and "you turned this
+off" are different facts and the log must tell them apart.
+
+## Bytes and the cap
 
 - **Inbound:** `BoundedCopy.exactly` with the cap enforced by a counting loop. Never `readBytes()`,
-  never `copyTo` — at 200 MiB a buffered body is an OOM, and an OOM mid-write leaves a truncated
-  file that reports success.
-- **Outbound:** `setFixedLengthStreamingMode(length)` so the caller gets a real `Content-Length`
-  and a mid-stream failure is a broken connection rather than a short file with a clean 200.
+  never `copyTo`: at 200 MiB a buffered body is an OOM, and an OOM mid-write leaves a truncated file
+  that reports success.
+- **Outbound:** `setFixedLengthStreamingMode(length)`, so a mid-stream failure is a broken connection
+  rather than a short file behind a clean 200.
 - **Neither route audits the body.** The audit blob cap is 32 KiB; a file body would silently eat
   retention.
 
-## The cap: 200 MiB
+**Cap: 200 MiB**, checked against `Content-Length` before the gate opens, so a refusal never costs a
+tap. No `Content-Length` means refused, not streamed blind — the cap is the number that decides
+whether the transfer may happen at all, and it cannot be enforced against an undeclared length.
+Over the cap: `413 file_too_large`, with the limit in the message.
 
-Checked against `Content-Length` **before the gate opens**, so a refusal never costs a tap. A
-request with no `Content-Length` is refused rather than streamed blind — the cap is the one number
-that decides whether the transfer is allowed at all, and it cannot be enforced against a length
-nobody declared.
+## Progress: a notification, because the card cannot stay
 
-`206/413` carry the code `file_too_large` with the limit in the message, so a caller learns the
-number instead of guessing.
+An approved 200 MiB upload takes minutes. The gate cannot be held open for it — a modal pinned for
+minutes blocks every other request — so the approval ends and the transfer continues.
 
-## Collision: refuse
+That leaves two failures the human would otherwise never see: a silent success, and a failure at
+180 MiB with nothing on screen to report it. So the upload runs with a **notification** on the app's
+existing channel, showing transferred bytes while it runs and collapsing to one of:
+
+- `uploaded report.pdf (42 MB)`
+- `upload failed: connection lost — nothing was written`
+
+The failure text says **nothing was written** only when that is true: a partial write is rolled back
+before the notification is updated, so the message and the disk agree.
+
+## Collision: refuse, and nothing else can either
 
 An upload to an existing name answers `409 file_exists` and writes nothing.
 
-The alternatives are worse in a way that is easy to miss: `name (1)` quietly fills the folder with
-copies nobody asked for, and a replace destroys a file behind a card that says "upload". Replacing
-is a deliberate two-step — DELETE, then upload — and each step gets its own card, which is what
-makes it deliberate.
+There is no overwrite path at all now that DELETE is gone, so **no route in this plugin can remove
+or replace an existing file**. The modal names the full target path, so "upload" is never really
+"overwrite".
 
-The modal names the full target path, so the human sees what will be written before approving.
-
-## Storage robustness — the matrix
-
-Filesystem behaviour is the part most likely to differ per device, so each case is decided here
-rather than discovered:
+## The matrix
 
 | Case | Answer |
 |---|---|
-| API < 29 | `503 unsupported_storage`, same wording Drive uses. MediaStore Downloads is API 29+, and on 29+ direct writes into `/sdcard/Download` are blocked anyway — so there is one permission-free path and it has a floor. |
-| No external storage / unmounted | `503 storage_unavailable`. Not `500`: the phone is in a legitimate state, not broken. |
-| Read-only volume | `503 storage_read_only` on writes; reads still work. |
-| Folder does not exist | Created on first upload, as part of the same gated operation. A read of a missing folder is `404`. |
-| Path with `//`, `./`, trailing `/` | Normalised by the same canonicalisation the traversal check uses. |
-| Unicode, emoji, spaces, newline in a name | Allowed. The name reaches JSON as escaped text; the newline survives because a filename may legally contain one. |
-| `..` or an absolute path | Refused by the root check, not by string cleaning. |
-| Symlink out of the sandbox | Resolved, then refused — same check. |
-| A directory where a file is expected | `400 not_a_file`; a file where a directory is expected | `400 not_a_directory`. |
-| File deleted between the card and the write | `404 file_gone`. Never a partial success. |
+| No folder granted yet | `503 folder_not_granted`, message names Settings |
+| Grant revoked in system settings | Same code — the state is indistinguishable and needs the same fix |
+| Folder deleted after the grant | `404 folder_gone` |
+| Read-only provider (some cloud-backed SAF roots) | `503 storage_read_only` on upload; reads work |
+| Unicode, emoji, spaces, newline in a name | Allowed. Names are provider-escaped by `DocumentsContract`, and a newline is legal in a filename. |
+| `..` or an absolute path in `path` | `400 bad_path`. Compared as a document NAME against a listing, never resolved — there is no path to traverse. |
+| Name containing `/` | `400 bad_name`. This is the MediaStore injection the first draft missed; SAF would treat it as a nested document. |
+| Directory where a file is expected | `400 not_a_file` |
+| Expected type does not match the provider's | `415 unsupported_document` rather than a silent coercion |
+| File deleted between the card and the read | `404 file_gone` |
 
 ## What this must not do
 
-- **No route reads or writes outside `Downloads/STMP`.** The check is at the resolved path, and it
-  is the only place that decides.
+- **No route outside the granted folder.** The grant is the boundary; the code never constructs a
+  path of its own.
 - **No silent truncation.** A body shorter than `Content-Length` is an error, never a smaller file
   that answers 200.
 - **No audit of file bytes.**
-- **No overwrite, ever, without an explicit delete first.**
+- **No delete, no overwrite.** Two absences that are the plugin's promise.
 
 ## Tests
 
-- **Traversal:** `../`, `..%2f`, absolute paths, `//`, a symlink out, and a name that is literally
-  `..` — each refused, each as `403 path_outside_root` rather than a generic failure.
+- **Grant:** no grant → `503`; revoked mid-life → `503`; no card is opened for either.
 - **Cap:** over-limit refused before the gate (asserted by a gate that is never asked); no
   `Content-Length` refused; exactly-at-limit accepted.
-- **Collision:** an existing name gives `409 file_exists` and the original is byte-identical
-  afterwards — the assertion that proves "refuse" actually refused.
-- **Short body:** a body shorter than declared leaves no file.
-- **Verification:** a completed upload's on-disk size equals the size the response reported. This
-  is the documented trap — a mid-stream break cannot be reported once the headers are gone.
-- **API floor:** below 29, `unsupported_storage` and no card.
+- **Collision:** an existing name gives `409`, and the original is byte-identical afterwards — the
+  assertion that proves "refuse" actually refused.
+- **Short body:** a body shorter than declared leaves no file behind.
+- **Verification:** a completed upload's on-disk size equals the size the response reported.
+- **Names:** `/` in a name, a leading `..`, and an empty name each refused with a specific code.
+- **No delete route exists:** a DELETE to `/files` answers `not_found`, which is the regression guard
+  for the decision itself.
