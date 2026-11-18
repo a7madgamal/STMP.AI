@@ -10,6 +10,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -584,11 +585,27 @@ class ApprovalActivity : FragmentActivity() {
                 // and coloured. Everything else keeps the plain renderer. Falling through to
                 // `Theme.text(mono = true)` would draw either one in a single colour, which is
                 // what they looked like before this existed.
-                val view = when (r.style) {
+                //
+                // **A command row is a WIDE object in a narrow card, so it gets its own scroller.**
+                // Wrapping is not a neutral choice here: it splits one token across two lines, so
+                // `--force` can read as `--f` and `orce`, and it reflows the card's height on
+                // every request. One `HorizontalScrollView` around the whole block — every line
+                // moves together, which is what keeps a multi-line command readable as one
+                // object rather than as N independently scrolled strips.
+                //
+                // The scroller is what actually prevents wrapping: it measures its child with an
+                // unbounded width. `setHorizontallyScrolling(true)` alone does not, because the
+                // text already contains the inserted breaks and a TextView still lawys those out
+                // against MATCH_PARENT.
+                val codeView = when (r.style) {
                     ApprovalGate.Row.Style.CODE -> TextView(this).apply {
                         // The COMMAND is what the risk floor reads. Collected here because this
                         // is the one place a command row becomes a view, and because the floor
                         // must run even when the model never answers.
+                        //
+                        // **`r.value` is the UNTOUCHED command.** `ShellCode.render` builds a
+                        // separate buffer and never mutates its argument, so the string this
+                        // list holds is byte-identical to what the caller sent.
                         commandsSeen += r.value
                         text = ShellCode.render(
                             r.value,
@@ -601,7 +618,6 @@ class ApprovalActivity : FragmentActivity() {
                         setLineSpacing(0f, 1.25f) // room for the inserted breaks
                         setPadding(0, 0, 0, Theme.dp(this@ApprovalActivity, 6))
                     }
-
                     ApprovalGate.Row.Style.JSON -> TextView(this).apply {
                         text = JsonCode.render(r.value)
                         textSize = Theme.TEXT_BODY_SP
@@ -649,7 +665,25 @@ class ApprovalActivity : FragmentActivity() {
                         }
                     }
                 }
-                content.addView(view)
+                content.addView(
+                    // A CODE row is wrapped in its own scroller; everything else is added directly.
+                    // Wrapped here rather than inside the `when` so the row's own layout params
+                    // stay with the row, and so there is exactly ONE place a code block can be
+                    // scrolled — a second wrapper would give a command two ways to move.
+                    if (r.style == ApprovalGate.Row.Style.CODE) {                        HorizontalScrollView(this).apply {
+                            isHorizontalScrollBarEnabled = true
+                            // No fill-viewport: the card behind is already the surface, and a
+                            // second background would paint a slightly different paper behind the
+                            // command than the row it sits in.
+                            addView(codeView, android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ))
+                        }
+                    } else {
+                        codeView
+                    }
+                )
                 // The qualifying line, in a smaller face. Never its own label: this is the same
                 // fact as the value, at a lower weight — the exact address behind a friendly
                 // connection name, not a second thing to read.

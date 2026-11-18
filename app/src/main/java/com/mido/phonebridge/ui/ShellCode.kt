@@ -164,9 +164,55 @@ object ShellCode {
             )
         }
 
+        // The indent a break creates is collapsed for DRAWING only. Added last, because it covers
+        // whitespace no other span cares about, and because a reader looking for "what changes the
+        // picture" should find it after "what the characters are".
+        collapseBreakIndent(text, command, cuts)
+
         // An unstyled gap would take the TextView's colour, which is the WARN amber the
         // surrounding row uses. Setting it explicitly keeps "no colour claimed" honest.
         return text
+    }
+
+    /**
+     * Collapse the drawn width of a line's leading whitespace, WITHOUT touching the characters.
+     *
+     * `echo a; echo b` breaks onto two lines and the second one draws one space in, because that
+     * space is genuinely between the `;` and `echo` in the command. It looks like a second
+     * command's indent rather than one command's continuation, so it is not drawn — but it is
+     * still THERE in the string, which is what the character-fidelity guarantee is about.
+     *
+     * **Draw-time only, and it takes a copy.** The span is attached to the rendered buffer; the
+     * command the caller holds never sees it. This function does not mutate [text]'s characters
+     * either — it only adds a span over them, so `text.toString()` is unchanged.
+     *
+     * The first line is skipped: an indent there came from the caller, not from a break this
+     * renderer inserted, and trimming it would misrepresent a command that is deliberately
+     * indented (a nested bash block, a heredoc body).
+     *
+     * @param cuts the offsets the breaks were inserted at, in ORIGINAL string indices.
+     */
+    private fun collapseBreakIndent(
+        text: SpannableStringBuilder,
+        command: String,
+        cuts: List<Int>,
+    ) {
+        // Only the beginnings of the lines this renderer CREATED — every element of `cuts` is a
+        // real break, so no offset arithmetic beyond the existing mapping is needed.
+        for (cut in cuts) {
+            // Skip the break's own newline; the run starts at the next character.
+            var i = cut
+            while (i < command.length && (command[i] == ' ' || command[i] == '\t')) i++
+            if (i == cut) continue // nothing to trim; the next token starts right away
+            // `displayOffset(cut, …)` points at the NEWLINE this renderer inserted, and the run
+            // starts on the character after it — one display index later. Starting on the newline
+            // would collapse the line break itself and glue two commands onto one visual line,
+            // which is the opposite of what the breaks are for.
+            val start = displayOffset(cut, cuts) + 1
+            val end = displayOffset(i, cuts)
+            if (end <= start) continue
+            text.setSpan(ZeroWidthSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
     /** Monospace face that cannot be substituted by the handwritten default. */

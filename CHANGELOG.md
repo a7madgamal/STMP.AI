@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.66 (build 392)**.
+Current build: **v0.51.67 (build 393)**.
 
 ---
 
@@ -5734,9 +5734,14 @@ devDependencies. `node_modules/` is gitignored.
 - The audit record keeps the typed reason in `decision.reason`, written only when there is one, so "no reason given" and "a reason that was empty" cannot be confused.
 - The log-detail goldens no longer rot: their fixtures carry fixed dates, so a store with a hundred-year age cap is installed for the test rather than letting the seven-day retention delete a fixture and turn the suite red with no code change.
 
-## 0.51.66 (build 392) — 2026-11-18 — CURRENT
+## 0.51.66 (build 392) — 2026-11-18
 - The reason sheet's keyboard no longer covers the field it just focused. The activity asks for `adjustResize` and the modal now pads for the IME inset as well as the system bars, so the pinned block moves up instead of sitting underneath the keyboard. `maxOf` rather than a sum, because the keyboard is drawn over the navigation bar and adding the two would reserve a bar's height twice.
 - The IME rule is pinned by a source scan, because Robolectric draws no keyboard and no screenshot could ever show this failing.
+
+## 0.51.67 (build 393) — 2026-11-18 — CURRENT
+- A long command scrolls sideways in the approval card instead of wrapping. Wrapping split one token across two lines — `--force` could read as `--f` / `orce` — and reflowed the card's height on every request. One scroller around the whole code block, so a multi-line command stays readable as one object.
+- The indent a line break creates is no longer drawn. `echo a; echo b` put a phantom space in front of the second line, which read as the start of a second command. The characters are still there, because they are in the command that gets sent: a zero-width span collapses only the drawn run.
+- The command string and everything drawn from it stay separate. The renderer builds its own buffer and never touches its argument, so what a human approves is byte-identical to what arrives — and a test pins that the space is present in the text while absent from the glyphs.
 
 ## Keeping this file honest
 
