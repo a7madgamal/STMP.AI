@@ -107,7 +107,6 @@
         android:name=".plugins.files.FilesGrantActivity"
         android:exported="false"
         android:excludeFromRecents="true"
-        android:noHistory="true"
         android:theme="@style/Theme.STMP.Approval" />
 
     <activity

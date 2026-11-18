@@ -238,6 +238,27 @@ class FilesPluginTest {
         assertTrue("must name what the human will see: $line", line.contains("sheet"))
     }
 
+    /**
+     * The grant Activity must NOT be declared `noHistory`.
+     *
+     * **This is a regression test for a defect that ate the user's answer.** `noHistory="true"`
+     * finishes an Activity as soon as it is covered — and the folder picker covers it — so the
+     * picker's result was delivered to an Activity that no longer existed, `onActivityResult` never
+     * ran, and the folder the human picked was silently discarded. Nothing in the code could show
+     * this; only the manifest attribute could, which is why it is asserted here.
+     */
+    @Test
+    fun `the grant activity keeps its state across the picker`() {
+        val manifest = java.io.File("src/main/AndroidManifest.xml").readText()
+        val start = manifest.indexOf(".plugins.files.FilesGrantActivity")
+        assertTrue("FilesGrantActivity is not declared", start >= 0)
+        val element = manifest.substring(manifest.lastIndexOf("<activity", start), manifest.indexOf("/>", start))
+        assertTrue(
+            "noHistory finishes the activity when the picker covers it, so the result is lost:\n$element",
+            !element.contains("noHistory"),
+        )
+    }
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {

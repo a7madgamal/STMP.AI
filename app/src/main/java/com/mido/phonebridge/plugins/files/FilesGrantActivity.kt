@@ -29,18 +29,34 @@ class FilesGrantActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pickerLaunched = savedInstanceState?.getBoolean(STATE_PICKER) ?: false
         if (savedInstanceState == null) {
             showPrompt()
         }
-        // A recreated activity is the "returning from the picker" case; the result is still
-        // delivered to onActivityResult, so the screen only has to exist.
+        // A recreated Activity is the "returning from the picker" case: the result is still
+        // delivered to onActivityResult, so the screen only has to exist. Re-drawing the prompt
+        // would invite a second picker over the one already open.
+    }
+
+    /** True once the picker has been launched, so a re-create is not mistaken for a fresh ask. */
+    private var pickerLaunched = false
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_PICKER, pickerLaunched)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Cleared here rather than in onActivityResult: a human who backs out or swipes the sheet
-        // away must be askable again on the next request.
-        FolderGrant.finished()
+        // **Not `FolderGrant.finished()` here.** Opening the picker backgrounds this Activity, and a
+        // backgrounded Activity can be destroyed by the system at any moment — so clearing the guard
+        // on destroy would let a second request raise a second sheet while the first picker is still
+        // open, and the human would pick a folder twice. The guard is released where the flow
+        // actually ends: a result, a cancel, or an explicit close.
+        //
+        // `isFinishing` is the one signal that means "this Activity is really going away and no
+        // result is coming", which is exactly when the guard must lift.
+        if (isFinishing) FolderGrant.finished()
     }
 
     private fun showPrompt() {
@@ -108,6 +124,7 @@ class FilesGrantActivity : Activity() {
      * folder" affordance, so a phone without `Downloads/STMP` yet needs nothing pre-made.
      */
     private fun launchPicker() {
+        pickerLaunched = true
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -130,6 +147,7 @@ class FilesGrantActivity : Activity() {
         val uri: Uri? = data?.data
         if (resultCode != RESULT_OK || uri == null) {
             // Backing out is a decision, not a failure: close quietly and let the next request ask.
+            FolderGrant.finished()
             finish()
             return
         }
@@ -194,5 +212,6 @@ class FilesGrantActivity : Activity() {
 
     private companion object {
         const val REQUEST_TREE = 41
+        const val STATE_PICKER = "picker_launched"
     }
 }
