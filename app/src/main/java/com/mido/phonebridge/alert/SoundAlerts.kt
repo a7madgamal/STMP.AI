@@ -26,6 +26,31 @@ object SoundAlerts {
 
     private const val TAG = "SoundAlerts"
 
+    /**
+     * How loud the app's own cues play, as a fraction of full scale.
+     *
+     * **A per-sample gain, never the system stream.** Changing the media stream volume would move
+     * every other app on the phone; this only makes STMP quieter relative to everything else, which
+     * is the thing that was being asked for. Both channels take the same number — a cue panned to
+     * one ear is a mistake nobody would notice until they were wearing headphones.
+     *
+     * **One number, deliberately.** These were three literals (0.7, 0.85, and a separate tone
+     * volume) that had drifted into no relationship with each other. A single gain keeps the
+     * samples' relative loudness — the stamp still lands harder than the crease, because that
+     * difference was chosen — while making "turn STMP down" a one-line change.
+     */
+    private const val GAIN = 0.5f
+
+    /**
+     * The NOTIFY tick's own level, on `ToneGenerator`'s 0..100 scale.
+     *
+     * **Not [GAIN], because it is not the same unit.** `ToneGenerator` takes an integer percent, not
+     * a 0..1 float, so halving it is 35 → 18 and saying `35 * GAIN` would be a type confusion that
+     * happens to compile. Kept beside [GAIN] so the two move together when someone next decides
+     * STMP is too loud.
+     */
+    private const val NOTIFY_TONE_VOLUME = 18
+
     /** Thrown when the stamp sample cannot be decoded or played. Never swallowed. */
     class SoundUnavailable(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
@@ -48,7 +73,7 @@ object SoundAlerts {
     fun modalAppear(ctx: Context) {
         ensureSamplesLoaded(ctx)
         if (!creaseLoaded) throw SoundUnavailable("crease sample not decoded yet")
-        val played = stampPool?.play(creaseSoundId, 0.7f, 0.7f, 1, 0, 1.0f) ?: 0
+        val played = stampPool?.play(creaseSoundId, 0.7f * GAIN, 0.7f * GAIN, 1, 0, 1.0f) ?: 0
         if (played == 0) throw SoundUnavailable("SoundPool refused to play the crease sample")
     }
 
@@ -120,7 +145,7 @@ object SoundAlerts {
         if (!ensureSamplesLoaded(ctx)) {
             throw SoundUnavailable("stamp sample not decoded yet")
         }
-        val played = stampPool?.play(stampSoundId, 0.85f, 0.85f, 1, 0, 1.0f) ?: 0
+        val played = stampPool?.play(stampSoundId, 0.85f * GAIN, 0.85f * GAIN, 1, 0, 1.0f) ?: 0
         if (played == 0) {
             throw SoundUnavailable("SoundPool refused to play the stamp sample")
         }
@@ -132,7 +157,7 @@ object SoundAlerts {
         // The stated rule: subtle only IF the screen is on. Re-checked here, not inherited,
         // because this is the function whose whole contract is that.
         if (!isAttended(ctx)) return
-        tone(ctx, volume = 35)
+        tone(ctx, volume = NOTIFY_TONE_VOLUME)
         oneShotVibration(ctx, ms = 20, amplitude = 40)
     }
 

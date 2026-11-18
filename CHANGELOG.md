@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.69 (build 395)**.
+Current build: **v0.51.70 (build 396)**.
 
 ---
 
@@ -5747,9 +5747,15 @@ devDependencies. `node_modules/` is gitignored.
 - A scrolling command shows a scrollbar that does not fade. The platform hides it after a couple of seconds, which is exactly when someone is still reading the command — and a command that continues past the edge looks the same as one that ends there.
 - A command too wide for the card casts a shadow at whichever edge still has content behind it: nothing on the left until you scroll, nothing on the right once you reach the end. The shadow is drawn in ink and darkens toward the edge, because a fade from the paper colour to the paper colour is a gradient nobody can see — which is how the first attempt shipped invisible.
 
-## 0.51.69 (build 395) — 2026-11-18 — CURRENT
+## 0.51.69 (build 395) — 2026-11-18
 - The shadow covers exactly the band that scrolls, not the strip below it. People aim a drag at the shadow, so a shadow stretched over the scrollbar promised scrolling on a strip that passes the gesture straight through.
 - The shadow reads its position from the scroller instead of from a cached copy. A missed scroll event left the wrong edge shaded until something else forced a repaint.
+
+## 0.51.70 (build 396) — 2026-11-18 — CURRENT
+- Every sound the app makes is half as loud. The crease, the stamp and the attention cues now take a per-sample gain instead of three literals that had drifted apart, so the samples keep their relative loudness — the stamp still lands harder than the crease — while "turn STMP down" is one number per file.
+- The gain is a sample-level multiplier, not the phone's media stream: nothing outside the app gets quieter.
+- The NOTIFY tick keeps its own constant, because `ToneGenerator` takes an integer percent rather than a 0..1 float and pretending otherwise would be a type confusion that happens to compile.
+- Haptics and the TTS speaker are untouched: this is the app's own cues, not vibration and not speech.
 
 ## Keeping this file honest
 

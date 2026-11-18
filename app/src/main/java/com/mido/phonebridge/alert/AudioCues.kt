@@ -20,6 +20,9 @@ import java.util.concurrent.TimeUnit
  */
 object AudioCues {
 
+    /** The cue's own level: 0.4 of full scale, half of the 0.8 these used to play at. */
+    private const val CUE_GAIN = 0.4f
+
     /** The entire vocabulary. Adding a cue is an app change, deliberately. */
     enum class Cue(val asset: String, val label: String) {
         /** A single short high blip. The default "look here". */
@@ -94,7 +97,9 @@ object AudioCues {
     @Synchronized
     fun play(ctx: Context, cue: Cue) {
         val id = ensureLoaded(ctx, cue)
-        val played = pool?.play(id, 0.8f, 0.8f, 1, 0, 1.0f) ?: 0
+        // A per-sample gain, not the phone's media stream: this makes the cue quieter relative to
+        // everything else on the device and never moves the system volume. Both channels equal.
+        val played = pool?.play(id, CUE_GAIN, CUE_GAIN, 1, 0, 1.0f) ?: 0
         if (played == 0) throw CueUnavailable("SoundPool refused to play ${cue.label}")
     }
 
