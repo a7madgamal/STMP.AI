@@ -1,79 +1,70 @@
 package com.mido.phonebridge.plugins.files
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
-import com.mido.phonebridge.R
 
 /**
- * Ask the human to choose the folder — once, not once per request.
+ * Ask the human to choose the folder — by raising the modal directly, not by posting a notification.
  *
- * **The grant is asked for when a request needs it.** There is no setup screen and no prompt on
- * first launch: a route that finds no grant refuses with `503 folder_not_granted` and this posts a
- * notification whose tap opens the system picker. The HTTP call does not wait for the picker,
- * because a human browsing a filesystem is unbounded time and often on another app's screen.
+ * **The notification was the wrong instrument.** It was chosen on the theory that a background
+ * route cannot raise a window, but this app already answers that question another way: `VaultUnlock`
+ * and the approval card both reach the human with a direct `startActivity` from the service. A
+ * notification is a second door that can be disabled by a channel setting, swallowed by
+ * `POST_NOTIFICATIONS`, or simply not looked at — and it gave no way to say *why* the folder is
+ * wanted. The modal is the same surface a human already trusts for a decision this app needs.
  *
- * **De-duplicated, because a polling caller would otherwise fill the tray.** A client retrying every
- * few seconds would produce one notification per retry, and a tray full of identical prompts is a
- * notification nobody reads. Same notification id every time, so the platform replaces rather than
- * stacks.
- *
- * The notification is also the explanation: it says which folder and why, so a human who never
- * intended to use this plugin can decline by ignoring it.
+ * **De-duplicated in-process, not by the platform.** A polling caller would otherwise stack identical
+ * windows; one flag means a second request while the prompt is already up does not raise another.
+ * The flag is cleared by the Activity whichever way the human leaves it, so a cancelled prompt can
+ * be asked for again on the next request.
  */
 object FolderGrant {
 
-    private const val CHANNEL_ID = "files_grant"
+    /** True while a grant prompt is on screen. Guarded by the object's own monitor. */
+    private var showing = false
 
-    /** One id: a second ask replaces the first instead of stacking. */
-    private const val NOTIFICATION_ID = 7919
-
+    /**
+     * Raise the folder prompt, unless one is already up.
+     *
+     * Called from the pre-gate check, so the human is asked at the exact moment a request needs the
+     * grant — never at setup, never on app launch.
+     */
+    @Synchronized
     fun askOnce(ctx: Context) {
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Folder access",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                )
-            )
+        if (showing) {
+            // Already asking. Raising a second window would be two pickers over each other.
+            com.mido.phonebridge.Debug.log("files: grant prompt already showing")
+            return
         }
-        // The picker lives in the app: an Activity has to launch it, because SAF requires a
-        // foreground activity for the result. The notification is only the door.
-        val intent = Intent(ctx, FilesGrantActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        }
-        val pi = PendingIntent.getActivity(
-            ctx,
-            NOTIFICATION_ID,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = Notification.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_stmp)
-            .setContentTitle("Choose a folder for STMP")
-            .setContentText("Tap to grant file access to ${FilesPlugin.FOLDER}")
-            .setCategory(Notification.CATEGORY_REMINDER)
-            .setContentIntent(pi)
-            .setAutoCancel(true)
-            .build()
+        showing = true
         try {
-            nm.notify(NOTIFICATION_ID, notification)
+            ctx.startActivity(
+                Intent(ctx, FilesGrantActivity::class.java).apply {
+                    // A separate task, because this is launched from a service and must not be
+                    // stacked onto whatever the human was doing.
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
         } catch (e: Exception) {
-            // A notification that cannot post must not turn a refusal into a crash: the 503 the
-            // caller already received is the answer, and this is only the nudge.
-            com.mido.phonebridge.Debug.log("folder-grant ask failed: ${e.javaClass.simpleName}")
+            // `startActivity` from the background is refused on some Android versions and OEM
+            // builds, with `BackgroundActivityStartDenied` in the log. Clearing the flag is the
+            // important half: a failed raise must not block every later attempt.
+            showing = false
+            com.mido.phonebridge.Debug.log(
+                "files: could not raise the grant prompt (${e.javaClass.simpleName}): ${e.message}"
+            )
         }
     }
 
-    /** Clear the nudge once a folder has been granted. */
-    fun dismiss(ctx: Context) {
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(NOTIFICATION_ID)
+    /**
+     * Called by [FilesGrantActivity] when it goes away, however that happened.
+     *
+     * Deliberately not "on success": a human who backs out must be able to be asked again, and a
+     * flag that only cleared on success would leave the prompt permanently suppressed after one
+     * cancel.
+     */
+    @Synchronized
+    fun finished() {
+        showing = false
     }
 }
