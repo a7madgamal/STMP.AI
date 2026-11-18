@@ -1,4 +1,4 @@
-# PhoneBridge — Audit Log + Request Labels/Policy: Release Plan
+# STMP — Audit Log + Request Labels/Policy: Release Plan
 
 Status: **R1–R3 shipped, `OFF` removed** (`0.12.0`, build 80). R4 is architecture only.
 Author's constraint: MVP, fail fast and loud, small isolated releases, architecture-first beyond R1.
@@ -445,7 +445,7 @@ trusted, and neither should be verifiable only by hand on a device.
 
 - Build green, lint green (`allWarningsAsErrors = true` stays on).
 - All §5.10 items observed on the device and written into `references/known-status.md`.
-- Version 0.4.0 shipped as `PhoneBridge-v0.4.0-debug.apk`, signer SHA-1 unchanged.
+- Version 0.4.0 shipped as `STMP-v0.4.0-debug.apk`, signer SHA-1 unchanged.
 - Skill doc updated: the "read/deny/timeout" behaviour table now also states that every request
   is logged and where.
 

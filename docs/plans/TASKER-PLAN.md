@@ -8,7 +8,7 @@ declared inline action construction unbuildable/unreviewable. Mido corrected the
 be able to use tasker's capabilities not run my tasks"*. That is a different — and better — target,
 and it **is** reachable. This version supersedes v1 entirely.
 
-**Decision in one line: build a curated inline-action catalogue. PhoneBridge constructs an
+**Decision in one line: build a curated inline-action catalogue. STMP constructs an
 ephemeral action list and broadcasts it, so no saved task is needed — the blocker is not the
 mechanism, it is that Tasker never published an argument schema, so each exposed action must be
 verified empirically and shipped as a typed route.**
@@ -75,7 +75,7 @@ v1 said inline actions are "strictly less reviewable" than a saved task, and use
 them. That reasoning was wrong, and it is worth saying exactly why, because it is the crux.
 
 The objection only holds for a **raw passthrough** — a route where the caller sends
-`{"code": 511, "args": []}` and PhoneBridge relays it. In that shape the approval card can only show
+`{"code": 511, "args": []}` and STMP relays it. In that shape the approval card can only show
 a number.
 
 But **if we own the schema, we own the rendering.** The catalogue is ours, so the card can say:

@@ -28,7 +28,7 @@ object Debug {
         val line = "${fmt.format(Date())}  $safe"
         lines.addLast(line)
         while (lines.size > MAX) lines.removeFirst()
-        android.util.Log.i("PhoneBridge", safe)
+        android.util.Log.i("STMP", safe)
     }
 
     @Synchronized

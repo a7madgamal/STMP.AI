@@ -1,4 +1,4 @@
-# PhoneBridge — End-to-End Security Review
+# STMP — End-to-End Security Review
 
 Scope: the whole phone-bridge flow as built today — HTTP server, approval gate,
 notification plugin, Google auth, Gmail plugin. Threat model: single user (Mido),

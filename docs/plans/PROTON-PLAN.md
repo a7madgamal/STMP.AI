@@ -10,7 +10,7 @@ fixable reason.**
 
 ---
 
-## 1. Proton Drive — NOT viable as a PhoneBridge plugin
+## 1. Proton Drive — NOT viable as a STMP plugin
 
 **There is no public API.** Proton states plainly that the Drive SDK is *"not officially supported
 for third-party use at present"* and *"not ready for public use yet"*; the SDK repo says Proton
@@ -112,7 +112,7 @@ Proton calendar".**
 
 ---
 
-## 3. What this means for the PhoneBridge plugin list
+## 3. What this means for the STMP plugin list
 
 | Item | Verdict | Why |
 |---|---|---|

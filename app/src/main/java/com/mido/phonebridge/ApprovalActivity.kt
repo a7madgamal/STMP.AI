@@ -2104,7 +2104,7 @@ class ApprovalActivity : FragmentActivity() {
     }
 
     private fun endpointLabel(): String =
-        intent.getStringExtra(EXTRA_ENDPOINT) ?: "PhoneBridge"
+        intent.getStringExtra(EXTRA_ENDPOINT) ?: "STMP"
 
     /**
      * Why approval is or is not possible right now.

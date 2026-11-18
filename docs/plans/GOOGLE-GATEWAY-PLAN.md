@@ -25,7 +25,7 @@ mandatory fingerprint on every request. Single user, dev mode, no distribution c
 
 ## 2. Architecture
 
-    [remote caller] --HTTP over Tailscale--> [phone: PhoneBridge app]
+    [remote caller] --HTTP over Tailscale--> [phone: STMP app]
                                                |
                                                +-- PluginRegistry
                                                |     +-- GmailPlugin  (routes / scopes / UI)

@@ -88,9 +88,31 @@ class PhoneSaveTest {
     }
 
     @Test
-    fun `the target folder is PhoneBridge under Downloads`() {
-        // Mido, 2026-10-21: "/PhoneBridge" — its own directory so saved files are one place,
-        // easy to find and easy to wipe.
-        assertEquals("PhoneBridge", PhoneSave.RELATIVE_SUBDIR)
+    fun `the target folder is STMP under Downloads`() {
+        // Mido, 2026-10-21: its own directory so saved files are one place, easy to find and easy
+        // to wipe. Renamed from PhoneBridge on 2026-11-18 — the product is only STMP now, and the
+        // download folder was the last place the old name still reached a user.
+        //
+        // **This pins a user-visible path, so changing it is a decision, not a rename.** Files
+        // already in the old folder are deliberately left where they are; a test that demanded they
+        // move would be demanding the app delete or relocate the user's data.
+        assertEquals("STMP", PhoneSave.RELATIVE_SUBDIR)
+    }
+
+    /**
+     * The old folder name must survive nowhere in CODE — only in history.
+     *
+     * A leftover literal is how a rename half-happens: one route keeps writing to the old folder,
+     * the user looks in the new one, and the file appears to have vanished.
+     */
+    @Test
+    fun `no source file still writes to the old folder`() {
+        val offenders = java.io.File("src/main/java")
+            .walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filter { f -> f.readText().contains("\"PhoneBridge\"") }
+            .map { it.path }
+            .toList()
+        assertEquals("these files still name the old folder: $offenders", emptyList<String>(), offenders)
     }
 }

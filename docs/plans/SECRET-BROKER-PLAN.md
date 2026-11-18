@@ -5,7 +5,7 @@ built yet; this is the spec to build against.
 
 ## Goal
 
-Secure access to third-party APIs from PhoneBridge (starting: **Todoist**), so a secret
+Secure access to third-party APIs from STMP (starting: **Todoist**), so a secret
 lives on the phone (Keystore, biometric-gated) and never on the host — **without** writing a
 Kotlin plugin per service. Mido will keep adding services as he needs them, so per-service
 plugins are not the primary path.

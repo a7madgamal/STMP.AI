@@ -52,8 +52,14 @@ object PhoneSave {
     }
 
     /**
-     * The folder under Downloads. Its own directory on purpose (Mido, 2026-10-21: *"/PhoneBridge"*)
-     * so saved files are one place, easy to find and easy to wipe.
+     * The folder under Downloads. Its own directory so saved files are one place, easy to find and
+     * easy to wipe (Mido, 2026-10-21: *"/PhoneBridge"*).
+     *
+     * **Renamed to STMP, and the old folder is left alone.** Files already saved under
+     * `Downloads/PhoneBridge/` stay accessible and untouched — this app never deletes a file it did
+     * not just create — so a rename moves where NEW saves land, not where old ones live. Say it that
+     * way in the docs too: a user looking for last week's export will look in the old folder, and
+     * telling them it moved would be false.
      */
-    const val RELATIVE_SUBDIR = "PhoneBridge"
+    const val RELATIVE_SUBDIR = "STMP"
 }

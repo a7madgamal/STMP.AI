@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.70 (build 396)**.
+Current build: **v0.51.71 (build 397)**.
 
 ---
 
@@ -5751,11 +5751,16 @@ devDependencies. `node_modules/` is gitignored.
 - The shadow covers exactly the band that scrolls, not the strip below it. People aim a drag at the shadow, so a shadow stretched over the scrollbar promised scrolling on a strip that passes the gesture straight through.
 - The shadow reads its position from the scroller instead of from a cached copy. A missed scroll event left the wrong edge shaded until something else forced a repaint.
 
-## 0.51.70 (build 396) — 2026-11-18 — CURRENT
+## 0.51.70 (build 396) — 2026-11-18
 - Every sound the app makes is half as loud. The crease, the stamp and the attention cues now take a per-sample gain instead of three literals that had drifted apart, so the samples keep their relative loudness — the stamp still lands harder than the crease — while "turn STMP down" is one number per file.
 - The gain is a sample-level multiplier, not the phone's media stream: nothing outside the app gets quieter.
 - The NOTIFY tick keeps its own constant, because `ToneGenerator` takes an integer percent rather than a 0..1 float and pretending otherwise would be a type confusion that happens to compile.
 - Haptics and the TTS speaker are untouched: this is the app's own cues, not vibration and not speech.
+
+## 0.51.71 (build 397) — 2026-11-18 — CURRENT
+- New downloads land in `Downloads/STMP/`. The old `Downloads/PhoneBridge/` folder is left exactly as it is — files already saved there stay there, because a rename changes where new files go, not where old ones live.
+- The logcat tags say STMP. They were the last place the old product name appeared in a running app, which is the one place a rename is usually forgotten.
+- The planning docs say STMP; the changelog history does not. Entries describing a release that shipped under the old name still describe it accurately.
 
 ## Keeping this file honest
 
