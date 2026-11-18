@@ -19,6 +19,7 @@ They are kept because the "why" behind a rule is usually invisible in the code â
 | [REFINED-PAPER-CLEANUP-PLAN.md](REFINED-PAPER-CLEANUP-PLAN.md) | The locked Direction A UI/UX cleanup: paper visual system, three-tab structure, approval hierarchy and motion. |
 | [APPROVAL-TIP-PLAN.md](APPROVAL-TIP-PLAN.md) | The resting approval tip: a paper wedge instead of a full-screen modal, the strip window, and the one-Activity handover that lets the stack promote. |
 | [DENY-REASON-PLAN.md](DENY-REASON-PLAN.md) | The long-press reason sheet on DENY: why the reason travels to the caller, the one-off 30s extension, and why the bar jumps. |
+| [FILES-PLUGIN-PLAN.md](FILES-PLUGIN-PLAN.md) | The `files` plugin: one resolved-and-checked sandbox, every route gated, 200 MiB streaming cap, refuse on collision. |
 
 ## Reading order
 
