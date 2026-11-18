@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.72 (build 398)**.
+Current build: **v0.51.73 (build 399)**.
 
 ---
 
@@ -5762,11 +5762,14 @@ devDependencies. `node_modules/` is gitignored.
 - The logcat tags say STMP. They were the last place the old product name appeared in a running app, which is the one place a rename is usually forgotten.
 - The planning docs say STMP; the changelog history does not. Entries describing a release that shipped under the old name still describe it accurately.
 
-## 0.51.72 (build 398) — 2026-11-18 — CURRENT
+## 0.51.72 (build 398) — 2026-11-18
 - New `files` plugin: list, read and upload files in one folder on the phone, through the normal gate. Every route opens a card, listing included.
 - **It can add and read files; it cannot destroy one.** There is no delete route, and an upload to an existing name is refused with `file_exists` rather than replacing it.
 - The folder is chosen through the system picker, asked for when a request needs it — never at setup. A request with no grant answers `folder_not_granted` and posts one notification whose tap opens the picker; the request does not wait for it.
 - Uploads stream with a 200 MiB cap checked against `Content-Length` before the card opens, so nobody approves a transfer that cannot happen. A body shorter than declared is an error and its partial document is removed.
+
+## 0.51.73 (build 399) — 2026-11-18 — CURRENT
+- Fixed: every upload card said **0 B**, including for a 43 MB APK. The length was dropped between the request and the row that renders it, and the row turned "unknown" into zero. A card that under-states a transfer by that much reads as small and safe, so it now either shows the real size or says the size was not declared.
 
 ## Keeping this file honest
 

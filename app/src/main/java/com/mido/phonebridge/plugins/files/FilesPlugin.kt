@@ -221,11 +221,14 @@ class FilesPlugin(private val ctx: Context) : Plugin {
     /** The modal names the full target, so "upload" can never mean "overwrite" something. */
     private fun uploadRows(req: Req): List<ApprovalRow> {
         val name = store.requireName(requireParam(req, "path"))
-        val size = req.bodyLength.coerceAtLeast(0)
+        // **"Unknown" is not "zero".** -1 means the length never reached this row, and rendering
+        // it as `0 B` was a real defect on device: six cards said a 43 MB APK was 0 bytes, which
+        // reads as a small, safe transfer. A size that is not known is SAID to be unknown.
+        val size = if (req.bodyLength >= 0) humanSize(req.bodyLength) else "size not declared"
         return listOf(
             ApprovalRow("UPLOAD", name, ApprovalRow.Style.WARN),
             ApprovalRow("TO", "$FOLDER/$name", ApprovalRow.Style.NORMAL),
-            ApprovalRow("SIZE", humanSize(size), ApprovalRow.Style.NORMAL),
+            ApprovalRow("SIZE", size, ApprovalRow.Style.NORMAL),
         )
     }
 

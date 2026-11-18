@@ -122,6 +122,45 @@ class FilesPluginTest {
         assertTrue("and it must validate before the card", upload.validate != null)
     }
 
+    /**
+     * The card states the size it was told, and says so plainly when it was told nothing.
+     *
+     * **This is a regression test for a defect that reached the phone.** Every upload card said
+     * "0 B" for a 43 MB APK, because the `Req` built for describing rows dropped `bodyLength` and
+     * the row coerced -1 to 0. A card that under-states a transfer by 43 megabytes is worse than
+     * one that omits the size: it reads as small and safe.
+     */
+    @Test
+    fun `the upload card states the declared size, and never invents zero`() {
+        val plugin = FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication())
+
+        val known = card {
+            com.mido.phonebridge.core.Req(
+                method = "POST", path = "/files/upload",
+                query = mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
+                bodyLength = 43L * 1024L * 1024L,
+            )
+        }
+        val sizeRow = known.first { it.label == "SIZE" }
+        assertTrue("a known 43 MiB must render as MiB, not 0 B: '${sizeRow.value}'", sizeRow.value.contains("MiB"))
+
+        val unknown = card {
+            com.mido.phonebridge.core.Req(
+                method = "POST", path = "/files/upload",
+                query = mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
+                bodyLength = -1L,
+            )
+        }
+        val unknownSize = unknown.first { it.label == "SIZE" }
+        assertFalse("an undeclared size must not render as a number", unknownSize.value.contains("0 B"))
+        assertTrue("it must say so", unknownSize.value.contains("not declared"))
+    }
+
+    private fun card(block: () -> com.mido.phonebridge.core.Req) =
+        FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).describeRows(block())
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {

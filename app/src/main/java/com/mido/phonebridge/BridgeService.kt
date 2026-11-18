@@ -1592,7 +1592,7 @@ class HttpServer(
                         //
                         // Rows are built ONCE, before the view, because a bad target must still
                         // throw pre-gate (coded 4xx, no modal) and the AI needs the same rows.
-                        val rows = pluginRows(resolved.route, path, body, query, remote)
+                        val rows = pluginRows(resolved.route, path, body, query, remote, req.bodyLength)
                         val gate = ApprovalGate.await(
                             ctx, remote, "$method $path", summary,
                             detail = detailFor(resolved.route.path, path, body),
@@ -2100,7 +2100,15 @@ class HttpServer(
         actualPath: String,
         body: JSONObject,
         query: Map<String, String>,
-        remote: String
+        remote: String,
+        /**
+         * The declared body length, for a row that has to state a SIZE.
+         *
+         * Defaulted to -1 (unknown) so the two other call sites stay unchanged; `files` is the
+         * only plugin that needs it, and passing it explicitly at the gated site is what keeps
+         * "unknown" distinguishable from "zero".
+         */
+        bodyLength: Long = -1L,
     ): List<ApprovalRow> {
         val plugin = PluginRegistry.resolve(route.method, route.path)?.plugin
             ?: throw PluginError("internal_error", "no plugin for ${route.method} ${route.path}")
@@ -2117,7 +2125,13 @@ class HttpServer(
             query = query,
             pathParams = pathParams,
             body = body,
-            remote = remote
+            remote = remote,
+            // **The declared length, because a row may need to show a SIZE.** This was missing,
+            // and the effect was not a crash but a lie: `files` renders "SIZE" from
+            // `req.bodyLength`, got the -1 default, and every upload card said "0 B" for a file
+            // the human was about to approve. A row that describes the wrong magnitude is worse
+            // than a row that omits it — it reads as a small, safe transfer.
+            bodyLength = bodyLength,
         )
         // **The style survives.** This used to be `.map { it.label to it.value }`, which threw
         // away the render hint — so every row in every modal became WARN (mono, amber) and the
