@@ -325,7 +325,7 @@ object ErrorCodes {
         "file_exists" to "A file with that name is already in Downloads/STMP. Nothing was written: replacing is an explicit decision, not a side effect of an upload.",
         "upload_failed" to "The transfer failed part-way. The message says whether the partial file was removed; if it was not, it may still be in the folder.",
         "not_a_file" to "That name is a folder, not a file. A folder cannot be downloaded as bytes.",
-        "folder_not_granted" to "No folder has been granted yet, so there is nothing to read or write. The phone has posted a notification: tap it to choose Downloads/STMP, then retry.",
+        "folder_not_granted" to "No folder has been granted yet, so there is nothing to read or write. A sheet has opened on the phone: choose Downloads/STMP there, then retry.",
 
         // --- our side ---
         "auth_not_configured" to "This build has no OAuth credentials; it cannot serve Google routes.",

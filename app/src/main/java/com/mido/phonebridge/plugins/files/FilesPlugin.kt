@@ -333,7 +333,7 @@ class FilesPlugin(private val ctx: Context) : Plugin {
             FolderGrant.askOnce(ctx)
             throw PluginError(
                 "folder_not_granted",
-                "no folder has been granted yet; tap the notification to choose one, then retry",
+                "no folder has been granted yet; a sheet has opened on the phone — choose the folder there, then retry",
             )
         }
     }
@@ -344,7 +344,7 @@ class FilesPlugin(private val ctx: Context) : Plugin {
         FolderGrant.askOnce(ctx)
         throw PluginError(
             "folder_not_granted",
-            "no folder has been granted yet; tap the notification to choose one, then retry",
+            "no folder has been granted yet; a sheet has opened on the phone — choose the folder there, then retry",
         )
     }
 

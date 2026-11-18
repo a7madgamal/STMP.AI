@@ -221,6 +221,23 @@ class FilesPluginTest {
         )
     }
 
+    /**
+     * The refusal must describe the thing that actually appears.
+     *
+     * It said "tap the notification" for two releases after the notification became a sheet, so a
+     * human following the instruction looked for something that was no longer posted. Copy that
+     * names a mechanism is copy that has to move when the mechanism does.
+     */
+    @Test
+    fun `the grant refusal names the sheet, not a notification`() {
+        // Read from the classification test's own source of truth rather than the private map:
+        // asking the app what it thinks the words are is not a test of the words.
+        val source = java.io.File("src/main/java/com/mido/phonebridge/core/ErrorCodes.kt").readText()
+        val line = source.lines().first { it.contains("\"folder_not_granted\" to \"") }
+        assertTrue("must not point at a notification any more: $line", !line.contains("notification"))
+        assertTrue("must name what the human will see: $line", line.contains("sheet"))
+    }
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {
