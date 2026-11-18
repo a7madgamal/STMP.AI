@@ -26,18 +26,28 @@ proves nothing about reading. Three consequences, and the third decides the desi
 
 So MediaStore-only cannot do the job.
 
-## Access: SAF, one folder, granted once
+## Access: SAF, one folder, granted ON DEMAND
 
 The user picks the folder in the system picker; the app keeps the grant with
 `takePersistableUriPermission`. Everything then goes through `DocumentsContract` and
 `ContentResolver`.
+
+**The grant is asked for when a request needs it, not at setup.** No onboarding screen, no prompt on
+first app open, no permission the user has to understand before they have a reason to. A route that
+arrives without a grant answers `503 folder_not_granted` and posts a notification whose tap opens
+the picker; the caller retries once the human has chosen.
+
+**The HTTP call does not wait for the picker.** A folder picker is a human browsing a filesystem —
+unbounded time, and often on another app's screen. Blocking the request on it would either exceed
+the gate's window or hang the caller on an action it cannot influence. So the answer is immediate
+and the grant is the human's next step, which also means the retry is explicit rather than implicit.
 
 - Works from **API 26**, so the `unsupported_storage` floor Drive needs disappears.
 - The boundary is **the URI the human chose**, which is stronger than any path string: there is no
   root to escape from, because there is no path arithmetic at all.
 - `list` sees every file in the folder, including ones put there outside the app.
 - The grant can be revoked in system settings, so an unreachable folder is a normal state:
-  `503 folder_not_granted`, with the fix named in the message.
+  `503 folder_not_granted` again, and asking again is the same one notification.
 
 ## Routes: READ and WRITE only
 
@@ -86,8 +96,15 @@ existing channel, showing transferred bytes while it runs and collapsing to one 
 - `uploaded report.pdf (42 MB)`
 - `upload failed: connection lost — nothing was written`
 
-The failure text says **nothing was written** only when that is true: a partial write is rolled back
-before the notification is updated, so the message and the disk agree.
+The failure text says **nothing was written** only when that is true: a partial document is rolled
+back before the notification is updated, so the message and the disk agree.
+
+**A failed upload deletes the document it just created**, and that is not the DELETE route coming
+back. The promise is about the user's files; a half-written document from a transfer that failed is
+not a file they asked for, and leaving it is worse than removing it because the Files app shows it
+as complete and nobody knows it is truncated. The call is `DocumentsContract.deleteDocument` on the
+URI this upload created — never on a document that existed before it started, which the collision
+rule guarantees cannot happen.
 
 ## Collision: refuse, and nothing else can either
 
@@ -101,8 +118,8 @@ or replace an existing file**. The modal names the full target path, so "upload"
 
 | Case | Answer |
 |---|---|
-| No folder granted yet | `503 folder_not_granted`, message names Settings |
-| Grant revoked in system settings | Same code — the state is indistinguishable and needs the same fix |
+| No folder granted yet | `503 folder_not_granted` **and** a notification to open the picker. Asked at the moment a request needs it, never at setup. |
+| Grant revoked in system settings | Same code, same notification — the state is indistinguishable and needs the same fix |
 | Folder deleted after the grant | `404 folder_gone` |
 | Read-only provider (some cloud-backed SAF roots) | `503 storage_read_only` on upload; reads work |
 | Unicode, emoji, spaces, newline in a name | Allowed. Names are provider-escaped by `DocumentsContract`, and a newline is legal in a filename. |
@@ -123,7 +140,8 @@ or replace an existing file**. The modal names the full target path, so "upload"
 
 ## Tests
 
-- **Grant:** no grant → `503`; revoked mid-life → `503`; no card is opened for either.
+- **Grant:** no grant → `503` plus exactly one picker notification (not one per request); a granted
+  folder → the same request succeeds on retry; revoked mid-life → back to `503`.
 - **Cap:** over-limit refused before the gate (asserted by a gate that is never asked); no
   `Content-Length` refused; exactly-at-limit accepted.
 - **Collision:** an existing name gives `409`, and the original is byte-identical afterwards — the
