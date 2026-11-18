@@ -28,6 +28,7 @@ import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.ShellCode
 import com.mido.phonebridge.ui.JsonCode
 import com.mido.phonebridge.ui.StampOverlay
+import com.mido.phonebridge.ui.EdgeScrimScrollView
 import com.mido.phonebridge.ui.PaperMotion
 import com.mido.phonebridge.ui.PaperEntranceView
 import com.mido.phonebridge.ui.PaperTearView
@@ -144,6 +145,13 @@ class ApprovalActivity : FragmentActivity() {
     private val DENY_WASH_ALPHA = 0.40f
 
     companion object {
+        /**
+         * How far the code block's edge shadow reaches in from the side, in dp.
+         *
+         * Wide enough to read as a fade rather than a line, narrow enough that it does not cover
+         * the first characters of a command the human is meant to read.
+         */
+        private const val CODE_SCRIM_DP = 20f
         private val entranceRegistry = PaperMotion.EntranceRegistry()
 
         /**
@@ -670,16 +678,23 @@ class ApprovalActivity : FragmentActivity() {
                     // Wrapped here rather than inside the `when` so the row's own layout params
                     // stay with the row, and so there is exactly ONE place a code block can be
                     // scrolled — a second wrapper would give a command two ways to move.
-                    if (r.style == ApprovalGate.Row.Style.CODE) {                        HorizontalScrollView(this).apply {
-                            isHorizontalScrollBarEnabled = true
-                            // No fill-viewport: the card behind is already the surface, and a
-                            // second background would paint a slightly different paper behind the
-                            // command than the row it sits in.
-                            addView(codeView, android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ))
-                        }
+                    //
+                    // **The scroller carries two affordances, and both are load-bearing.** A
+                    // command that continues past the right edge looks exactly like a command that
+                    // ends there; the part nobody scrolled to is the part nobody approved. So the
+                    // bar stays visible instead of fading after the platform's two seconds, and an
+                    // edge scrim appears at whichever side still has content behind it.
+                    if (r.style == ApprovalGate.Row.Style.CODE) {
+                        EdgeScrimScrollView(
+                            this,
+                            codeView,
+                            // **The scrim fades FROM the surface the row actually sits on.** This
+                            // was `SURFACE` first and was invisible on a phone: a code row is not
+                            // inside a filled card, it sits directly on the sheet, so the fade ran
+                            // from one paper colour to a nearly identical one. `BG` is that sheet.
+                            shadowColor = Theme.ON_SURFACE,
+                            scrimWidthPx = Theme.dpF(this, CODE_SCRIM_DP),
+                        )
                     } else {
                         codeView
                     }
