@@ -52,11 +52,60 @@ class FilesStore(private val ctx: Context) {
         val uri = Uri.parse(stored)
         val live = ctx.contentResolver.persistedUriPermissions
         if (live.none { it.uri == uri && it.isReadPermission }) throw NotGranted()
+        // **A live permission is not a live FOLDER.** Delete or rename `Downloads/STMP` and the
+        // persisted grant survives — the system still reports it, and every query against it then
+        // fails with a provider error that reads like a bug rather than like "the folder is gone".
+        // Probing once here turns that into the state the human can actually act on.
+        if (!folderReachable(uri)) throw NotGranted()
         return uri
     }
 
-    /** Remember the tree the picker returned, and ask the system to keep it. */
+    /**
+     * Whether the granted tree still answers.
+     *
+     * One cheap child query: `listChildren` on a missing tree throws or returns nothing, and either
+     * way this is the only way to find out. It is deliberately a liveness probe and not a listing —
+     * the result is discarded, so a folder with no files still counts as reachable.
+     */
+    private fun folderReachable(uri: Uri): Boolean = try {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+        ctx.contentResolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+            null, null, null,
+        )?.use { it.moveToFirst(); true } ?: false
+    } catch (e: Exception) {
+        // A revoked, deleted or unmounted tree throws here — including a provider that is no longer
+        // installed. All of those mean the same thing to the caller: ask again.
+        com.mido.phonebridge.Debug.log(
+            "files: granted folder is unreachable (${e.javaClass.simpleName}): ${e.message}"
+        )
+        false
+    }
+
+    /**
+     * Remember the tree the picker returned, and ask the system to keep it.
+     *
+     * **The previous grant is released first.** Android caps how many persistable grants one app
+     * may hold, so keeping an old folder forever is not just untidy — it is a limit that eventually
+     * refuses the next grant. Only OUR stored uri is released: releasing every persisted permission
+     * would revoke grants some other part of the app may hold.
+     */
     fun accept(treeUri: Uri) {
+        val previous = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_URI, null)?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        if (previous != null && previous != treeUri) {
+            try {
+                ctx.contentResolver.releasePersistableUriPermission(
+                    previous,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            } catch (e: Exception) {
+                // Releasing something already gone throws. Nothing to do and nothing to tell the
+                // human: the grant they just made is what matters.
+                com.mido.phonebridge.Debug.log("files: could not release the old grant: ${e.message}")
+            }
+        }
         // Read AND write: uploads add documents, and the grant must survive a reboot.
         ctx.contentResolver.takePersistableUriPermission(
             treeUri,

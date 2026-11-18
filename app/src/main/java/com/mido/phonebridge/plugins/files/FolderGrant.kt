@@ -23,6 +23,19 @@ object FolderGrant {
     /** True while a grant prompt is on screen. Guarded by the object's own monitor. */
     private var showing = false
 
+    /** When the last prompt was raised, so a retrying caller cannot reopen it every second. */
+    private var lastAskedAtMs = 0L
+
+    /**
+     * Minimum gap between prompts, after one was raised and dismissed without a grant.
+     *
+     * **SAF has no "don't ask again"**, which is right — a human who backs out should be able to
+     * change their mind. But the *caller* is a script, and a script retries. Without this, a client
+     * polling in a loop would stack a fresh sheet on the human every few seconds, which is worse
+     * than a notification because it takes the whole screen.
+     */
+    private const val COOLDOWN_MS = 60_000L
+
     /**
      * Raise the folder prompt, unless one is already up.
      *
@@ -36,7 +49,15 @@ object FolderGrant {
             com.mido.phonebridge.Debug.log("files: grant prompt already showing")
             return
         }
+        val since = System.currentTimeMillis() - lastAskedAtMs
+        if (lastAskedAtMs != 0L && since < COOLDOWN_MS) {
+            // Asked recently and dismissed. The refusal the caller already has is the answer; the
+            // human is not to be interrupted again this minute.
+            com.mido.phonebridge.Debug.log("files: grant prompt in cooldown (${since}ms)")
+            return
+        }
         showing = true
+        lastAskedAtMs = System.currentTimeMillis()
         try {
             ctx.startActivity(
                 Intent(ctx, FilesGrantActivity::class.java).apply {

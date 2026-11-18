@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.76 (build 402)**.
+Current build: **v0.51.77 (build 403)**.
 
 ---
 
@@ -5777,10 +5777,15 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.75 (build 401) — 2026-11-18
 - The `files` routes check the folder grant **before** opening a card. Approving a listing only to be told `folder_not_granted` afterwards was a wasted tap on a request that could never have worked, and every refusal this plugin makes belongs before the modal.
 
-## 0.51.76 (build 402) — 2026-11-18 — CURRENT
+## 0.51.76 (build 402) — 2026-11-18
 - The `files` folder grant is now a **modal**, not a notification: a paper sheet that says what is being asked and why, then opens the system folder picker. Same shape as the vault unlock, which is the precedent this app already trusts for a decision it needs.
 - A notification could be disabled by its channel, swallowed by `POST_NOTIFICATIONS`, or simply not noticed — and it could not explain itself. The sheet can.
 - It is raised on demand only, never at setup, and never twice at once. Backing out leaves the plugin untouched and the next request asks again.
+
+## 0.51.77 (build 403) — 2026-11-18 — CURRENT
+- A granted folder that has since been deleted or renamed now reads as `folder_not_granted` and re-asks, instead of surfacing a provider error that looks like a bug. The persisted permission outlives the folder, so the system still reported it as granted.
+- Accepting a new folder releases the previous grant. Android caps how many persistable grants an app may hold, so keeping old ones eventually refuses the next one.
+- The grant prompt cannot be reopened more than once a minute after being dismissed. SAF has no "don't ask again" — which is right — but a polling client would otherwise stack a full-screen sheet on the human every few seconds.
 
 ## Keeping this file honest
 

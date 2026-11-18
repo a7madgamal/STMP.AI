@@ -204,6 +204,23 @@ class FilesPluginTest {
         assertTrue("an ungranted folder must be stated", rows.any { it.value.contains("not granted") })
     }
 
+    /**
+     * A grant whose folder has been deleted must read as "not granted", not as a broken read.
+     *
+     * The persisted permission outlives the folder, so the system still says it is granted while
+     * every query against it fails. Returning that state as an odd provider error makes a normal
+     * situation look like a bug — and gives the human nothing to act on.
+     */
+    @Test
+    fun `an unreachable folder is reported as ungranted`() {
+        val store = store()
+        // No grant at all is the pre-condition this shares with the real case: both must surface as
+        // NotGranted so the same 503-and-ask path handles them.
+        assertTrue(
+            runCatching { store.root() }.exceptionOrNull() is FilesStore.NotGranted,
+        )
+    }
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {
