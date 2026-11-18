@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.79 (build 405)**.
+Current build: **v0.51.80 (build 406)**.
 
 ---
 
@@ -5790,9 +5790,13 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.78 (build 404) — 2026-11-18
 - The `folder_not_granted` refusal said "tap the notification" for two releases after the notification became a sheet, so anyone following it looked for something that is no longer posted. It now names the sheet.
 
-## 0.51.79 (build 405) — 2026-11-18 — CURRENT
+## 0.51.79 (build 405) — 2026-11-18
 - Fixed: picking a folder in the grant sheet **threw the answer away**. The activity was declared `noHistory`, which finishes it the moment the system picker covers it — so the picker's result was delivered to an activity that no longer existed and `onActivityResult` never ran. The folder was chosen, and the plugin still said `folder_not_granted`.
 - The in-process "already asking" guard is no longer cleared on `onDestroy` for the same reason: a backgrounded activity can be destroyed mid-flow, which would have let a second sheet open over a live picker. It is released only when the flow actually ends.
+
+## 0.51.80 (build 406) — 2026-11-18 — CURRENT
+- The `files` cards say **UPLOAD** and **DOWNLOAD** instead of the internal READ/WRITE verbs. A verb whose direction depends on which side you stand on is the wrong word for a card a human reads — the phone writes, the caller receives, and "read" genuinely did not say whether anything left the device.
+- The listing card says **LIST FOLDER** and names the folder, rather than "LIST FILES" with no target.
 
 ## Keeping this file honest
 

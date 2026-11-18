@@ -259,6 +259,23 @@ class FilesPluginTest {
         )
     }
 
+    /**
+     * The card speaks UPLOAD and DOWNLOAD, not the internal READ/WRITE verbs.
+     *
+     * `Verb` is the app's taxonomy and its direction depends on which side you stand on — the phone
+     * writes, the caller receives. A human reading a card has no such context, and "READ" is
+     * genuinely ambiguous about whether anything leaves the device. Reported on device as a
+     * question about what the word meant, which is the test.
+     */
+    @Test
+    fun `the cards use upload and download, not read and write`() {
+        val routes = FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).routes()
+        val labels = routes.joinToString(" | ") { it.describe }
+        assertTrue("a route still says READ: $labels", !routes.any { it.describe.startsWith("READ") })
+        assertTrue("the download route must say so: $labels", labels.contains("DOWNLOAD"))
+        assertTrue("the upload route must say so: $labels", labels.contains("UPLOAD"))
+    }
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {

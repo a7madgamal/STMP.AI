@@ -53,12 +53,17 @@ and the grant is the human's next step, which also means the retry is explicit r
 
 | Route | Verb | Notes |
 |---|---|---|
-| `GET /files?path=<dir>` | READ | listing: name, size, mtime, isDir |
-| `GET /files/content?path=<file>` | READ | raw bytes, the file's own content type |
-| `POST /files/upload?path=<file>&type=<mime>` | WRITE | the body IS the file |
+| `GET /files?path=<dir>` | READ | LIST FOLDER: name, size, mtime, isDir |
+| `GET /files/content?path=<file>` | READ | DOWNLOAD: raw bytes, the file's own content type |
+| `POST /files/upload?path=<file>&type=<mime>` | WRITE | UPLOAD: the body IS the file |
 
 **Every route opens a card**, listing included. Browsing is a read of the device and this app treats
 reads as things a human approves.
+
+**The cards say UPLOAD and DOWNLOAD, not WRITE and READ.** `Verb` is the app's internal taxonomy and
+its direction depends on whose side you are standing on — the phone writes, the caller receives. A
+human reading a card has no such context. DOWNLOAD also cannot be mistaken for "open it on the
+phone", which "READ" could: the bytes leave the device, and the row says so.
 
 **There is no DELETE.** It was the only irreversible action in the plugin, and the review found its
 card could not honestly describe itself: `Downloads` has no trash, so the words would have to be

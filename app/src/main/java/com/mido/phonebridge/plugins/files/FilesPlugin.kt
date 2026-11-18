@@ -39,7 +39,7 @@ class FilesPlugin(private val ctx: Context) : Plugin {
 
     override fun routes(): List<Route> = listOf(
         Route(
-            "GET", "/files", "LIST FILES", Verb.READ,
+            "GET", "/files", "LIST FOLDER", Verb.READ,
             // A listing is a read with a target worth naming — the folder — so the card says
             // which folder rather than asking someone to approve an empty concept.
             auditRequestBody = false,
@@ -51,7 +51,7 @@ class FilesPlugin(private val ctx: Context) : Plugin {
         ) { listFiles() },
 
         Route(
-            "GET", "/files/content", "READ A FILE", Verb.READ,
+            "GET", "/files/content", "DOWNLOAD A FILE", Verb.READ,
             // The response is the file's bytes: never audited, for the same reason an upload's
             // body is not — a document must not be copied into an append-only log.
             auditResponseBody = false,
@@ -247,7 +247,7 @@ class FilesPlugin(private val ctx: Context) : Plugin {
     private fun listRows(@Suppress("UNUSED_PARAMETER") req: Req): List<ApprovalRow> {
         val count = withGrantOrNull { store.list().size }
         return listOf(
-            ApprovalRow("LIST", FOLDER, ApprovalRow.Style.WARN),
+            ApprovalRow("LIST FOLDER", FOLDER, ApprovalRow.Style.WARN),
             ApprovalRow("FILES", if (count == null) "folder not granted yet" else "$count in the folder",
                 ApprovalRow.Style.NORMAL),
         )
@@ -259,7 +259,11 @@ class FilesPlugin(private val ctx: Context) : Plugin {
             ?: return emptyList()
         val entry = withGrantOrNull { store.find(name) }
         return listOf(
-            ApprovalRow("READ", name, ApprovalRow.Style.WARN),
+            // DOWNLOAD, not READ. The row is read by a human, not by the app's verb taxonomy: the
+            // bytes leave the phone, and a word whose direction depends on who is standing where
+            // forces the reader to work that out. The name, the size and the source path make it
+            // impossible to mistake for a local preview.
+            ApprovalRow("DOWNLOAD", name, ApprovalRow.Style.WARN),
             ApprovalRow("FROM", "$FOLDER/$name", ApprovalRow.Style.NORMAL),
             ApprovalRow(
                 "SIZE",
