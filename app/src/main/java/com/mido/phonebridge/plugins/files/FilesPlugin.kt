@@ -44,6 +44,10 @@ class FilesPlugin(private val ctx: Context) : Plugin {
             // which folder rather than asking someone to approve an empty concept.
             auditRequestBody = false,
             aiSummary = false,
+            // **The grant is checked BEFORE the card.** Without this the human approved a listing
+            // and then got `503 folder_not_granted` from the handler — a wasted tap on a request
+            // that could never have worked. Every refusal this plugin makes belongs pre-gate.
+            validate = { requireGrant() },
         ) { listFiles() },
 
         Route(
@@ -53,6 +57,10 @@ class FilesPlugin(private val ctx: Context) : Plugin {
             auditResponseBody = false,
             auditRequestBody = false,
             aiSummary = false,
+            validate = { req ->
+                requireGrant()
+                store.requireName(requireParam(req, "path"))
+            },
         ) { download(it) },
 
         Route(
@@ -65,7 +73,10 @@ class FilesPlugin(private val ctx: Context) : Plugin {
             auditResponseBody = false,
             // Named input validated BEFORE the card: a bad name or a missing length can only
             // ever end in a 400, so it must not cost the human a tap.
-            validate = { req -> preflight(req) },
+            validate = { req ->
+                requireGrant()
+                preflight(req)
+            },
         ) { upload(it) }
     )
 
@@ -304,6 +315,29 @@ class FilesPlugin(private val ctx: Context) : Plugin {
      * One notification per refusal would let a polling caller fill the tray, so the ask is
      * de-duplicated by the notifier itself — see [FolderGrant].
      */
+    /**
+     * Refuse BEFORE the card when there is no folder.
+     *
+     * The grant is not caller input, so this is not "validation" in the strict sense — but it has
+     * the same consequence: a card for a request that can only end in `503` costs a tap and teaches
+     * the human to distrust the modal. Reported on device: approved a listing, got
+     * `folder_not_granted` from the handler afterwards.
+     *
+     * It also means the notification that asks for the grant arrives while the caller is still
+     * waiting on its refusal, which is the moment the human is most likely to act on it.
+     */
+    private fun requireGrant() {
+        try {
+            store.root()
+        } catch (e: FilesStore.NotGranted) {
+            FolderGrant.askOnce(ctx)
+            throw PluginError(
+                "folder_not_granted",
+                "no folder has been granted yet; tap the notification to choose one, then retry",
+            )
+        }
+    }
+
     private fun <T> withGrant(block: () -> T): T = try {
         block()
     } catch (e: FilesStore.NotGranted) {

@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.74 (build 400)**.
+Current build: **v0.51.75 (build 401)**.
 
 ---
 
@@ -5771,8 +5771,11 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.73 (build 399) — 2026-11-18
 - Fixed: every upload card said **0 B**, including for a 43 MB APK. The length was dropped between the request and the row that renders it, and the row turned "unknown" into zero. A card that under-states a transfer by that much reads as small and safe, so it now either shows the real size or says the size was not declared.
 
-## 0.51.74 (build 400) — 2026-11-18 — CURRENT
+## 0.51.74 (build 400) — 2026-11-18
 - The `files` cards now name what they are about: the listing says **which folder** (`Downloads/STMP`) and how many entries it holds, and a download names the file and its size. "LIST FILES" with an empty card asked someone to approve a read of the phone's storage without saying where.
+
+## 0.51.75 (build 401) — 2026-11-18 — CURRENT
+- The `files` routes check the folder grant **before** opening a card. Approving a listing only to be told `folder_not_granted` afterwards was a wasted tap on a request that could never have worked, and every refusal this plugin makes belongs before the modal.
 
 ## Keeping this file honest
 

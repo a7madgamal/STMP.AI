@@ -162,6 +162,26 @@ class FilesPluginTest {
         FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).describeRows(block())
 
     /**
+     * Every route refuses BEFORE the card when no folder is granted.
+     *
+     * On device the listing card was approved and *then* answered `503 folder_not_granted` — a
+     * wasted tap on a request that could never have worked, and the kind of thing that teaches a
+     * human to stop reading the modal. The check is on `validate`, which runs pre-gate, so this
+     * asserts the wiring rather than the behaviour of a handler nobody should reach.
+     */
+    @Test
+    fun `every route checks the grant before the card`() {
+        val routes = FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).routes()
+        for (route in routes) {
+            assertTrue(
+                "${route.method} ${route.path} has no pre-gate check, so an ungranted folder " +
+                    "would cost a tap",
+                route.validate != null,
+            )
+        }
+    }
+
+    /**
      * The listing card must NAME the folder it is about to read.
      *
      * "LIST FILES" with no rows asks someone to approve a read of the phone's storage without
