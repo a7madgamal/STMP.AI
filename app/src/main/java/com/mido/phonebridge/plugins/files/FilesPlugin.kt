@@ -71,8 +71,16 @@ class FilesPlugin(private val ctx: Context) : Plugin {
 
     override fun describeRows(req: Req): List<ApprovalRow> = rowsFor(
         req,
-        reads = setOf("GET /files", "GET /files/content"),
-        writes = mapOf("POST /files/upload" to ::uploadRows),
+        // **An explicit entry for the listing, because "LIST FILES" alone names nothing.** The
+        // human is being asked to let a request read the phone's storage; a card that does not say
+        // WHICH folder is the same defect as an upload card that does not say how big — it asks for
+        // a decision about an unnamed thing. Both reads name their target now.
+        reads = emptySet(),
+        writes = mapOf(
+            "GET /files" to ::listRows,
+            "GET /files/content" to ::readRows,
+            "POST /files/upload" to ::uploadRows,
+        ),
     )
 
     override fun status(): PluginStatus = PluginStatus(
@@ -217,6 +225,55 @@ class FilesPlugin(private val ctx: Context) : Plugin {
     }
 
     // --- card rows -----------------------------------------------------------------------------
+
+    /**
+     * The listing card names the FOLDER.
+     *
+     * "LIST FILES" with no rows asks someone to approve a read of the phone's storage without
+     * saying where — the same defect as an upload card that omits the size. The grant is one folder,
+     * so the row names that folder and how many entries are in it.
+     */
+    private fun listRows(@Suppress("UNUSED_PARAMETER") req: Req): List<ApprovalRow> {
+        val count = withGrantOrNull { store.list().size }
+        return listOf(
+            ApprovalRow("LIST", FOLDER, ApprovalRow.Style.WARN),
+            ApprovalRow("FILES", if (count == null) "folder not granted yet" else "$count in the folder",
+                ApprovalRow.Style.NORMAL),
+        )
+    }
+
+    /** The download card names the FILE, and its size when the provider knows it. */
+    private fun readRows(req: Req): List<ApprovalRow> {
+        val name = runCatching { store.requireName(requireParam(req, "path")) }.getOrNull()
+            ?: return emptyList()
+        val entry = withGrantOrNull { store.find(name) }
+        return listOf(
+            ApprovalRow("READ", name, ApprovalRow.Style.WARN),
+            ApprovalRow("FROM", "$FOLDER/$name", ApprovalRow.Style.NORMAL),
+            ApprovalRow(
+                "SIZE",
+                when {
+                    entry == null -> "not found"
+                    entry.size <= 0 -> "size not reported"
+                    else -> humanSize(entry.size)
+                },
+                ApprovalRow.Style.NORMAL,
+            ),
+        )
+    }
+
+    /**
+     * [withGrant] for a CARD, where a refusal must not become an error.
+     *
+     * A row builder runs before the gate, and a missing grant is answered by the route (503 plus the
+     * picker notification) — so the card must still render, saying plainly that nothing is granted,
+     * rather than throwing and hiding the modal behind an error.
+     */
+    private fun <T> withGrantOrNull(block: () -> T): T? = try {
+        block()
+    } catch (e: FilesStore.NotGranted) {
+        null
+    }
 
     /** The modal names the full target, so "upload" can never mean "overwrite" something. */
     private fun uploadRows(req: Req): List<ApprovalRow> {

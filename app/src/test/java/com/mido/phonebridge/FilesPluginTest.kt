@@ -161,6 +161,29 @@ class FilesPluginTest {
     private fun card(block: () -> com.mido.phonebridge.core.Req) =
         FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).describeRows(block())
 
+    /**
+     * The listing card must NAME the folder it is about to read.
+     *
+     * "LIST FILES" with no rows asks someone to approve a read of the phone's storage without
+     * saying where. Reported on device as a card that was "almost empty".
+     */
+    @Test
+    fun `the list card names the folder`() {
+        val rows = FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).describeRows(
+            com.mido.phonebridge.core.Req(
+                method = "GET", path = "/files", query = emptyMap(),
+                pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
+            )
+        )
+        assertTrue("the card must have rows at all, not an empty modal", rows.isNotEmpty())
+        assertTrue(
+            "the folder must be named: ${rows.map { it.label + "=" + it.value }}",
+            rows.any { it.value.contains("STMP") },
+        )
+        // With no grant it still renders, and says so rather than showing an empty list.
+        assertTrue("an ungranted folder must be stated", rows.any { it.value.contains("not granted") })
+    }
+
     /** A download never records the file's bytes in the audit either. */
     @Test
     fun `the download route does not audit its response`() {
