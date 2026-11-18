@@ -35,45 +35,39 @@ types a reason into a request the server already answered.
 | Placement | Long-press on DENY; short tap unchanged |
 | Hint | One caption line under the button row: `hold DENY to say why` |
 | Field contents | Always blank. No suggested reasons |
-| Submit with nothing typed | Disabled until at least one character |
+| Submit with nothing typed | Disabled until at least one character (and the gate refuses blank text too) |
 | When it denies | Immediately on submit |
-| The clock | `+30s`, granted ONCE, not stackable on reopen |
-| Auto-dismiss | At the extended deadline the sheet closes and the request resolves as a plain `408`; the text is discarded |
-| The bar | Jumps up to the new level on extension |
+| The clock | 90 seconds, ONE constant — no extension logic at all |
+| Auto-dismiss | Never extends; the modal resolves at 90s like it did at 60s |
 | Where the reason is stored | The 403 `detail`, plus `decision.reason` in the audit record |
 
-**Why `+30s` and not a pause.** A pause is unbounded, and an unbounded pause on the head of a
-FIFO queue starves every request behind it: nothing is shown until the sheet closes. Thirty
-seconds is enough to type a sentence, and the request still dies on its own if the human walks
-away.
-
-**Why the bar jumps.** After an extension the honest reading is "73s left of 90s", which is more
-than the "43s left of 60s" it showed a moment earlier. A smooth bar that kept shrinking would be
-showing a number that is not true; the jump is the extension being admitted rather than hidden.
+**Why 90 and not a pause or an extension.** A pause is unbounded, and an unbounded pause on the
+head of a FIFO queue starves every request behind it. An extension that is granted when the sheet
+opens looks cheaper than that and is not: the latch is already waiting when the sheet can be
+touched, so a moving deadline needs a re-await loop, a live re-read in the modal's tick, and a
+second source of truth for "time left" — three ways for the bar to disagree with the thing that
+eventually kills the request. A flat 90 costs thirty seconds on a modal nobody touches, and buys
+one number that the bar, the latch and `/help` all read.
 
 ---
 
 ## The build
 
-1. **`DenyReason` (pure).** The rule that decides the window: `60s`, or `90s` once the sheet has
-   been opened. Pure and Context-free so a JVM test can pin the boundary, exactly like
-   `ArmGuard` and `CountdownMeter` — a rule enforceable only by watching a phone is a rule
-   nobody re-checks.
-2. **`ApprovalGate.Pending`** gains `reason: String?` and `extendedOnce: Boolean`, and
-   `maxWaitMs()` consults the extension. `latch.await` becomes a re-await loop on the moving
-   deadline, because the wait must never end before the window the UI is showing.
-3. **`resolveWithReason(requestId, text)`** beside `resolve`. A DENY carrying a reason is still a
-   DENY, so it must not be able to approve anything — and `needsPassword` is irrelevant here,
-   because a deny is always accepted.
-4. **`GateResult.Denied`** gains `reason: String?`. The dispatch site builds the detail from it
-   and falls back to `"request denied by user"` when absent, so the existing wording survives for
-   every deny that has no reason.
-5. **`AuditRecord.Decision`** gains `reason: String`. Additive; written only when present, and the
-   reader tolerates its absence — an older log must still parse.
+1. **`ApprovalGate.TIMEOUT_SECONDS` becomes 90.** One constant: the auto-deny latch, the draining
+   bar and `/help` all read it, so the bar cannot disagree with the deadline it displays.
+2. **`GateResult.Denied` gains `reason: String?`**, and `Pending` gains `denyReason` — the typed
+text, or null for a plain deny. Null is "no reason given", never an empty string.
+3. **`resolveWithReason(requestId, text)`** beside `resolve`. A reasoned deny is still a deny: it
+   goes through the same latch and the same `approved = false`, so there is no second exit from
+   the gate. It refuses blank text rather than storing it.
+4. **The dispatch site** builds the 403 `detail` from the reason, falling back to
+   `"request denied by user"`. `error` stays `denied`, so a client that maps the code is unaffected.
+5. **`Decision` gains `reason`**, written to the record only when present. Additive; an older log
+   still parses, and its absence means "none given".
 6. **The sheet** is built programmatically like every other screen (this project has no
-   `res/layout/`). A paper surface with one input, its text colours set explicitly, and a submit
-   that is disabled until non-empty. Long-press is attached to the DENY control from item 2 —
-   the same button, no second factory.
+   `res/layout/`): a paper block with one single-line input, explicit text colours, and a submit
+   that is disabled until the field is non-blank. Opened by `setOnLongClickListener` on the DENY
+   control, returning `true` so the release does not also fire the plain deny.
 
 ## What this is not
 
@@ -86,9 +80,11 @@ showing a number that is not true; the jump is the extension being admitted rath
 
 ## Tests
 
-- `DenyReasonTest` — the window rule: not extended, extended once, and that a second open grants
-  nothing.
-- `DenyReasonGateTest` — a deny carrying text resolves as `Denied(reason)`; a deny without text
-  resolves as `Denied(null)`, so the plain path cannot regress into an empty detail.
-- A screenshot state with the sheet open, one with the submit disabled, and one showing the hint
-  line under the row — visual claims that a golden can contradict.
+- `DenyReasonTest` — the gate half: a plain deny carries no reason, a reasoned deny stores its text
+  and still denies, blank text is refused (so the request stays open), and the 90s constant is
+  pinned because the bar, the latch and `/help` all read it.
+- A screenshot at `approval__deny_reason` with the sheet open, asserted to be hidden BEFORE the
+  long-press — the state that could not be checked from source, and the same class of miss that
+  shipped the invisible DENY drain.
+- `LogDetailScreenshotTest` now installs a store whose retention cannot reach the fixture dates, so
+  goldens that print a fixed date stop failing on their own after seven days.

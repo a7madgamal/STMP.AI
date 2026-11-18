@@ -46,6 +46,15 @@ abstract class ShotTest(protected val variant: Variant) {
     }
 }
 
+/** The first `EditText` under [root], or null. */
+fun findEditText(root: android.view.View): android.widget.EditText? {
+    if (root is android.widget.EditText) return root
+    if (root is android.view.ViewGroup) {
+        for (i in 0 until root.childCount) findEditText(root.getChildAt(i))?.let { return it }
+    }
+    return null
+}
+
 /** The first view under [root] whose content description equals [description]. */
 fun findByDescription(root: android.view.View, description: String): android.view.View? {
     if (root.contentDescription?.toString() == description) return root

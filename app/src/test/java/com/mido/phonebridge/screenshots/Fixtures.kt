@@ -205,7 +205,19 @@ object Fixtures {
 
     /** `count` records, newest last, one minute apart from [NOW_MS]; ids are fixed. */
     fun auditRecords(count: Int): List<String> {
-        val store = com.mido.phonebridge.audit.AuditLog.from(app)
+        // **The records below carry FIXED timestamps, so retention must not measure them against
+        // the real clock.** These goldens are compared pixel for pixel, and a prune that deletes a
+        // fixture once its date is more than seven days old turns a green suite red with no code
+        // change at all. That is not hypothetical: a baseline recorded on 2026-11-11 started
+        // rendering "no longer stored" on the 18th, because `AuditLog` pruned the file before the
+        // detail screen read it.
+        //
+        // Freezing the wall clock is not available here (`ShadowSystemClock` in this Robolectric
+        // exposes `setNanoTime` but not a settable wall clock), and moving the timestamps to "now"
+        // would replace a stable date in the image with a different one every run. So the fixture
+        // installs its own store with an age cap nothing can reach. Production retention is
+        // untouched — this is a statement about a test, not about a phone.
+        val store = installLongLivedAuditStore()
         val outcomes = listOf(
             com.mido.phonebridge.audit.AuditOutcome.APPROVED,
             com.mido.phonebridge.audit.AuditOutcome.DENIED,
@@ -219,8 +231,30 @@ object Fixtures {
         }
     }
 
-    private fun auditRecord(id: String, ts: Long, outcome: com.mido.phonebridge.audit.AuditOutcome, i: Int) =
-        com.mido.phonebridge.audit.AuditRecord(
+    /**
+     * Replace the process-wide audit store with one whose retention never expires.
+     *
+     * Installed through the same `singleton` field [dropSingletons] resets, so the fixture cannot
+     * leak into another test — and so a screen that calls `AuditLog.from` sees THIS store rather
+     * than a fresh one over the same directory.
+     */
+    private fun installLongLivedAuditStore(): com.mido.phonebridge.audit.AuditStore {
+        val dir = java.io.File(app.filesDir, "audit")
+        val store = com.mido.phonebridge.audit.AuditLog(
+            dir = dir,
+            // 100 years. An age cap, not a disabled rule: `maxAgeDays = 0` would make the cutoff
+            // "now" and prune every file, including the one being appended.
+            retention = com.mido.phonebridge.audit.AuditRetention(maxAgeDays = 36_500),
+            appVersionName = com.mido.phonebridge.BuildConfig.VERSION_NAME,
+            appVersionCode = com.mido.phonebridge.BuildConfig.VERSION_CODE,
+        )
+        val cls = com.mido.phonebridge.audit.AuditLog::class.java
+        val field = cls.declaredFields.first { it.name == "singleton" }.apply { isAccessible = true }
+        field.set(null, store)
+        return store
+    }
+
+    private fun auditRecord(id: String, ts: Long, outcome: com.mido.phonebridge.audit.AuditOutcome, i: Int) =        com.mido.phonebridge.audit.AuditRecord(
             id = id, ts = ts, outcome = outcome,
             label = "contacts.read", plugin = "contacts", verb = "READ",
             origin = "TAILNET", remote = "100.64.0.7", requester = "Work laptop",

@@ -109,6 +109,28 @@ class ApprovalActivity : FragmentActivity() {
     private var denyDrain: com.mido.phonebridge.ui.Theme.CountdownControl? = null
 
     /**
+     * The reason sheet's parts, or null when the modal has none.
+     *
+     * Held as one bundle because the three pieces are always used together: opening it reveals
+     * the field and focuses it, and submitting reads it. Splitting them into three fields would
+     * let one be forgotten on a swap to another request, which is the failure this modal has
+     * already paid for once with the countdown.
+     */
+    private class ReasonSheet(
+        val view: View,
+        val field: EditText,
+        val submit: MaterialButton,
+    ) {
+        /** Runs once when the sheet is first revealed — the hint retires here. */
+        var onReveal: (() -> Unit)? = null
+
+        /** True while the sheet is on screen. The container is what carries the flag. */
+        val visible: Boolean get() = view.visibility == View.VISIBLE
+    }
+
+    private var reasonSheet: ReasonSheet? = null
+
+    /**
      * How much of the fill's colour is blended into the DENY trough.
      *
      * **A literal `DANGER_SURFACE` fill was the wrong reading of "pale" because it is barely a
@@ -1018,6 +1040,13 @@ class ApprovalActivity : FragmentActivity() {
             isEnabled = false
             alpha = 0.4f
         }
+        // Long-press opens the reason sheet; the normal click above is untouched. Returning true
+        // from the listener stops the click firing on release, so a long-press cannot deny twice
+        // — once plainly and once with a reason.
+        deny.setOnLongClickListener {
+            showReasonSheet(id)
+            true
+        }
         // APPROVE on a contacts request asks for the permission FIRST.
         //
         // **This is the whole point of the fix** (Mido, 2026-11-02, with a screenshot of this very
@@ -1336,6 +1365,41 @@ class ApprovalActivity : FragmentActivity() {
             )
         }
         pinned.addView(btnRow)
+
+        // --- The reason sheet, behind a long-press on DENY. ---
+        //
+        // A SHORT tap is still a plain deny, unchanged: the reject path is the one a
+        // half-asleep human has to hit correctly, and a required field in front of it would
+        // make every deny slower to protect the minority that want to explain. So the reason
+        // lives behind a deliberate gesture instead of beside a fast one — a third control in
+        // this row would re-create the "three equal choices" reading that separating APPROVE
+        // from DENY in 0.23.0 was meant to end.
+        //
+        // The hint says the gesture exists, because a long-press nobody is told about is a
+        // feature that ships invisible.
+        val reasonSheet = buildReasonSheet(id)
+        this.reasonSheet = reasonSheet
+        val reasonHint = Theme.text(
+            this,
+            "hold DENY to say why",
+            Theme.TEXT_CAPTION_SP,
+            Theme.ON_SURFACE_VARIANT,
+        ).apply {
+            setPadding(0, Theme.dp(this@ApprovalActivity, 8), 0, 0)
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        // The hint disappears once the sheet is open: it has done its job, and repeating the
+        // instruction above the field it just revealed reads as a second, different step.
+        val hintView = reasonHint
+        reasonSheet.onReveal = { hintView.visibility = ViewGroup.GONE }
+        pinned.addView(reasonHint)
+        reasonSheet.view.visibility = ViewGroup.GONE
+        pinned.addView(reasonSheet.view, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        // The long-press opens it. `performLongClick` is what Android calls for a held press, so
+        // wiring `setOnLongClickListener` is the whole mechanism — no gesture detector, and the
+        // button keeps its normal click for the plain deny.
 
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1735,6 +1799,128 @@ class ApprovalActivity : FragmentActivity() {
      * `text.toString()`: a String cannot be wiped, and going through one would leave an
      * unremovable copy of the password in the heap for no benefit.
      */
+    /**
+     * The reason sheet: one field, one submit, hidden until the human holds DENY.
+     *
+     * Built as a paper surface like every other block in this modal — this project has no
+     * `res/layout/`, so a sheet is Kotlin or it does not exist.
+     *
+     * **Submit starts disabled and is driven by the field's own text.** An empty reason is not a
+     * reason: it would reach the caller as an empty `detail` and be indistinguishable from a
+     * plain deny, while being stored as if someone had explained themselves. Disabling the
+     * control is the honest form of that rule, and the gate refuses blank text as well so the
+     * rule does not live only in a button's state.
+     */
+    private fun buildReasonSheet(id: Long): ReasonSheet {
+        val field = EditText(this).apply {
+            // Explicit colours: the platform default is white-on-cream here and hides whatever
+            // was typed. Every input in this app sets these.
+            setTextColor(Theme.ON_SURFACE)
+            setHintTextColor(Theme.ON_SURFACE_VARIANT)
+            highlightColor = Theme.ACCENT
+            hint = "why? (sent to the caller)"
+            textSize = Theme.TEXT_BODY_SP
+            typeface = Theme.bodyFont(this@ApprovalActivity)
+            // One line: a reason is a sentence, not an essay, and a growing field would push the
+            // decision buttons down the screen mid-countdown.
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            background = Theme.outlined(this@ApprovalActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
+            setPadding(
+                Theme.dp(this@ApprovalActivity, 12),
+                Theme.dp(this@ApprovalActivity, 10),
+                Theme.dp(this@ApprovalActivity, 12),
+                Theme.dp(this@ApprovalActivity, 10),
+            )
+        }
+        val submit = Theme.button(this, "DENY WITH REASON", Theme.ButtonStyle.DANGER, small = true) {
+            submitReason(id)
+        }.apply {
+            isEnabled = false
+            alpha = 0.4f
+        }
+        field.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                // Trimmed, so a field holding only a space is still empty — the same test the
+                // gate applies, so the button and the gate cannot disagree about what counts.
+                val usable = !s.isNullOrBlank()
+                submit.isEnabled = usable
+                submit.alpha = if (usable) 1f else 0.4f
+            }
+        })
+        field.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE && !field.text.isNullOrBlank()) {
+                submitReason(id)
+                true
+            } else false
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Theme.sheet(Theme.BG)
+            setPadding(0, Theme.dp(this@ApprovalActivity, 10), 0, 0)
+            addView(Theme.text(
+                this@ApprovalActivity,
+                "tell the caller why",
+                Theme.TEXT_CAPTION_SP,
+                Theme.ON_SURFACE_VARIANT,
+            ))
+            addView(field, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@ApprovalActivity, 6) })
+            addView(submit, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = Theme.dp(this@ApprovalActivity, 8) })
+        }
+        return ReasonSheet(body, field, submit)
+    }
+
+    /**
+     * Reveal the sheet and put the caret in it.
+     *
+     * No clock change: the window is already the one constant the whole modal uses, and a
+     * deadline that moved when this opened would have to wake a latch that is already waiting.
+     * The 90s is chosen to cover the typing instead.
+     */
+    private fun showReasonSheet(id: Long) {
+        val sheet = reasonSheet ?: return
+        if (stamping) return
+        sheet.view.visibility = ViewGroup.VISIBLE
+        sheet.onReveal?.invoke()
+        sheet.field.requestFocus()
+        // Only if the field is already attached; a dismissed keyboard is not an error, and
+        // forcing it during a swap would fight the incoming request.
+        if (sheet.field.isAttachedToWindow) {
+            val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(sheet.field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+        Log.i("ApprovalActivity", "reason sheet opened for $id")
+    }
+
+    /**
+     * Submit the typed reason: deny with it, through the same stamp as any other deny.
+     *
+     * The text is handed to the gate, not to the caller directly — the gate owns the latch and
+     * the single return path, so a reasoned deny cannot resolve twice or through a second exit.
+     */
+    private fun submitReason(id: Long) {
+        val text = reasonSheet?.field?.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return
+        val resolved = ApprovalGate.resolveWithReason(id, text)
+        if (!resolved) {
+            Log.w("ApprovalActivity", "request $id already resolved/expired")
+            return
+        }
+        // Hide the keyboard before the stamp, or it stays over the animation.
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as? android.view.inputmethod.InputMethodManager
+        imm?.hideSoftInputFromWindow(reasonSheet?.field?.windowToken, 0)
+        showStamp(approved = false)
+    }
+
     private fun finishWithPassword(id: Long, password: CharArray) {
         val resolved = try {
             ApprovalGate.resolveWithPassword(id, password)

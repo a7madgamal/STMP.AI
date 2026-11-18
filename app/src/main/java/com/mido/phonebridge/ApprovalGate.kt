@@ -29,7 +29,23 @@ object ApprovalGate {
     private const val TAG = "ApprovalGate"
 
     const val CHANNEL_ID = "approval"
-    const val TIMEOUT_SECONDS = 60L
+
+    /**
+     * How long the human has to decide, in seconds.
+     *
+     * **Ninety, because DENY now has a reason sheet behind a long-press.** Sixty was enough
+     * for one tap; a long-press, a sentence and a submit is not a sixty-second thought, and a
+     * window that expires under the thumb makes the reason usable only when it was never
+     * needed.
+     *
+     * **One number, not two.** The auto-deny latch, the draining bar and `/help` all read this
+     * constant, so the bar cannot disagree with the deadline — the failure mode that a second
+     * "display" number always eventually produces. Every modal gets the same window whether or
+     * not the sheet is ever opened: a deadline that moves would have to wake a latch that is
+     * already waiting, which is a loop and a second source of truth for "time left" in exchange
+     * for thirty seconds nobody was using.
+     */
+    const val TIMEOUT_SECONDS = 90L
 
     /**
      * How long past its own budget a summary may still report as Loading before the gate
@@ -57,12 +73,21 @@ object ApprovalGate {
             val queueDepth: Int
         ) : GateResult()
 
-        /** The human tapped DENY. */
+        /**
+         * The human tapped DENY.
+         *
+         * [reason] is the text they typed in the reason sheet, or null for a plain one-tap
+         * deny. It travels to the caller in the 403 `detail`, which is why it is on the result
+         * rather than only in the audit record: a reason the requesting agent cannot read is a
+         * reason nobody acts on. Null means "no reason given", never an empty string — the
+         * submit control refuses an empty field, so the two cases cannot be confused.
+         */
         data class Denied(
             val enqueuedAt: Long,
             val shownAt: Long,
             val decidedAt: Long,
-            val queueDepth: Int
+            val queueDepth: Int,
+            val reason: String? = null,
         ) : GateResult()
 
         /** Nobody decided inside the window. Automatically denied. */
@@ -313,7 +338,7 @@ object ApprovalGate {
          */
         val needsPassword: Boolean = false,
         /** Seconds until auto-deny, for the countdown UI. */
-        val timeoutSeconds: Long = TIMEOUT_SECONDS
+        val timeoutSeconds: Long = TIMEOUT_SECONDS,
         // NOTE: there are no AI fields here any more. The summary arrives AFTER this view is
         // built (Mido, 2026-10-19), so it cannot be part of it — a field that is always blank
         // by construction is a field that lies about what the view knows. The modal renders
@@ -381,6 +406,16 @@ object ApprovalGate {
          * [approved] is true — the tap approves and writes in one gesture.
          */
         @Volatile var exceptionRule: Rule? = null,
+
+        /**
+         * The text the human typed in the reason sheet, or null for a plain deny.
+         *
+         * Written by [resolveWithReason], carried here so the single return site in [await]
+         * can put it on [GateResult.Denied]. Like [exceptionRule], this is the Activity
+         * SIGNALLING a choice, not the UI writing anything: the caller decides what to do with
+         * it.
+         */
+        @Volatile var denyReason: String? = null,
 
         /**
          * True when this request cannot proceed without a password the human types.
@@ -643,6 +678,29 @@ object ApprovalGate {
     }
 
     /**
+     * Called by ApprovalActivity when the human submits the reason sheet: deny this request and
+     * carry their words back to the caller.
+     *
+     * **A reasoned deny is still a deny**, so it goes through the same latch and the same
+     * `approved = false` as [resolve] — there is no second exit from the gate, and nothing here
+     * can approve. [text] is refused when blank rather than stored, because an empty reason is
+     * indistinguishable from "no reason" once it reaches the caller, and the sheet's own
+     * button is disabled in that case. Refusing it here as well is the same rule enforced at
+     * the boundary instead of only in the UI.
+     */
+    fun resolveWithReason(requestId: Long, text: String): Boolean {
+        val p = current ?: return false
+        if (p.requestId != requestId) return false
+        val reason = text.trim()
+        if (reason.isEmpty()) return false
+        p.denyReason = reason
+        p.approved = false
+        p.decidedAtMs = System.currentTimeMillis()
+        p.latch.countDown()
+        return true
+    }
+
+    /**
      * Called by ApprovalActivity when the human taps the exception button: approve this
      * request AND write [rule] for its pair.
      *
@@ -823,7 +881,8 @@ object ApprovalGate {
                     enqueuedAt = pending.createdAtMs,
                     shownAt = pending.shownAtMs,
                     decidedAt = decidedAt,
-                    queueDepth = pending.queueDepthAtEnqueue
+                    queueDepth = pending.queueDepthAtEnqueue,
+                    reason = pending.denyReason,
                 )
             }
         } finally {

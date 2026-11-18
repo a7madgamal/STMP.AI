@@ -27,4 +27,16 @@ data class Decision(
     val decidedAt: Long? = null,
     /** How many requests were waiting behind this one when it was decided. */
     val queueDepth: Int = 0,
+    /**
+     * The text the human typed when denying, or null for a plain deny.
+     *
+     * Stored because a reason is a decision the human made and the log is the only place it
+     * survives — the caller gets it in the 403 body, but a request that already gave up on the
+     * other side leaves no other trace. Additive: absent on every record written before this
+     * existed, so a reader must treat its absence as "none given" rather than as a defect.
+     *
+     * The 8 KiB value cap applies like any other field; the sheet caps its own input well under
+     * that, so a truncated reason is not a case this can reach.
+     */
+    val reason: String? = null,
 )

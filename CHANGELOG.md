@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.64 (build 390)**.
+Current build: **v0.51.65 (build 391)**.
 
 ---
 
@@ -5722,10 +5722,17 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.63 (build 389) — 2026-11-17
 - A switch that is off shows a red knob. Ink-grey read as a neutral resting state, but these switches mostly control security features, so "off" is a thing to notice rather than a state to ignore.
 
-## 0.51.64 (build 390) — 2026-11-17 — CURRENT
+## 0.51.64 (build 390) — 2026-11-17
 - The DENY button's countdown bar is visible. The fill was being repainted beige before it ever drew: the button carried a `backgroundTintList`, and assigning a track-and-fill background re-applies that tint over every layer. The control is now built by one factory that owns the layer stack and clears the tint, so the bar drains from full to empty as the window closes.
 - The fill is a wash rather than the solid stamp red, because a solid fill's boundary crosses the centred label and ink on that red is 2.1:1. The wash keeps the label at 5.4:1 on the fill and 10.8:1 on the trough, so it never has to change colour mid-countdown.
 - The level that drives the drain comes from `CountdownMeter`, a pure function with tests, instead of arithmetic inline in the tick. A level set on the inner fill alone paints nothing, so the handle exposes it and pins that trap with a test.
+
+## 0.51.65 (build 391) — 2026-11-18 — CURRENT
+- Holding DENY opens a reason sheet: one field, one submit, and the words go to the caller in the 403 `detail`. A short tap is still a plain deny, because the reject path is the one a half-asleep human has to hit correctly and a required field in front of it would slow every deny to serve the few that want to explain. A hint line under the row says the gesture exists.
+- Submit is disabled until something is typed, and the gate refuses blank text too. An empty reason would reach the caller as an empty `detail` — indistinguishable from a plain deny while being recorded as if someone had explained themselves.
+- The decision window is 90 seconds instead of 60, in one constant. A window that grew when the sheet opened would have to wake a latch that is already waiting, and a second "display" number is how a bar starts disagreeing with the deadline it claims to show.
+- The audit record keeps the typed reason in `decision.reason`, written only when there is one, so "no reason given" and "a reason that was empty" cannot be confused.
+- The log-detail goldens no longer rot: their fixtures carry fixed dates, so a store with a hundred-year age cap is installed for the test rather than letting the seven-day retention delete a fixture and turn the suite red with no code change.
 
 ## Keeping this file honest
 

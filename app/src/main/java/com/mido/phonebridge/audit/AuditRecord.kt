@@ -80,6 +80,10 @@ data class AuditRecord(
                 put("shownAt", decision.shownAt ?: JSONObject.NULL)
                 put("decidedAt", decision.decidedAt ?: JSONObject.NULL)
                 put("queueDepth", decision.queueDepth)
+                // Only when the human actually typed one. The key is absent otherwise, so
+                // "no reason given" and "a reason that happened to be empty" cannot be
+                // confused — the same rule the truncated block below follows.
+                decision.reason?.takeIf { it.isNotBlank() }?.let { put("reason", it) }
             }
         )
         put("durationMs", durationMs)

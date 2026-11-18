@@ -1634,10 +1634,17 @@ class HttpServer(
                             is ApprovalGate.GateResult.Denied -> {
                                 draft.outcome(AuditOutcome.DENIED)
                                 draft.error("denied")
+                                // The human's words, or the standing sentence. `error` stays
+                                // `denied` either way: a client that maps the code is unaffected,
+                                // and `detail` has always varied by cause (a locked phone answers
+                                // a different one), so this is a third wording rather than a new
+                                // shape.
+                                val detail = gate.reason?.takeIf { it.isNotBlank() }
+                                    ?: "request denied by user"
                                 draft.response(403, null)
                                 return Dispatched(
                                     Response.Status.FORBIDDEN,
-                                    err("denied", "request denied by user")
+                                    err("denied", detail)
                                 )
                             }
                             is ApprovalGate.GateResult.TimedOut -> {
@@ -1754,7 +1761,8 @@ class HttpServer(
             )
             is ApprovalGate.GateResult.Denied -> Decision(
                 mode, source, globalMode.name, ruleKey,
-                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth
+                g.enqueuedAt, g.shownAt, g.decidedAt, g.queueDepth,
+                reason = g.reason
             )
             is ApprovalGate.GateResult.TimedOut -> Decision(
                 mode, source, globalMode.name, ruleKey,

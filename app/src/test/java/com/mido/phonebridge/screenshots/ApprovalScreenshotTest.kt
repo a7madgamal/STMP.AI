@@ -9,6 +9,7 @@ import com.mido.phonebridge.core.Verb
 import com.mido.phonebridge.policy.Mode
 import com.mido.phonebridge.policy.Rule
 import org.junit.After
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 
@@ -112,6 +113,68 @@ class ApprovalScreenshotTest(variant: Variant) : ShotTest(variant) {
     @Test fun ai_ready_medium() = show("ai_ready_medium", ai = summary(Risk.MEDIUM))
     @Test fun ai_ready_high() = show("ai_ready_high", ai = summary(Risk.HIGH))
     @Test fun ai_failed() = show("ai_failed", ai = ApprovalGate.AiState.Failed("the model did not answer in time"))
+    /**
+     * The reason sheet, open and empty.
+     *
+     * The state that cannot be checked from the source: the sheet is `GONE` until a long-press
+     * reveals it, so every other baseline in this class photographs a modal where the feature does
+     * not exist. That is precisely how the DENY drain shipped invisible — a control whose visible
+     * state was never in an image.
+     *
+     * The long-press is performed the way a human does it (a real `performLongClick`), not by
+     * setting `visibility` from the test, so the wiring is under test too.
+     */
+    @Test
+    fun deny_reason_sheet() {
+        val now = System.currentTimeMillis()
+        val pending = ApprovalGate.Pending(
+            requestId = 4242L,
+            latch = CountDownLatch(1),
+            detail = org.json.JSONObject().put("method", "GET").put("path", "/contacts/search"),
+            view = view(),
+            remote = "100.64.0.7",
+            endpoint = "GET /contacts/search",
+            summary = "Search contacts for sara",
+            account = "me@example.com",
+            createdAtMs = now,
+            shownAtMs = now,
+            aiState = ApprovalGate.AiState.NotNeeded,
+            enabledAtMs = now - 1,
+        )
+        ApprovalGate.setCurrentForTest(pending)
+        queue().clear()
+        queue().add(pending)
+        val intent = Intent(Fixtures.app, ApprovalActivity::class.java)
+            .putExtra(ApprovalActivity.EXTRA_ID, 4242L)
+            .putExtra(ApprovalActivity.EXTRA_CREATED_AT, now)
+        val a = org.robolectric.Robolectric.buildActivity(ApprovalActivity::class.java, intent).setup().get()
+        findByDescription(a.window.decorView, TIP_DESCRIPTION)?.performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        val deny = findByText(a.window.decorView, "DENY")
+        assertSheetHidden(a)
+        deny?.performLongClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        capture(a, "approval", "deny_reason")
+    }
+
+    /**
+     * The sheet must start off screen, or the "hold DENY" gesture has nothing to reveal and the
+     * modal shows a text field nobody asked for.
+     *
+     * Asserted on the CONTAINER's flag, not the field's: a child's own `visibility` is `VISIBLE`
+     * inside a hidden parent, and testing it would fail while the screen was correct — which is
+     * exactly what the first version of this assertion did.
+     */
+    private fun assertSheetHidden(activity: ApprovalActivity) {
+        val field = findEditText(activity.window.decorView)
+        assertTrue("the reason field must exist", field != null)
+        val container = field!!.parent as android.view.View
+        assertTrue(
+            "the reason sheet must be hidden until the long-press",
+            container.visibility != android.view.View.VISIBLE,
+        )
+    }
+
     @Test fun not_needed() = show("not_needed")
 
     /**
