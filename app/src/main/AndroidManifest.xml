@@ -107,6 +107,7 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:showOnLockScreen="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.STMP.Approval.Sheet" />
 
         <!--

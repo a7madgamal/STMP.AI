@@ -1415,9 +1415,17 @@ class ApprovalActivity : FragmentActivity() {
         // orientation, and this modal is drawn over whatever was on screen — so a hardcoded
         // number would be wrong exactly where it matters. Bottom is included too, so the
         // buttons never sit under the navigation bar.
+        //
+        // **The IME is part of that, and its absence was a real bug:** the reason sheet opens a
+        // keyboard over the pinned block, so the field it just focused sat underneath it — the
+        // human typed into something they could not see. `adjustResize` in the manifest lets the
+        // window shrink; this listener is what moves the content out of the space the keyboard
+        // took. `max(bars, ime)` rather than a sum: the keyboard is drawn OVER the navigation
+        // bar, so adding the two would push the buttons twice the height of a bar into the sheet.
         ViewCompat.setOnApplyWindowInsetsListener(outer) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, bars.top, 0, bars.bottom)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(0, bars.top, 0, maxOf(bars.bottom, ime.bottom))
             insets
         }
         sheetRoot = outer

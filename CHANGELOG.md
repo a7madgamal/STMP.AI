@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.65 (build 391)**.
+Current build: **v0.51.66 (build 392)**.
 
 ---
 
@@ -5727,12 +5727,16 @@ devDependencies. `node_modules/` is gitignored.
 - The fill is a wash rather than the solid stamp red, because a solid fill's boundary crosses the centred label and ink on that red is 2.1:1. The wash keeps the label at 5.4:1 on the fill and 10.8:1 on the trough, so it never has to change colour mid-countdown.
 - The level that drives the drain comes from `CountdownMeter`, a pure function with tests, instead of arithmetic inline in the tick. A level set on the inner fill alone paints nothing, so the handle exposes it and pins that trap with a test.
 
-## 0.51.65 (build 391) — 2026-11-18 — CURRENT
+## 0.51.65 (build 391) — 2026-11-18
 - Holding DENY opens a reason sheet: one field, one submit, and the words go to the caller in the 403 `detail`. A short tap is still a plain deny, because the reject path is the one a half-asleep human has to hit correctly and a required field in front of it would slow every deny to serve the few that want to explain. A hint line under the row says the gesture exists.
 - Submit is disabled until something is typed, and the gate refuses blank text too. An empty reason would reach the caller as an empty `detail` — indistinguishable from a plain deny while being recorded as if someone had explained themselves.
 - The decision window is 90 seconds instead of 60, in one constant. A window that grew when the sheet opened would have to wake a latch that is already waiting, and a second "display" number is how a bar starts disagreeing with the deadline it claims to show.
 - The audit record keeps the typed reason in `decision.reason`, written only when there is one, so "no reason given" and "a reason that was empty" cannot be confused.
 - The log-detail goldens no longer rot: their fixtures carry fixed dates, so a store with a hundred-year age cap is installed for the test rather than letting the seven-day retention delete a fixture and turn the suite red with no code change.
+
+## 0.51.66 (build 392) — 2026-11-18 — CURRENT
+- The reason sheet's keyboard no longer covers the field it just focused. The activity asks for `adjustResize` and the modal now pads for the IME inset as well as the system bars, so the pinned block moves up instead of sitting underneath the keyboard. `maxOf` rather than a sum, because the keyboard is drawn over the navigation bar and adding the two would reserve a bar's height twice.
+- The IME rule is pinned by a source scan, because Robolectric draws no keyboard and no screenshot could ever show this failing.
 
 ## Keeping this file honest
 
