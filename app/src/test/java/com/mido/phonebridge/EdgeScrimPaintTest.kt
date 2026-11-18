@@ -45,10 +45,38 @@ class EdgeScrimPaintTest {
         val bm = Bitmap.createBitmap(v.width, v.height, Bitmap.Config.ARGB_8888)
         v.draw(Canvas(bm))
         // `0 until width`, so the last paintable column is width-1.
-        return bm.getPixel(x.coerceIn(0, v.width - 1), v.height / 2)
+        //
+        // **Sample inside the SCROLL BAND, not the wrapper's middle.** The shadow is deliberately
+        // drawn only over the band that responds to a drag, so the wrapper's vertical centre can
+        // fall below it — sampling there would report "no shadow" on a screen that shows one.
+        val content = (v.getChildAt(0) as android.widget.HorizontalScrollView).getChildAt(0)
+        val y = (content.height / 2).coerceIn(0, v.height - 1)
+        return bm.getPixel(x.coerceIn(0, v.width - 1), y)
     }
 
     private fun scroll(v: EdgeScrimScrollView) = v.getChildAt(0) as HorizontalScrollView
+
+    /**
+     * Scroll the way the widget does: move, then re-lay-out.
+     *
+     * `scrollTo` alone updates nothing observable here — a `HorizontalScrollView` clamps and repaints
+     * through a layout pass, so a test that only calls `scrollTo` asserts against a scroll position
+     * the view never actually took. That is a fact about the harness, not about the shadow.
+     */
+    private fun scrollTo(v: EdgeScrimScrollView, x: Int) {
+        val sc = scroll(v)
+        sc.scrollTo(x, 0)
+        sc.measure(
+            View.MeasureSpec.makeMeasureSpec(v.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        sc.layout(0, 0, sc.measuredWidth, sc.measuredHeight)
+        v.measure(
+            View.MeasureSpec.makeMeasureSpec(v.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+    }
 
     /** At the left end there is nothing behind you, so no left shadow — the ask cuts both ways. */
     @Test
@@ -69,7 +97,7 @@ class EdgeScrimPaintTest {
     @Test
     fun `both shadows appear mid-scroll`() {
         val v = build("echo " + "x".repeat(300))
-        scroll(v).scrollTo(120, 0)
+        scrollTo(v, 120)
         assertNotEquals("left edge must darken once scrolled past the start", Theme.BG, pixel(v, 0))
         assertNotEquals("right edge must still darken", Theme.BG, pixel(v, v.width - 1))
     }

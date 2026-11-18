@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.68 (build 394)**.
+Current build: **v0.51.69 (build 395)**.
 
 ---
 
@@ -5743,9 +5743,13 @@ devDependencies. `node_modules/` is gitignored.
 - The indent a line break creates is no longer drawn. `echo a; echo b` put a phantom space in front of the second line, which read as the start of a second command. The characters are still there, because they are in the command that gets sent: a zero-width span collapses only the drawn run.
 - The command string and everything drawn from it stay separate. The renderer builds its own buffer and never touches its argument, so what a human approves is byte-identical to what arrives — and a test pins that the space is present in the text while absent from the glyphs.
 
-## 0.51.68 (build 394) — 2026-11-18 — CURRENT
+## 0.51.68 (build 394) — 2026-11-18
 - A scrolling command shows a scrollbar that does not fade. The platform hides it after a couple of seconds, which is exactly when someone is still reading the command — and a command that continues past the edge looks the same as one that ends there.
 - A command too wide for the card casts a shadow at whichever edge still has content behind it: nothing on the left until you scroll, nothing on the right once you reach the end. The shadow is drawn in ink and darkens toward the edge, because a fade from the paper colour to the paper colour is a gradient nobody can see — which is how the first attempt shipped invisible.
+
+## 0.51.69 (build 395) — 2026-11-18 — CURRENT
+- The shadow covers exactly the band that scrolls, not the strip below it. People aim a drag at the shadow, so a shadow stretched over the scrollbar promised scrolling on a strip that passes the gesture straight through.
+- The shadow reads its position from the scroller instead of from a cached copy. A missed scroll event left the wrong edge shaded until something else forced a repaint.
 
 ## Keeping this file honest
 

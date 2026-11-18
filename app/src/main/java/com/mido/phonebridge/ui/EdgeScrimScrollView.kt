@@ -75,9 +75,17 @@ class EdgeScrimScrollView(
         // property initialiser — a `lateinit`-shaped ordering bug in a file that is otherwise
         // straight-line.
         scrim = Scrim()
-        scroller.setOnScrollChangeListener { _, scrollX, _, _, _ -> scrim.onScrolled(scrollX) }
+        // The listener only asks for a repaint; the POSITION is read from the scroller when the
+        // scrim draws. A cached copy is what went stale: `scrollTo` does not always reach a
+        // scroll-change listener (Robolectric's does not at all), and a shadow that trusts the
+        // event instead of the widget shows the wrong edge forever after one missed delivery.
+        scroller.setOnScrollChangeListener { _, _, _, _, _ -> scrim.refresh() }
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         // The scrim sits above the content, and must not eat the drag that scrolls it.
+        // **MATCH_PARENT, or the scrim has no height at all.** It is a custom `View` with no
+        // intrinsic size, so `WRAP_CONTENT` measures it to zero and it draws nothing — a shadow
+        // that exists, computes correctly, and has no pixels to paint on. The band it should cover
+        // is applied in `onDraw` instead, which is the one place that can be exact.
         addView(scrim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         scrim.isClickable = false
         scrim.isFocusable = false
@@ -94,6 +102,15 @@ class EdgeScrimScrollView(
      */
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
+        // **The shadow is drawn over the band that actually scrolls.** People read the shadow as
+        // "this strip responds to a drag" and aim at it, so it must not be taller than the text: a
+        // shadow over the scrollbar promises scrolling on a strip that does not scroll. The
+        // content view is that band — the scroller's own height also covers the bar.
+        //
+        // The height is handed to the scrim to DRAW with rather than pushed into its layout
+        // params: assigning `layoutParams` from inside `onLayout` does not schedule another pass,
+        // so the first version silently kept the full-height rectangle it was measured at.
+        scrim.bandHeight = scroller.getChildAt(0)?.height ?: 0
         scrim.refresh()
     }
 
@@ -111,6 +128,9 @@ class EdgeScrimScrollView(
         private var rightAlpha = 0
         private var lastScrollX = 0
 
+        /** Height of the scrollable band, set by the parent after layout. 0 means "not known yet". */
+        var bandHeight: Int = 0
+
         init {
             // A View with no background still receives no touches unless it declines them, and the
             // default is to be transparent to touch — stated here so a later `setBackground` on
@@ -121,11 +141,6 @@ class EdgeScrimScrollView(
 
         override fun onTouchEvent(event: MotionEvent): Boolean = false
 
-        fun onScrolled(scrollX: Int) {
-            lastScrollX = scrollX
-            recalculate()
-        }
-
         /** Recompute from current geometry. Called after layout and on every scroll. */
         fun refresh() = recalculate()
 
@@ -133,6 +148,8 @@ class EdgeScrimScrollView(
             val width = width
             if (width <= 0) return
             val contentWidth = scroller.getChildAt(0)?.width ?: 0
+            // Read the live position, never a cached one.
+            lastScrollX = scroller.scrollX
             val maxScroll = (contentWidth - width).coerceAtLeast(0)
             // Nothing to reach in either direction: no shadows, and the bar is the only affordance
             // — which is correct, because there is nothing hidden.
@@ -151,7 +168,9 @@ class EdgeScrimScrollView(
 
         override fun onDraw(canvas: Canvas) {
             val w = width.toFloat()
-            val h = height.toFloat()
+            // The scrollable band, never the full wrapper: the extra strip below is the scrollbar,
+            // which a drag passes straight through.
+            val h = (if (bandHeight > 0) bandHeight else height).toFloat()
             if (w <= 0f || h <= 0f) return
             val band = scrimWidthPx.coerceAtMost(w / 3f)
 
