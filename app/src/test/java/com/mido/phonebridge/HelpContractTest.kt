@@ -126,7 +126,7 @@ class HelpContractTest {
          * Not generated: writing the pin by hand is what makes a bump a deliberate act rather
          * than something a script does while you are not looking.
          */
-        const val CONTRACT_VERSION = 5
+        const val CONTRACT_VERSION = 6
 
         val PINNED_ROUTES: Set<String> = setOf(
             "DELETE /audit",
@@ -137,10 +137,13 @@ class HelpContractTest {
             "GET /drive/files",
             "GET /drive/files/{id}",
             "GET /drive/files/{id}/content",
+            "GET /files",
+            "GET /files/content",
             "GET /gmail/messages",
             "GET /gmail/messages/{id}",
             "GET /gmail/profile",
             "GET /health",
+            "POST /files/upload",
             "GET /help",
             "GET /probe",
             "GET /logs",

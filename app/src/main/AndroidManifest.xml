@@ -100,7 +100,17 @@
             </intent-filter>
         </activity>
 
-        <activity
+        <!-- The folder picker for the files plugin. No launcher entry and no navigation: it is reached
+         only from the notification that a refused request posts, because the grant is asked for
+         when a request needs it rather than at setup. -->
+    <activity
+        android:name=".plugins.files.FilesGrantActivity"
+        android:exported="false"
+        android:excludeFromRecents="true"
+        android:noHistory="true"
+        android:theme="@style/Theme.STMP.Approval" />
+
+    <activity
             android:name=".ApprovalActivity"
             android:exported="false"
             android:launchMode="singleTop"

@@ -34,6 +34,8 @@ object ErrorCodes {
     const val NOT_FOUND = 404
     const val CONFLICT = 409
     const val GONE = 410
+    /** 413: the body is bigger than this route will accept. Used by `files` uploads. */
+    const val PAYLOAD_TOO_LARGE = 413
     const val INTERNAL = 500
     const val UNAVAILABLE = 503
 
@@ -118,6 +120,32 @@ object ErrorCodes {
         // "timed out" — the human was never shown anything. 503 rather than 403 because the phone
         // is not-ready for approval, and try-again becomes true the moment the grant is given.
         "prompt_unreachable" to UNAVAILABLE,
+
+        // --- files ---------------------------------------------------------------------------
+        // The plugin can add and read files; it never removes or replaces one, and these codes
+        // are how it says so without a 500.
+        //
+        // A name that is really a path. Refused rather than sanitised: rewriting it would mean the
+        // document the human approved and the document written could differ.
+        "bad_name" to BAD_REQUEST,
+        // `?path` missing, or an upload with no body.
+        "length_required" to BAD_REQUEST,
+        // Over the cap, refused BEFORE the card so nobody approves a transfer that cannot happen.
+        "file_too_large" to PAYLOAD_TOO_LARGE,
+        // A body that stopped short of its declared length. 400 rather than a short file behind a
+        // clean 200 — a truncated document that reports success is the worst outcome here.
+        "incomplete_body" to BAD_REQUEST,
+        // The name is taken. 409, and nothing is written: replacing is an explicit decision, not a
+        // side effect of an upload.
+        "file_exists" to CONFLICT,
+        // The transfer failed mid-stream. 500 because it is our side of the wire, and the message
+        // says whether the partial document was rolled back.
+        "upload_failed" to INTERNAL,
+        // Asked for a file, named a folder.
+        "not_a_file" to BAD_REQUEST,
+        // The bundle exists but was never given a folder. 503 with try-again: the notification that
+        // accompanies it is how the human fixes it.
+        "folder_not_granted" to UNAVAILABLE,
 
         // --- our side, or an upstream we depend on ---
         "auth_not_configured" to UNAVAILABLE,
@@ -290,6 +318,14 @@ object ErrorCodes {
         "caller_unverified" to "This address has never been named. A human must approve it on the phone (with a name) before any route will answer.",
         "caller_denied" to "A human blocked this address. No route will answer it until that block is removed on the phone.",
         "prompt_unreachable" to "The approval prompt cannot be displayed on this phone, so the request was refused instead of waiting. Grant full-screen notifications or draw-over-apps in Preferences.",
+        "bad_name" to "A file name is required and cannot contain a path separator: \"/\" or \"\\\". The name is refused rather than cleaned, so the file you approve is the file that is written.",
+        "length_required" to "An upload must declare Content-Length. The size cap cannot be enforced against an undeclared length, so a body of unknown size is refused rather than streamed blind.",
+        "file_too_large" to "The file exceeds the 200 MiB limit. Refused before any approval card, so nobody approves a transfer that cannot happen.",
+        "incomplete_body" to "The body stopped short of its declared Content-Length, so nothing was kept. A truncated file that answers 200 is the failure this refusal exists to prevent.",
+        "file_exists" to "A file with that name is already in Downloads/STMP. Nothing was written: replacing is an explicit decision, not a side effect of an upload.",
+        "upload_failed" to "The transfer failed part-way. The message says whether the partial file was removed; if it was not, it may still be in the folder.",
+        "not_a_file" to "That name is a folder, not a file. A folder cannot be downloaded as bytes.",
+        "folder_not_granted" to "No folder has been granted yet, so there is nothing to read or write. The phone has posted a notification: tap it to choose Downloads/STMP, then retry.",
 
         // --- our side ---
         "auth_not_configured" to "This build has no OAuth credentials; it cannot serve Google routes.",

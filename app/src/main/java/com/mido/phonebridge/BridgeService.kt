@@ -807,6 +807,11 @@ class BridgeService : Service() {
         if (PluginRegistry.get("audio") == null) {
             PluginRegistry.register(com.mido.phonebridge.plugins.audio.AudioPlugin(applicationContext))
         }
+        // Files: add and read only. There is deliberately no delete route — see the plugin's own
+        // comment for why the irreversible one was cut rather than worded around.
+        if (PluginRegistry.get("files") == null) {
+            PluginRegistry.register(com.mido.phonebridge.plugins.files.FilesPlugin(applicationContext))
+        }
         // The agent's entry point. Registered beside the rest, gated like the rest — its
         // default rule (help/ANY -> NOTIFY) is seeded into the policy file, not baked in here,
         // so the human can see and change it on the exceptions screen.
