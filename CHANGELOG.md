@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.53.5 (build 436)**.
+Current build: **v0.53.6 (build 437)**.
 
 ---
 
@@ -5970,10 +5970,15 @@ devDependencies. `node_modules/` is gitignored.
 - **Fixed: the code exchange sent the wrong client secret.** `redeemSecret` was resolved and then ignored; the form used the build's own secret, so a credential with its own client could not redeem a code even after the client id was corrected. The refresh path correctly keeps the build secret — it redeems a token minted by the build's client.
 - New `IdTokenIdentityTest` (Robolectric): reads a well-formed Google `id_token`, and refuses a foreign issuer, a missing email, a missing `sub`, and a non-JWT. The issuer check is what stops a substituted token from naming an account.
 
-## 0.53.5 (build 436) — 2026-11-20 — CURRENT
+## 0.53.5 (build 436) — 2026-11-20
 - **Fixed: an account could be saved holding none of its data scopes.** The device log showed the second account granted `scope: "openid userinfo.email"` although Gmail, Calendar and Drive were all requested — Google honours exactly what the human ticks, and the app stored that record as connected. Every Gmail call afterwards would have failed with a 403 naming nothing. Connect now compares the granted set against what the plugins require and fails with `scope_missing`, listing the exact permissions, so the problem surfaces at the consent screen where it can be fixed.
 - **Fixed: connecting an OAuth credential died with `identity_lookup_failed: userinfo HTTP 401`.** A credential consent asks only for its own scope (`chromewebstore`), and Google returns an `id_token` only when `openid` is present — so there was no identity, the fallback called userinfo, and that bearer had no `userinfo.email` scope. The credential consent now always includes `openid email`, which are identity rather than data and add nothing to the prompt beyond naming the account.
 - Recorded what Google granted rather than what was requested, so a stored scope set can no longer overstate access.
+
+## 0.53.6 (build 437) — 2026-11-21 — CURRENT
+- **Fixed: the approval modal never named the Google account.** The gate passes the endpoint as `"$method $path"`, so the string begins `"GET /gmail/messages"` — and the predicate tested `startsWith("/gmail")`, which is false with a method in front. The account line was therefore never drawn on any Gmail, Calendar or Drive card, exactly the fact the human needs before approving. The resolver was always right; only the predicate was wrong. Reported by Mido on the card itself.
+- **Fixed: an account sign-in inherited the OAuth credential's client.** `PlayAuth.oauthTarget` is process-wide and was set when the OAuth screen ran a connect, but the account flow never cleared it. A subsequent ACCOUNT sign-in was minted against that credential's client and redeemed with its secret, so the stored refresh token belonged to a client the later account refresh did not name — `unauthorized_client` on the next Gmail call, which is what the second account hit after the store credential was connected.
+- New `IsGoogleRequestTest`: covers method-prefixed endpoints, bare paths, and the two near-misses that must NOT match (`/secrets/gmail-key`, a query string containing a route).
 
 ## Keeping this file honest
 

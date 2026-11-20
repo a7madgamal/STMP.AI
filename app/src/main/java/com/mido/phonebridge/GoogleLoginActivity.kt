@@ -161,6 +161,14 @@ class GoogleLoginActivity : Activity() {
     }
 
     private fun beginFlow(adding: Boolean, target: String?) {
+        // **Clear any credential target.** `oauthTarget` is a process-wide `@Volatile` on PlayAuth,
+        // set when the OAuth screen starts a connect. If it survives into an ACCOUNT sign-in, the
+        // account gets minted against that credential's client and the credential's own client
+        // secret is used to redeem it — and the stored refresh token then belongs to a client that
+        // a later account refresh does not name. The result is `unauthorized_client` on the next
+        // Gmail call, which is exactly what happened to the second account after the credential
+        // was connected. An account flow must start with no credential in scope.
+        PlayAuth.targetOauthCredential(null)
         thread {
             try {
                 val scopes = com.mido.phonebridge.core.PluginRegistry.allScopes()

@@ -1630,8 +1630,13 @@ class ApprovalActivity : FragmentActivity() {
      * Matched on the route prefix, because the endpoint is what this Activity already has in hand;
      * the plugin id never crosses the intent.
      */
-    private fun isGoogleRequest(routePath: String): Boolean {
-        val path = routePath.substringBefore('?')
+    private fun isGoogleRequest(endpoint: String): Boolean {
+        // **Strip the METHOD, not just the query.** The gate passes the endpoint as
+        // `"$method $path"` (see ApprovalGate.await), so this string begins `"GET /gmail/..."`.
+        // Matching `startsWith("/gmail")` therefore never fired, `view.account` was never drawn,
+        // and every Google modal omitted the account it was about to act on — the one fact the
+        // human needs before approving. The resolver is unchanged; only the predicate was wrong.
+        val path = endpoint.substringAfter(' ', endpoint).substringBefore('?')
         return path.startsWith("/gmail") ||
             path.startsWith("/calendar") ||
             path.startsWith("/drive")
