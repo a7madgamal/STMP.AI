@@ -377,7 +377,35 @@ class OauthPlugin(
 
     // --- validation -----------------------------------------------------------
 
+    /**
+     * Refuse a credential that cannot mint, BEFORE the gate.
+     *
+     * A credential imported from a client file has no refresh token yet, so every call is a
+     * guaranteed failure. Costing a human an approval tap for something that cannot work is the
+     * exact rule `no_folder_granted` already follows. Its own code, because "finish the
+     * authorisation" is a different repair from "grant a folder" or "fix the host allowlist".
+     */
+    private fun requireReady(name: String) {
+        val status = try {
+            OauthSecret.fromVault(SecretVault.get(ctx, OauthStore.vaultName(name))).status
+        } catch (e: PluginError) {
+            // A missing/short vault entry is its own coded refusal; let it through unchanged so the
+            // caller learns what is actually wrong rather than being told to authorise.
+            throw e
+        }
+        if (status == OauthSecretStatus.NEEDS_REFRESH_TOKEN) {
+            throw PluginError(
+                "oauth_needs_refresh_token",
+                "'$name' has no refresh token yet, so it cannot mint. Open the OAuth screen, tap " +
+                    "Connect on that credential, and finish the authorisation. Nothing was sent.",
+            )
+        }
+    }
+
     private fun validateCall(req: Req) {
+        // Readiness before anything else: an unusable credential fails on its own terms, and the
+        // answer names the one action that fixes it.
+        requireReady(name)
         val host = requireHttpsHost(req.body.optString("url", "").trim())
         val hosts = try {
             SecretVault.meta(ctx, OauthStore.vaultName(name)).hosts
@@ -396,6 +424,7 @@ class OauthPlugin(
     }
 
     private fun validateUpload(req: Req) {
+        requireReady(name)
         // The grant is checked BEFORE the card: a request that can never succeed must not cost a tap.
         try {
             store.root()
@@ -530,6 +559,17 @@ class OauthIndexPlugin(private val ctx: Context) : Plugin {
                     .put("tokenUrl", entry.tokenUrl)
                     .put("authStyle", entry.authStyle)
                     .put("scope", entry.scope)
+                    // Whether it can mint, so a caller sees "not ready" instead of discovering it
+                    // through a refusal. Absent means the secret itself is unreadable, which is a
+                    // different fact and is reported as such.
+                    .put(
+                        "status",
+                        runCatching {
+                            OauthSecret.fromVault(
+                                SecretVault.get(ctx, OauthStore.vaultName(n))
+                            ).status.wireName
+                        }.getOrElse { "unreadable" }
+                    )
                     .put("hosts", org.json.JSONArray(hosts))
                     .put("call", "POST /oauth/$n/call")
                     .put("upload", "POST /oauth/$n/upload")

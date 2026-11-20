@@ -3,11 +3,14 @@ package com.mido.phonebridge
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.plugins.oauth.OauthEntry
 import com.mido.phonebridge.plugins.oauth.OauthSecret
+import com.mido.phonebridge.plugins.oauth.OauthSecretStatus
+import com.mido.phonebridge.plugins.oauth.RefreshTokenPaste
 import com.mido.phonebridge.plugins.oauth.OauthToken
 import com.mido.phonebridge.plugins.oauth.OauthTokenCache
 import com.mido.phonebridge.plugins.oauth.tokenErrorLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -99,18 +102,42 @@ class OauthPluginTest {
     }
 
     @Test
-    fun `a missing refresh token is refused by its own name`() {
-        try {
-            OauthSecret.fromVault("""{"client_secret":"GOCSPX-abc"}""")
-            fail("must refuse")
-        } catch (e: PluginError) {
-            assertEquals("oauth_bad_secret", e.code)
-            assertNotNull(e.message)
-            assertTrue(
-                "the message must name the missing field, or the repair is a guess: ${e.message}",
-                e.message!!.contains("refresh_token"),
-            )
-        }
+    fun `a stored credential WITHOUT a refresh token parses, and reports that it needs one`() {
+        // **This is what the import needs.** A downloaded client file is the client half only, so
+        // refusing to store a credential without a refresh token discarded a perfectly good import
+        // and blocked the user on a field the file cannot contain. The state is now explicit and
+        // visible rather than an error.
+        val parsed = OauthSecret.fromVault("""{"client_secret":"GOCSPX-abc"}""")
+        assertEquals("", parsed.refreshToken)
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, parsed.status)
+    }
+
+    @Test
+    fun `a stored credential WITH a refresh token reports ready`() {
+        val parsed = OauthSecret.fromVault(
+            """{"refresh_token":"1//0gTOKEN","client_secret":"GOCSPX-abc"}"""
+        )
+        assertEquals(OauthSecretStatus.READY, parsed.status)
+    }
+
+    @Test
+    fun `a blank refresh token is the same state as an absent one`() {
+        // Both mean "imported, not authorised". Distinguishing them would be a distinction with no
+        // difference to any caller.
+        val parsed = OauthSecret.fromVault(
+            """{"refresh_token":"   ","client_secret":"GOCSPX-abc"}"""
+        )
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, parsed.status)
+    }
+
+    @Test
+    fun `the status round-trips through storage`() {
+        val before = OauthSecret(refreshToken = "", clientSecret = "s")
+        val after = OauthSecret.fromVault(before.toJson())
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, after.status)
+        // And an empty string survives as empty rather than becoming a placeholder — a placeholder
+        // would be a lie that surfaces at the provider as invalid_grant.
+        assertEquals("", after.refreshToken)
     }
 
     @Test
@@ -168,6 +195,52 @@ class OauthPluginTest {
     fun `basic is the default auth style`() {
         val entry = OauthEntry.fromJson("""{"tokenUrl":"https://x/token"}""")
         assertEquals(OauthEntry.AUTH_BASIC, entry.authStyle)
+    }
+
+    // --- the paste parser ---------------------------------------------------------------------
+
+    @Test
+    fun `a bare refresh token is accepted`() {
+        val token = "1//0gLONGREFRESHTOKENVALUEhere"
+        assertEquals(token, RefreshTokenPaste.extract(token))
+    }
+
+    @Test
+    fun `the whole json line is accepted, and the token is extracted`() {
+        // The most common paste: the human copies the line from the exchange response.
+        val line = """  "refresh_token": "1//0gLONGREFRESHTOKENVALUEhere","""
+        assertEquals("1//0gLONGREFRESHTOKENVALUEhere", RefreshTokenPaste.extract(line))
+    }
+
+    @Test
+    fun `quotes and a trailing comma are stripped`() {
+        assertEquals(
+            "1//0gLONGREFRESHTOKENVALUEhere",
+            RefreshTokenPaste.extract("\"1//0gLONGREFRESHTOKENVALUEhere\","),
+        )
+    }
+
+    @Test
+    fun `a client secret pasted into the token field is refused`() {
+        // These two sit adjacent in the console, and storing a secret as the refresh token fails at
+        // the PROVIDER as invalid_grant — which reads as "my credential is refused" rather than
+        // "the wrong field was filled".
+        assertNull(RefreshTokenPaste.extract("GOCSPX-abcdefghijklmnopqrstuvwxyz"))
+    }
+
+    @Test
+    fun `something too short to be a token is refused`() {
+        assertNull(RefreshTokenPaste.extract("1//x"))
+    }
+
+    @Test
+    fun `prose is refused rather than stored`() {
+        assertNull(RefreshTokenPaste.extract("copy the refresh token value from the page"))
+    }
+
+    @Test
+    fun `empty input is refused`() {
+        assertNull(RefreshTokenPaste.extract("   "))
     }
 
     @Test

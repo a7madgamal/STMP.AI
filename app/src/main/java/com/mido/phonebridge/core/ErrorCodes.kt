@@ -238,6 +238,9 @@ object ErrorCodes {
         // to fix it: 409 says "your config disagrees with reality". Two codes rather than one because
         // they are repaired in different fields of the same dialog.
         "oauth_bad_config" to CONFLICT,
+        // The credential exists but has never been authorised, so it cannot mint. CONFLICT: the
+        // stored record disagrees with what a call needs, and the repair is one screen action.
+        "oauth_needs_refresh_token" to CONFLICT,
         "oauth_bad_secret" to CONFLICT,
         "unknown_oauth" to BAD_REQUEST,
         // The provider refused the mint (RFC 6749 §5.2: invalid_grant, invalid_client, …). CONFLICT,
@@ -409,6 +412,7 @@ object ErrorCodes {
         "jwt_bad_secret" to "The stored JWT signing secret is empty or unusable; replace it on the JWT screen.",
         "unknown_jwt" to "No JWT credential is stored under that name; `GET /jwt` lists them.",
         "oauth_bad_config" to "The stored OAuth configuration cannot be read; fix it on the OAuth screen.",
+        "oauth_needs_refresh_token" to "This OAuth credential has been imported but never authorised, so it has no refresh token and cannot mint one. Open the OAuth screen, tap Connect on it, and finish the authorisation. Nothing was sent.",
         "oauth_bad_secret" to "The stored OAuth credential is missing its refresh token or client secret; replace them on the OAuth screen.",
         "unknown_oauth" to "No OAuth credential is stored under that name; `GET /oauth` lists them.",
         "oauth_token_refused" to "The token endpoint refused to mint an access token: the refresh token may be expired or revoked, the client secret may be wrong, or the client authenticates a different way. The provider's own error is in the message.",

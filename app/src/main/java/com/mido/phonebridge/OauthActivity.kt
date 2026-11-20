@@ -21,6 +21,8 @@ import com.mido.phonebridge.plugins.oauth.OauthClientImport
 import com.mido.phonebridge.plugins.oauth.OauthClientJson
 import com.mido.phonebridge.plugins.oauth.OauthEntry
 import com.mido.phonebridge.plugins.oauth.OauthSecret
+import com.mido.phonebridge.plugins.oauth.OauthSecretStatus
+import com.mido.phonebridge.plugins.oauth.RefreshTokenPaste
 import com.mido.phonebridge.plugins.oauth.OauthStore
 import com.mido.phonebridge.plugins.oauth.OauthTokenCache
 import com.mido.phonebridge.plugins.secrets.HostAllowlist
@@ -188,7 +190,25 @@ class OauthActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { bottomMargin = Theme.dp(this@OauthActivity, 10) }
 
+        // Read the stored status BEFORE building the row: it decides whether Connect is offered
+        // and whether the card says anything at all about being unfinished.
+        val status = runCatching {
+            OauthSecret.fromVault(SecretVault.get(this, OauthStore.vaultName(name))).status
+        }.getOrNull()
+        val needsToken = status == OauthSecretStatus.NEEDS_REFRESH_TOKEN
+
         card.addView(Theme.text(this, name, Theme.TEXT_BODY_SP))
+        if (needsToken) {
+            // Said in words, on the card, because a credential that silently cannot mint is the
+            // kind of thing nobody discovers until a release fails at 2am.
+            card.addView(
+                Theme.text(
+                    this,
+                    "needs a refresh token — tap CONNECT to authorise",
+                    Theme.TEXT_CAPTION_SP, Theme.WARNING,
+                )
+            )
+        }
         card.addView(
             Theme.text(
                 this,
@@ -221,6 +241,12 @@ class OauthActivity : Activity() {
         )
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // **CONNECT is the follow-up, and it appears only when it is the useful action.**
+        //
+        // A credential imported from a client file has no refresh token, so the next thing the
+        // human needs is an authorisation — not a rotate, not a hosts editor. Showing it here, on
+        // the card that says "needs a refresh token", is what turns a blocked import into one tap.
+        if (needsToken) buttons.addView(small("connect") { connectDialog(name, entry) })
         buttons.addView(small("rotate") { rotateSecretDialog(name) })
         buttons.addView(small("edit") { addDialog(name) })
         buttons.addView(small("hosts") { hostsDialog(name) })
@@ -731,7 +757,12 @@ class OauthActivity : Activity() {
 
         if (creating) {
             if (clientSecret?.isBlank() != false) return refuse("(secret) CLIENT SECRET is required")
-            if (refreshToken?.isBlank() != false) return refuse("(refresh) REFRESH TOKEN is required")
+            // **The refresh token is NOT required.** Mido, 2026-11-20: *"i don't like being blocked
+            // by a required field … we should accept the json data and have a follow up"*.
+            //
+            // A downloaded client file cannot contain one, so demanding it here refused a file that
+            // was perfectly good. The credential is saved as `needs_refresh_token`, the card says
+            // so, and Connect finishes it.
         }
 
         // Hosts are validated as a whole before anything is written, so a typo in the last one cannot
@@ -750,7 +781,10 @@ class OauthActivity : Activity() {
                 SecretVault.put(
                     this,
                     OauthStore.vaultName(cleanName),
-                    OauthSecret(refreshToken!!.trim(), clientSecret!!.trim()).toJson(),
+                    OauthSecret(
+                        refreshToken = refreshToken?.trim().orEmpty(),
+                        clientSecret = clientSecret!!.trim(),
+                    ).toJson(),
                     hosts = hostRules,
                     docs = docs.trim(),
                     // OWNED BY THIS PLUGIN. The Secrets screen lists only unowned entries, so this is
@@ -784,7 +818,14 @@ class OauthActivity : Activity() {
             // to the previous config.
             OauthTokenCache.forget(cleanName)
             BridgeService.registerOauthPlugin(this, cleanName)
-            toast(if (creating) "credential '$cleanName' saved" else "updated '$cleanName'")
+            toast(
+                when {
+                    !creating -> "updated '$cleanName'"
+                    refreshToken.isNullOrBlank() ->
+                        "'$cleanName' saved — now tap Connect on it to get a refresh token"
+                    else -> "credential '$cleanName' saved"
+                }
+            )
             render()
         } catch (e: PluginError) {
             refuse("(fail) ${e.message}")
@@ -868,6 +909,170 @@ class OauthActivity : Activity() {
             refuse = refuse,
         )
     }
+
+    /**
+     * The follow-up: everything that turns "imported" into "working", in one sheet.
+     *
+     * **This is Tier 1.** From the client file the app already holds the client id, the token URI
+     * and the registered redirect URIs, so it can build the EXACT authorisation URL and open it —
+     * with `access_type=offline` and `prompt=consent`, which are the two parameters that actually
+     * cause Google to return a refresh token and which the Playground hides behind a gear icon.
+     *
+     * What is left is unavoidable without a local listener: Google redirects to the registered URI,
+     * and this build cannot serve that, so the authorisation code comes back through the Playground
+     * and the human pastes ONE line. Tier 2 removes that paste; it needs a loopback socket, which is
+     * a separate decision.
+     */
+    private fun connectDialog(name: String, entry: OauthEntry) {
+        val scope = runCatching {
+            // A credential may carry a display-only scope; fall back to the one this screen is
+            // mostly used for so the link is still pre-filled rather than blank.
+            OauthStore.get(this, name).scope.ifBlank { DEFAULT_SCOPE }
+        }.getOrDefault(DEFAULT_SCOPE)
+
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        box.addView(
+            Theme.text(
+                this,
+                "Two steps. The first opens Google's consent page already filled in — approve it, " +
+                    "and Google sends you back with a code.",
+                Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+            ).apply { setPadding(0, 0, 0, Theme.dp(this@OauthActivity, 10)) }
+        )
+
+        val authUrl = authorisationUrl(entry, scope)
+
+        val openBtn = Theme.button(this, "1 · AUTHORISE", Theme.ButtonStyle.SUCCESS) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(authUrl)))
+            } catch (e: Exception) {
+                // No browser is a real state on a stripped device; say so rather than appearing to
+                // do nothing, and leave the URL on screen so it can be copied elsewhere.
+                toast("no browser available — copy the URL below")
+            }
+        }
+        openBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
+        box.addView(openBtn)
+
+        // The URL itself, selectable, because a device with no browser is not the only reason to
+        // want it: the same link works pasted anywhere.
+        box.addView(
+            Theme.text(this, authUrl, Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT).apply {
+                typeface = Theme.monoFont(this@OauthActivity)
+                setTextIsSelectable(true)
+                setPadding(0, Theme.dp(this@OauthActivity, 6), 0, Theme.dp(this@OauthActivity, 12))
+            }
+        )
+
+        box.addView(
+            Theme.text(
+                this,
+                "If the redirect goes to the Playground, use it there: paste the client id and " +
+                    "secret on that page, exchange the code, and copy the refresh_token it shows.",
+                Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+            ).apply { setPadding(0, 0, 0, Theme.dp(this@OauthActivity, 12)) }
+        )
+
+        // Step 2: one field, accepting either the bare token or a whole pasted fragment.
+        val tokenField = labelledField(
+            box, "2 · REFRESH TOKEN",
+            "Paste the refresh_token from the exchange. Anything extra around it is stripped, so " +
+                "pasting the whole line works — and a value that is obviously not a token is " +
+                "refused rather than stored.",
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            required = true,
+        )
+
+        val refuse: (String) -> Boolean = { message ->
+            toast(message.substringAfter(')').trim().ifEmpty { message })
+            tokenField.requestFocus()
+            true
+        }
+
+        PaperDialog.show(
+            this,
+            "Connect $name",
+            box,
+            actions = listOf(
+                "cancel" to {},
+                "save token" to {
+                    val raw = tokenField.text.toString()
+                    val cleaned = extractRefreshToken(raw)
+                    if (cleaned == null) {
+                        return@to refuse(
+                            "(token) that does not look like a refresh token — the exchange shows " +
+                                "one starting with '1//'. Paste the refresh_token value itself."
+                        ).let { }
+                    }
+                    try {
+                        // The client secret is already in the vault; this only fills the half that
+                        // was missing, so the imported values are never re-typed.
+                        val existing = OauthSecret.fromVault(
+                            SecretVault.get(this, OauthStore.vaultName(name))
+                        )
+                        val hosts = runCatching {
+                            SecretVault.meta(this, OauthStore.vaultName(name)).hosts
+                        }.getOrDefault(emptyList())
+                        SecretVault.put(
+                            this,
+                            OauthStore.vaultName(name),
+                            OauthSecret(refreshToken = cleaned, clientSecret = existing.clientSecret).toJson(),
+                            hosts = hosts,
+                            owner = "oauth",
+                        )
+                        // Any cached token was minted before this credential existed.
+                        OauthTokenCache.forget(name)
+                        toast("'$name' is connected")
+                        render()
+                    } catch (e: Exception) {
+                        refuse("(fail) ${e.message}")
+                    }
+                },
+            ),
+            style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
+            refuse = refuse,
+        )
+    }
+
+    /**
+     * Build the authorisation URL for this credential.
+     *
+     * **`access_type=offline` and `prompt=consent` are the point.** Without the first Google does
+     * not issue a refresh token at all; without the second it omits one on a repeat authorisation.
+     * Both are absent from the Playground's default flow, which is why people come back with no
+     * `refresh_token` and no explanation.
+     *
+     * The redirect URI is the Playground's, because that is the one registered for the Web-typed
+     * client this build expects, and it is the URI that can catch the callback without STMP
+     * listening on a socket.
+     */
+    private fun authorisationUrl(entry: OauthEntry, scope: String): String {
+        val base = entry.tokenUrl.substringBefore("/token").ifEmpty { GOOGLE_AUTH_BASE }
+        val authEndpoint = if (base.contains("googleapis")) GOOGLE_AUTH_BASE else base
+        return authEndpoint.trimEnd('/') + "/o/oauth2/auth" +
+            "?client_id=" + enc(entry.clientId) +
+            "&redirect_uri=" + enc(OauthClientJson.PLAYGROUND_URI) +
+            "&response_type=code" +
+            "&scope=" + enc(scope) +
+            "&access_type=offline" +
+            "&prompt=consent"
+    }
+
+    private fun enc(v: String): String = java.net.URLEncoder.encode(v, "UTF-8")
+
+    /**
+     * Pull a refresh token out of whatever was pasted.
+     *
+     * People paste the whole `"refresh_token": "1//0g…"` line, or the field with quotes, or with a
+     * trailing comma. Being strict here would mean the value is right and the app still refuses,
+     * which is the worst combination. Being LENIENT about SHAPE while still refusing something that
+     * obviously is not a token is the honest middle.
+     */
+    private fun extractRefreshToken(raw: String): String? = RefreshTokenPaste.extract(raw)
+
 
     private fun hostsDialog(name: String) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -972,5 +1177,9 @@ class OauthActivity : Activity() {
         const val REQ_PICK_FOLDER = 9101
         /** The client-json picker. Distinct from the folder picker: different grant shape. */
         const val REQ_IMPORT_JSON = 9102
+        /** Google's authorisation endpoint, used when the entry's token URL is Google's. */
+        const val GOOGLE_AUTH_BASE = "https://accounts.google.com"
+        /** Pre-filled scope for the store this screen was built for. */
+        const val DEFAULT_SCOPE = "https://www.googleapis.com/auth/chromewebstore"
     }
 }

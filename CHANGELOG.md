@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.91 (build 417)**.
+Current build: **v0.51.92 (build 418)**.
 
 ---
 
@@ -5861,13 +5861,21 @@ devDependencies. `node_modules/` is gitignored.
 - The import also parses `redirect_uris` for one purpose: warning when `https://developers.google.com/oauthplayground` is not registered for the client, because that failure is a cryptic `redirect_uri_mismatch` that otherwise reads like a plugin bug.
 - Import is its own button that runs BEFORE the form exists. Delivering a picker result into an already-open dialog means crossing a possible activity restart to reach its fields, and a reference chain that breaks quietly is how a form ends up half-filled with no explanation.
 
-## 0.51.91 (build 417) — 2026-11-20 — CURRENT
+## 0.51.91 (build 417) — 2026-11-20
 - **Every route now DECLARES its query parameters, `/help` publishes them exactly, and anything undeclared is refused with `unknown_param` before the gate.** Found live: a call sent `GET /gmail/messages?maxResults=10`, the route's parameter is `max`, and the answer was 20 rows with no hint anything was ignored. Every route used to read the names it knew and silently drop the rest, so a slightly-wrong name returned a DEFAULT — an answer that looks like an answer, which is the one failure mode that cannot be debugged from the caller's side. Mido, 2026-11-20: *"document ALL params exactly and fail hard on ANY unexpected params"*.
 - **The declaration and the handler cannot diverge, structurally rather than by test.** `Req.query` is a `QueryParams`, not a plain map: reading or contains-checking a name the route never declared THROWS where the bug is, and `keys` only yields declared names so a handler cannot echo an undeclared parameter back as though it were understood. Dispatch builds the wrapper from the route's own `params`, so the type system carries the guarantee instead of a source-grep — which was tried first, produced false positives on Calendar's helper-read parameters, and was deleted rather than kept as a guard nobody trusts.
 - Refusals name the rejected parameter AND the accepted ones, marking which are required. "unknown parameter" alone costs a second guess.
 - A route that declares nothing now refuses ANY query string, which is the honest default: forgetting to declare fails loudly on first use instead of quietly ignoring input.
 - `/help` gains a `params` array per route — name, type, required, default, allowed values and a description — always emitted, so `[]` states "takes none" rather than leaving the reader unsure whether it is undocumented. The markdown says the same, built from the same array so prose and data cannot disagree.
 - Declared for all 43 routes, including `oauth`'s `path`/`url`/`field`/`fields`, Drive's `to`/`parent`/`name`/`type`, Calendar's required `timeMin`/`timeMax`/`timeZone`, and Gmail's `max`/`q`/`pageToken`.
+
+## 0.51.92 (build 418) — 2026-11-20 — CURRENT
+- **The JSON import no longer refuses to save because a refresh token is missing.** A downloaded client file is the CLIENT half only and can never contain one, so demanding it discarded a file that was perfectly good and blocked the user on a field the file cannot fill. A credential is now saved as an explicit `needs_refresh_token` state. Mido, 2026-11-20: *"i don't like being blocked by a required field … we should accept the json data and have a follow up"*.
+- That state is **named, not silent**: the card says "needs a refresh token — tap CONNECT to authorise", `GET /oauth` reports `status: ready|needs_refresh_token|unreadable`, and `call`/`upload` refuse **pre-gate** with `oauth_needs_refresh_token`. A call that cannot mint must not cost a human a tap — the same rule `no_folder_granted` already followed.
+- **CONNECT is the follow-up, and it builds the exact authorisation URL from the file already imported**: client id, scope, and `access_type=offline` plus `prompt=consent`. Those last two are the reason people come back from the Playground with no `refresh_token` at all, and the Playground hides both behind a gear icon. One tap opens Google's consent page fully pre-filled instead of pasting two values into a third-party page.
+- The token comes back as ONE paste, and the field accepts the whole `"refresh_token": "1//…"` line — quotes, trailing comma and all — while refusing something obviously different. A client secret pasted in its place starts with `GOCSPX-` and is refused by name, because storing it would fail later at the provider as `invalid_grant`, which reads as "my credential is refused" rather than "the wrong field was filled".
+- **No placeholder is ever stored for a missing token.** An empty string is preserved as empty: a placeholder would be a lie that surfaces at the provider, further away from the cause.
+- Phase B of `docs/plans/OAUTH-REFRESH-TOKEN-PLAN.md` (a loopback listener, so the app catches the redirect itself and no paste is needed) is NOT in this build. Google supports it for Desktop (`installed`) clients — verified against the loopback-migration guide — but it adds a listening socket reachable by every app on the phone, which is a separate decision.
 
 ## Keeping this file honest
 
