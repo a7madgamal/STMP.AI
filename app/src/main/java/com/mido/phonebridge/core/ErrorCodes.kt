@@ -37,6 +37,13 @@ object ErrorCodes {
     /** 413: the body is bigger than this route will accept. Used by `files` uploads. */
     const val PAYLOAD_TOO_LARGE = 413
     const val INTERNAL = 500
+    /**
+     * 502: an upstream answered in a way this build cannot use.
+     *
+     * Distinct from [INTERNAL] on purpose: 500 says "this app is broken", 502 says "the thing we
+     * called is". A caller reading the log should not have to guess which side to look at.
+     */
+    const val BAD_GATEWAY = 502
     const val UNAVAILABLE = 503
 
     /**
@@ -205,14 +212,50 @@ object ErrorCodes {
         "ssh_bad_key" to CONFLICT,
         // Generating a keypair failed on this device. Our side (no CryptoMaterial), and the human
         // cannot fix it by changing the request — 500 is the honest status.
-        "ssh_keygen_failed" to INTERNAL,
-        // First connection to a host: nothing is pinned, so nothing runs until the human confirms
+        "ssh_keygen_failed" to INTERNAL,        // First connection to a host: nothing is pinned, so nothing runs until the human confirms
         // the fingerprint. 409 (a disagreement about state) rather than 403 (a refusal).
         "ssh_host_key_unknown" to CONFLICT,
         // The host key does not match the one pinned on first connect. 409 rather than 403
         // because it is not a permission verdict — it is a DISAGREEMENT that a human must look
         // at, and the message says so.
         "ssh_host_key_changed" to CONFLICT,
+        // --- JWT plugin ---
+        // A stored config that cannot be parsed is OUR record being wrong and the human has to fix
+        // it: 409 says "your config disagrees with reality".
+        "jwt_bad_config" to CONFLICT,
+        // A stored signing secret that is empty or cannot be used. Same class as a bad SSH key.
+        "jwt_bad_secret" to CONFLICT,
+        // The caller named a credential that is not configured. Their mistake, and pre-gate, so it
+        // is noise like every other unknown-name refusal.
+        "unknown_jwt" to BAD_REQUEST,
+
+        // --- OAuth plugin ---
+        // A stored config or secret that cannot be read is OUR record being wrong and the human has
+        // to fix it: 409 says "your config disagrees with reality". Two codes rather than one because
+        // they are repaired in different fields of the same dialog.
+        "oauth_bad_config" to CONFLICT,
+        "oauth_bad_secret" to CONFLICT,
+        "unknown_oauth" to BAD_REQUEST,
+        // The provider refused the mint (RFC 6749 §5.2: invalid_grant, invalid_client, …). CONFLICT,
+        // not BAD_REQUEST: the CALLER's request was fine, the stored credential is what disagrees.
+        "oauth_token_refused" to CONFLICT,
+        // The token endpoint did not answer inside its own 15s budget. UNAVAILABLE for the same
+        // reason as `upstream_timeout`: nothing is wrong with the request, the provider was slow.
+        "oauth_token_timeout" to UNAVAILABLE,
+        "oauth_token_failed" to UNAVAILABLE,
+        // A 2xx whose body this build cannot read (form-encoded instead of JSON).
+        "oauth_bad_response" to BAD_GATEWAY,
+        "oauth_upload_refused" to CONFLICT,
+        "oauth_upload_timeout" to UNAVAILABLE,
+        "oauth_upload_failed" to UNAVAILABLE,
+        // The named file is not in the granted folder. The caller's mistake, like a bad name.
+        "file_not_found" to NOT_FOUND,
+        // No folder granted for uploads. Refused PRE-gate, so this is a caller-visible setup step
+        // rather than a fault: 503 says "not ready yet", which is exactly true.
+        "no_folder_granted" to UNAVAILABLE,
+        // The provider rotated the refresh token (RFC 6749 §6). CONFLICT, not a server error: the
+        // stored credential now disagrees with the provider, and only the human can update it.
+        "refresh_token_rotated" to CONFLICT,
         // A host-key refusal whose exact JSch type we do not recognise. It is still a
         // host-key decision that a human must resolve, not a server fault — 409 keeps it out of
         // the 5xx bucket, where it would be logged as our bug and retried pointlessly.
@@ -354,6 +397,22 @@ object ErrorCodes {
         "ssh_keygen_failed" to "Generating an ed25519 keypair failed on this device.",
         "ssh_host_key_unknown" to "Nothing is pinned for this host yet. Repeat the call with `trustHostKey` to confirm the fingerprint shown.",
         "ssh_host_key_changed" to "The host key does not match the pinned one. Only a human can decide whether that is expected.",
+        "jwt_bad_config" to "The stored JWT configuration cannot be read; fix it on the JWT screen.",
+        "jwt_bad_secret" to "The stored JWT signing secret is empty or unusable; replace it on the JWT screen.",
+        "unknown_jwt" to "No JWT credential is stored under that name; `GET /jwt` lists them.",
+        "oauth_bad_config" to "The stored OAuth configuration cannot be read; fix it on the OAuth screen.",
+        "oauth_bad_secret" to "The stored OAuth credential is missing its refresh token or client secret; replace them on the OAuth screen.",
+        "unknown_oauth" to "No OAuth credential is stored under that name; `GET /oauth` lists them.",
+        "oauth_token_refused" to "The token endpoint refused to mint an access token: the refresh token may be expired or revoked, the client secret may be wrong, or the client authenticates a different way. The provider's own error is in the message.",
+        "oauth_token_timeout" to "The token endpoint did not answer within 15s, so no access token was minted and nothing reached the target.",
+        "oauth_token_failed" to "The phone could not reach the token endpoint at all.",
+        "oauth_bad_response" to "The token endpoint answered successfully with a body this build cannot read. A provider that replies form-encoded rather than JSON is not supported.",
+        "oauth_upload_refused" to "The upload target refused the request; the provider's status and body are in the reply.",
+        "oauth_upload_timeout" to "The upload did not finish in time. The file may be partly transferred: check the provider before retrying.",
+        "oauth_upload_failed" to "The upload failed part-way through streaming the file.",
+        "file_not_found" to "No file with that name is in the granted folder. Grant the folder on the OAuth screen, or check the name.",
+        "no_folder_granted" to "No folder has been granted for OAuth uploads. Open the OAuth screen and grant Downloads/STMP, then retry. Nothing was sent.",
+        "refresh_token_rotated" to "The provider issued a new refresh token, which this build will not write back during a call. Replace the refresh token on the OAuth screen and retry.",
         "ssh_host_key_refused" to "The host key was refused for a reason the app could not name.",
         "ssh_timeout" to "The command was still running at its deadline and was stopped.",
         "ssh_job_not_found" to "No detached job has that id (unknown, or its output expired).",

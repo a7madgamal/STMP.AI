@@ -36,6 +36,10 @@ object PaperDialog {
      * @param actions label → handler, drawn as buttons along the bottom. The handler runs after
      *   the dialog is dismissed, so a handler that opens another screen does not leave this one
      *   behind it.
+     * @param refuse return true from this to KEEP THE DIALOG OPEN: the action's handler does not run,
+     *   and whatever the handler drew (an error line beside the field it is about) is already on
+     *   screen. A form whose positive button always closes cannot report a validation failure
+     *   without throwing away everything the human typed — which is the defect this exists to stop.
      */
     fun show(
         ctx: Context,
@@ -43,6 +47,7 @@ object PaperDialog {
         body: View,
         actions: List<Pair<String, () -> Unit>> = listOf("close" to {}),
         style: (Int) -> Theme.ButtonStyle = { Theme.ButtonStyle.NEUTRAL },
+        refuse: ((String) -> Boolean)? = null,
     ): Dialog {
         val dialog = Dialog(ctx).apply { requestWindowFeature(Window.FEATURE_NO_TITLE) }
 
@@ -63,13 +68,19 @@ object PaperDialog {
         }
         val scroll = OverflowScrollView(ctx)
         scroll.setContent(dialogBody)
-        sheet.addView(scroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
 
+        // **The title comes FIRST, before the scrolling body.**
+        //
+        // It was added after the scroll, and a vertical `LinearLayout` lays its children out in the
+        // order they were added — so every paper dialog drew its heading UNDERNEATH the content it
+        // headed, with the scroll claiming all the slack height above it. A form with eight fields
+        // showed the form and then, at the bottom, the name of the thing being edited.
         sheet.addView(Theme.text(ctx, title, Theme.TEXT_TITLE_SP, Theme.ON_SURFACE).apply {
             typeface = Theme.handFont(ctx)
         })
+        sheet.addView(scroll, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
 
         dialogBody.addView(body)
 
@@ -82,6 +93,9 @@ object PaperDialog {
             actions.forEachIndexed { index, (label, handler) ->
                 row.addView(
                     Theme.button(ctx, label, style(index), small = true) {
+                        // A refusal leaves the sheet open and does not run the handler: the action
+                        // is what the human was trying to do, and it did not happen.
+                        if (refuse?.invoke(label) == true) return@button
                         dialog.dismiss()
                         handler()
                     },

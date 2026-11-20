@@ -192,6 +192,17 @@
             android:name=".SshActivity"
             android:exported="false" />
 
+        <!-- JWT credentials. Sets FLAG_SECURE itself: a signing secret is typed here. -->
+        <activity
+            android:name=".JwtActivity"
+            android:exported="false" />
+
+        <!-- OAuth credentials. Sets FLAG_SECURE itself: a refresh token is typed here. It also
+             opens the system folder picker, which returns through onActivityResult. -->
+        <activity
+            android:name=".OauthActivity"
+            android:exported="false" />
+
         <!-- Secret CRUD. Sets FLAG_SECURE itself, so no screenshots of a value. -->
         <activity
             android:name=".SecretsActivity"

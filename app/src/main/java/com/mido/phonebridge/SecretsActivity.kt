@@ -105,18 +105,17 @@ class SecretsActivity : Activity() {
         }
 
         listContainer.removeAllViews()
-        // **SSH connections are NOT listed here.**
+        // **This screen lists ONLY entries with no owner.**
         //
-        // Mido, 2026-11-04: *"move ssh entries from the secrets screen to the ssh screen where
-        // they belong"*. They are vault entries, which is why they appeared — but a connection is
-        // managed by generating and installing a key, not by pasting a value, and the SSH screen
-        // already owns that flow. Listing them here offered a "delete" button and a sentence
-        // pointing elsewhere: a screen showing something it cannot edit.
+        // It used to filter `startsWith("ssh-") || startsWith("jwt-")`, which made one screen
+        // know two other plugins' naming conventions — and every new credential plugin had to come
+        // back and edit this line. Ownership is now declared by whichever plugin writes the entry
+        // (`SecretVault.put(owner = …)`) and read here as a fact, so this screen contains no plugin
+        // id, no prefix and no Kind check. Adding `oauth` or anything after it changes nothing here.
         //
-        // `ssh-` is the prefix `SshConnection.vaultName()` writes, so this filter matches the
-        // same set the SSH screen loads.
+        // Mido, 2026-11-19: *"each plugin should handle its own secrets"*.
         val names = try {
-            SecretVault.names(this).filterNot { it.startsWith("ssh-") }
+            SecretVault.unowned(this)
         } catch (e: Exception) {
             listContainer.addView(row("vault unreadable", e.message ?: "", Theme.DANGER_SURFACE))
             emptyList()
@@ -125,7 +124,7 @@ class SecretsActivity : Activity() {
             listContainer.addView(
                 row(
                     "no secrets yet",
-                    "tap ADD SECRET. SSH keys live on the SSH screen.",
+                    "tap ADD SECRET.",
                     Theme.SURFACE
                 )
             )
@@ -141,81 +140,41 @@ class SecretsActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = Theme.dp(this@SecretsActivity, 10) }
 
-            // Read the kind BEFORE deciding which controls to build: a private key must never be
-            // offered a reveal button. Mido, 2026-10-21 — the key is generated on the phone so it
-            // does not travel, and this screen is the one place that could undo that.
-            val meta = try {
-                SecretVault.meta(this, n)
-            } catch (e: Exception) {
-                SecretVault.SecretMeta()
-            }
-            // Filtered above, so this is always false. Kept as a guard rather than deleted:
-            // a future entry could carry Kind.SSH under a different name prefix, and the
-            // reveal button must never appear for a private key.
-            val isSsh = meta.kind == SecretVault.SecretMeta.Kind.SSH
+            // **No Kind guard is needed any more, and its absence is the point.** The only entries
+            // that reach this loop are unowned ones, and an unowned entry is by definition a plain
+            // API credential. A signing key or a private key cannot appear here, because whoever
+            // wrote it declared an owner — so there is no branch to keep in sync and nothing to
+            // forget when a new credential plugin ships.
 
             rowView.addView(Theme.text(this, n, 16f))
             val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            if (isSsh) {
-                // No reveal, no replace — both would put the private key on screen or in a paste
-                // box. Deleting is still here: removing a connection is legitimate, and it destroys
-                // the key rather than exposing it.
-                //
-                // Nothing harmless sits beside it on this branch, so it stays in the row: there is
-                // no safe key for a mis-tap to reach instead.
-                buttons.addView(small("delete") { confirmDelete(n) })
-            } else {
-                buttons.addView(small("reveal") { revealValue(n) })
-                buttons.addView(small("replace") { addSecretDialog(n) })
-            }
+            buttons.addView(small("reveal") { revealValue(n) })
+            buttons.addView(small("replace") { addSecretDialog(n) })
             rowView.addView(buttons)
 
-            if (!isSsh) {
-                // **Delete is on its own line, away from the keys that only read or change a
-                // value.** Reveal and Replace both open something you can back out of; Delete
-                // destroys the vault entry, and for an API key that means re-issuing it at the
-                // provider. On one row the three sit ~8dp apart at the same size and shape, so a
-                // mis-tap one key over is unrecoverable.
-                //
-                // The dialog already has this care — `confirmDelete` uses `.showDestructive()`, and
-                // its comment says the destroying control must not be where a stray confirm lands.
-                // That reasoning stops at the dialog; this is the same reasoning applied to the
-                // card the dialog is opened from.
-                val destructive = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.END
-                }
-                destructive.addView(
-                    Theme.button(this, "delete", Theme.ButtonStyle.GHOST, small = true) { confirmDelete(n) }
-                )
-                rowView.addView(
-                    destructive,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ).apply { topMargin = Theme.dp(this@SecretsActivity, 4) },
-                )
+            // **Delete is on its own line, away from the keys that only read or change a
+            // value.** Reveal and Replace both open something you can back out of; Delete
+            // destroys the vault entry, and for an API key that means re-issuing it at the
+            // provider. On one row the three sit ~8dp apart at the same size and shape, so a
+            // mis-tap one key over is unrecoverable.
+            //
+            // The dialog already has this care — `confirmDelete` uses `.showDestructive()`, and
+            // its comment says the destroying control must not be where a stray confirm lands.
+            // That reasoning stops at the dialog; this is the same reasoning applied to the
+            // card the dialog is opened from.
+            val destructive = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
             }
-
-            if (isSsh) {
-                // Say WHY there is no reveal, or the missing buttons read as a bug. The public key
-                // is shown instead — that is the harmless half, and it is what you paste on the
-                // server.
-                rowView.addView(
-                    Theme.text(
-                        this,
-                        "SSH key — the private half is never displayed. Manage connections on the " +
-                            "SSH screen.",
-                        12f, Theme.ON_SURFACE_VARIANT
-                    ).apply { setPadding(0, Theme.dp(this@SecretsActivity, 6), 0, 0) }
-                )
-                // Skip the links/hosts block for an SSH entry: those are HTTP-broker concepts and
-                // showing an empty "no hosts allowed — every call will be refused" would be a lie.
-                listContainer.addView(rowView)
-                // `continue`, not `return`: this is the body of a `for (n in names)` loop, so the
-                // remaining link/host block is skipped for THIS entry and the loop carries on.
-                continue
-            }
-
+            destructive.addView(
+                Theme.button(this, "delete", Theme.ButtonStyle.GHOST, small = true) { confirmDelete(n) }
+            )
+            rowView.addView(
+                destructive,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = Theme.dp(this@SecretsActivity, 4) },
+            )
             // The two links (plan: docs + key issuance). Plaintext, so they are readable
             // while the vault is shut — which is when you actually want them, right after
             // a call failed. Shown as their own row, above the actions, because "where do

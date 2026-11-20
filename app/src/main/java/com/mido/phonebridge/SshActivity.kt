@@ -19,6 +19,8 @@ import com.mido.phonebridge.plugins.ssh.SshConnection
 import com.mido.phonebridge.plugins.ssh.SshKeygen
 import com.mido.phonebridge.ui.Theme
 import com.mido.phonebridge.ui.showDestructive
+import com.mido.phonebridge.ui.PaperDialog
+import com.mido.phonebridge.ui.labelledField
 import com.mido.phonebridge.ui.showSecure
 
 /**
@@ -103,7 +105,7 @@ class SshActivity : Activity() {
 
         listContainer.removeAllViews()
         val names = try {
-            SecretVault.names(this).filter { it.startsWith("ssh-") }
+            SecretVault.ownedBy(this, "ssh")
         } catch (e: Exception) {
             listContainer.addView(row("vault unreadable", e.message ?: "", Theme.DANGER_SURFACE))
             emptyList()
@@ -232,17 +234,29 @@ class SshActivity : Activity() {
                 Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
             )
         }
-        AlertDialog.Builder(this)
-            .setTitle("Public key — $label")
-            .setMessage("Add this line to ~/.ssh/authorized_keys on ${conn.host}.")
-            .setView(box)
-            .setPositiveButton("copy") { _, _ ->
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("ssh public key", pub))
-                toast("public key copied")
-            }
-            .setNegativeButton("close", null)
-            .showSecure()
+        PaperDialog.show(
+            ctx = this,
+            title = "Public key — $label",
+            body = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(PaperDialog.caption(this@SshActivity, "Add this line to ~/.ssh/authorized_keys on ${conn.host}."))
+                addView(
+                    box,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = Theme.dp(this@SshActivity, 10) },
+                )
+            },
+            actions = listOf(
+                "copy" to {
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("ssh public key", pub))
+                    toast("public key copied")
+                },
+                "close" to {},
+            ),
+            style = { index -> if (index == 0) Theme.ButtonStyle.PRIMARY else Theme.ButtonStyle.NEUTRAL },
+        )
     }
 
     /**
@@ -258,15 +272,7 @@ class SshActivity : Activity() {
             toast("vault locked — unlock the app first")
             return
         }
-        val nameField = field("name (lowercase, e.g. prod)")
-        val hostField = field("host (e.g. box.example.com)")
-        val portField = field("port (default 22)").apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText("22")
-        }
-        val userField = field("user (e.g. deploy)")
-
-        // The reason a failure left the dialog empty, shown INSIDE it.
+        // The reason a refusal left the form intact, shown inside it, next to the fields.
         val errorLine = TextView(this).apply {
             textSize = Theme.TEXT_CAPTION_SP
             setTextColor(Theme.DANGER)
@@ -274,139 +280,126 @@ class SshActivity : Activity() {
             setPadding(0, Theme.dp(this@SshActivity, 8), 0, 0)
         }
 
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(
-                Theme.dp(this@SshActivity, 16), Theme.dp(this@SshActivity, 8),
-                Theme.dp(this@SshActivity, 16), 0
-            )
-            addView(nameField)
-            addView(hostField)
-            addView(portField)
-            addView(userField)
-            addView(errorLine)
-        }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        // **A REAL dialog, not `setPositiveButton`.**
-        //
-        // Mido, 2026-11-04: *"the problem is the dialog is lost, a failed attempt should keep the
-        // dialog and its data for easy fix"*.
-        //
-        // `setPositiveButton` ALWAYS dismisses when tapped — that is the contract. So the old
-        // `return@setPositiveButton` on a validation failure returned from a dialog Android had
-        // already decided to close. The name rule is the one people hit (it demands lowercase
-        // `[a-z0-9_-]`), and the result was: hint unreadable as a toast, all four fields gone,
-        // retype from scratch. A validation failure must cost a keystroke, not the form.
-        //
-        // So the button is wired manually and the dialog closes ONLY on success. The error is
-        // reported IN the dialog, where the fields it refers to still are.
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Add SSH connection")
-            .setView(box)
-            .setNegativeButton("cancel", null)
-            .setPositiveButton("generate key", null)
-            .create()
+        // **Required first.** Everything here is required except the port, which is prefilled — so
+        // the order is the order the connection is described in: what to call it, where it is, as
+        // whom, and then the value that is already filled in.
+        val nameField = labelledField(
+            box, "NAME",
+            "What you will call this connection. It becomes part of the route " +
+                "(POST /ssh/<name>) and of the policy key, so it is lowercase letters, digits, " +
+                "- or _ only. Pick something you will recognise on an approval card.",
+            example = "prod",
+            required = true,
+        )
+        val hostField = labelledField(
+            box, "HOST",
+            "The address of the machine to connect to — a hostname or an IP. This is what the host " +
+                "key is pinned against on the first connection, so a name that resolves differently " +
+                "later will be refused rather than trusted quietly.",
+            example = "box.example.com",
+            required = true,
+        )
+        val userField = labelledField(
+            box, "USER",
+            "The account to log in as. The generated key is installed in THIS user's " +
+                "~/.ssh/authorized_keys, so the commands you run are that user's commands.",
+            example = "deploy",
+            required = true,
+        )
+        val portField = labelledField(
+            box, "PORT",
+            "The SSH port on that machine. Almost always 22; change it only if the server listens " +
+                "somewhere else, or if it sits behind a port forward.",
+            example = "22",
+            inputType = InputType.TYPE_CLASS_NUMBER,
+        ).apply { setText("22") }
+        box.addView(errorLine)
 
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val name = nameField.text.toString().trim().lowercase()
-                val host = hostField.text.toString().trim()
-                val user = userField.text.toString().trim()
-                val port = portField.text.toString().trim().toIntOrNull() ?: 22
+        // Save, returning "refused?" so the sheet stays open with every field still typed in.
+        // Mido, 2026-11-04: *"a failed attempt should keep the dialog and its data for easy fix"*.
+        fun attemptCreate(): Boolean {
+            val name = nameField.text.toString().trim().lowercase()
+            val host = hostField.text.toString().trim()
+            val user = userField.text.toString().trim()
+            val port = portField.text.toString().trim().toIntOrNull() ?: 22
 
-                fun refuse(message: String, focus: android.widget.EditText) {
-                    errorLine.text = message
-                    errorLine.visibility = android.view.View.VISIBLE
-                    focus.requestFocus()
-                    Debug.log("ssh: add refused: $message")
-                }
+            fun refuse(message: String, focus: android.widget.EditText): Boolean {
+                errorLine.text = message
+                errorLine.visibility = android.view.View.VISIBLE
+                focus.requestFocus()
+                Debug.log("ssh: add refused: $message")
+                return true
+            }
 
-                if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
-                    refuse(
-                        "Name must be lowercase letters, digits, - or _ (1-49 chars). " +
-                            "\"$name\" has something else.",
-                        nameField,
-                    )
-                    return@setOnClickListener
-                }
-                if (host.isBlank()) {
-                    refuse("Host is required.", hostField)
-                    return@setOnClickListener
-                }
-                if (user.isBlank()) {
-                    refuse("User is required.", userField)
-                    return@setOnClickListener
-                }
-                if (port !in 1..65535) {
-                    refuse("Port must be between 1 and 65535.", portField)
-                    return@setOnClickListener
-                }
-                if (SecretVault.has(this, "ssh-$name")) {
-                    refuse("A connection named \"$name\" already exists. Pick another name.", nameField)
-                    return@setOnClickListener
-                }
+            // The rule matches the one the screen uses elsewhere (49 chars here, 48 after the
+            // leading character), so a name accepted in one place is accepted everywhere.
+            if (!name.matches(Regex("[a-z0-9][a-z0-9_-]{0,48}"))) {
+                return refuse(
+                    "Name must be lowercase letters, digits, - or _ (1-49 chars). " +
+                        "\"$name\" has something else.",
+                    nameField,
+                )
+            }
+            if (host.isBlank()) return refuse("Host is required.", hostField)
+            if (user.isBlank()) return refuse("User is required.", userField)
+            if (port !in 1..65535) return refuse("Port must be between 1 and 65535.", portField)
+            if (SecretVault.has(this, "ssh-$name")) {
+                return refuse("A connection named \"$name\" already exists. Pick another name.", nameField)
+            }
 
-                errorLine.visibility = android.view.View.GONE
-                try {
-                    val key = SshKeygen.generate(comment = "phonebridge-$name")
-                    val conn = SshConnection(
-                        host = host,
-                        port = port,
-                        user = user,
-                        privateKey = key.privateKey,
-                        // Nothing pinned yet: the first call reports the fingerprint and refuses,
-                        // which is the confirmation step.
-                        hostKeyFingerprint = null
-                    )
-                    SecretVault.put(
-                        this, "ssh-$name", conn.toJson().toString(),
-                        kind = SecretVault.SecretMeta.Kind.SSH
-                    )
-                    // ONLY here does the dialog close: the connection exists.
-                    dialog.dismiss()
-                    render()
-                    // Show the public key straight away — the connection is useless until the
-                    // human installs it, so handing it over now is the only useful next step.
+            errorLine.visibility = android.view.View.GONE
+            try {
+                val key = SshKeygen.generate(comment = "phonebridge-$name")
+                val conn = SshConnection(
+                    host = host,
+                    port = port,
+                    user = user,
+                    privateKey = key.privateKey,
+                    // Nothing pinned yet: the first call reports the fingerprint and refuses, which
+                    // is the confirmation step.
+                    hostKeyFingerprint = null
+                )
+                SecretVault.put(
+                    this, "ssh-$name", conn.toJson().toString(),
+                    kind = SecretVault.SecretMeta.Kind.SSH,
+                    // Declared ownership: the SSH screen lists `ownedBy("ssh")` rather than
+                    // pattern-matching the `ssh-` prefix, which is what let this name convention
+                    // leak into other screens.
+                    owner = "ssh",
+                )
+                render()
+                // Show the public key straight away — the connection is useless until the human
+                // installs it, so handing it over now is the only useful next step. Posted, so it
+                // opens after this sheet closes rather than behind it.
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
                     copyPublicKey(name, conn)
-                } catch (e: PluginError) {
-                    // Logged as well as shown: this is the one path whose failure the human
-                    // reports as "it just doesn't work".
-                    Debug.log("ssh: create '$name' failed: ${e.code}: ${e.message}")
-                    refuse("${e.code}: ${e.message}", nameField)
-                } catch (e: Throwable) {
-                    // **Throwable, not Exception.** The 0.40.3 failure was a
-                    // `NoClassDefFoundError` from inside JSch — an `Error`, which an `Exception`
-                    // catch does not see at all. Catching `Throwable` here is correct precisely
-                    // because this is a UI boundary: the process must not die and the reason must
-                    // reach the log.
-                    Debug.log("ssh: create '$name' CRASHED: ${e.javaClass.name}: ${e.message}")
-                    refuse("Could not create key: ${e.javaClass.simpleName}: ${e.message}", nameField)
                 }
+                return false
+            } catch (e: PluginError) {
+                // Logged as well as shown: this is the one path whose failure the human reports as
+                // "it just doesn't work".
+                Debug.log("ssh: create '$name' failed: ${e.code}: ${e.message}")
+                return refuse("${e.code}: ${e.message}", nameField)
+            } catch (t: Throwable) {
+                // **Throwable, not Exception.** The 0.40.3 failure was a `NoClassDefFoundError` from
+                // inside JSch — an `Error`, which an `Exception` catch does not see at all. Correct
+                // here precisely because this is a UI boundary: the process must not die and the
+                // reason must reach the log.
+                Debug.log("ssh: create '$name' CRASHED: ${t.javaClass.name}: ${t.message}")
+                return refuse("Could not create key: ${t.javaClass.simpleName}: ${t.message}", nameField)
             }
         }
-        dialog.showSecure()
-    }
 
-    /** A text field styled to match the paper palette. */
-    private fun field(hintText: String) = EditText(this).apply {
-        // Explicit colours: the platform default is white-on-cream here, and with a DayNight
-        // parent it went the other way on a dark-mode phone — the mismatch Mido reported.
-        setTextColor(Theme.ON_SURFACE)
-        setHintTextColor(Theme.ON_SURFACE_VARIANT)
-        highlightColor = Theme.ACCENT
-        // A drawn background, so the field is a paper block rather than a Material underline
-        // that carries its own theme colours.
-        background = Theme.outlined(this@SshActivity, Theme.SURFACE_VARIANT, Theme.RADIUS_CONTROL)
-        setPadding(
-            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10),
-            Theme.dp(this@SshActivity, 12), Theme.dp(this@SshActivity, 10)
+        PaperDialog.show(
+            ctx = this,
+            title = "Add SSH connection",
+            body = box,
+            actions = listOf("generate key" to {}, "cancel" to {}),
+            style = { index -> if (index == 0) Theme.ButtonStyle.PRIMARY else Theme.ButtonStyle.NEUTRAL },
+            refuse = { label -> if (label == "generate key") attemptCreate() else false },
         )
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = Theme.dp(this@SshActivity, 8) }
-        hint = hintText
-        inputType = InputType.TYPE_CLASS_TEXT
-        importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
     }
 
     private fun confirmDelete(label: String, vaultName: String) {

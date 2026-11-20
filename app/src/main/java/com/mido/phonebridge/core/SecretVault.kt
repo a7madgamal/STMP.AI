@@ -190,6 +190,21 @@ object SecretVault {
          * Defaults to [Kind.SECRET] so every existing entry keeps working untouched.
          */
         val kind: Kind = Kind.SECRET,
+        /**
+         * Which PLUGIN owns this entry, or null for a generic secret the Secrets screen manages.
+         *
+         * **This replaces name-prefix sniffing.** `SecretsActivity` used to filter
+         * `it.startsWith("ssh-") || it.startsWith("jwt-")`, which meant one screen knew two other
+         * plugins' naming conventions — and every new credential plugin had to edit that line and
+         * the [Kind] enum here. Ownership is declared once, by the plugin that writes the entry,
+         * and read by anyone who asks. Adding a credential plugin now touches no other plugin.
+         *
+         * Mido, 2026-11-19: *"each plugin should handle its own secrets"*.
+         *
+         * Null is a real value, not "unknown": it means a plain API credential, which is exactly
+         * what the Secrets screen lists and edits.
+         */
+        val owner: String? = null,
     ) {
         enum class Kind {
             /** A third-party API credential. Reveal and replace are allowed. */
@@ -197,11 +212,61 @@ object SecretVault {
 
             /** An SSH private key. Never revealed, never replaced through the generic dialog. */
             SSH,
+
+            /**
+             * A JWT signing secret.
+             *
+             * Its own kind rather than a plain `SECRET` for the same reason SSH has one: this value is
+             * the signing key for a bearer credential, and the generic Secrets screen offers a reveal
+             * button and a paste box for every entry it owns. A JWT secret that can be revealed is a
+             * secret that can be read off a screen — and it signs tokens for everything the issuer can
+             * reach, so it is at least as sensitive as a private key.
+             *
+             * The JWT screen owns create/rotate/delete for these entries.
+             */
+            JWT,
         }
     }
 
     /** Secret names, sorted. Readable while locked — a name is a label, not a credential. */
     fun names(ctx: Context): List<String> = readMeta(ctx).keys.sorted()
+
+    /**
+     * The names owned by [owner], sorted. Empty when the plugin has no entries yet.
+     *
+     * **A plugin lists its own entries through this and never through a name prefix.** There is no
+     * renaming behind it, so an entry is where it says it is: the name is what the human typed, and
+     * ownership is a separate fact that does not have to agree with it.
+     *
+     * An unreadable index returns empty rather than throwing, because every caller is a screen
+     * rendering a list — a corrupt index reported as a crash blanks the tab that explains it. The
+     * routes that must be loud read [meta] instead, which throws.
+     */
+    fun ownedBy(ctx: Context, owner: String): List<String> = try {
+        readMeta(ctx)
+            .filterValues { it.owner == owner }
+            .keys.sorted()
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /**
+     * The names with NO owner — the generic API credentials the Secrets screen manages.
+     *
+     * Read from the index rather than subtracting other plugins' names: a new plugin's entries can
+     * never leak onto the Secrets screen by being forgotten about here, because being absent from
+     * this list is the default for anything that declares an owner.
+     */
+    fun unowned(ctx: Context): List<String> = try {
+        readMeta(ctx)
+            .filterValues { it.owner == null }
+            .keys.sorted()
+    } catch (e: Exception) {
+        // The Secrets screen renders this, so it must not throw. It logs through the caller's own
+        // error row: an empty list here is distinguishable on screen from a real empty vault,
+        // because `row("vault unreadable")` is what the caller adds when names(ctx) itself fails.
+        emptyList()
+    }
 
     /** Whether [name] is a registered secret, without needing the vault unlocked. */
     fun has(ctx: Context, name: String): Boolean = readMeta(ctx).containsKey(name)
@@ -235,8 +300,34 @@ object SecretVault {
                         // that happens to start with "ssh-" would silently lose its reveal button.
                         kind = when (v?.optString("kind")) {
                             "ssh" -> SecretMeta.Kind.SSH
+                            // A value this build does not recognise falls back to SECRET rather
+                            // than refusing to start: the KIND only decides which screen offers a
+                            // reveal button, and a dead app over one word in a file the user did
+                            // not write is the failure mode this project already rejected once. A
+                            // reveal button on a JWT secret is recoverable; an unopenable vault is
+                            // not.
+                            "jwt" -> SecretMeta.Kind.JWT
                             else -> SecretMeta.Kind.SECRET
-                        }
+                        },
+                        // **OWNERSHIP IS MIGRATED FROM `kind`, NEVER FROM THE NAME.**
+                        //
+                        // Every entry written before `owner` existed has no owner field. Deriving
+                        // it here reproduces today's behaviour exactly: kind != SECRET was hidden
+                        // from the Secrets screen, so it becomes owned by the plugin whose id is
+                        // that kind's own name.
+                        //
+                        // Name-prefix derivation would be WRONG and is the bug the field exists
+                        // to remove: a plain secret that happens to be called `ssh-notes` is a
+                        // generic credential and must keep its reveal button.
+                        //
+                        // Absent-or-blank `owner` with kind == SECRET stays null — the normal
+                        // case, and the one that must not be "repaired" into anything.
+                        owner = v?.optString("owner")?.takeIf { it.isNotBlank() }
+                            ?: when (v?.optString("kind")) {
+                                "ssh" -> "ssh"
+                                "jwt" -> "jwt"
+                                else -> null
+                            },
                     )
                 }
                 m
@@ -264,7 +355,17 @@ object SecretVault {
                     .put("docs", v.docs)
                     .put("key", v.key)
                     .put("hosts", org.json.JSONArray(v.hosts))
-                    .put("kind", if (v.kind == SecretMeta.Kind.SSH) "ssh" else "secret")
+                    .put("kind", when (v.kind) {
+                        SecretMeta.Kind.SSH -> "ssh"
+                        SecretMeta.Kind.JWT -> "jwt"
+                        SecretMeta.Kind.SECRET -> "secret"
+                    })
+                    // `kind` is STILL WRITTEN, and that is deliberate: an older APK reads it to
+                    // decide which entries get a reveal button, so dropping it would hand an
+                    // older build an SSH private key with a reveal button. Ownership is read by
+                    // this build; kind is kept for one-way compatibility and can be retired in a
+                    // release that no longer supports downgrading.
+                    .apply { v.owner?.let { put("owner", it) } }
             )
         }
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -422,6 +523,19 @@ object SecretVault {
         hosts: List<String>? = null,
         /** SSH entries are marked so the CRUD screen can refuse to reveal them. */
         kind: SecretMeta.Kind = SecretMeta.Kind.SECRET,
+        /**
+         * The plugin that owns this entry. Null means "keep whatever ownership is already recorded".
+         *
+         * **Null resolves to the existing owner, never to "no owner".** This is the same contract
+         * [hosts] has, and for the same reason: a programmatic replace (rotating a value) passes
+         * no owner, and if that were read as "clear it" the entry would silently move onto the
+         * Secrets screen with a reveal button — one tap from a signing key. The migration in
+         * [readMeta] would then un-migrate itself on first touch.
+         *
+         * A plugin that creates or rotates its own entry passes its own id; nothing else passes
+         * anything, and the Secrets screen's own writes keep their null.
+         */
+        owner: String? = null,
     ) {
         requireName(name)
         if (value.isEmpty()) throw PluginError("bad_request", "secret value must not be empty")
@@ -438,8 +552,10 @@ object SecretVault {
         // blob is touched, not after, or the two would disagree.
         val existing = readMeta(ctx)
         val resolvedHosts = rules ?: existing[name]?.hosts ?: emptyList()
+        // Resolved, not copied: see the parameter doc. `?: existing?.owner` is the whole fix.
+        val resolvedOwner = owner ?: existing[name]?.owner
         val meta = existing.toMutableMap().apply {
-            this[name] = SecretMeta(docs, key, resolvedHosts, kind)
+            this[name] = SecretMeta(docs, key, resolvedHosts, kind, resolvedOwner)
         }
         persist(ctx, next)
         writeMeta(ctx, meta)

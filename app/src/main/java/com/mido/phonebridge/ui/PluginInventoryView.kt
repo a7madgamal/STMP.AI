@@ -5,6 +5,8 @@ import android.content.Intent
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.mido.phonebridge.Debug
+import com.mido.phonebridge.JwtActivity
+import com.mido.phonebridge.OauthActivity
 import com.mido.phonebridge.PluginDetailActivity
 import com.mido.phonebridge.ScreenHost
 import com.mido.phonebridge.SecretsActivity
@@ -40,14 +42,27 @@ class PluginInventoryView(
     private val groups: List<Pair<String, Set<String>>> = listOf(
         "Accounts & services" to setOf("google", "gmail", "calendar", "drive"),
         "Phone" to setOf("notifications", "contacts", "audio", "tts"),
-        // **Secrets and SSH are separate headers, each with its own items.**
+        // **Files lives with the phone, not with the accounts.**
+        //
+        // It was in no group at all, so it fell through to `unlisted` and rendered under "Other"
+        // beside the log viewer — a plugin whose whole job is moving documents to and from this
+        // device, filed under miscellany. It belongs beside the other things that act on the phone
+        // itself.
+        "Files" to setOf("files"),
+        // **Secrets, SSH and JWT are three headers, each with its own items.**
         //
         // Mido, 2026-11-04: *"split secrets into secrets and ssh with its own header and related
-        // items"*. An earlier pass merged them because SSH IS a vault entry — but they are not the
-        // same work: Secrets holds API keys you paste, SSH holds generated keys you install on a
-        // server. Merging them put two different add flows under one word.
+        // items"*. An earlier pass merged them because all three ARE vault entries — but they are
+        // not the same work: Secrets holds API keys you paste, SSH holds keys generated on the
+        // phone, JWT holds a signing key that mints tokens. Merging them put three different add
+        // flows under one word.
+        //
+        // JWT used to be merged into "Secrets & connections" for exactly the reason SSH was, which
+        // is the argument that was already rejected once.
         "Secrets" to setOf("secrets"),
         "SSH" to setOf("ssh"),
+        "JWT" to setOf("jwt"),
+        "OAuth" to setOf("oauth"),
         "Developer" to setOf("help", "debug", "logs", "probe"),
     )
 
@@ -104,7 +119,7 @@ class PluginInventoryView(
 
     /** Keep the intent-based order even though plugin rows are discovered before global settings. */
     fun arrange() {
-        val rank = listOf("Phone", "Accounts & services", "Secrets & connections", "AI",
+        val rank = listOf("Phone", "Files", "Accounts & services", "Secrets", "SSH", "JWT", "OAuth", "AI",
             "Approval & exceptions", "System", "About & updates", "Developer",
             "Capabilities", "Other")
         val ordered = groupsByName.values.sortedBy { host ->
@@ -149,6 +164,15 @@ class PluginInventoryView(
         // exists per-secret, so excluding it is precise and cannot go stale.
         val plugins = PluginRegistry.all()
             .filterNot { it is com.mido.phonebridge.plugins.secrets.SecretPlugin }
+            // Credential plugins are listed on their OWN screens, not here: their rows would all
+            // read `JWT: <name>` or `OAuth: <name>` and each would open the same screen. Only the
+            // INDEX plugins (`jwt`, `oauth`) keep a row, and those are the ones whose rows open the
+            // screens.
+            //
+            // Filtered by TYPE for the same reason `SecretPlugin` is: an id-prefix list would drift
+            // and silently hide the next credential plugin someone adds.
+            .filterNot { it is com.mido.phonebridge.plugins.jwt.JwtPlugin }
+            .filterNot { it is com.mido.phonebridge.plugins.oauth.OauthPlugin }
 
         if (plugins.isEmpty()) {
             // Real state: the service has not registered yet. Say so rather than showing a blank
@@ -164,9 +188,14 @@ class PluginInventoryView(
         val claimed = mutableSetOf<String>()
 
         for ((heading, ids) in groups) {
-            val group = if (heading == "Secrets" || heading == "SSH") {
-                "Secrets & connections"
-            } else heading
+            // **Each secrets-family heading gets its own section now.**
+        //
+        // All three used to be folded into one "Secrets & connections" header, which is what the
+        // separate headings above were supposed to stop: a group key that maps every member to the
+        // same label re-merges them on screen no matter how they are declared. Files is its own
+        // section too, and the rank below keeps the secrets family adjacent so the screen still
+        // reads as related work.
+        val group = heading
             val members = ids.mapNotNull { byId[it] }.sortedBy { it.displayName }
             if (members.isEmpty()) continue
             claimed += members.map { it.id }
@@ -208,6 +237,8 @@ class PluginInventoryView(
                 for (plugin in members) addPlugin(group, row(plugin, store))
                 if (heading == "Secrets") addSecretsActions(members)
                 if (heading == "SSH") addSshActions(members)
+                if (heading == "JWT") addJwtActions(members)
+                if (heading == "OAuth") addOauthActions(members)
             }
 
 
@@ -229,8 +260,7 @@ class PluginInventoryView(
      * vault's name index is plaintext precisely so this works while it is locked.
      */
     private fun sshConnectionNames(): List<String> = try {
-        com.mido.phonebridge.core.SecretVault.names(context)
-            .filter { it.startsWith("ssh-") }
+        com.mido.phonebridge.core.SecretVault.ownedBy(context, "ssh")
             .map { it.removePrefix("ssh-") }
     } catch (e: Exception) {
         // A corrupt index must not blank the screen: the SSH plugin's own row still reports the
@@ -462,8 +492,14 @@ class PluginInventoryView(
         "gmail" -> "Read, search and manage Gmail messages."
         "calendar" -> "Read and manage calendar events."
         "drive" -> "Read, upload and manage Drive files."
+        // `files` had no entry, so it fell back to "Open <name> settings and current status" — the
+        // generic sentence that exists for a plugin somebody adds without thinking about this list.
+        // A first-class plugin reading as an unknown one is the same defect as being grouped under
+        // "Other".
+        "files" -> "Move files between this phone and a caller, without Drive."
         "secrets" -> "Store credentials and broker approved calls."
         "ssh" -> "Run commands through configured SSH connections."
+        "jwt" -> "Sign short-lived tokens for APIs that authenticate with JWT."
         "help" -> "Describe available bridge routes."
         "debug" -> "Inspect bridge health and recent state."
         "logs" -> "Read this app's diagnostic log."
@@ -515,10 +551,15 @@ class PluginInventoryView(
         // never be reached. Mido asked twice: *"secrets need each url in a line, and they need to
         // be clickable links"*, then *"i said secrets plugin should show each url in its own line
         // and should be CLICKABLE links"*. The rendering was correct; the door was missing.
-        val target = if (pluginId == "secrets") {
-            SecretsActivity::class.java
-        } else {
-            PluginDetailActivity::class.java
+        val target = when (pluginId) {
+            "secrets" -> SecretsActivity::class.java
+            // JWT credentials are managed on their own screen: a signing secret is typed there, and
+            // its list is what a caller needs to see. The detail page has nothing to add here.
+            "jwt" -> JwtActivity::class.java
+            // OAuth credentials live on their own screen for the same reason JWT's do: the secrets
+            // are typed there and its list is what a caller needs to see.
+            "oauth" -> OauthActivity::class.java
+            else -> PluginDetailActivity::class.java
         }
         val intent = Intent(context, target)
         if (target == PluginDetailActivity::class.java) {
@@ -559,7 +600,7 @@ class PluginInventoryView(
     private fun addSecretsActions(members: List<com.mido.phonebridge.core.Plugin>) {
         if (members.none { it.id == "secrets" }) return
         // The SecretsActivity manages secret values and their links; it has its own add flow.
-        addPlugin("Secrets & connections",
+        addPlugin("Secrets",
             Theme.button(context, "+ ADD SECRET", Theme.ButtonStyle.SUCCESS) {
                 // Same destination as the Secrets row: one screen, one way to add.
                 host.go(Intent(context, SecretsActivity::class.java))
@@ -579,12 +620,51 @@ class PluginInventoryView(
      */
     private fun addSshActions(members: List<com.mido.phonebridge.core.Plugin>) {
         if (members.none { it.id == "ssh" }) return
-        for (name in sshConnectionNames()) addPlugin("Secrets & connections", sshRow(name))
-        addPlugin("Secrets & connections",
+        for (name in sshConnectionNames()) addPlugin("SSH", sshRow(name))
+        addPlugin("SSH",
             Theme.button(context, "+ ADD CONNECTION", Theme.ButtonStyle.SUCCESS) {
                 // The SSH screen owns the generate-and-install flow: a connection needs a key
                 // before it can do anything, so adding one is a screen, not a form here.
                 host.go(Intent(context, SshActivity::class.java))
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(context, 10) },
+        )
+    }
+
+    /**
+     * The OAuth group's action.
+     *
+     * One row, not one per credential: the rows live on the OAuth screen, where rotate and hosts
+     * are. A second list here would be a second place to keep in sync.
+     */
+    private fun addOauthActions(members: List<com.mido.phonebridge.core.Plugin>) {
+        if (members.none { it.id == "oauth" }) return
+        addPlugin("OAuth",
+            Theme.button(context, "+ ADD OAUTH CREDENTIAL", Theme.ButtonStyle.SUCCESS) {
+                host.go(Intent(context, OauthActivity::class.java))
+            },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = Theme.dp(context, 10) },
+        )
+    }
+
+    /**
+     * The JWT group's action.
+     *
+     * One row, not one per credential: the credential rows live on the JWT screen, where the rotate
+     * and hosts controls are. A second list here would be a second place to keep in sync with what
+     * the screen shows.
+     */
+    private fun addJwtActions(members: List<com.mido.phonebridge.core.Plugin>) {
+        if (members.none { it.id == "jwt" }) return
+        addPlugin("JWT",
+            Theme.button(context, "+ ADD JWT CREDENTIAL", Theme.ButtonStyle.SUCCESS) {
+                host.go(Intent(context, JwtActivity::class.java))
             },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,

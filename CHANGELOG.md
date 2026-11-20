@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.80 (build 406)**.
+Current build: **v0.51.89 (build 415)**.
 
 ---
 
@@ -5794,9 +5794,64 @@ devDependencies. `node_modules/` is gitignored.
 - Fixed: picking a folder in the grant sheet **threw the answer away**. The activity was declared `noHistory`, which finishes it the moment the system picker covers it — so the picker's result was delivered to an activity that no longer existed and `onActivityResult` never ran. The folder was chosen, and the plugin still said `folder_not_granted`.
 - The in-process "already asking" guard is no longer cleared on `onDestroy` for the same reason: a backgrounded activity can be destroyed mid-flow, which would have let a second sheet open over a live picker. It is released only when the flow actually ends.
 
-## 0.51.80 (build 406) — 2026-11-18 — CURRENT
+## 0.51.80 (build 406) — 2026-11-18
 - The `files` cards say **UPLOAD** and **DOWNLOAD** instead of the internal READ/WRITE verbs. A verb whose direction depends on which side you stand on is the wrong word for a card a human reads — the phone writes, the caller receives, and "read" genuinely did not say whether anything left the device.
 - The listing card says **LIST FOLDER** and names the folder, rather than "LIST FILES" with no target.
+
+## 0.51.81 (build 407) — 2026-11-19
+- New **JWT plugin**: a caller names a stored credential and a URL, writes `***` where a signed token belongs, and the phone mints the token and makes the call. Neither the signing secret nor the token is ever returned to the caller.
+- Credentials are managed on their own screen: name, issuer, algorithm, lifetime, clock skew, header scheme, optional key id and extra claims, plus the hosts it may reach. The signing secret is its own vault kind, so neither screen offers to reveal it.
+- Issuer fields are validated as they are typed, naming the two mistakes that actually happen: the account number instead of the API key, and a key missing its trailing segment.
+- New routes: `GET /jwt` (names and public configuration only) and `POST /jwt/{name}/call`. Contract version 7.
+- Signing is HMAC-SHA256 behind an algorithm registry, so another algorithm is one new signer rather than a change to the route, the store or the screen.
+
+## 0.51.82 (build 408) — 2026-11-19
+- Preferences now gives Secrets, SSH and JWT a section each. All three were still rendered under one "Secrets & connections" header, because the group key mapped them to the same label — the split into separate headings did nothing on screen.
+- `files` gets its own section instead of falling through to "Other", and a real one-line purpose instead of the generic "open settings" sentence shown for an unknown plugin.
+
+## 0.51.83 (build 409) — 2026-11-19
+- Dialog fields are labelled above the input with a help affordance that explains what the value is, instead of a grey placeholder inside it. A hint disappears the moment there is text in it, which is exactly when the explanation is needed.
+- Fixed: the JWT dialog's header-scheme choice was never added to the form, so it could not be changed.
+
+## 0.51.84 (build 410) — 2026-11-19
+- Form sheets are drawn as paper dialogs rather than platform dialogs, and their bodies scroll with the overflow cue, so a form with eight fields is reachable on a short screen.
+- Each field's explanation opens from the app's own help bulb, in the same paper sheet as every other help surface, instead of a second help control invented for these forms.
+- Fields are ordered required-first, and required ones are marked: an optional field with a working default never sits above one the form cannot save without.
+- Fixed: every paper dialog drew its title **below** its content. The heading was added after the scrolling body, so a long form showed the form and then its own title underneath.
+- Fixed: a validation failure now keeps the sheet open with everything already typed. The paper dialog gained a refusal hook, because its action button closed unconditionally — the same defect the SSH form had at the platform-dialog level.
+
+## 0.51.85 (build 411) — 2026-11-19
+- `/help` documents the JWT feature properly: the body shape, what the `***` placeholder does, that omitting it sends the token as the `Authorization` header, that https and the allowed host are checked before the approval card, how the verb is derived from the method, and what the `jwt` block in the reply means. It previously said only that a credential existed.
+- The same facts are in the JSON response as a `jwt` object, built from the plugin's own constants, so a caller that parses only JSON does not have to infer the body shape from a route name.
+
+## 0.51.86 (build 412) — 2026-11-19
+- **Vault entries now declare an OWNER instead of being recognised by their name.** `SecretsActivity` filtered `startsWith("ssh-") || startsWith("jwt-")`, so one screen knew two other plugins' naming conventions, and every new credential plugin had to come back and edit that line plus the `Kind` enum in core. `SecretMeta` gained `owner: String?` — the plugin id that wrote the entry, null for a plain API credential — and each plugin's screen lists `SecretVault.ownedBy(ctx, "<its id>")` while the Secrets screen lists `unowned(ctx)`. Adding a credential plugin now touches no other plugin's screen or core's enum. Mido, 2026-11-19: *"each plugin should handle its own secrets"*.
+- Existing vaults migrate on read, **from `kind`, never from the name**: `kind == ssh` → owner `ssh`, `kind == jwt` → owner `jwt`, otherwise null. That reproduces today's behaviour exactly (kind != SECRET was hidden from the Secrets screen), and it is the only correct source — a plain secret called `ssh-notes` is a generic credential and must keep its reveal button, which name-prefix derivation would have taken away.
+- **`put()` resolves a null owner to the existing one**, not to "no owner". A programmatic replace passes nothing, so a null-as-clear reading would silently move a signing key onto the Secrets screen with a reveal button — and re-un-migrate the vault on first touch. Same contract `hosts` already had.
+- `kind` is **still written**, one-way, because an older APK uses it to decide which entries get a reveal button; dropping it would hand a downgraded install an SSH private key with a reveal button.
+- `BridgeService` decides broker routes by ownership too, so it no longer has to learn each plugin's credential kind to keep a private key off `POST /secrets/<name>/call`.
+- Fixed: two text calls sat below the 13sp floor (`REQUIRED` at 10f, the JWT no-hosts warning at 12f). The project's own typography test caught them; both now use `Theme.TEXT_CAPTION_SP`.
+
+## 0.51.87 (build 413) — 2026-11-19
+- New **OAuth plugin**: a caller names a stored credential and a URL, writes `***` where a token belongs, and the phone exchanges a stored refresh token for an access token and makes the call. Neither the client secret, the refresh token nor the access token is ever returned to the caller. Mido's rule stands: there is no route that hands out a token, because a token issued to a caller works outside the gate.
+- Named after the MECHANISM, not the store. The first consumer is the Chrome Web Store, but the flow — RFC 6749 §6 refresh grant, then a gated call — is identical for Slack, Dropbox, Spotify, GitHub Apps and Salesforce, so the plugin is `oauth`, its routes are `/oauth`, and nothing in the code mentions Google.
+- Three routes: `GET /oauth` (names and public config only, PARANOID floor), `POST /oauth/{name}/call` (JSON, bearer injected), and `POST /oauth/{name}/upload` (streams a file). **The upload route is why this exists**: Chrome's `:upload` takes the package as the raw body and AMO's source upload takes it as a multipart part, so `field` decides which — absent means raw, present means multipart, and `fields` adds the text parts AMO needs (`channel`, `license`).
+- The two secrets are ONE vault entry holding a JSON object (`refresh_token`, `client_secret`), because RFC 6749 §6 needs both in the same request and the secret broker substitutes exactly one value. The client id is deliberately NOT in the vault: it ships inside every OAuth client and is not a secret.
+- **Basic auth is the default, per RFC 6749 §2.3.1**, which says a server MUST support it for clients issued a password while form-body credentials are only a MAY. Getting that backwards yields `invalid_client`, which is indistinguishable from a wrong secret.
+- A rotated refresh token is **refused, not written back** (`refresh_token_rotated`). RFC 6749 §6 says a new one must replace the old, but writing during a request means mutating the vault mid-call behind a fingerprint prompt. Failing visibly beats continuing with a token the provider just invalidated.
+- `scope` is recorded and **never sent on a refresh**: §6 allows it only as a subset of what was granted, and a disagreeing provider answers `invalid_scope`.
+- Tokens are cached in memory only, with a 60s margin, and dropped on lock, edit, rotation or a 401. Nothing is persisted — a token on disk would outlive the vault session that produced it.
+- **The upload route does not go through the secret broker**, so every property the broker would have given for free is re-established by hand and visible in one place: https only, the per-credential host allowlist, no redirect following with a bearer attached, its own timeouts, bounded reads, and a scrub. Reusing a route shape as if the guarantees came with it is how a security property gets lost.
+- The plugin owns its **own SAF grant** over `Downloads/STMP`, in its own prefs. The folder NAME moved to `core/StmpFolder` because it is a fact about the app rather than about one plugin — but the permission does not, so turning `files` off cannot break uploads here.
+- Contract version 8; `/help` gained an `oauth` object describing the body shape, the two upload modes, the auth styles and the no-token-route rule.
+
+## 0.51.88 (build 414) — 2026-11-20
+- `/help` now serves `contractVersion` at the **top level** as well as inside `stmp`. It only existed nested, so a client reading `help["contractVersion"]` — the obvious key, and where the number logically belongs — got null and concluded the surface had not changed. Mido reported it after a live check. Both fields come from the same constant, and a test now pins the top-level one so the two cannot drift.
+
+## 0.51.89 (build 415) — 2026-11-20 — CURRENT
+- **Fixed: the OAuth screen's folder indicator was wrong.** It printed `Downloads/STMP` whenever any grant existed, so after the human picked a different tree it still claimed the expected folder. `FilesStore.rootLabel()` now asks the provider for the granted tree's own display name, and the panel shows that — with a warning when it is not the folder uploads are expected from. Mido reported it: a label that echoes the constant tells you what the app wants, not what it has, and the difference is exactly what breaks an upload.
+- The grant toast used `uri.lastPathSegment.contains("STMP")`, which is `primary:Downloads/STMP` on some providers and a bare document id on others — right by luck on one and wrong on the next. It now asks the same `rootLabel()` the panel does, so the two cannot disagree.
+- `StmpFolder.LAST_SEGMENT` added: a SAF tree's display name is the folder's own name (`STMP`), never the multi-level path the app thinks in, so any "is this the right folder" check must compare against that.
 
 ## Keeping this file honest
 

@@ -46,6 +46,22 @@ class HelpContractTest {
     }
 
     @Test
+    fun `contractVersion is served at the top level of help, not only nested under stmp`() {
+        // Mido, 2026-11-20, after a live check: `help.contractVersion` was absent because the value
+        // only existed inside `stmp`. A client that reads the obvious key gets null and concludes
+        // nothing changed, which is exactly the stale understanding the number exists to prevent.
+        //
+        // A source scan for the same reason the route pin is one: `HelpPlugin` needs a Context.
+        val source = File("src/main/java/com/mido/phonebridge/plugins/help/HelpPlugin.kt").readText()
+        val builder = source.substringAfter("val out = JSONObject()", "")
+        assertTrue(
+            "the /help response must put contractVersion at the TOP level: a caller reading " +
+                "`help[\"contractVersion\"]` must not get null",
+            builder.contains(".put(\"contractVersion\", CONTRACT_VERSION)"),
+        )
+    }
+
+    @Test
     fun `the pinned contract version matches the constant`() {
         // Two places, on purpose: the pin above describes the SURFACE, this describes the
         // NUMBER. Changing one without the other is exactly the drift the guard exists to catch.
@@ -75,15 +91,17 @@ class HelpContractTest {
     /** Every `Method "path"` pair in the main source. */
     private fun declaredRoutes(): Set<String> {
         val root = sourceRoot()
-        // `$secretName` is a Kotlin interpolation, not a URL template. Normalised to `{name}`
-        // here so the scan matches what a caller actually sees on the wire.
+        // `$secretName` and `$name` are Kotlin interpolations, not URL templates. Normalised to
+        // `{name}` here so the scan matches what a caller actually sees on the wire.
         val pattern = Regex(""""(GET|POST|PUT|PATCH|DELETE)",\s*"(/[^"]*)"""")
         val found = mutableSetOf<String>()
         root.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
             .forEach { file ->
                 for (m in pattern.findAll(file.readText())) {
-                    val path = m.groupValues[2].replace("\$secretName", "{name}")
+                    val path = m.groupValues[2]
+                        .replace("\$secretName", "{name}")
+                        .replace("\$name", "{name}")
                     found.add("${m.groupValues[1]} $path")
                 }
             }
@@ -126,7 +144,7 @@ class HelpContractTest {
          * Not generated: writing the pin by hand is what makes a bump a deliberate act rather
          * than something a script does while you are not looking.
          */
-        const val CONTRACT_VERSION = 6
+        const val CONTRACT_VERSION = 8
 
         val PINNED_ROUTES: Set<String> = setOf(
             "DELETE /audit",
@@ -143,6 +161,8 @@ class HelpContractTest {
             "GET /gmail/messages/{id}",
             "GET /gmail/profile",
             "GET /health",
+            "GET /jwt",
+            "GET /oauth",
             "POST /files/upload",
             "GET /help",
             "GET /probe",
@@ -164,6 +184,9 @@ class HelpContractTest {
             "POST /gmail/messages/send",
             "POST /gmail/messages/{id}/modify",
             "POST /gmail/messages/{id}/trash",
+            "POST /jwt/{name}/call",
+            "POST /oauth/{name}/call",
+            "POST /oauth/{name}/upload",
             "POST /notifications/{id}/action",
             "POST /notifications/{id}/dismiss",
             "POST /secrets/{name}/call",

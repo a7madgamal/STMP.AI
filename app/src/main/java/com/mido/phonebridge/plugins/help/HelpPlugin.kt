@@ -137,9 +137,12 @@ class HelpPlugin(private val ctx: Context) : Plugin {
         // `404 not_found`, which reads as "the route is broken" rather than "you used a name
         // that does not exist". Names only: the private key never leaves the vault, and this
         // route is reachable by any verified caller.
+        //
+        // Listed by OWNER, not by the `ssh-` prefix. The route segment is the name minus that
+        // prefix, so `removePrefix` is still exactly right — it is the SELECTION that must not
+        // depend on the convention.
         val sshNames = try {
-            SecretVault.names(ctx)
-                .filter { it.startsWith("ssh-") }
+            SecretVault.ownedBy(ctx, "ssh")
                 .map { it.removePrefix("ssh-") }
                 .sorted()
         } catch (e: Exception) {
@@ -149,14 +152,185 @@ class HelpPlugin(private val ctx: Context) : Plugin {
         }
         val ssh = JSONArray(sshNames)
 
+        // JWT credentials are not plugins either (`jwt:<name>` IS one, but the useful half is the
+        // config: what issuer a name signs as and which hosts it may reach). Without this a caller
+        // has to guess a credential name, and a wrong guess is `unknown_jwt` — which reads as "the
+        // route is broken" rather than "you used a name that is not configured". Names and public
+        // configuration only: the signing secret is never here, and there is no parameter that could
+        // ask for it.
+        val jwtEntries = JSONArray()
+        val jwtNames = try {
+            com.mido.phonebridge.plugins.jwt.JwtStore.names(ctx)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        for (name in jwtNames) {
+            val entry = try {
+                com.mido.phonebridge.plugins.jwt.JwtStore.get(ctx, name)
+            } catch (e: Exception) {
+                jwtEntries.put(JSONObject().put("name", name).put("error", e.message ?: "unreadable"))
+                continue
+            }
+            val hosts = try {
+                SecretVault.meta(ctx, com.mido.phonebridge.plugins.jwt.JwtStore.vaultName(name)).hosts
+            } catch (e: Exception) {
+                emptyList()
+            }
+            jwtEntries.put(
+                JSONObject()
+                    .put("name", name)
+                    .put("issuer", entry.issuer)
+                    .put("alg", entry.alg)
+                    .put("ttlSeconds", entry.ttlSeconds)
+                    .put("scheme", entry.scheme)
+                    .put("hosts", JSONArray(hosts))
+                    .put("route", "POST /jwt/$name/call")
+            )
+        }
+
         val out = JSONObject()
+            // **`contractVersion` at the TOP LEVEL as well as inside `stmp`.**
+            //
+            // The doc comment on [CONTRACT_VERSION] says a caller compares the number it cached
+            // against the one this build reports. Requiring that caller to know the value is nested
+            // under `stmp` means a client that reads `help["contractVersion"]` — the obvious guess,
+            // and where the field logically belongs — silently gets null and concludes nothing
+            // changed. Reported by Mido, 2026-11-20, after a live check showed the key was absent
+            // exactly there.
+            //
+            // Both places are populated from the same constant, so they cannot disagree; the pin
+            // test asserts that.
+            .put("contractVersion", CONTRACT_VERSION)
             .put("stmp", stmp)
             .put("errors", errors)
             .put("plugins", plugins)
             .put("sshConnections", ssh)
-        out.put("markdown", markdown(stmp, errors, plugins, ssh))
+            .put("jwtCredentials", jwtEntries)
+            // **How to use the JWT plugin, as DATA rather than only prose.** A caller that reads
+            // `markdown` gets the same facts, but an agent that only parses JSON would otherwise
+            // have to infer the body shape from a route name — which is how a capability ends up
+            // being discovered by trial and error against a live gate.
+            .put("jwt", jwtHelp())
+            // The OAuth plugin's usage, as data for the same reason `jwt` is: an agent that parses
+            // only JSON must not have to infer the body shape from a route name.
+            .put("oauth", oauthHelp())
+        out.put("markdown", markdown(stmp, errors, plugins, ssh, jwtEntries))
         return out
     }
+
+    /**
+     * The JWT plugin's usage, as data.
+     *
+     * Built from the same constants the plugin enforces, so a value here cannot drift from what the
+     * route actually accepts: the placeholder, the body fields, the verb mapping and the scheme list
+     * all come from the implementation rather than from a description of it.
+     */
+    /**
+     * The OAuth plugin's usage, as data.
+     *
+     * Built from the same constants the plugin enforces, so nothing here can drift from what the
+     * routes accept. Two facts are called out because they are the ones a caller gets wrong: there is
+     * no route that returns a token, and `scope` is never sent on a refresh (RFC 6749 §6).
+     */
+    private fun oauthHelp(): JSONObject = JSONObject()
+        .put(
+            "summary",
+            "Calls an API with an OAuth2 access token. The phone exchanges a stored refresh token " +
+                "for an access token, uses it for ONE approved call or upload, and drops it. " +
+                "Neither the client secret, the refresh token nor the access token is ever returned " +
+                "to the caller."
+        )
+        .put("list", "GET /oauth")
+        .put("route", "POST /oauth/{name}/call")
+        .put("upload", "POST /oauth/{name}/upload")
+        .put(
+            "body",
+            JSONObject()
+                .put("url", "https, and its host must be on the credential's allowlist")
+                .put("method", "GET, POST, PUT, PATCH, DELETE or HEAD; decides the approval verb")
+                .put("headers", "object; write *** where the token belongs")
+                .put("query", "object")
+                .put("body", "string")
+        )
+        .put("placeholder", com.mido.phonebridge.plugins.secrets.SecretBroker.PLACEHOLDER)
+        .put(
+            "tokenPlacement",
+            "If *** appears anywhere, the token goes exactly there. If it does not, the token is sent " +
+                "as the Authorization: Bearer header, and an Authorization you set yourself is never " +
+                "overwritten."
+        )
+        .put(
+            "uploadParams",
+            JSONObject()
+                .put("path", "file name inside the granted folder; no path separators")
+                .put("url", "https target")
+                .put("field", "omit for a raw body (Chrome Web Store); set for a multipart part name (AMO)")
+                .put("fields", "JSON object of extra text parts; only valid with 'field'")
+        )
+        .put("authStyles", JSONArray(com.mido.phonebridge.plugins.oauth.OauthEntry.AUTH_STYLES))
+        .put("policyKey", "oauth:<name> × <verb>")
+        .put(
+            "refresh",
+            "The refresh token is never written back. If the provider issues a new one, the call " +
+                "fails with refresh_token_rotated and the entry must be updated on the OAuth screen."
+        )
+        .put(
+            "scope",
+            "Display only. Never sent on a refresh, because RFC 6749 §6 permits it only as a subset " +
+                "of the granted scope and a disagreeing provider answers invalid_scope."
+        )
+        .put(
+            "noTokenRoute",
+            "There is deliberately no route that hands back a token: a token issued to a caller works " +
+                "outside the approval gate."
+        )
+
+    private fun jwtHelp(): JSONObject = JSONObject()
+        .put(
+            "summary",
+            "You send the request; the phone signs a short-lived token and makes the call. The " +
+                "signing secret stays in the vault and no token is ever returned to you."
+        )
+        .put("route", "POST /jwt/{name}/call")
+        .put("list", "GET /jwt")
+        .put("placeholder", com.mido.phonebridge.plugins.secrets.SecretBroker.PLACEHOLDER)
+        .put(
+            "bodyFields",
+            JSONArray(
+                listOf(
+                    JSONObject().put("name", "url").put("required", true)
+                        .put("note", "https only; the host must be on the credential's allowed list"),
+                    JSONObject().put("name", "method").put("required", false)
+                        .put("note", "defaults to GET; the verb is derived from it"),
+                    JSONObject().put("name", "headers").put("required", false)
+                        .put("note", "put *** in a value to place the token there"),
+                    JSONObject().put("name", "query").put("required", false)
+                        .put("note", "*** here lands in upstream logs; the card warns"),
+                    JSONObject().put("name", "body").put("required", false)
+                        .put("note", "string body, *** substituted"),
+                )
+            )
+        )
+        .put(
+            "whenNoPlaceholder",
+            "The token is sent as the Authorization header in the credential's own scheme, so a " +
+                "body with no *** at all is the normal case."
+        )
+        .put(
+            "verbByMethod",
+            JSONObject()
+                .put("GET", "READ").put("HEAD", "READ").put("OPTIONS", "READ")
+                .put("DELETE", "DELETE").put("other", "WRITE")
+        )
+        .put("policyKey", "jwt:<name> × <verb>")
+        .put("schemes", JSONArray(com.mido.phonebridge.plugins.jwt.JwtSpec.SCHEMES))
+        .put("algorithms", JSONArray(com.mido.phonebridge.plugins.jwt.JwtSigners.names()))
+        .put("returnsToken", false)
+        .put(
+            "response",
+            "The upstream's status, headers and body, scrubbed of the token, plus a `jwt` block " +
+                "naming the credential, issuer, algorithm and the token window."
+        )
 
     private fun describePlugin(plugin: Plugin): JSONObject {
         val o = JSONObject().put("id", plugin.id)
@@ -214,6 +388,7 @@ class HelpPlugin(private val ctx: Context) : Plugin {
         errors: JSONArray,
         plugins: JSONArray,
         ssh: JSONArray,
+        jwtCredentials: JSONArray,
     ): String {
         val sb = StringBuilder()
         sb.appendLine("# STMP ${stmp.getString("appVersion")} (build ${stmp.getInt("appBuild")})")
@@ -289,6 +464,70 @@ class HelpPlugin(private val ctx: Context) : Plugin {
             sb.appendLine()
         }
 
+        if (jwtCredentials.length() > 0) {
+            sb.appendLine("## JWT credentials")
+            sb.appendLine()
+            sb.appendLine("A credential holds a signing secret in the phone's vault. You never see")
+            sb.appendLine("the secret and you are never given a token: you send the REQUEST, the phone")
+            sb.appendLine("signs a short-lived JWT and makes the call. That is deliberate — a token handed")
+            sb.appendLine("to you would work outside the gate.")
+            sb.appendLine()
+            sb.appendLine("### Calling one")
+            sb.appendLine()
+            sb.appendLine("`POST /jwt/{name}/call` with a JSON body of the same shape the secret broker")
+            sb.appendLine("takes — `url`, `method`, `headers`, `query`, `body` — and write `***` wherever")
+            sb.appendLine("the token belongs:")
+            sb.appendLine()
+            sb.appendLine("```")
+            sb.appendLine("{\"url\": \"https://addons.mozilla.org/api/v5/addons/search/\",")
+            sb.appendLine(" \"method\": \"GET\",")
+            sb.appendLine(" \"headers\": {\"Authorization\": \"JWT ***\"},")
+            sb.appendLine(" \"query\": {\"author\": \"18729937\"}}")
+            sb.appendLine("```")
+            sb.appendLine()
+            sb.appendLine("- **Omit the `***` entirely** and the token is sent as `Authorization: <scheme>")
+            sb.appendLine("  <token>` automatically — that is what most APIs want, and it is the")
+            sb.appendLine("  shorter body.")
+            sb.appendLine("- `***` is substituted everywhere you put it: a header, a query value, or the body.")
+            sb.appendLine("  In a query string it ends up in the upstream's logs, so the approval card")
+            sb.appendLine("  warns about that placement specifically.")
+            sb.appendLine("- **https only**, and the host must be on that credential's allowed list — both are")
+            sb.appendLine("  checked BEFORE the approval card, so a mistake costs you nothing.")
+            sb.appendLine("- The verb is derived from `method`: GET/HEAD/OPTIONS are READ, DELETE is DELETE,")
+            sb.appendLine("  everything else is WRITE. Policy is keyed `jwt:<name> × <verb>`.")
+            sb.appendLine()
+            sb.appendLine("### What comes back")
+            sb.appendLine()
+            sb.appendLine("The upstream's status, headers and body, scrubbed of the token — plus a")
+            sb.appendLine("`jwt` block naming the credential, issuer, algorithm and the window the token")
+            sb.appendLine("was valid for. That block is how you tell a genuine 401 from an expired one.")
+            sb.appendLine()
+            sb.appendLine("Tokens are cached in memory and reused until shortly before they expire, so a")
+            sb.appendLine("burst of calls costs one signature. There is **no route that returns a token**.")
+            sb.appendLine()
+            sb.appendLine("### Configured")
+            sb.appendLine()
+            for (i in 0 until jwtCredentials.length()) {
+                val e = jwtCredentials.getJSONObject(i)
+                if (e.has("error")) {
+                    sb.appendLine("- `${e.getString("name")}` — unreadable: ${e.getString("error")}")
+                    continue
+                }
+                val hosts = e.getJSONArray("hosts")
+                val hostText = if (hosts.length() == 0) "none — every call is refused"
+                else (0 until hosts.length()).joinToString(", ") { hosts.getString(it) }
+                sb.appendLine(
+                    "- `${e.getString("name")}` — iss `${e.getString("issuer")}`, " +
+                        "${e.getString("alg")}, valid ${e.getInt("ttlSeconds")}s, " +
+                        "${e.getString("scheme")} header. hosts: $hostText"
+                )
+            }
+            sb.appendLine()
+            sb.appendLine("Signing is HMAC-SHA256 today, behind an algorithm registry — `GET /jwt`")
+            sb.appendLine("reports the `alg` each credential actually uses rather than assuming one.")
+            sb.appendLine()
+        }
+
         return sb.toString().trimEnd() + "\n"
     }
 
@@ -304,6 +543,6 @@ class HelpPlugin(private val ctx: Context) : Plugin {
          * **Guarded by a test**, because a number nobody checks is a number that is wrong. The
          * suite pins the route set against this build; changing a route without bumping fails.
          */
-        const val CONTRACT_VERSION = 6
+        const val CONTRACT_VERSION = 8
     }
 }

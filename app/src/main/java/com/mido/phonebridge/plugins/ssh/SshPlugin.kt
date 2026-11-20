@@ -344,7 +344,8 @@ class SshPlugin(private val ctx: Context) : Plugin {
     private fun saveConnection(name: String, conn: SshConnection) {
         SecretVault.put(
             ctx, vaultNameFor(name), conn.toJson().toString(),
-            kind = SecretVault.SecretMeta.Kind.SSH
+            kind = SecretVault.SecretMeta.Kind.SSH,
+            owner = "ssh",
         )
     }
 

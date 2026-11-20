@@ -20,7 +20,19 @@ import com.mido.phonebridge.core.PluginError
  * whose tap opens the picker. The HTTP call does not wait for the picker — a human browsing a
  * filesystem is unbounded time and often on another app's screen.
  */
-class FilesStore(private val ctx: Context) {
+class FilesStore(
+    private val ctx: Context,
+    /**
+     * Which SharedPreferences hold the tree URI.
+     *
+     * **A parameter, not a constant, because a grant belongs to ONE plugin.** The `files` plugin
+     * and the `oauth` plugin both read `Downloads/STMP` ([StmpFolder.PATH]) but must each hold their
+     * own persistable permission: sharing the stored URI would make turning one plugin off break the
+     * other's uploads. The default keeps `files` exactly as it was, so nothing about its behaviour
+     * changes; `oauth` passes its own name.
+     */
+    private val grantPrefs: String = DEFAULT_PREFS,
+) {
 
     /** No grant, or one the system has since revoked. The plugin turns this into 503. */
     class NotGranted : Exception("no folder has been granted")
@@ -47,7 +59,7 @@ class FilesStore(private val ctx: Context) {
      * granted to some other app cannot be mistaken for this one.
      */
     fun root(): Uri {
-        val stored = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val stored = ctx.getSharedPreferences(grantPrefs, Context.MODE_PRIVATE)
             .getString(KEY_URI, null) ?: throw NotGranted()
         val uri = Uri.parse(stored)
         val live = ctx.contentResolver.persistedUriPermissions
@@ -92,7 +104,7 @@ class FilesStore(private val ctx: Context) {
      * would revoke grants some other part of the app may hold.
      */
     fun accept(treeUri: Uri) {
-        val previous = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val previous = ctx.getSharedPreferences(grantPrefs, Context.MODE_PRIVATE)
             .getString(KEY_URI, null)?.let { runCatching { Uri.parse(it) }.getOrNull() }
         if (previous != null && previous != treeUri) {
             try {
@@ -111,12 +123,37 @@ class FilesStore(private val ctx: Context) {
             treeUri,
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
         )
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        ctx.getSharedPreferences(grantPrefs, Context.MODE_PRIVATE)
             .edit().putString(KEY_URI, treeUri.toString()).apply()
     }
 
     /** The root's own document id, which every child query is built from. */
     private fun rootDocId(): String = DocumentsContract.getTreeDocumentId(root())
+
+    /**
+     * The DISPLAY NAME of the granted tree's root, or null when it cannot be resolved.
+     *
+     * **The granted folder is not necessarily the expected one.** The picker lets the human choose
+     * any tree, and a screen that says "granted: Downloads/STMP" while a different folder is what
+     * was actually taken is lying to them — the uploads then read from somewhere else and the
+     * failure looks like a plugin bug. This asks the PROVIDER what the tree is called, so a screen
+     * can show the truth and warn when it disagrees with where uploads are expected to come from.
+     *
+     * Null is "could not ask", never "no folder": [root] already throws [NotGranted] for that, and
+     * conflating the two would hide a revoked grant behind a shrug.
+     */
+    fun rootLabel(): String? = try {
+        val root = root()
+        val docUri = DocumentsContract.buildDocumentUriUsingTree(root, rootDocId())
+        ctx.contentResolver.query(
+            docUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null,
+        )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (e: Exception) {
+        com.mido.phonebridge.Debug.log("files: could not read the granted folder's name: ${e.message}")
+        null
+    }
 
     /**
      * Every file in the granted folder.
@@ -192,7 +229,7 @@ class FilesStore(private val ctx: Context) {
     }
 
     private companion object {
-        const val PREFS = "files_grant"
+        const val DEFAULT_PREFS = "files_grant"
         const val KEY_URI = "tree_uri"
     }
 }

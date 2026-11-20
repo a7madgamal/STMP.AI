@@ -71,6 +71,39 @@ class BridgeService : Service() {
         const val PORT = 8787
 
         /**
+         * Register one JWT credential at runtime, so a credential added on the JWT screen becomes
+         * routable without restarting the service. Idempotent.
+         *
+         * The same narrow seam as [registerSecretPlugin]: the screen owns the value, the service owns
+         * the routing table.
+         */
+        fun registerJwtPlugin(ctx: Context, name: String) {
+            val id = "jwt:$name"
+            if (PluginRegistry.get(id) == null) {
+                PluginRegistry.register(
+                    com.mido.phonebridge.plugins.jwt.JwtPlugin(ctx.applicationContext, name)
+                )
+                Debug.log("jwt plugin registered at runtime: '$name'")
+            }
+        }
+
+        /**
+         * Register a newly created OAuth credential without a service restart.
+         *
+         * The screen calls this after a save, so the routes exist the moment the credential does.
+         * Idempotent: `PluginRegistry.register` ignores a duplicate id.
+         */
+        fun registerOauthPlugin(ctx: Context, name: String) {
+            val id = "oauth:$name"
+            if (PluginRegistry.get(id) == null) {
+                PluginRegistry.register(
+                    com.mido.phonebridge.plugins.oauth.OauthPlugin(ctx.applicationContext, name)
+                )
+                Debug.log("oauth plugin registered at runtime: '$name'")
+            }
+        }
+
+        /**
          * The one wording for "there is nothing to bind to".
          *
          * Tailscale is a RECOMMENDATION, not a precondition (see `BindAddress`): a phone on plain
@@ -845,8 +878,86 @@ class BridgeService : Service() {
                 com.mido.phonebridge.plugins.secrets.SecretIndexPlugin(applicationContext)
             )
         }
+        // The JWT feature's two halves: the index (one plugin, serves every credential) and one
+        // plugin per configured credential so policy keys on `jwt:<name>`.
+        if (PluginRegistry.get("jwt") == null) {
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.jwt.JwtIndexPlugin(applicationContext)
+            )
+        }
         registerSecretPlugins()
+        registerJwtPlugins()
+
+        // The OAuth feature's two halves, same shape as JWT's: the index (one plugin, serves every
+        // credential) and one plugin per configured credential so policy keys on `oauth:<name>`.
+        if (PluginRegistry.get("oauth") == null) {
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.oauth.OauthIndexPlugin(applicationContext)
+            )
+        }
+        registerOauthPlugins()
     }
+
+    /**
+     * One plugin per configured OAuth credential.
+     *
+     * The list is data, so a new credential becomes routable without a release — and the names come
+     * from the plaintext sidecar, which is readable while the vault is locked, so the rules screen
+     * works without a fingerprint. An unreadable store registers nothing rather than failing startup:
+     * an OAuth config cannot make the whole bridge unservable.
+     */
+    private fun registerOauthPlugins() {
+        val names = try {
+            com.mido.phonebridge.plugins.oauth.OauthStore.names(applicationContext)
+        } catch (e: Exception) {
+            Debug.log("oauth config unreadable, no oauth routes registered: ${e.message}")
+            return
+        }
+        var count = 0
+        for (name in names) {
+            val id = "oauth:$name"
+            if (PluginRegistry.get(id) != null) continue
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.oauth.OauthPlugin(applicationContext, name)
+            )
+            count++
+        }
+        if (count > 0) Debug.log("registered $count oauth credential plugin(s)")
+    }
+
+    /**
+     * One plugin per configured JWT credential.
+     *
+     * Same shape as [registerSecretPlugins] and for the same reason: the credential list is data, so
+     * a new JWT entry becomes routable without a release. The names come from the plaintext sidecar,
+     * which is readable while the vault is locked — the rules screen has to show
+     * `jwt:amo × READ` before anyone has touched a fingerprint.
+     *
+     * A failure to read the sidecar does NOT stop the bridge, unlike the secret index. The difference
+     * is what each holds: an unreadable secret index hides credentials that still exist in the
+     * encrypted blob, while an unreadable JWT sidecar hides only configuration — and the JWT screen
+     * reports that itself, so refusing to start would take every other capability down to make a
+     * broken config louder.
+     */
+    private fun registerJwtPlugins() {
+        val names = try {
+            com.mido.phonebridge.plugins.jwt.JwtStore.names(applicationContext)
+        } catch (e: Exception) {
+            Debug.log("jwt config unreadable, no jwt routes registered: ${e.message}")
+            return
+        }
+        var count = 0
+        for (name in names) {
+            val id = "jwt:$name"
+            if (PluginRegistry.get(id) != null) continue
+            PluginRegistry.register(
+                com.mido.phonebridge.plugins.jwt.JwtPlugin(applicationContext, name)
+            )
+            count++
+        }
+        if (count > 0) Debug.log("registered $count jwt credential plugin(s)")
+    }
+
 
     /**
      * Register one plugin per stored secret (plan D7/D8).
@@ -880,16 +991,20 @@ class BridgeService : Service() {
             // fires pre-gate forever, and /help then advertises a capability that does not exist.
             // It also told a caller "there is an HTTP API called evox2", which is simply false.
             //
-            // So the kind decides. An unreadable entry is skipped rather than guessed at: a
-            // metadata read that throws must not silently produce a broker route either.
-            val kind = try {
-                com.mido.phonebridge.core.SecretVault.meta(applicationContext, name).kind
+            // So OWNERSHIP decides, not kind. An entry some plugin declared as its own is not a
+            // broker secret, whatever its kind says: that covers SSH keys, JWT signing secrets, and
+            // anything a future plugin stores — without this loop having to learn each one.
+            //
+            // An unreadable entry is skipped rather than guessed at: a metadata read that throws
+            // must not silently produce a broker route either.
+            val meta = try {
+                com.mido.phonebridge.core.SecretVault.meta(applicationContext, name)
             } catch (e: Exception) {
                 Debug.log("secret '$name': metadata unreadable (${e.message}); not registering")
                 continue
             }
-            if (kind != com.mido.phonebridge.core.SecretVault.SecretMeta.Kind.SECRET) {
-                Debug.log("secret '$name': kind=$kind — not a broker secret, no route")
+            if (meta.owner != null) {
+                Debug.log("secret '$name': owned by '${meta.owner}' — not a broker secret, no route")
                 continue
             }
             if (PluginRegistry.get(name) == null) {
