@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.92 (build 418)**.
+Current build: **v0.51.93 (build 419)**.
 
 ---
 
@@ -5869,13 +5869,17 @@ devDependencies. `node_modules/` is gitignored.
 - `/help` gains a `params` array per route — name, type, required, default, allowed values and a description — always emitted, so `[]` states "takes none" rather than leaving the reader unsure whether it is undocumented. The markdown says the same, built from the same array so prose and data cannot disagree.
 - Declared for all 43 routes, including `oauth`'s `path`/`url`/`field`/`fields`, Drive's `to`/`parent`/`name`/`type`, Calendar's required `timeMin`/`timeMax`/`timeZone`, and Gmail's `max`/`q`/`pageToken`.
 
-## 0.51.92 (build 418) — 2026-11-20 — CURRENT
+## 0.51.92 (build 418) — 2026-11-20
 - **The JSON import no longer refuses to save because a refresh token is missing.** A downloaded client file is the CLIENT half only and can never contain one, so demanding it discarded a file that was perfectly good and blocked the user on a field the file cannot fill. A credential is now saved as an explicit `needs_refresh_token` state. Mido, 2026-11-20: *"i don't like being blocked by a required field … we should accept the json data and have a follow up"*.
 - That state is **named, not silent**: the card says "needs a refresh token — tap CONNECT to authorise", `GET /oauth` reports `status: ready|needs_refresh_token|unreadable`, and `call`/`upload` refuse **pre-gate** with `oauth_needs_refresh_token`. A call that cannot mint must not cost a human a tap — the same rule `no_folder_granted` already followed.
 - **CONNECT is the follow-up, and it builds the exact authorisation URL from the file already imported**: client id, scope, and `access_type=offline` plus `prompt=consent`. Those last two are the reason people come back from the Playground with no `refresh_token` at all, and the Playground hides both behind a gear icon. One tap opens Google's consent page fully pre-filled instead of pasting two values into a third-party page.
 - The token comes back as ONE paste, and the field accepts the whole `"refresh_token": "1//…"` line — quotes, trailing comma and all — while refusing something obviously different. A client secret pasted in its place starts with `GOCSPX-` and is refused by name, because storing it would fail later at the provider as `invalid_grant`, which reads as "my credential is refused" rather than "the wrong field was filled".
 - **No placeholder is ever stored for a missing token.** An empty string is preserved as empty: a placeholder would be a lie that surfaces at the provider, further away from the cause.
 - Phase B of `docs/plans/OAUTH-REFRESH-TOKEN-PLAN.md` (a loopback listener, so the app catches the redirect itself and no paste is needed) is NOT in this build. Google supports it for Desktop (`installed`) clients — verified against the loopback-migration guide — but it adds a listening socket reachable by every app on the phone, which is a separate decision.
+
+## 0.51.93 (build 419) — 2026-11-20 — CURRENT
+- **Fixed: the add form still marked REFRESH TOKEN as required.** 0.51.92 removed the save check but left the field declared `required = true`, so the dialog still showed a REQUIRED badge and still refused — and the marker is the contract the user reads, not the code behind it. Mido hit it immediately: *"refresh token still required in the dialog!"*. The field is now labelled **REFRESH TOKEN (OPTIONAL)** with `required = false`, and its help says to leave it empty when the credential has not been authorised yet.
+- A test now pins that marker, because this regression is invisible to a compile and to the save logic: it was a layout fact inside an Activity, and the suite has no device to build those views on.
 
 ## Keeping this file honest
 

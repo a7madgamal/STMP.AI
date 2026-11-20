@@ -10,6 +10,7 @@ import com.mido.phonebridge.plugins.oauth.OauthTokenCache
 import com.mido.phonebridge.plugins.oauth.tokenErrorLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -195,6 +196,35 @@ class OauthPluginTest {
     fun `basic is the default auth style`() {
         val entry = OauthEntry.fromJson("""{"tokenUrl":"https://x/token"}""")
         assertEquals(OauthEntry.AUTH_BASIC, entry.authStyle)
+    }
+
+    @Test
+    fun `the add form does NOT mark the refresh token as required`() {
+        // **A regression guard for a shipped mistake.** 0.51.92 removed the save check but left the
+        // field marked `required = true`, so the dialog still showed a REQUIRED badge and still
+        // refused — the marker is the contract the user sees, not the code behind it. Mido caught it
+        // immediately: *"refresh token still required in the dialog!"*
+        //
+        // A source scan because this is a LAYOUT fact inside an Activity, and the JVM suite cannot
+        // build that Activity's views without a device.
+        val source = java.io.File("src/main/java/com/mido/phonebridge/OauthActivity.kt").readText()
+        // Slice from the refresh field's own title to the END of its `labelledField(...)` call.
+        // `required = false` is written after `inputType`, so a slice stopping there cut the very
+        // line being asserted — a guard that failed while the code was correct. The `)` that closes
+        // the call comes after `required`, so the slice ends at the first `)\n` following it.
+        val field = source.substringAfter("\"REFRESH TOKEN (OPTIONAL)\"", "")
+            .substringAfter("inputType")
+            .substringBefore("\n            )")
+            .let { "inputType" + it }
+        assertTrue(
+            "the refresh-token field must be declared with required = false, so the form does not " +
+                "demand a value the imported file can never contain",
+            field.contains("required = false"),
+        )
+        assertFalse(
+            "it must not be marked required: ${field.take(120)}",
+            field.contains("required = true"),
+        )
     }
 
     // --- the paste parser ---------------------------------------------------------------------

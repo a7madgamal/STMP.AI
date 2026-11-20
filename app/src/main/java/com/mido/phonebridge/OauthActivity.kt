@@ -583,23 +583,21 @@ class OauthActivity : Activity() {
                 imported?.let { setText(it.clientSecret) }
             }
             refreshField = labelledField(
-                box, "REFRESH TOKEN",
-                // **The only field an import cannot fill, so the help is the instructions.**
+                box, "REFRESH TOKEN (OPTIONAL)",
+                // **OPTIONAL, and the label says so.** Mido, 2026-11-20, twice: *"i don't like being
+                // blocked by a required field"*, then *"refresh token still required in the dialog!"*
+                // after a build that removed the save check but left this field marked REQUIRED —
+                // so the form still demanded it and still refused. The marker is the contract here,
+                // not the save code behind it.
                 //
-                // The client file is the CLIENT half of a credential. A refresh token comes from an
-                // authorisation where a human signs in, and no download can contain one. Rather
-                // than a vague "use the Playground", these are the exact four steps — and the
-                // redirect-URI question they depend on is answered by the import itself.
-                "Not in the downloaded file — that file is only the client half. Get one from an " +
-                    "authorisation round trip: (1) open https://developers.google.com/oauthplayground" +
-                    "\n(2) gear icon → tick 'Use your own OAuth credentials' → paste this client id " +
-                    "and secret\n(3) tick the scope you need, e.g. " +
-                    "https://www.googleapis.com/auth/chromewebstore\n(4) Authorize, sign in as the " +
-                    "account that owns it, then 'Exchange authorization code for tokens' and copy " +
-                    "refresh_token.\nIt is the key to the account until revoked, which is why it " +
-                    "lives in the vault and never leaves the phone.",
+                // Leaving it empty saves the credential as needs_refresh_token, and the card then
+                // offers CONNECT, which builds the authorisation URL from the imported values.
+                "Leave this EMPTY if you have not authorised yet — the credential still saves, and " +
+                    "CONNECT on its card finishes it with the client id and secret already stored.\n" +
+                    "If you do have one, paste it here: it is the key to the account until revoked, " +
+                    "so it goes straight into the vault and never leaves the phone.",
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
-                required = true,
+                required = false,
             )
         } else {
             clientSecretField = null
