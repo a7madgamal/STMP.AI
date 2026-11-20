@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import com.google.android.material.button.MaterialButton
 import com.mido.phonebridge.ui.ServerStatus
+import com.mido.phonebridge.core.GoogleAccounts
 import com.mido.phonebridge.audit.AuditHealth
 import com.mido.phonebridge.audit.AuditLog
 import com.mido.phonebridge.audit.PolicyAudit
@@ -546,8 +547,10 @@ class HomeFragment : BridgeFragment(), BridgeControl {
         append(com.mido.phonebridge.ai.ModelProvisioner.running).append('|')
         append(com.mido.phonebridge.ai.ModelProvisioner.progress?.percent ?: -1).append('|')
         append(com.mido.phonebridge.ai.ModelRegistry.readiness(ctx).ready).append('|')
-        append(AuthManager.isLoggedIn(ctx)).append('|')
-        append(AuthManager.accountEmail ?: "").append('|')
+        append(AuthManager.hasAccount(ctx)).append('|')
+        // The COUNT, not an address: with several accounts there is no single "the account",
+        // and this signature only needs to notice that the set changed.
+        append(runCatching { GoogleAccounts.count(ctx) }.getOrDefault(-1)).append('|')
         append(com.mido.phonebridge.core.OnboardingPrefs.seen(ctx)).append('|')
         append(AuditLog.from(requireContext()).headers().firstOrNull()?.id ?: "").append('|')
         append(AuditHealth.reason ?: "").append('|')

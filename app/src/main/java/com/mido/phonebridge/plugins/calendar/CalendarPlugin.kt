@@ -61,18 +61,24 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
                 ParamSpec("q", "Free-text search over event fields."),
                 ParamSpec("pageToken", "The nextPageToken from a previous reply."),
                 ParamSpec("calendarId", "Which calendar to read. Defaults to 'primary'.", default = "primary"),
+                ACCOUNT_PARAM,
             ),
             // Same parsers run pre-gate and in the handler, so a bad window answers
             // 400 without a tap and the two paths cannot drift.
             validate = { requireWindow(it); requireMax(it); requireSingleEvents(it); requireTimeZone(it) }
         ) { list(it) },
-        Route("POST", "/calendar/events", "CREATE CALENDAR EVENT", Verb.WRITE) { create(it) },
-        Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT", Verb.EDIT) { update(it) },
-        Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT", Verb.DELETE) { delete(it) },
-        Route("POST", "/calendar/events/{id}/move", "MOVE CALENDAR EVENT", Verb.EDIT) { move(it) },
+        Route("POST", "/calendar/events", "CREATE CALENDAR EVENT", Verb.WRITE,
+            params = listOf(ACCOUNT_PARAM)) { create(it) },
+        Route("POST", "/calendar/events/{id}", "UPDATE CALENDAR EVENT", Verb.EDIT,
+            params = listOf(ACCOUNT_PARAM)) { update(it) },
+        Route("DELETE", "/calendar/events/{id}", "DELETE CALENDAR EVENT", Verb.DELETE,
+            params = listOf(ACCOUNT_PARAM)) { delete(it) },
+        Route("POST", "/calendar/events/{id}/move", "MOVE CALENDAR EVENT", Verb.EDIT,
+            params = listOf(ACCOUNT_PARAM)) { move(it) },
         Route("POST", "/calendar/quickadd", "QUICK-ADD CALENDAR EVENT", Verb.WRITE,
             // The zone must MATCH the calendar's, which cannot succeed if it does not — so
             // it is checked pre-gate and never costs an approval tap. See requireQuickAddZone.
+            params = listOf(ACCOUNT_PARAM),
             validate = { requireQuickAddZone(it) }
         ) { quickAdd(it) }
     )
@@ -116,10 +122,13 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
                 }
             },
             "DELETE /calendar/events/{id}" to { r ->
+                // The rows are built before the modal, so the account comes from the request —
+                // the same resolution the handler will use, never a global.
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
                 val calendarId = r.query["calendarId"]?.trim()?.takeIf { it.isNotBlank() } ?: "primary"
                 val ev = try {
-                    GoogleApi.get(ctx, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
+                    GoogleApi.get(ctx, account, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
                 } catch (e: PluginError) {
                     throw PluginError("not_found", "no event for id '$id': ${e.message}")
                 }
@@ -170,6 +179,23 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         val tz = st.optString("timeZone").ifBlank { en.optString("timeZone") }
         return if (tz.isNotBlank()) "${one(st)} → ${one(en)} ($tz)" else "${one(st)} → ${one(en)}"
     }
+
+    /**
+     * The account this request acts as, resolved BEFORE the gate.
+     *
+     * See `GmailPlugin.resolveAccount`: the modal must name the calendar owner before the human
+     * approves, and a handler cannot supply that because it runs afterwards.
+     */
+    override fun resolveAccount(req: Req): GoogleAccounts.Account =
+        AuthManager.resolveAccount(ctx, req.query["account"])
+
+    /** The account the dispatcher resolved, or a defect — a handler never guesses one. */
+    private fun requireAccount(req: Req): GoogleAccounts.Account =
+        req.googleAccount ?: throw PluginError(
+            "account_storage_error",
+            "the dispatcher ran this handler without resolving an account (a defect, not a " +
+                "request problem)",
+        )
 
     private fun requireString(req: Req, key: String): String {
         val v = req.body.optString(key).trim()
@@ -239,14 +265,19 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         if (AuthManager.clientId.isBlank()) {
             return PluginStatus("Calendar", PluginStatus.State.OFF, "no OAuth client id configured")
         }
-        if (!AuthManager.isLoggedIn(ctx)) {
-            return PluginStatus("Calendar", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
+        val accounts = GoogleAccounts.count(ctx)
+        if (accounts == 0) {
+            return PluginStatus(
+                "Calendar", PluginStatus.State.NEEDS_ATTENTION, "no account connected",
+            )
         }
-        // The ACCOUNT is not echoed here. The Google card above these rows states it once —
-        // Mido, 2026-11-04: *"the google plugin should be one card, show the email once"*.
-        // Repeating it on three service rows is the same fact four times, and it pushed each
-        // row's real status (what it can actually do) off the line.
-        return PluginStatus("Calendar", PluginStatus.State.OK, "ready")
+        // The ACCOUNT is not echoed here as a claim about which one a request will use: every
+        // request names its own, and the modal is where that is stated. The COUNT is the honest
+        // summary — it says the row can serve, and how many identities it can serve for.
+        return PluginStatus(
+            "Calendar", PluginStatus.State.OK,
+            if (accounts == 1) "ready" else "ready · $accounts accounts",
+        )
     }
 
     // --- routes ---
@@ -284,6 +315,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         req.query["singleEvents"]?.trim()?.let { parseBool("singleEvents", it) } ?: true
 
     private fun list(req: Req): Resp {
+        val account = requireAccount(req)
         val (timeMin, timeMax) = requireWindow(req)
         val max = requireMax(req)
 
@@ -306,7 +338,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         url.append("&timeZone=${enc(timeZone)}")
         if (pageToken != null) url.append("&pageToken=${enc(pageToken)}")
 
-        val res = GoogleApi.get(ctx, url.toString())
+        val res = GoogleApi.get(ctx, account, url.toString())
         val items = res.optJSONArray("items") ?: JSONArray()
         val out = JSONArray()
         for (i in 0 until items.length()) {
@@ -326,6 +358,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * Returns the FULL event read back (server-side GET inside the same request).
      */
     private fun create(req: Req): Resp {
+        val account = requireAccount(req)
         val summary = requireBodyString(req, "summary")
         val start = requireBodyString(req, "start")
         val end = requireBodyString(req, "end")
@@ -347,7 +380,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
             payload.put("attendees", arr)
         }
 
-        val res = GoogleApi.post(ctx, "$base/calendars/${enc(calendarId)}/events", payload.toString())
+        val res = GoogleApi.post(ctx, account, "$base/calendars/${enc(calendarId)}/events", payload.toString())
         // Read back the full resulting event (choice B).
         val id = res.optString("id")
         if (id.isBlank()) throw PluginError("google_error", "create returned no id: $res")
@@ -359,6 +392,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * start, end, timeZone — same contract as create, per the standing rule.
      */
     private fun update(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
         val summary = requireBodyString(req, "summary")
         val start = requireBodyString(req, "start")
@@ -376,19 +410,21 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         req.body.optString("location").takeIf { it.isNotBlank() }?.let { payload.put("location", it) }
 
         val res = GoogleApi.patch(
-            ctx, "$base/calendars/${enc(calendarId)}/events/${enc(id)}", payload.toString()
+            ctx, account,
+            "$base/calendars/${enc(calendarId)}/events/${enc(id)}", payload.toString()
         )
         return Resp.ok(JSONObject().put("event", summarize(res)))
     }
 
     /** Delete an event. Returns the full (now cancelled) event read back. */
     private fun delete(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
         val calendarId = req.query["calendarId"]?.trim()?.takeIf { it.isNotBlank() } ?: "primary"
         // DELETE returns 204 with no body; read the event back BEFORE deleting so
         // the caller still gets the object it asked to remove (choice B), then delete.
-        val before = GoogleApi.get(ctx, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
-        GoogleApi.delete(ctx, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
+        val before = GoogleApi.get(ctx, account, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
+        GoogleApi.delete(ctx, account, "$base/calendars/${enc(calendarId)}/events/${enc(id)}")
         val ev = summarize(before)
         ev.put("deleted", true)
         return Resp.ok(JSONObject().put("event", ev))
@@ -399,11 +435,12 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * REQUIRED: calendarId (destination). Source defaults to `primary`.
      */
     private fun move(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
         val dest = requireBodyString(req, "calendarId")
         val from = req.body.optString("fromCalendarId").trim().ifBlank { "primary" }
         val res = GoogleApi.post(
-            ctx,
+            ctx, account,
             "$base/calendars/${enc(from)}/events/${enc(id)}/move?destination=${enc(dest)}",
             "{}"
         )
@@ -424,13 +461,14 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * tap). Use `create` when the zone must differ from the calendar's.
      */
     private fun quickAdd(req: Req): Resp {
+        val account = requireAccount(req)
         val text = requireBodyString(req, "text")
         // Already validated (and matched to the calendar's zone) pre-gate; re-required here
         // so the handler cannot run on a request that skipped validation.
         requireBodyZone(req)
         val calendarId = req.body.optString("calendarId").trim().ifBlank { "primary" }
         val url = "$base/calendars/${enc(calendarId)}/events/quickAdd?text=${enc(text)}"
-        val res = GoogleApi.post(ctx, url, "{}")
+        val res = GoogleApi.post(ctx, account, url, "{}")
         return Resp.ok(JSONObject().put("event", summarize(res)))
     }
 
@@ -454,7 +492,7 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
         // That is the same misclassification this project already fixed for `bad_lines`.
         // Rethrown as a 5xx (not noise), with the underlying cause kept in the detail.
         val calZone = try {
-            calendarZone(calendarId)
+            calendarZone(req, calendarId)
         } catch (e: PluginError) {
             throw PluginError(
                 "calendar_zone_unavailable",
@@ -479,13 +517,14 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
      * value is needed to enforce the caller's, and guessing it is exactly what this change
      * forbids.
      */
-    private fun calendarZone(calendarId: String): String {
+    private fun calendarZone(req: Req, calendarId: String): String {
+        val account = requireAccount(req)
         val now = java.time.Instant.now()
         val from = now.minusSeconds(3600).toString()
         val to = now.plusSeconds(3600).toString()
         val url = "$base/calendars/${enc(calendarId)}/events" +
             "?maxResults=1&singleEvents=true&timeMin=${enc(from)}&timeMax=${enc(to)}"
-        val res = GoogleApi.get(ctx, url)
+        val res = GoogleApi.get(ctx, account, url)
         val z = res.optString("timeZone")
         if (z.isBlank()) {
             throw PluginError("google_error", "calendar '$calendarId' reported no timeZone")

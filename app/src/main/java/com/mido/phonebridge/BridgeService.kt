@@ -1,5 +1,6 @@
 package com.mido.phonebridge
 
+import com.mido.phonebridge.core.ErrorCodes
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -359,6 +360,7 @@ class BridgeService : Service() {
         // Web client, then exchange it for a refresh token. The Web client's
         // SECRET is never embedded.
         PlayAuth.configure(serverClientId = GOOGLE_SERVER_CLIENT_ID, offline = true)
+
         registerPlugins()
 
         // POLICY, before any listener exists. An unreadable policy means the server
@@ -1455,9 +1457,26 @@ class HttpServer(
             val summary = describe(resolved.plugin.id, resolved.route.path, body)
             draft.summary(summary)
 
-            val am = com.mido.phonebridge.core.AuthManager
-            val account = am.accountEmail
-                ?: if (am.isLoggedIn(ctx)) "(signed in)" else "—"
+            // THE ACCOUNT, resolved BEFORE the gate and before any modal is built.
+            //
+            // The old line read one global `accountEmail`, so a modal named whichever account
+            // signed in last while the request could act as another. Now the plugin resolves
+            // its own account from the request (see `Plugin.resolveAccount`), the value is
+            // carried onto the Req, and the modal renders THAT. `None` is not an error here —
+            // non-Google routes have no account at all, and a Google route that refused never
+            // reaches this point with a null (the plugin throws first).
+            val resolvedGoogleAccount = try {
+                resolved.plugin.resolveAccount(req)
+            } catch (e: PluginError) {
+                // Pre-gate refusal: a coded 4xx with no modal, exactly like a bad parameter.
+                draft.outcome(AuditOutcome.REJECTED_INVALID)
+                draft.error(e.code)
+                val obj = err(e.code, e.message ?: e.code)
+                draft.response(ErrorCodes.statusFor(e.code), obj.toString())
+                return Dispatched(httpStatusFor(e.code), obj)
+            }
+            req.googleAccount = resolvedGoogleAccount
+            val account = resolvedGoogleAccount?.email ?: "—"
 
             // POLICY. Resolved after validation (bad input still costs nothing) and
             // before the gate. Guarded rather than assumed: startup already refuses on
@@ -1635,6 +1654,10 @@ class HttpServer(
                                 else null,
                                 needsAi = com.mido.phonebridge.ai.AiGateway.requiresAi(ctx, resolved.route.aiSummary),
                                 callerLabel = callerLabelFor(remote),
+                                // The SAME resolved account the modal would show. A NOTIFY rule
+                                // approves on silence, so this line is the only place the
+                                // mailbox is named before consent is inferred.
+                                account = resolvedGoogleAccount?.email,
                             )
                             when (decision) {
                                 is NotifyGate.Result.Approved -> {

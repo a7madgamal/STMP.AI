@@ -35,6 +35,24 @@ import org.json.JSONObject
  * The list is the contract in both directions: `/help` documents exactly these, and dispatch
  * REFUSES any parameter not listed. Guessing becomes a loud error instead of a wrong answer.
  */
+/**
+ * The `account` parameter, declared on every route that acts on a Google account.
+ *
+ * **Declared as optional on purpose, and that is not the same as "never required".** Whether a
+ * caller must send it depends on how many accounts exist, which lives on disk — so it cannot be
+ * a constant here. `ParamSpec.required` is left false and `AuthManager.accountRequirement` is the
+ * single authority on presence: the dispatcher refuses with `account_required` when it says so,
+ * and `/help` asks the SAME function to describe the route. One authority, two readers.
+ *
+ * Declaring it is still load-bearing: it makes `/help` truthful about the name, and it makes
+ * `checkParams` accept the parameter instead of refusing it as unknown.
+ */
+val ACCOUNT_PARAM = ParamSpec(
+    "account",
+    "Which Google account to act as, as the full email address (see GET /help for the list). " +
+        "Required when more than one account is connected; omit it when exactly one is.",
+)
+
 data class ParamSpec(
     val name: String,
     /** What it does, in the words the caller needs. Shown by `/help`. */
@@ -405,6 +423,19 @@ class Req(
      * later and is attached here rather than in a second Req.
      */
     var secretInput: CharArray? = null
+
+    /**
+     * The Google account this request acts as, resolved BEFORE the gate opened.
+     *
+     * Set by the dispatcher from the plugin's `resolveAccount` hook, so the approval view can
+     * name it and the handler cannot pick a different one later. Null on every non-Google
+     * route, and also null on a Google route when no account could be resolved — in which case
+     * the request was already refused and no handler ran.
+     *
+     * Mutable for the same reason as [secretInput]: the value depends on state read after the
+     * request is constructed, and building a second Req would duplicate the whole body.
+     */
+    var googleAccount: GoogleAccounts.Account? = null
 }
 
 /**
@@ -613,6 +644,20 @@ interface Plugin {
                 "add it to reads, or add a write entry)"
         )
     }
+
+    /**
+     * The Google account this request acts as, or null when the route does not touch Google.
+     *
+     * **Called by the dispatcher BEFORE the approval view exists**, which is the whole reason
+     * this is a plugin hook rather than something a handler does: a handler runs after the human
+     * has decided, so an account resolved there can only be reported after the fact. Resolving
+     * here means the modal names the account the request will actually use.
+     *
+     * Returning null on a Google route is a refusal, not a default: the dispatcher treats it as
+     * `account_required`/`no_accounts` per [AuthManager.accountRequirement]. A plugin must never
+     * return "whichever account exists" — that is exactly the behaviour multi-account removes.
+     */
+    fun resolveAccount(req: Req): GoogleAccounts.Account? = null
 
     /** UI status card data. */
     fun status(): PluginStatus

@@ -461,8 +461,14 @@ class ApprovalTipView(context: Context) : View(context) {
     /** The countdown ring's stroke width, in px, from the last rebuild. */
     private var ringStroke: Float = 0f
 
-    override fun onDraw(canvas: Canvas) {        val m = metrics
-        com.mido.phonebridge.Debug.log("tip: onDraw called")
+    override fun onDraw(canvas: Canvas) {
+        val m = metrics
+        // **No per-frame log here.** This line ran on EVERY draw — the tip animates, so that is
+        // tens of lines a second — and it filled the 200-entry ring buffer continuously. The
+        // effect was that `GET /debug`'s `logTail` contained nothing but this line, so the one
+        // buffer that is supposed to explain a failed login (and a failed anything) held no
+        // evidence at all. A diagnostic that evicts every other diagnostic is worse than none.
+        // The first-draw geometry line below is the part that was actually useful, and it stays.
         if (drawnOnce == 0) {
             // One line, once, at the first real draw. The window geometry is invisible from
             // outside the view, so without this a blank tip is indistinguishable from a tip that

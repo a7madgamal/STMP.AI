@@ -15,8 +15,8 @@ import java.net.URL
 object GoogleApi {
     private const val TAG = "GoogleApi"
 
-    fun get(ctx: Context, url: String): JSONObject {
-        val token = AuthManager.accessToken(ctx)
+    fun get(ctx: Context, account: GoogleAccounts.Account, url: String): JSONObject {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
@@ -27,8 +27,8 @@ object GoogleApi {
         return readJson(conn)
     }
 
-    fun post(ctx: Context, url: String, body: String): JSONObject {
-        val token = AuthManager.accessToken(ctx)
+    fun post(ctx: Context, account: GoogleAccounts.Account, url: String, body: String): JSONObject {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
@@ -41,8 +41,8 @@ object GoogleApi {
         return readJson(conn)
     }
 
-    fun patch(ctx: Context, url: String, body: String): JSONObject {
-        val token = AuthManager.accessToken(ctx)
+    fun patch(ctx: Context, account: GoogleAccounts.Account, url: String, body: String): JSONObject {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "PATCH"
             doOutput = true
@@ -55,8 +55,8 @@ object GoogleApi {
         return readJson(conn)
     }
 
-    fun delete(ctx: Context, url: String): JSONObject {
-        val token = AuthManager.accessToken(ctx)
+    fun delete(ctx: Context, account: GoogleAccounts.Account, url: String): JSONObject {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "DELETE"
             connectTimeout = 15_000
@@ -78,8 +78,8 @@ object GoogleApi {
      * promised. A stream that starts and then dies mid-transfer cannot be reported as an HTTP
      * error, which is why the check has to happen first.
      */
-    fun openStream(ctx: Context, url: String): Pair<HttpURLConnection, java.io.InputStream> {
-        val token = AuthManager.accessToken(ctx)
+    fun openStream(ctx: Context, account: GoogleAccounts.Account, url: String): Pair<HttpURLConnection, java.io.InputStream> {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
@@ -121,8 +121,8 @@ object GoogleApi {
      * body would find nothing useful — the header IS the result — so returning a `JSONObject`
      * here would quietly lose the only thing the call produces.
      */
-    fun postJsonForLocation(ctx: Context, url: String, body: String): String {
-        val token = AuthManager.accessToken(ctx)
+    fun postJsonForLocation(ctx: Context, account: GoogleAccounts.Account, url: String, body: String): String {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
@@ -161,8 +161,8 @@ object GoogleApi {
      * upload; the length comes from the caller, who got it from the request. A wrong length here
      * fails the upload rather than truncating it silently, which is the safe direction.
      */
-    fun putStream(ctx: Context, url: String, input: java.io.InputStream, length: Long, contentType: String): JSONObject {
-        val token = AuthManager.accessToken(ctx)
+    fun putStream(ctx: Context, account: GoogleAccounts.Account, url: String, input: java.io.InputStream, length: Long, contentType: String): JSONObject {
+        val token = AuthManager.accessToken(ctx, account)
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "PUT"
             doOutput = true

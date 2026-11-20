@@ -1162,14 +1162,23 @@ class ApprovalActivity : FragmentActivity() {
                 // decision is actually resolved. On a dismissed or failed prompt we do
                 // nothing at all, so the request stays pending and the human can retry —
                 // same behaviour as APPROVE.
+                // **The decision goes through the same finish as APPROVE, or it makes no sound.**
+                //
+                // This used to call `resolveWithException` and `finish()` directly, which skipped
+                // `finishWith` — and `finishWith` is what runs `showStamp`, which is what plays
+                // the stamp thud and haptic. So "USE CARD FROM NOW ON" approved the request in
+                // silence and without the ink mark that every other decision gets: reported as
+                // *"it should have the same sound effect as accept"*. The rule is still attached
+                // to the gate first, because `finishWith` resolves with a plain approve and would
+                // otherwise drop it.
                 if (requiresBiometric) {
                     promptBiometric {
                         ApprovalGate.resolveWithException(id, off.rule)
-                        finish()
+                        showStamp(approved = true)
                     }
                 } else {
                     ApprovalGate.resolveWithException(id, off.rule)
-                    finish()
+                    showStamp(approved = true)
                 }
             }.apply {
                 isEnabled = false

@@ -62,13 +62,14 @@ class SignInRowTest {
     /** True when the screen offers the sign-in row, found by its label. */
     private fun offersSignIn(a: PluginDetailActivity): Boolean =
         com.mido.phonebridge.screenshots.findByText(
-            a.window.decorView, "Google sign-in",
+            a.window.decorView, "Google account",
         ) != null
 
     @Test
-    fun `a Google plugin offers sign-in when there is a client and nobody is signed in`() {
+    fun `a Google plugin offers sign-in when there is a client and no account`() {
         AuthManager.clientId = "test-client-id.apps.googleusercontent.com"
-        AuthManager.accountEmail = null
+        // No account can be stored in a JVM test (there is no Keystore), so an empty account
+        // list is the "nobody is signed in" case this test is about.
         val a = gmail()
         assertTrue(
             "Gmail cannot serve without an account, so its screen must offer sign-in",

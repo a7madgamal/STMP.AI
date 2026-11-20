@@ -105,6 +105,17 @@ object ErrorCodes {
         // --- credentials ---
         "auth_required" to UNAUTHORIZED,
         "auth_expired" to UNAUTHORIZED,
+        // Multi-account: all four are the CALLER's fault — a missing or wrong parameter, not a
+        // broken install — so they are 4xx and noise, and none of them opens a modal.
+        "no_accounts" to BAD_REQUEST,
+        "account_required" to BAD_REQUEST,
+        "account_not_found" to NOT_FOUND,
+        // The account exists in this app but is no longer on the device, so it cannot be
+        // re-authorised. The caller's mistake, and the fix is ADD ACCOUNT.
+        "account_missing" to BAD_REQUEST,
+        // The picker returned a different account than the one being re-authorised. Nothing was
+        // stored; the human picked wrong or changed their mind. A caller error, not a fault.
+        "wrong_account" to BAD_REQUEST,
         // The vault is shut. Not the caller's fault and not ours: it is a state the
         // human clears by unlocking the app. 403 ("not allowed right now"), never 500 —
         // a locked vault is a normal condition, not a server fault.
@@ -282,6 +293,12 @@ object ErrorCodes {
         // the same shape as google_error.
         "ssh_failed" to CONFLICT,
         "auth_error" to INTERNAL,
+        // Ours: the record exists and its credential does not read. A real fault, not a typo.
+        "account_storage_error" to INTERNAL,
+        "identity_lookup_failed" to BAD_GATEWAY,
+        // The account IS gone from this phone; Google just did not confirm the revoke. Reported
+        // as a fault because a token that may still be live is not a completed removal.
+        "revoke_failed" to INTERNAL,
         "secure_storage_error" to INTERNAL,
         "email_lookup_failed" to INTERNAL,
         "no_scopes" to INTERNAL,
@@ -365,7 +382,15 @@ object ErrorCodes {
         "not_clearable" to "That notification cannot be dismissed.",
 
         // --- credentials ---
-        "auth_required" to "The Google account is not signed in.",
+        "auth_required" to "That Google account has no usable credential; authorise it again.",
+        "no_accounts" to "No Google account is connected on this phone.",
+        "account_required" to "Name an account: more than one is connected, so ?account=<email> is required.",
+        "account_not_found" to "No connected Google account has that address.",
+        "account_missing" to "That account is no longer on this device; add it again to use it.",
+        "wrong_account" to "A different Google account was chosen than the one being re-authorised.",
+        "account_storage_error" to "The stored account data is unreadable; this needs fixing on the phone.",
+        "identity_lookup_failed" to "Google did not report which account a token belongs to.",
+        "revoke_failed" to "The account was removed here, but Google did not confirm the token was revoked.",
         "auth_expired" to "The OAuth token expired and needs a re-login on the phone.",
         "secret_locked" to "The vault is shut. A human unlocks it by opening the app.",
         "denied" to "No approval was recorded: the human declined, a NOTIFY card was rejected, or the gate could not be presented (screen off or locked).",

@@ -27,8 +27,20 @@ class GmailPlugin(private val ctx: Context) : Plugin {
 
     private val base = "https://gmail.googleapis.com/gmail/v1/users/me"
 
+    /**
+     * The account this request acts as, resolved BEFORE the gate.
+     *
+     * Throws rather than returning null on a configured phone: at two or more accounts a missing
+     * `?account=` is `account_required`, and with none connected it is `no_accounts`. The
+     * dispatcher turns either into a coded 4xx with no modal, so the human is never asked to
+     * approve a send whose mailbox is unknown.
+     */
+    override fun resolveAccount(req: Req): GoogleAccounts.Account =
+        AuthManager.resolveAccount(ctx, req.query["account"])
+
     override fun routes(): List<Route> = listOf(
-        Route("GET", "/gmail/profile", "Show your Gmail profile", Verb.READ) { profile() },
+        Route("GET", "/gmail/profile", "Show your Gmail profile", Verb.READ,
+            params = listOf(ACCOUNT_PARAM)) { profile(it) },
         Route(
             "GET", "/gmail/messages", "List your Gmail messages", Verb.READ,
             params = listOf(
@@ -48,16 +60,21 @@ class GmailPlugin(private val ctx: Context) : Plugin {
                     "pageToken",
                     "The nextPageToken from a previous reply, to fetch the following page.",
                 ),
+                ACCOUNT_PARAM,
             ),
             // A bad `max` used to fall back to 20 silently — a caller asking for 5000
             // got a short page and no clue why. Now it is a pre-gate 400: no tap, and
             // the answer names the problem.
             validate = { requireMax(it) }
         ) { list(it) },
-        Route("GET", "/gmail/messages/{id}", "Read a Gmail message", Verb.READ) { get(it) },
-        Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels", Verb.EDIT) { modify(it) },
-        Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL", Verb.DELETE) { trash(it) },
-        Route("POST", "/gmail/messages/send", "SEND EMAIL", Verb.WRITE) { send(it) }
+        Route("GET", "/gmail/messages/{id}", "Read a Gmail message", Verb.READ,
+            params = listOf(ACCOUNT_PARAM)) { get(it) },
+        Route("POST", "/gmail/messages/{id}/modify", "Modify Gmail labels", Verb.EDIT,
+            params = listOf(ACCOUNT_PARAM)) { modify(it) },
+        Route("POST", "/gmail/messages/{id}/trash", "TRASH EMAIL", Verb.DELETE,
+            params = listOf(ACCOUNT_PARAM)) { trash(it) },
+        Route("POST", "/gmail/messages/send", "SEND EMAIL", Verb.WRITE,
+            params = listOf(ACCOUNT_PARAM)) { send(it) }
     )
 
     /**
@@ -89,12 +106,15 @@ class GmailPlugin(private val ctx: Context) : Plugin {
                 }
             },
             "POST /gmail/messages/{id}/trash" to { r ->
+                // The resolved account, from the request — the modal's rows name a mailbox, so
+                // they must read it the same way the handler will act.
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
                 // Fetch the message so the modal NAMES what is being trashed, not just
                 // its id. A bad id fails hard (no modal) — we will not offer to trash
                 // something we cannot describe.
                 val msg = try {
-                    GoogleApi.get(ctx, "$base/messages/$id?format=metadata" +
+                    GoogleApi.get(ctx, account, "$base/messages/$id?format=metadata" +
                         "&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date")
                 } catch (e: PluginError) {
                     throw PluginError("not_found", "no message for id '$id': ${e.message}")
@@ -124,6 +144,14 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     )
 
     /** `max`: absent means 20, present must be 1..100. Never silently clamped. */
+    /** The account the dispatcher resolved, or a defect — a handler never guesses one. */
+    private fun requireAccount(req: Req): GoogleAccounts.Account =
+        req.googleAccount ?: throw PluginError(
+            "account_storage_error",
+            "the dispatcher ran this handler without resolving an account (a defect, not a " +
+                "request problem)",
+        )
+
     private fun requireMax(req: Req): Int = req.query["max"]?.let { raw ->
         val v = raw.trim().toIntOrNull()
             ?: throw PluginError("bad_max", "max must be an integer, got '$raw'")
@@ -147,24 +175,29 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         if (AuthManager.clientId.isBlank()) {
             return PluginStatus("Gmail", PluginStatus.State.OFF, "no OAuth client id configured")
         }
-        if (!AuthManager.isLoggedIn(ctx)) {
-            return PluginStatus("Gmail", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
+        val accounts = GoogleAccounts.count(ctx)
+        if (accounts == 0) {
+            return PluginStatus("Gmail", PluginStatus.State.NEEDS_ATTENTION, "no account connected")
         }
-        // The ACCOUNT is not echoed here — the Google card states it once. What this row is for
-        // is whether Gmail can serve, so that is what it says.
-        val left = AuthManager.tokenRemainingMs()
-        val detail = if (left > 0) {
-            "ready · token ${left / 60_000}m"
+        // **The row names the accounts, not one of them.** There is no "the account" to state:
+        // every request carries its own. At one account that reads as a single address; at two
+        // it says how many, and the row is a pointer to the list rather than a claim about which
+        // one a request will use — the approval modal is where that claim is made, per request.
+        return if (accounts == 1) {
+            val email = runCatching { GoogleAccounts.sole(ctx).email }.getOrNull() ?: "1 account"
+            PluginStatus("Gmail", PluginStatus.State.OK, "ready · $email")
         } else {
-            "ready · renews automatically"
+            PluginStatus(
+                "Gmail", PluginStatus.State.OK,
+                "ready · $accounts accounts — every request names one",
+            )
         }
-        return PluginStatus("Gmail", PluginStatus.State.OK, detail)
     }
 
     // --- routes ---
 
-    private fun profile(): Resp {
-        val obj = GoogleApi.get(ctx, "$base/profile")
+    private fun profile(req: Req): Resp {
+        val obj = GoogleApi.get(ctx, requireAccount(req), "$base/profile")
         return Resp.ok(
             JSONObject()
                 .put("emailAddress", obj.optString("emailAddress"))
@@ -174,6 +207,7 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     }
 
     private fun list(req: Req): Resp {
+        val account = requireAccount(req)
         val q = req.query["q"]?.takeIf { it.isNotBlank() } ?: "in:inbox"
         val max = requireMax(req)
         val pageToken = req.query["pageToken"]
@@ -181,7 +215,7 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         val url = StringBuilder("$base/messages?maxResults=$max&q=${enc(q)}")
         if (!pageToken.isNullOrBlank()) url.append("&pageToken=${enc(pageToken)}")
 
-        val listObj = GoogleApi.get(ctx, url.toString())
+        val listObj = GoogleApi.get(ctx, account, url.toString())
         val ids = listObj.optJSONArray("messages") ?: JSONArray()
         val out = JSONArray()
         for (i in 0 until ids.length()) {
@@ -189,7 +223,7 @@ class GmailPlugin(private val ctx: Context) : Plugin {
             val id = m.optString("id")
             // metadata fetch per message (Gmail list returns only ids)
             val meta = GoogleApi.get(
-                ctx,
+                ctx, account,
                 "$base/messages/$id?format=metadata" +
                     "&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date"
             )
@@ -204,14 +238,16 @@ class GmailPlugin(private val ctx: Context) : Plugin {
     }
 
     private fun get(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
-        val msg = GoogleApi.get(ctx, "$base/messages/$id?format=full")
+        val msg = GoogleApi.get(ctx, account, "$base/messages/$id?format=full")
         val summary = summarize(msg)
         summary.put("bodyText", extractPlainText(msg.optJSONObject("payload")))
         return Resp.ok(summary)
     }
 
     private fun modify(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
         val add = req.body.optJSONArray("addLabels") ?: JSONArray()
         val remove = req.body.optJSONArray("removeLabels") ?: JSONArray()
@@ -219,17 +255,19 @@ class GmailPlugin(private val ctx: Context) : Plugin {
             throw PluginError("bad_request", "addLabels or removeLabels required")
         }
         val body = JSONObject().put("addLabelIds", add).put("removeLabelIds", remove)
-        val res = GoogleApi.post(ctx, "$base/messages/$id/modify", body.toString())
+        val res = GoogleApi.post(ctx, account, "$base/messages/$id/modify", body.toString())
         return Resp.ok(JSONObject().put("id", res.optString("id")).put("labelIds", res.optJSONArray("labelIds") ?: JSONArray()))
     }
 
     private fun trash(req: Req): Resp {
+        val account = requireAccount(req)
         val id = req.pathParams["id"] ?: throw PluginError("bad_request", "missing id")
-        val res = GoogleApi.post(ctx, "$base/messages/$id/trash", "{}")
+        val res = GoogleApi.post(ctx, account, "$base/messages/$id/trash", "{}")
         return Resp.ok(JSONObject().put("id", res.optString("id")))
     }
 
     private fun send(req: Req): Resp {
+        val account = requireAccount(req)
         val to = req.body.optJSONArray("to") ?: throw PluginError("bad_request", "to[] required")
         if (to.length() == 0) throw PluginError("bad_request", "to[] empty")
         val subject = req.body.optString("subject")
@@ -249,7 +287,7 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         )
         val payload = JSONObject().put("raw", encoded)
         if (threadId != null) payload.put("threadId", threadId)
-        val res = GoogleApi.post(ctx, "$base/messages/send", payload.toString())
+        val res = GoogleApi.post(ctx, account, "$base/messages/send", payload.toString())
         return Resp.ok(
             JSONObject()
                 .put("id", res.optString("id"))

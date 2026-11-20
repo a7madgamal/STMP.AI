@@ -88,16 +88,13 @@ class OauthClientJsonTest {
     }
 
     @Test
-    fun `playground registration is detected, and its absence is not an error`() {
+    fun `the registered redirect URIs are still parsed, though nothing redirects any more`() {
+        // The URIs are no longer used to mint a token — CONNECT runs in-app through Identity
+        // Services and never leaves the app on a redirect. They are still parsed because a client
+        // file carries them and dropping the field would lose information the human can see.
         assertTrue(
-            "this file lists the Playground, so the authorisation can work",
-            OauthClientJson.parse(webFile).playgroundRegistered,
-        )
-        // The installed file lists loopback + oob, so the Playground is NOT registered. Parsing
-        // must still succeed: this is a warning the dialog shows, not a refusal.
-        assertFalse(
-            "a desktop client does not register the Playground by default",
-            OauthClientJson.parse(installedFile).playgroundRegistered,
+            "a web client file lists its redirect URIs",
+            OauthClientJson.parse(webFile).redirectUris.isNotEmpty(),
         )
     }
 

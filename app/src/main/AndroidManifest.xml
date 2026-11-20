@@ -20,6 +20,11 @@
          change makes a 100.x address available, so turning Tailscale back on left the bridge
          down until someone opened the app (2026-10-25). Normal permission: granted at install. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Resolving a stored Google account back to the device's own Account, so
+         `AuthorizationRequest.setAccount` names an account Play Services recognises. Without
+         it a constructed Account is refused with ApiException 8 / 28405. Normal permission:
+         granted at install, READ only — nothing is ever added to the device account list. -->
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
     <!-- Required for the approval haptics (alert/SoundAlerts.kt). Without it
          VibrationEffect silently does nothing - a request you were meant to FEEL
          would be silent, which is the exact failure the alerts exist to fix. -->

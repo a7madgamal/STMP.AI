@@ -5,123 +5,183 @@ import android.content.Intent
 import com.mido.phonebridge.Debug
 import com.mido.phonebridge.GoogleLoginActivity
 import com.mido.phonebridge.core.AuthManager
+import com.mido.phonebridge.core.GoogleAccounts
 import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.core.PluginError
+import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginSetting
 import com.mido.phonebridge.core.PluginStatus
 
 /**
- * The Google account itself: who is signed in, whether the token is alive, and how to change it.
+ * The Google accounts themselves: who is connected, what each may do, and how to change it.
  *
  * **Why this is a plugin and not a section on Home.** Mido, 2026-11-03: *"move the account part to
  * the google plugin"*. The account is a capability the other three depend on, not app furniture —
- * Gmail, Calendar and Drive each refuse to serve without it. Putting it here means the screen that
- * shows "why is Gmail not working" is one tap from the thing that fixes it.
+ * Gmail, Calendar and Drive each refuse to serve without one. Putting it here means the screen
+ * that shows "why is Gmail not working" is one tap from the thing that fixes it.
  *
- * **It has no routes, and that is correct.** There is nothing to call on `/google`: the account is
- * a precondition for other plugins, not an endpoint. A plugin with zero routes is a perfectly
- * normal shape — `PluginRegistry` handles it, and `/help` lists it with an empty route list, which
- * is the honest description of what it is.
+ * **It has no routes, and that is correct.** There is nothing to call on `/google`: accounts are
+ * chosen per request with `?account=`, and the list is published by `/help`. A plugin with zero
+ * routes is a perfectly normal shape — `PluginRegistry` handles it.
  *
- * **It cannot be disabled.** Turning off the account would strand Gmail, Calendar and Drive in a
- * state where each reports "not signed in" with no screen that could sign in again. That is the
- * same argument as `help`/`debug`/`logs`, applied to a dependency rather than a diagnostic.
+ * **It cannot be disabled.** Turning off the accounts would strand Gmail, Calendar and Drive in a
+ * state where each reports "no account" with no screen that could add one. Same argument as
+ * `help`/`debug`/`logs`, applied to a dependency rather than a diagnostic.
+ *
+ * **There is no "current account" and therefore no switch.** Every request names its own account,
+ * so the only thing this screen can usefully do is manage the set: add, re-authorise, remove.
  */
 class GooglePlugin(private val ctx: Context) : Plugin {
 
     override val id = "google"
-    override val displayName = "Google account"
-
+    override val displayName = "Google accounts"
 
     /** No routes: this plugin is a precondition, not an endpoint. */
     override fun routes() = emptyList<com.mido.phonebridge.core.Route>()
 
     /**
-     * The scopes the OTHER Google plugins declare, surfaced here so the account screen can state
-     * what signing in actually grants.
+     * The scopes the OTHER Google plugins declare, surfaced here so the add flow can state what
+     * connecting an account actually grants.
      *
      * Not owned: Gmail, Calendar and Drive each declare their own, because each is the authority
      * on what it needs. This reads the registry rather than duplicating a list that would then
      * have to be kept in step by hand.
      */
     override val scopes: List<String>
-        get() = com.mido.phonebridge.core.PluginRegistry.all()
+        get() = PluginRegistry.all()
             .filter { it.id != id }
             .flatMap { it.scopes }
             .distinct()
 
-    override fun settings(): List<PluginSetting> = listOf(
-        PluginSetting.Action(
-            id = "signIn",
-            label = if (AuthManager.isLoggedIn(ctx)) "Re-sign in" else "Sign in with Google",
-            description = "Opens the Google account picker. Re-signing in also refreshes the " +
-                "scopes, which is what to do if one plugin says it is missing a permission.",
-            run = { c ->
-                try {
-                    c.startActivity(Intent(c, GoogleLoginActivity::class.java).apply {
-                        // The plugin may be given an application context by a caller that is not
-                        // an Activity, and a background start without this flag throws.
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    })
-                } catch (e: Exception) {
-                    Debug.log("cannot open Google sign-in: ${e.message}")
-                }
-            },
-        ),
-        // **A way out of the account.**
-        //
-        // Mido, 2026-11-04: *"add button in google plugin to logout"*. The plugin could sign in
-        // and re-sign in, but never LEAVE — so changing accounts meant clearing app data or
-        // reinstalling. That is not a preference, it is a trapdoor.
-        //
-        // Only offered when there is something to log out of: a "Log out" button on a signed-out
-        // account is a control that cannot do anything, which is the pattern this codebase keeps
-        // removing.
-        PluginSetting.Action(
-            id = "signOut",
-            label = if (AuthManager.isLoggedIn(ctx)) "Log out" else "Not signed in",
-            description = "Forgets the account and its tokens on this phone. Gmail, Calendar and " +
-                "Drive stop serving until you sign in again. Nothing in your Google account is " +
-                "changed — stored secrets and SSH keys are untouched.",
-            run = { c ->
-                try {
-                    AuthManager.clear(c)
-                    Debug.log("google: signed out")
-                } catch (e: Exception) {
-                    Debug.log("google: sign-out failed: ${e.message}")
-                }
-            },
-        ).takeIf { AuthManager.isLoggedIn(ctx) }
-    ).filterNotNull()
+    /**
+     * One row per account, rebuilt on every render.
+     *
+     * Dynamic because the list is data: a fixed set of settings could not describe N accounts,
+     * and a separate screen for two of them is ceremony. `settings()` is already re-read on each
+     * paint, so this is the shape the screen wanted anyway.
+     *
+     * Each account offers RE-AUTHORISE and REMOVE. There is deliberately no per-account "make
+     * default": a default is precisely the implicit binding this design deleted.
+     */
+    override fun settings(): List<PluginSetting> {
+        val accounts = try {
+            GoogleAccounts.all(ctx)
+        } catch (e: PluginError) {
+            // A storage defect must be visible on this screen — it is the one place that can
+            // explain it — rather than thrown into a blank page.
+            return listOf(
+                PluginSetting.Action(
+                    id = "storageError",
+                    label = "Account storage is unreadable",
+                    description = e.message ?: e.code,
+                    run = { },
+                ),
+            )
+        }
+        val out = ArrayList<PluginSetting>(accounts.size * 2 + 2)
+        for (account in accounts) {
+            val scopes = account.grantedScopes.size.let {
+                if (it == 0) "granted scopes unknown" else "$it granted"
+            }
+            out.add(
+                PluginSetting.Action(
+                    id = "reauth:${account.sub.ifBlank { account.email }}",
+                    label = account.display,
+                    description = "Re-authorise this account · $scopes",
+                    run = { c ->
+                        try {
+                            c.startActivity(
+                                Intent(c, GoogleLoginActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    putExtra(GoogleLoginActivity.EXTRA_EMAIL, account.email)
+                                    putExtra(GoogleLoginActivity.EXTRA_ADD, false)
+                                },
+                            )
+                        } catch (e: Exception) {
+                            Debug.log("cannot open Google re-authorisation: ${e.message}")
+                        }
+                    },
+                ),
+            )
+            out.add(
+                PluginSetting.Action(
+                    id = "remove:${account.sub.ifBlank { account.email }}",
+                    label = "Remove ${account.email}",
+                    // The blast radius, stated where the choice is made: this is the row that
+                    // ends access, and it revokes at Google rather than only forgetting locally.
+                    description = "Revokes this account's token at Google and forgets it here. " +
+                        "Gmail, Calendar and Drive stop acting as it. Nothing in the Google " +
+                        "account itself is changed.",
+                    run = { c ->
+                        try {
+                            AuthManager.removeAccount(c, account)
+                            Debug.log("google: removed ${account.email}")
+                        } catch (e: PluginError) {
+                            Debug.log("google: remove ${account.email}: ${e.code}: ${e.message}")
+                        }
+                    },
+                ),
+            )
+        }
+        out.add(
+            PluginSetting.Action(
+                id = "add",
+                label = if (accounts.isEmpty()) "Connect a Google account" else "Add another account",
+                description = "Opens the Google account picker. Connecting grants " +
+                    "${scopes.size} scopes so Gmail, Calendar and Drive can act as it.",
+                run = { c ->
+                    try {
+                        c.startActivity(
+                            Intent(c, GoogleLoginActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                putExtra(GoogleLoginActivity.EXTRA_ADD, true)
+                            },
+                        )
+                    } catch (e: Exception) {
+                        Debug.log("cannot open Google sign-in: ${e.message}")
+                    }
+                },
+            ),
+        )
+        return out
+    }
 
     override fun status(): PluginStatus {
         if (AuthManager.clientId.isBlank()) {
-            // OFF here means NOT CONFIGURED, not "you turned it off" — the same distinction the
-            // plugins list makes everywhere. There is no OAuth client in this build, so there is
-            // nothing to sign into.
+            // OFF here means NOT CONFIGURED, not "you turned it off". There is no OAuth client
+            // in this build, so there is nothing to connect.
             return PluginStatus(
-                "Google account",
+                "Google accounts",
                 PluginStatus.State.OFF,
                 "no OAuth client id configured in this build",
             )
         }
-        if (!AuthManager.isLoggedIn(ctx)) {
-            return PluginStatus(
-                "Google account",
+        val accounts = try {
+            GoogleAccounts.all(ctx)
+        } catch (e: PluginError) {
+            return PluginStatus("Google accounts", PluginStatus.State.ERROR, e.message ?: e.code)
+        }
+        return when (accounts.size) {
+            0 -> PluginStatus(
+                "Google accounts",
                 PluginStatus.State.NEEDS_ATTENTION,
-                "not signed in — Gmail, Calendar and Drive cannot serve until you are",
+                "no account connected — Gmail, Calendar and Drive cannot serve until one is",
+            )
+            1 -> PluginStatus(
+                "Google accounts",
+                PluginStatus.State.OK,
+                // One account: name it. That is the single-account interface, unchanged.
+                accounts[0].email,
+            )
+            else -> PluginStatus(
+                "Google accounts",
+                PluginStatus.State.OK,
+                // **No address here, on purpose.** With several accounts there is no single
+                // answer to "who is signed in", and picking one would be a lie of exactly the
+                // kind this change removed. The count is the true statement; the list is one tap
+                // away, and each request names its own account in the modal.
+                "${accounts.size} accounts — every request names one",
             )
         }
-        val email = AuthManager.accountEmail ?: "(email unknown)"
-        // **Not "token valid for N min".** The access token is deliberately NOT cached across a
-        // process start -- it lives in memory, and the refresh token on disk is what survives. So
-        // `tokenRemainingMs()` is 0 on every cold read and the row claimed "valid for 0 min" while
-        // the account was working perfectly. A number that is wrong on first glance is worse than
-        // no number: it invites a re-login that changes nothing.
-        //
-        // State what is actually true: signed in, with a refresh token that renews on demand.
-        // Just the account. Mido, 2026-11-04: *"remove all 'renews automatically' from google
-        // plugin"*. It was a reassurance about machinery the human cannot see or act on, printed
-        // on every glance at the card.
-        return PluginStatus("Google account", PluginStatus.State.OK, email)
     }
 }

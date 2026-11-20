@@ -19,22 +19,11 @@ data class OauthClientImport(
     /**
      * The redirect URIs the client is registered for.
      *
-     * Not a form field: this exists to CHECK, before the human leaves for the Playground, that the
-     * authorisation will not fail with `redirect_uri_mismatch`. See [playgroundRegistered].
+     * Not a form field: this is reported so a mismatch is visible while the client is being
+     * imported, rather than surfacing later as a provider error.
      */
     val redirectUris: List<String>,
 ) {
-    /**
-     * Whether `https://developers.google.com/oauthplayground` is among the registered URIs.
-     *
-     * False is not an error — it is a fact the dialog warns about, because the Playground is the
-     * only way this credential gets a refresh token today, and Google's failure for this is a
-     * cryptic mismatch rather than "add the redirect URI".
-     */
-    val playgroundRegistered: Boolean
-        get() = redirectUris.any {
-            it.trimEnd('/').equals(OauthClientJson.PLAYGROUND_URI, ignoreCase = true)
-        }
 }
 
 /**
@@ -60,7 +49,6 @@ data class OauthClientImport(
 object OauthClientJson {
 
     /** The Playground's redirect URI, which is what makes it usable at all. */
-    const val PLAYGROUND_URI = "https://developers.google.com/oauthplayground"
 
     /**
      * A real client file is well under 1 KiB. 64 KiB is a ceiling on a hostile or accidentally huge

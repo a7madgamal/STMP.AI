@@ -3,6 +3,8 @@ package com.mido.phonebridge.plugins.drive
 import android.content.Context
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.ApprovalRow
+import com.mido.phonebridge.core.ACCOUNT_PARAM
+import com.mido.phonebridge.core.GoogleAccounts
 import com.mido.phonebridge.core.GoogleApi
 import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
@@ -160,7 +162,10 @@ class DrivePlugin(private val ctx: Context) : Plugin {
             path = path,
             describe = describe,
             verb = verb,
-            params = params,
+            // **`account` is declared here, once, for every Drive route.** Declaring it per
+            // route would be sixteen chances to forget one; the helper is the single place a
+            // Drive route is built, so it is the single place the parameter belongs.
+            params = params + ACCOUNT_PARAM,
             auditResponseBody = flags.auditResponseBody,
             auditRequestBody = flags.auditRequestBody,
             streamsRequest = flags.streamsRequest,
@@ -210,8 +215,11 @@ class DrivePlugin(private val ctx: Context) : Plugin {
         writes = mapOf(
             // --- the byte-carrying routes, which are the ones worth naming ---
             "GET /drive/files/{id}/content" to { r ->
+                // Rows are built BEFORE the modal, so they must read the account the same way
+                // the handler will — from the request, never from a global.
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
-                val f = detailsOf(id) ?: throw PluginError("not_found", "no file for id '$id'")
+                val f = detailsOf(account, id) ?: throw PluginError("not_found", "no file for id '$id'")
                 // The destination changes what the human is agreeing to, so it says which one.
                 val toPhone = r.query["to"]?.trim()?.equals("phone", ignoreCase = true) == true
                 fileCard(
@@ -221,6 +229,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                 )
             },
             "POST /drive/files/upload" to { r ->
+                val account = requireAccount(r)
                 val name = r.query["name"]?.trim().orEmpty()
                 if (name.isBlank()) {
                     throw PluginError("bad_request", "missing required 'name' query parameter")
@@ -242,7 +251,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                         ApprovalRow(
                             "INTO",
                             if (parent.isBlank()) "My Drive"
-                            else (pathOf(parent) ?: parent),
+                            else (pathOf(account, parent) ?: parent),
                             ApprovalRow.Style.NORMAL
                         )
                     )
@@ -251,6 +260,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
 
             // --- metadata writes ---
             "POST /drive/files" to { r ->
+                val account = requireAccount(r)
                 val name = requireBodyString(r, "name")
                 buildList {
                     add(ApprovalRow("CREATE FOLDER", name, ApprovalRow.Style.WARN))
@@ -258,16 +268,17 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                     add(
                         ApprovalRow(
                             "IN",
-                            if (parent.isBlank()) "My Drive" else (pathOf(parent) ?: parent),
+                            if (parent.isBlank()) "My Drive" else (pathOf(account, parent) ?: parent),
                             ApprovalRow.Style.NORMAL
                         )
                     )
                 }
             },
             "POST /drive/files/{id}/rename" to { r ->
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
                 val newName = requireBodyString(r, "name")
-                val f = detailsOf(id) ?: throw PluginError("not_found", "no file for id '$id'")
+                val f = detailsOf(account, id) ?: throw PluginError("not_found", "no file for id '$id'")
                 buildList {
                     add(ApprovalRow("RENAME", f.name, ApprovalRow.Style.WARN))
                     add(ApprovalRow("TO", newName, ApprovalRow.Style.WARN))
@@ -277,18 +288,20 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                 }
             },
             "POST /drive/files/{id}/move" to { r ->
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
                 val target = requireBodyString(r, "parentId")
-                val f = detailsOf(id) ?: throw PluginError("not_found", "no file for id '$id'")
+                val f = detailsOf(account, id) ?: throw PluginError("not_found", "no file for id '$id'")
                 buildList {
                     add(ApprovalRow("MOVE", f.name, ApprovalRow.Style.WARN))
                     add(ApprovalRow("FROM", DriveFormat.folderOf(f.path), ApprovalRow.Style.NORMAL))
-                    add(ApprovalRow("TO", pathOf(target) ?: target, ApprovalRow.Style.NORMAL))
+                    add(ApprovalRow("TO", pathOf(account, target) ?: target, ApprovalRow.Style.NORMAL))
                 }
             },
             "POST /drive/files/{id}/trash" to { r ->
+                val account = requireAccount(r)
                 val id = requirePathId(r.pathParams["id"])
-                val f = detailsOf(id) ?: throw PluginError("not_found", "no file for id '$id'")
+                val f = detailsOf(account, id) ?: throw PluginError("not_found", "no file for id '$id'")
                 // Trash, not delete: recoverable for 30 days. The label says so, because
                 // "TRASH" and "DELETE" lead a human to different decisions.
                 fileCard(f, headline = "TRASH (recoverable 30 days)")
@@ -326,6 +339,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     // --- reads ---
 
     private suspend fun list(req: Req): Resp {
+        val account = requireAccount(req)
         val max = parseMax(req.query["max"]) ?: 25
         // Default excludes trash: a list that silently includes deleted files is actively
         // misleading about what exists. A caller wanting trash passes `q=trashed=true`.
@@ -337,7 +351,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
             append("&q=").append(enc(q))
             if (pageToken.isNotBlank()) append("&pageToken=").append(enc(pageToken))
         }
-        val body = GoogleApi.get(ctx, url)
+        val body = GoogleApi.get(ctx, account, url)
         return Resp.ok(
             JSONObject()
                 .put("files", body.optJSONArray("files") ?: JSONArray())
@@ -347,8 +361,9 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     }
 
     private suspend fun get(req: Req): Resp {
+        val account = requireAccount(req)
         val id = requirePathId(req.pathParams["id"])
-        val body = GoogleApi.get(ctx, "$api/files/$id?fields=$FILE_FIELDS")
+        val body = GoogleApi.get(ctx, account, "$api/files/$id?fields=$FILE_FIELDS")
         return Resp.ok(JSONObject().put("file", body))
     }
 
@@ -361,6 +376,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * front.
      */
     private suspend fun download(req: Req): Resp {
+        val account = requireAccount(req)
         val id = requirePathId(req.pathParams["id"])
         // ONE destination parameter, one fetch path, two sinks. `?to=phone` saves to
         // Downloads/PhoneBridge; anything else streams the bytes to the caller. Merging them is
@@ -368,7 +384,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
         // and two separate routes would be two copies that drift.
         val toPhone = req.query["to"]?.trim()?.equals("phone", ignoreCase = true) == true
 
-        val meta = GoogleApi.get(ctx, "$api/files/$id?fields=id,name,mimeType,size")
+        val meta = GoogleApi.get(ctx, account, "$api/files/$id?fields=id,name,mimeType,size")
         val mimeType = meta.optString("mimeType")
         val name = meta.optString("name")
 
@@ -383,7 +399,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
             )
         }
 
-        val (conn, stream) = GoogleApi.openStream(ctx, "$api/files/$id?alt=media")
+        val (conn, stream) = GoogleApi.openStream(ctx, account, "$api/files/$id?alt=media")
         val contentType = mimeType.ifBlank {
             // A file with no type is not something to guess at: `application/octet-stream` makes
             // the caller save it rather than open it wrongly.
@@ -498,6 +514,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     // --- writes ---
 
     private suspend fun createFolder(req: Req): Resp {
+        val account = requireAccount(req)
         val name = requireBodyString(req, "name")
         val parent = req.body.optString("parentId").trim()
         val metadata = JSONObject()
@@ -505,17 +522,18 @@ class DrivePlugin(private val ctx: Context) : Plugin {
             .put("mimeType", FOLDER_MIME)
         if (parent.isNotBlank()) metadata.put("parents", JSONArray().put(parent))
 
-        val created = GoogleApi.post(ctx, "$api/files?fields=$FILE_FIELDS", metadata.toString())
+        val created = GoogleApi.post(ctx, account, "$api/files?fields=$FILE_FIELDS", metadata.toString())
         return Resp.ok(JSONObject().put("file", created))
     }
 
     private suspend fun rename(req: Req): Resp {
+        val account = requireAccount(req)
         val id = requirePathId(req.pathParams["id"])
         val name = requireBodyString(req, "name")
         // PATCH with only `name`: Drive treats omitted fields as unchanged, so this cannot
         // accidentally move or re-parent the file.
         val updated = GoogleApi.patch(
-            ctx,
+            ctx, account,
             "$api/files/$id?fields=$FILE_FIELDS",
             JSONObject().put("name", name).toString()
         )
@@ -523,11 +541,12 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     }
 
     private suspend fun move(req: Req): Resp {
+        val account = requireAccount(req)
         val id = requirePathId(req.pathParams["id"])
         val parent = requireBodyString(req, "parentId")
         // A move is addParents + removeParents on the QUERY STRING, not a body field. The old
         // parent must be removed explicitly or the file ends up in both.
-        val current = GoogleApi.get(ctx, "$api/files/$id?fields=parents")
+        val current = GoogleApi.get(ctx, account, "$api/files/$id?fields=parents")
         val oldParents = current.optJSONArray("parents")?.toStringList().orEmpty()
         val url = buildString {
             append("$api/files/$id?fields=$FILE_FIELDS")
@@ -536,17 +555,18 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                 append("&removeParents=").append(enc(oldParents.joinToString(",")))
             }
         }
-        val moved = GoogleApi.patch(ctx, url, JSONObject().toString())
+        val moved = GoogleApi.patch(ctx, account, url, JSONObject().toString())
         return Resp.ok(JSONObject().put("file", moved))
     }
 
     private suspend fun trash(req: Req): Resp {
+        val account = requireAccount(req)
         val id = requirePathId(req.pathParams["id"])
         // TRASH, not DELETE. Drive's `DELETE` is permanent and unrecoverable; `trashed=true` goes
         // to the bin for 30 days. A gate that offers permanent deletion needs a much louder
         // confirmation than a rename, so the recoverable one is what this route does.
         val trashed = GoogleApi.patch(
-            ctx,
+            ctx, account,
             "$api/files/$id?fields=$FILE_FIELDS",
             JSONObject().put("trashed", true).toString()
         )
@@ -565,6 +585,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * success is worse than a refusal.
      */
     private suspend fun uploadFile(req: Req): Resp {
+        val account = requireAccount(req)
         val name = req.query["name"]?.trim().orEmpty()
         if (name.isBlank()) throw PluginError("bad_request", "missing required 'name' query parameter")
         val parent = req.query["parent"]?.trim().orEmpty()
@@ -582,12 +603,12 @@ class DrivePlugin(private val ctx: Context) : Plugin {
 
         // Step 1: create the session. Metadata only.
         val sessionUri = GoogleApi.postJsonForLocation(
-            ctx,
+            ctx, account,
             "$upload/files?uploadType=resumable&fields=$FILE_FIELDS",
             metadata.toString()
         )
         // Step 2: the bytes.
-        val created = GoogleApi.putStream(ctx, sessionUri, stream, length, contentType)
+        val created = GoogleApi.putStream(ctx, account, sessionUri, stream, length, contentType)
         return Resp.ok(JSONObject().put("file", created))
     }
 
@@ -629,8 +650,8 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * Returns null when the file cannot be read at all; callers turn that into `not_found` BEFORE
      * the modal, which is the standing rule: never offer to act on something we cannot name.
      */
-    private fun detailsOf(id: String): FileDetails? = try {
-        val obj = GoogleApi.get(ctx, "$api/files/$id?fields=id,name,mimeType,size,parents")
+    private fun detailsOf(account: GoogleAccounts.Account, id: String): FileDetails? = try {
+        val obj = GoogleApi.get(ctx, account, "$api/files/$id?fields=id,name,mimeType,size,parents")
         val name = obj.optString("name")
         if (name.isBlank()) {
             null
@@ -643,7 +664,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
                 // Drive returns `size` as a STRING (it can exceed Int), and omits it entirely for
                 // folders and Google-native types. -1 keeps "absent" distinct from "zero".
                 sizeBytes = obj.optString("size").toLongOrNull() ?: -1L,
-                ancestors = ancestorNames(obj.optJSONArray("parents")?.toStringList().orEmpty()),
+                ancestors = ancestorNames(account, obj.optJSONArray("parents")?.toStringList().orEmpty()),
                 id = id,
             )
         }
@@ -658,7 +679,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * reverses it when rendering. Keeping the natural walk order here means a caller never has to
      * think about direction twice.
      */
-    private fun ancestorNames(startParents: List<String>): List<String> {
+    private fun ancestorNames(account: GoogleAccounts.Account, startParents: List<String>): List<String> {
         val names = ArrayList<String>()
         var parents = startParents
         var depth = 0
@@ -667,7 +688,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
         while (parents.isNotEmpty() && depth < MAX_ANCESTORS) {
             val parentId = parents.first()
             val parent = try {
-                GoogleApi.get(ctx, "$api/files/$parentId?fields=id,name,parents")
+                GoogleApi.get(ctx, account, "$api/files/$parentId?fields=id,name,parents")
             } catch (e: Exception) {
                 // A missing ancestor (deleted, or invisible to this token) truncates the path
                 // rather than failing the whole card: a partial path still beats a bare name.
@@ -683,8 +704,6 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     }
 
     /** The file's display name, or null when it cannot be read. */
-    private fun nameOf(id: String): String? = detailsOf(id)?.name
-
     /**
      * The full path of a folder (or file) by id, for a card that says where something goes.
      *
@@ -693,7 +712,8 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * the id cannot be read, and callers fall back to the raw id — a move card that shows an id is
      * worse than one showing a path, but far better than one showing nothing.
      */
-    private fun pathOf(id: String): String? = detailsOf(id)?.path
+    private fun pathOf(account: GoogleAccounts.Account, id: String): String? =
+        detailsOf(account, id)?.path
 
     private fun parseMax(raw: String?): Int? {
         val v = raw?.trim().takeUnless { it.isNullOrBlank() } ?: return null
@@ -709,6 +729,24 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     private fun requireMax(req: Req) {
         parseMax(req.query["max"])
     }
+
+    /**
+     * The account this request acts as, resolved BEFORE the gate.
+     *
+     * Drive is where the account matters most in a modal: "download a file" and "trash a file"
+     * mean different things per account, and the row names the file, so the account has to be
+     * beside it before the human taps.
+     */
+    override fun resolveAccount(req: Req): GoogleAccounts.Account =
+        AuthManager.resolveAccount(ctx, req.query["account"])
+
+    /** The account the dispatcher resolved, or a defect — a handler never guesses one. */
+    private fun requireAccount(req: Req): GoogleAccounts.Account =
+        req.googleAccount ?: throw PluginError(
+            "account_storage_error",
+            "the dispatcher ran this handler without resolving an account (a defect, not a " +
+                "request problem)",
+        )
 
     private fun requirePathId(id: String?): String {
         val v = id?.trim().orEmpty()
@@ -743,17 +781,25 @@ class DrivePlugin(private val ctx: Context) : Plugin {
         if (AuthManager.clientId.isBlank()) {
             return PluginStatus("Google Drive", PluginStatus.State.OFF, "no OAuth client id configured")
         }
-        if (!AuthManager.isLoggedIn(ctx)) {
-            return PluginStatus("Google Drive", PluginStatus.State.NEEDS_ATTENTION, "not logged in")
+        val accounts = GoogleAccounts.all(ctx)
+        if (accounts.isEmpty()) {
+            return PluginStatus(
+                "Google Drive", PluginStatus.State.NEEDS_ATTENTION, "no account connected",
+            )
         }
-        val hasScope = AuthManager.grantedScopes.contains("https://www.googleapis.com/auth/drive")
-        if (!hasScope && AuthManager.grantedScopes.isNotEmpty()) {
+        // **A scope check that names the accounts.** It used to read one global, always-empty
+        // set and guess; now each account carries what Google actually granted, so the warning
+        // can name the account that needs re-consent instead of hedging about "unknown".
+        val missing = accounts.filter { account ->
+            account.grantedScopes.isNotEmpty() && !account.grantedScopes.contains(DRIVE_SCOPE)
+        }
+        if (missing.isNotEmpty()) {
             // The grant set is only known when Google reported it; an empty set means "unknown",
             // not "missing", so this warning fires only when we positively know it is absent.
             return PluginStatus(
                 "Google Drive",
                 PluginStatus.State.NEEDS_ATTENTION,
-                "re-login needed to grant Drive access"
+                "re-authorise ${missing.joinToString(", ") { it.email }} to grant Drive access",
             )
         }
         // See CalendarPlugin: the account is stated once, on the Google card.
@@ -761,6 +807,9 @@ class DrivePlugin(private val ctx: Context) : Plugin {
     }
 
     private companion object {
+        /** The scope Drive routes need, checked per account rather than globally. */
+        const val DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
+
         const val FOLDER_MIME = "application/vnd.google-apps.folder"
 
         /**
