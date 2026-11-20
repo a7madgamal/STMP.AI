@@ -4,8 +4,11 @@ import android.content.Context
 import com.mido.phonebridge.BridgeService
 import com.mido.phonebridge.BuildConfig
 import com.mido.phonebridge.ApprovalGate
+import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.ErrorCodes
+import com.mido.phonebridge.core.GoogleAccounts
 import com.mido.phonebridge.core.Plugin
+import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginRegistry
 import com.mido.phonebridge.core.PluginStatus
 import com.mido.phonebridge.core.Req
@@ -204,6 +207,11 @@ class HelpPlugin(private val ctx: Context) : Plugin {
             .put("stmp", stmp)
             .put("errors", errors)
             .put("plugins", plugins)
+            // **The accounts, so discovery is one call.** An agent that has to guess an address
+            // will guess wrong, and a wrong `?account=` is a 404 that costs a round trip. This
+            // list is the answer, and `accountRequired` is the SAME function the dispatcher
+            // refuses with — not a second copy of the rule.
+            .put("googleAccounts", googleAccounts())
             .put("sshConnections", ssh)
             .put("jwtCredentials", jwtEntries)
             // **How to use the JWT plugin, as DATA rather than only prose.** A caller that reads
@@ -332,8 +340,65 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                 "naming the credential, issuer, algorithm and the token window."
         )
 
+    /**
+     * Every connected Google account, and whether a request must name one.
+     *
+     * `accountRequired` is read from [AuthManager.accountRequirement] — the single authority.
+     * `/help` never re-derives it from a count, because a second derivation is how the prose and
+     * the behaviour start disagreeing.
+     */
+    private fun googleAccounts(): JSONObject {
+        val list = JSONArray()
+        val accountList = try {
+            GoogleAccounts.all(ctx)
+        } catch (e: PluginError) {
+            // A storage defect is reported as a field rather than thrown: `/help` must still
+            // answer, and this is the one place an agent can learn why nothing Google works.
+            return JSONObject()
+                .put("accounts", list)
+                .put("accountRequired", false)
+                .put("error", e.code)
+                .put("detail", e.message ?: e.code)
+        }
+        for (a in accountList) {
+            list.put(
+                JSONObject()
+                    .put("email", a.email)
+                    .put("label", a.label ?: JSONObject.NULL)
+                    .put("scopes", JSONArray(a.grantedScopes.toList())),
+            )
+        }
+        return JSONObject()
+            .put("accounts", list)
+            .put(
+                "accountRequired",
+                AuthManager.accountRequirement(ctx) == AuthManager.AccountRequirement.REQUIRED,
+            )
+            .put(
+                "param",
+                "account",
+            )
+            .put(
+                "usage",
+                if (AuthManager.accountRequirement(ctx) == AuthManager.AccountRequirement.REQUIRED) {
+                    "Every Google route requires ?account=<full email>, exactly as listed here."
+                } else {
+                    "With one account the parameter may be omitted; it is accepted if sent."
+                },
+            )
+    }
+
     private fun describePlugin(plugin: Plugin): JSONObject {
         val o = JSONObject().put("id", plugin.id)
+        // Whether this plugin's routes resolve a Google account. Read from the plugin's own
+        // declaration ([Plugin.scopes]) rather than a hardcoded id list, so a fourth Google
+        // service is described correctly the day it is registered.
+        o.put("usesGoogleAccounts", plugin.scopes.any { it.contains("googleapis.com") })
+        // The scopes this plugin contributes to the one consent. Published because the login
+        // asks Google for the UNION of every plugin's list, and a scope Google will not accept
+        // fails the whole request with an opaque DEVELOPER_ERROR — so the list a caller can
+        // actually read is the list to check against the project.
+        if (plugin.scopes.isNotEmpty()) o.put("scopes", JSONArray(plugin.scopes))
         // A secret plugin is identified by a matching vault entry, not by a flag on the Plugin
         // interface — that is the honest source, since the vault is what decides the routing.
         val secretNames = try {
@@ -371,6 +436,39 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                 // that is actually a READ.
                 .put("verb", if (r.verbFor != null) "READ|WRITE|EDIT|DELETE|EXECUTE" else r.verb.name)
                 .put("gated", !r.gateExempt)
+
+            // **Every parameter the route accepts, and nothing else.**
+            //
+            // Mido, 2026-11-20: *"document ALL params exactly"*. Before this, the only way to
+            // learn a parameter name was to read the handler — so `?maxResults=10` looked right,
+            // was silently ignored, and answered 20. The list is now the contract in both
+            // directions: dispatch REFUSES anything not here, and this publishes what is.
+            //
+            // Always emitted, even when empty: an absent `params` key would read as "not
+            // documented yet", while `[]` is the true statement "this route takes none".
+            val paramsArr = JSONArray()
+            for (p in r.params) {
+                val pj = JSONObject()
+                    .put("name", p.name)
+                    .put("type", p.type)
+                    // **`account` reports the AUTHORITY's answer, not its ParamSpec flag.** The
+                    // flag is a constant and the rule depends on how many accounts exist, so
+                    // printing the flag here would describe an API this build does not have.
+                    .put(
+                        "required",
+                        if (p.name == "account") {
+                            AuthManager.accountRequirement(ctx) ==
+                                AuthManager.AccountRequirement.REQUIRED
+                        } else {
+                            p.required
+                        },
+                    )
+                    .put("describe", p.describe)
+                if (p.default.isNotEmpty()) pj.put("default", p.default)
+                if (p.allowed.isNotEmpty()) pj.put("allowed", JSONArray(p.allowed))
+                paramsArr.put(pj)
+            }
+            v.put("params", paramsArr)
             routes.put(v)
         }
         o.put("routes", routes)
@@ -383,6 +481,26 @@ class HelpPlugin(private val ctx: Context) : Plugin {
      * Built from the same [JSONObject]s the caller gets, so a field added above appears here
      * automatically or not at all — there is no second place to forget.
      */
+    /** The sentence a plugin's section opens with when its routes act on a Google account. */
+    private fun accountLine(plugin: JSONObject): String {
+        val block = googleAccounts()
+        if (block.has("error")) {
+            return "**Google accounts:** storage unreadable (${block.optString("error")})"
+        }
+        val accounts = block.optJSONArray("accounts") ?: JSONArray()
+        if (accounts.length() == 0) {
+            return "**Google accounts:** none connected — these routes refuse with `no_accounts`."
+        }
+        val emails = (0 until accounts.length()).map { accounts.getJSONObject(it).getString("email") }
+        val required = block.optBoolean("accountRequired")
+        return if (required) {
+            "**Google accounts:** ${emails.joinToString(", ")} — every route here requires " +
+                "`?account=<full email>`."
+        } else {
+            "**Google accounts:** ${emails[0]} — a single account, so `?account=` may be omitted."
+        }
+    }
+
     private fun markdown(
         stmp: JSONObject,
         errors: JSONArray,
@@ -429,6 +547,12 @@ class HelpPlugin(private val ctx: Context) : Plugin {
             val p = plugins.getJSONObject(i)
             val kind = p.getString("kind")
             sb.appendLine("### ${p.getString("id")} ($kind)")
+            // One line at the TOP of each plugin that acts on Google, because "which account"
+            // is the first thing a caller needs and the last thing it can guess.
+            if (p.getJSONArray("routes").length() > 0 && p.optBoolean("usesGoogleAccounts")) {
+                sb.appendLine()
+                sb.appendLine(accountLine(p))
+            }
             sb.appendLine()
             if (kind == "secret") {
                 if (p.has("docs")) sb.appendLine("- docs: ${p.getString("docs")}")
@@ -448,6 +572,34 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                     "- `${r.getString("method")} ${r.getString("path")}` — " +
                         "${r.getString("verb")} · ${r.getString("describe")} · $gated"
                 )
+                // Parameters as their own indented lines. Rendered from the same array the JSON
+                // carries, so prose and data cannot disagree — the reason this builder takes the
+                // already-built `JSONObject` rather than re-deriving from the plugin.
+                //
+                // Named explicitly as the ONLY accepted set, because that is now literally true:
+                // anything else is refused with `unknown_param`.
+                val params = r.optJSONArray("params")
+                if (params != null && params.length() > 0) {
+                    for (k in 0 until params.length()) {
+                        val prm = params.getJSONObject(k)
+                        val req = if (prm.getBoolean("required")) " (required)" else ""
+                        val def = prm.optString("default", "")
+                        val defTxt = if (def.isEmpty()) "" else " [default: $def]"
+                        val allowed = prm.optJSONArray("allowed")
+                        val allowTxt = if (allowed != null && allowed.length() > 0) {
+                            " [allowed: ${(0 until allowed.length()).joinToString(", ") { allowed.getString(it) }}]"
+                        } else ""
+                        sb.appendLine(
+                            "  - `${prm.getString("name")}` — ${prm.getString("type")}$req" +
+                                "$defTxt$allowTxt — ${prm.getString("describe")}"
+                        )
+                    }
+                } else {
+                    // Said out loud rather than omitted: a caller who sends a query string to a
+                    // route with no parameters now gets a refusal, so the absence is a fact worth
+                    // printing.
+                    sb.appendLine("  - takes no query parameters")
+                }
             }
             sb.appendLine()
         }

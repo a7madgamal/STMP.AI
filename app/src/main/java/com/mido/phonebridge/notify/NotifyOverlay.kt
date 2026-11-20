@@ -164,6 +164,15 @@ object NotifyOverlay {
         val summary: String,
         val label: String,
         val callerLabel: String,
+        /**
+         * The Google account this request acts as, or null for a route that touches none.
+         *
+         * **On the card because silence approves.** A `NOTIFY` rule means five seconds of no
+         * tap is consent, so an unread card is still a decision — and "send email" means
+         * different things per mailbox. Without this line the human can approve a send from an
+         * account nobody named.
+         */
+        val account: String?,
         /** What the request would DO. Drives the coloured badge, nothing else. */
         val verb: Verb,
         val windowMs: Long,
@@ -286,12 +295,13 @@ object NotifyOverlay {
         needsAi: Boolean,
         fetchCapMs: Long,
         callerLabel: String = "Caller",
+        account: String? = null,
         onOutcome: (Outcome) -> Unit
     ) {
         main.post {
             val entry = Entry(
-                ctx.applicationContext, id, summary, label, callerLabel, verb, windowMs, facts, needsAi,
-                fetchCapMs, onOutcome
+                ctx.applicationContext, id, summary, label, callerLabel, account, verb, windowMs,
+                facts, needsAi, fetchCapMs, onOutcome
             )
             when (val admission = queue.admit(entry)) {
                 is Admission.Now -> present(entry)
@@ -455,6 +465,22 @@ object NotifyOverlay {
         row.addView(close, LinearLayout.LayoutParams(dp(30), dp(30)))
 
         column.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        // The account, when there is one. Green like the approval modal's line, because it is
+        // the same fact on the same kind of surface — and only for routes that act as an
+        // account, since printing "as —" on a notification tap would be noise.
+        entry.account?.takeIf { it.isNotBlank() }?.let { who ->
+            val accountView = TextView(ctx).apply {
+                text = "as $who"
+                textSize = com.mido.phonebridge.ui.Theme.TEXT_CAPTION_SP
+                setTextColor(com.mido.phonebridge.ui.Theme.SUCCESS)
+                setTypeface(com.mido.phonebridge.ui.Theme.bodyFont(ctx))
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(2), 0, 0)
+            }
+            column.addView(accountView, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
 
         // The AI description line, present from the start so the fetch can fill it in
         // WITHOUT A RELAYOUT SURPRISE. While the fetch runs it reads as a status, not as an

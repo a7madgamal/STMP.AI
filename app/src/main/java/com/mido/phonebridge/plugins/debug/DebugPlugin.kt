@@ -286,14 +286,14 @@ class DebugPlugin(private val ctx: Context) : Plugin {
      * the value. Lengths are enough to tell "empty" from "set" from "truncated".
      */
     private fun accountInfo(): JSONObject = JSONObject()
-        .put("loggedIn", AuthManager.isLoggedIn(ctx))
+        .put("accounts", GoogleAccounts.count(ctx))
         // **No email.** Nothing in the app reads this field, and a diagnostic report is the wrong
         // place for an address: `/debug` is one of the few routes that can end up pasted into a bug
         // report or read by a caller debugging a broken bridge. `loggedIn` and
         // `clientIdConfigured` are what a diagnosis actually needs — whether there is an account at
         // all, and whether this build could use one.
         .put("clientIdConfigured", AuthManager.clientId.isNotBlank())
-        .put("accessTokenCachedMs", AuthManager.tokenRemainingMs())
+        .put("accountEmails", org.json.JSONArray(GoogleAccounts.emails(ctx)))
 
     /**
      * The small, non-sensitive answer to "is the bridge alive, and which build".

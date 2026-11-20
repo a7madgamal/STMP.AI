@@ -22,14 +22,43 @@ object Debug {
 
     fun init(ctx: Context) { /* no-op placeholder for future file logging */ }
 
+    /**
+     * **A repeated identical line is coalesced, not appended.**
+     *
+     * The buffer is 200 entries and a drawn surface can log many times a second, so one chatty
+     * line evicts every other line — and a ring that only contains the noisiest thing in the app
+     * cannot answer "why did the login fail", which is what it exists for. Rather than rely on
+     * every caller to behave (it did not: a per-frame `onDraw` line emptied the ring), the log
+     * itself refuses to let one message occupy it. The repeat count is shown, so a storm is
+     * still visible as a storm instead of being hidden.
+     */
     @Synchronized
     fun log(msg: String) {
         val safe = if (redactEnabled) redact(msg) else msg
-        val line = "${fmt.format(Date())}  $safe"
+        val stamp = fmt.format(Date())
+        val last = lines.lastOrNull()
+        val lastBody = last?.substringAfter("  ", "")
+        if (lastBody != null && lastBody == safe) {
+            repeats++
+            lines.removeLast()
+            lines.addLast("$stamp  $safe  (×${repeats + 1})")
+            android.util.Log.i("STMP", safe)
+            return
+        }
+        repeats = 0
+        val line = "$stamp  $safe"
         lines.addLast(line)
         while (lines.size > MAX) lines.removeFirst()
         android.util.Log.i("STMP", safe)
     }
+
+    /**
+     * How many times the message currently at the tail has repeated.
+     *
+     * Reset by any different line, so it counts a CONSECUTIVE run rather than a total. Anything
+     * else would make two unrelated bursts of the same text look like one.
+     */
+    private var repeats = 0
 
     @Synchronized
     fun dump(): String = lines.joinToString("\n").ifBlank { "(no log yet)" }

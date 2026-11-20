@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.89 (build 415)**.
+Current build: **v0.53.5 (build 436)**.
 
 ---
 
@@ -5848,10 +5848,132 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.88 (build 414) — 2026-11-20
 - `/help` now serves `contractVersion` at the **top level** as well as inside `stmp`. It only existed nested, so a client reading `help["contractVersion"]` — the obvious key, and where the number logically belongs — got null and concluded the surface had not changed. Mido reported it after a live check. Both fields come from the same constant, and a test now pins the top-level one so the two cannot drift.
 
-## 0.51.89 (build 415) — 2026-11-20 — CURRENT
+## 0.51.89 (build 415) — 2026-11-20
 - **Fixed: the OAuth screen's folder indicator was wrong.** It printed `Downloads/STMP` whenever any grant existed, so after the human picked a different tree it still claimed the expected folder. `FilesStore.rootLabel()` now asks the provider for the granted tree's own display name, and the panel shows that — with a warning when it is not the folder uploads are expected from. Mido reported it: a label that echoes the constant tells you what the app wants, not what it has, and the difference is exactly what breaks an upload.
 - The grant toast used `uri.lastPathSegment.contains("STMP")`, which is `primary:Downloads/STMP` on some providers and a bare document id on others — right by luck on one and wrong on the next. It now asks the same `rootLabel()` the panel does, so the two cannot disagree.
 - `StmpFolder.LAST_SEGMENT` added: a SAF tree's display name is the folder's own name (`STMP`), never the multi-level path the app thinks in, so any "is this the right folder" check must compare against that.
+
+## 0.51.90 (build 416) — 2026-11-20
+- The OAuth screen can **import a downloaded Google client file** (`client_secret_*.json`) and pre-fill the client id, client secret, token URL and a derived name. `ACTION_OPEN_DOCUMENT`, one document, read-only, and **no persistable permission**: the file is read once and nothing is stored, which is what was asked for and is the whole reason a single-document grant is right here rather than the tree grant the upload folder uses.
+- The file is untrusted input and is treated as such: a 64 KiB cap before parsing, `token_uri` re-checked for https even though the format says https, all five mandatory members reported at once rather than one per attempt, and refusals that name a FIELD but never echo a VALUE — a parse error quoting the client secret would put it in a toast, and toasts get screenshotted.
+- A service-account key downloaded from the same console page is refused with the actual explanation ("that is a service-account key, not an OAuth client"), because "no web or installed object" tells nobody what to do next.
+- **The dialog answers "how do I get the rest".** A client file is only the client half: it has no refresh token, no scope and no API host. So an import shows what it filled, what it did not, and the exact four Playground steps for the refresh token — instead of a blank required field that reads as a broken import.
+- The import also parses `redirect_uris` for one purpose: warning when `https://developers.google.com/oauthplayground` is not registered for the client, because that failure is a cryptic `redirect_uri_mismatch` that otherwise reads like a plugin bug.
+- Import is its own button that runs BEFORE the form exists. Delivering a picker result into an already-open dialog means crossing a possible activity restart to reach its fields, and a reference chain that breaks quietly is how a form ends up half-filled with no explanation.
+
+## 0.51.91 (build 417) — 2026-11-20
+- **Every route now DECLARES its query parameters, `/help` publishes them exactly, and anything undeclared is refused with `unknown_param` before the gate.** Found live: a call sent `GET /gmail/messages?maxResults=10`, the route's parameter is `max`, and the answer was 20 rows with no hint anything was ignored. Every route used to read the names it knew and silently drop the rest, so a slightly-wrong name returned a DEFAULT — an answer that looks like an answer, which is the one failure mode that cannot be debugged from the caller's side. Mido, 2026-11-20: *"document ALL params exactly and fail hard on ANY unexpected params"*.
+- **The declaration and the handler cannot diverge, structurally rather than by test.** `Req.query` is a `QueryParams`, not a plain map: reading or contains-checking a name the route never declared THROWS where the bug is, and `keys` only yields declared names so a handler cannot echo an undeclared parameter back as though it were understood. Dispatch builds the wrapper from the route's own `params`, so the type system carries the guarantee instead of a source-grep — which was tried first, produced false positives on Calendar's helper-read parameters, and was deleted rather than kept as a guard nobody trusts.
+- Refusals name the rejected parameter AND the accepted ones, marking which are required. "unknown parameter" alone costs a second guess.
+- A route that declares nothing now refuses ANY query string, which is the honest default: forgetting to declare fails loudly on first use instead of quietly ignoring input.
+- `/help` gains a `params` array per route — name, type, required, default, allowed values and a description — always emitted, so `[]` states "takes none" rather than leaving the reader unsure whether it is undocumented. The markdown says the same, built from the same array so prose and data cannot disagree.
+- Declared for all 43 routes, including `oauth`'s `path`/`url`/`field`/`fields`, Drive's `to`/`parent`/`name`/`type`, Calendar's required `timeMin`/`timeMax`/`timeZone`, and Gmail's `max`/`q`/`pageToken`.
+
+## 0.51.92 (build 418) — 2026-11-20
+- **The JSON import no longer refuses to save because a refresh token is missing.** A downloaded client file is the CLIENT half only and can never contain one, so demanding it discarded a file that was perfectly good and blocked the user on a field the file cannot fill. A credential is now saved as an explicit `needs_refresh_token` state. Mido, 2026-11-20: *"i don't like being blocked by a required field … we should accept the json data and have a follow up"*.
+- That state is **named, not silent**: the card says "needs a refresh token — tap CONNECT to authorise", `GET /oauth` reports `status: ready|needs_refresh_token|unreadable`, and `call`/`upload` refuse **pre-gate** with `oauth_needs_refresh_token`. A call that cannot mint must not cost a human a tap — the same rule `no_folder_granted` already followed.
+- **CONNECT is the follow-up, and it builds the exact authorisation URL from the file already imported**: client id, scope, and `access_type=offline` plus `prompt=consent`. Those last two are the reason people come back from the Playground with no `refresh_token` at all, and the Playground hides both behind a gear icon. One tap opens Google's consent page fully pre-filled instead of pasting two values into a third-party page.
+- The token comes back as ONE paste, and the field accepts the whole `"refresh_token": "1//…"` line — quotes, trailing comma and all — while refusing something obviously different. A client secret pasted in its place starts with `GOCSPX-` and is refused by name, because storing it would fail later at the provider as `invalid_grant`, which reads as "my credential is refused" rather than "the wrong field was filled".
+- **No placeholder is ever stored for a missing token.** An empty string is preserved as empty: a placeholder would be a lie that surfaces at the provider, further away from the cause.
+- Phase B of `docs/plans/OAUTH-REFRESH-TOKEN-PLAN.md` (a loopback listener, so the app catches the redirect itself and no paste is needed) is NOT in this build. Google supports it for Desktop (`installed`) clients — verified against the loopback-migration guide — but it adds a listening socket reachable by every app on the phone, which is a separate decision.
+
+## 0.51.93 (build 419) — 2026-11-20
+- **Fixed: the add form still marked REFRESH TOKEN as required.** 0.51.92 removed the save check but left the field declared `required = true`, so the dialog still showed a REQUIRED badge and still refused — and the marker is the contract the user reads, not the code behind it. Mido hit it immediately: *"refresh token still required in the dialog!"*. The field is now labelled **REFRESH TOKEN (OPTIONAL)** with `required = false`, and its help says to leave it empty when the credential has not been authorised yet.
+- A test now pins that marker, because this regression is invisible to a compile and to the save logic: it was a layout fact inside an Activity, and the suite has no device to build those views on.
+
+## 0.51.94 (build 420) — 2026-11-20
+- **Fixed: saving an OAuth credential showed its toast and then left the sheet open.** The save work had been moved into the action while a message-matching predicate was passed to `PaperDialog` — but that predicate receives the button **label** (`"save"`), matched no field prefix, fell through to its default and returned true, so the action was blocked and the sheet never dismissed. Mido: *"save shows a save hint but modal stays"*.
+- The predicate's contract was the real defect: its doc said the handler does not run "and whatever the handler drew is already on screen", which contradicts itself, because the handler has not run when the predicate is polled. It now says plainly that it receives the LABEL, states the poll-then-handle ordering once, and names the failure it caused.
+- All three OAuth dialogs (add/edit, rotate secrets, connect) now do their work from the predicate and return "was it refused", which is the pattern the JWT screen already used — the only shape that can keep a sheet open on a validation failure *and* close it on success.
+- A test pins it: no dialog predicate may test a message prefix, because that condition can only ever be wrong.
+
+## 0.52.0 (build 421) — 2026-11-20
+- **Multiple Google accounts, one per request.** Each account keeps its own refresh token, keyed by its Google `sub` and encrypted with the same device key as before. An existing install is adopted as the first account on read, so no re-login is needed.
+- **One account works exactly as it did.** With a single account no `?account=` is accepted or required, and nothing on screen asks a question that has one answer.
+- **Two or more accounts and every Google route requires `?account=<full email>`.** Omitted is `account_required` with the accounts listed and an example URL; unknown is `account_not_found`. There is no default account and no fallback to "the first one", because that reply is how a send leaves the wrong mailbox.
+- **The account is resolved before the approval modal is built**, by the plugin itself, so the modal and the NOTIFY card name the mailbox the request will actually use. The old single global email was only correct while exactly one account existed.
+- **The NOTIFY card names the account**, which matters because a `NOTIFY` rule approves on silence — an unread card was still a decision.
+- **Removing an account revokes at Google first**, then forgets it locally, and reports `revoke_failed` if Google did not confirm; a token left live after "remove" defeats the removal.
+- **`/help` lists the accounts** and reports `accountRequired` from the same function the dispatcher refuses with, so the description cannot drift from the behaviour.
+- Two defects found by the new tests: the account store used a new Keystore alias, which could never decrypt the existing token, and the crypto existed in one copy per store. Both are now a single `TokenCipher` under the original alias.
+
+## 0.52.1 (build 422) — 2026-11-20
+- **Fixed: re-authorising an account failed with `ApiException 8: 8: [28405]`.** Play Services validates the `Account` given to `setAccount` against the ones actually on the device, so a constructed `Account(email, "com.google")` is refused — and the code it returns says nothing about accounts. The account is now resolved from the device's own list, and `GET_ACCOUNTS` is declared (normal permission, read-only, nothing is ever added).
+- **A raw Play Services code is no longer the message.** 28405 now reads "that account is not on this device, use ADD ACCOUNT"; ApiException 10 reads as a signing-identity mismatch; 12501 as a cancelled picker. The unlisted codes still print their numbers, because inventing a meaning for one is worse than showing it.
+- **The re-authorise screen checks before it opens anything**, so an address the device no longer holds says so on the spot instead of failing after a round trip.
+- `account_missing` is classified as a caller error; the error-code test caught it unclassified, which is what that test is for.
+
+## 0.52.2 (build 423) — 2026-11-20
+- **Fixed: the login screen's log pane was always empty.** The view was created blank and `render()` was an empty stub, so every logged step went to the ring buffer and logcat while the screen showed a heading over nothing. It now repaints from `Debug.dump()` on a half-second tick, so a step that never returns is visible as a log that stops.
+- **`setAccount` is gone; re-authorisation uses the account picker and verifies what comes back.** Two attempts at `setAccount` (a constructed Account, then a real one resolved from `AccountManager`) both answered ApiException 8 / 28405, so the pin moves from before the tap to after it: the identity call runs first and a different account than the one being re-authorised is refused with `wrong_account` before anything is exchanged or stored.
+- The guarantee is unchanged and is now enforced where it can be: `sub` is compared, not the address, because a rename changes the address and not the account.
+
+## 0.52.3 (build 424) — 2026-11-20
+- **Fixed: the debug ring buffer was permanently full of one line.** `ApprovalTipView.onDraw` logged `tip: onDraw called` on every frame, and the tip animates, so the 200-entry ring held nothing but that — `/debug`'s `logTail` had no evidence about any failure. The line is gone; the one-per-draw geometry line that is actually diagnostic stays.
+- **The ring now coalesces a repeated identical line** into one entry with a count instead of letting a chatty caller evict everything. A storm stays visible as a storm.
+- **Fixed: a migrated account could never get its Google identity.** `adoptIdentity` existed and nothing called it, so an install upgraded from the single-account build had an account it could use but could not re-authorise (that flow needs a `sub`). Adoption now happens on the first successful token refresh, which is the only moment a live token proves which account it belongs to, and it is logged.
+- `/logs` serves logcat, not the ring; the ring is `logTail` on `/debug`. Recorded here because the two were being confused while diagnosing this.
+
+## 0.52.4 (build 425) — 2026-11-20
+- **The migration is all-or-nothing: an upgrade either produces one complete account or asks for a sign-in. There is no half state.** A record without a Google identity used to be possible — it could serve requests but could never be re-authorised, so it looked healthy until the one action that repairs a credential was the one it could not do.
+- **`Account` now refuses to exist without an identity and an address**, so no code path can build the half state again. `identified` and `adoptIdentity` are deleted with it.
+- **`migrateLegacy` asks Google ONCE for the identity behind the old token**, then either records a complete account and clears the old field, or — when Google refuses the token — clears it and leaves zero accounts, which every screen already explains. A failure that decides nothing (no network, no client id) writes nothing and retries.
+- **The migration runs from the service start, on a background thread, and never from a read.** It needs a network round trip, and `GoogleAccounts.all()` is called from UI paint and pre-gate request handling, where a stall would be a frozen screen or a hung approval.
+
+## 0.52.5 (build 426) — 2026-11-20
+- **Fixed: 0.52.4 crashed on launch for an upgraded install.** `Account` began refusing a blank identity, and `decode()` still constructed one from the half-state record every previous build could write — so the constructor threw on the first read, from a screen or a request.
+- **No migration from the single-account build: it signs the user out.** That credential has no Google identity, and a record without one can never be re-authorised. Carrying it across produced a half state; forbidding it produced a crash. Clearing it is one step, needs no network, and lands the app in the zero-account state every screen already explains. `migrateLegacy`, `identityFromRefreshToken` and `adoptIdentity` are deleted with it.
+- **A stored record with no identity is discarded and the removal persisted**, rather than crashing or being re-logged on every read.
+
+## 0.52.6 (build 427) — 2026-11-20
+- **One authorization flow: the account picker.** `setAccount` is gone rather than repaired — two attempts at it were refused with ApiException 8 / 28405, and `/debug` showed the failure happening on a phone with zero accounts configured, which is a request pinning an account that no longer exists. Re-authorising is now "add, choosing the account you already have".
+- **The consent RESULT is logged before it is parsed.** The previous run's log proved Play Services returned a consent intent and the failure was in reading it, so the request was never the problem. The raw action and extra keys now go to the log, which separates a cancellation from a misconfiguration from an empty result.
+- The pre-flight "not on this device" refusal is removed with `deviceAccounts`: the picker is where the human confirms the account, so a local list can no longer contradict it.
+- `expectIdentity`/`wrong_account` deleted — they were described but never wired, so they enforced nothing.
+
+## 0.52.7 (build 428) — 2026-11-20
+- **The login failure says what it is.** `extras=status` on the consent result means Google returned a refusal rather than a result, and the status extra is now logged as well as surfaced, so a numeric pair is never again the only evidence.
+- **ApiException 8 / 28405 reads as DEVELOPER_ERROR**: the OAuth client this build asks for is not accepted for this signature or project. That is a Google Cloud registration fact — the signing SHA-1 or the client id — not something a retry can change, and the message now says so instead of suggesting the human try again.
+- Confirmed in the shipped APK by bytes: both client ids are present, and the signer is the pinned certificate, so the fault is the project's configuration rather than the build.
+
+## 0.52.8 (build 429) — 2026-11-20
+- **Fixed: "USE CARD FROM NOW ON" approved silently, and left the modal looking unresponsive.** The exception button resolved the gate and finished the Activity directly, skipping `finishWith` — which is what runs the stamp, which is what plays the thud, the haptic and the ink mark. It now stamps like APPROVE does; the rule is still attached to the gate first, so the policy write is unchanged.
+- **The login logs the exact scope list it asks Google for.** The request is rejected as one unit, so the scope set and the project cannot be told apart without seeing it; `/help` now publishes each plugin's `scopes` for the same reason.
+
+## 0.52.9 (build 430) — 2026-11-20
+- The Web client used as `serverClientId` was deleted in the Cloud project, so every sign-in was refused with `8 / 28405` before an account was involved. A test token exchange against the token endpoint proved it: `deleted_client`. A replacement client is configured, and the same exchange now answers `invalid_grant` — which is the correct reply to a fake code and the proof the pair is live.
+- Worth recording because it cost a night: `ApiException 8 / 28405` on the AUTHORIZATION request does not necessarily mean the Android client or its SHA-1. The offline-access client is part of the same request, and a missing one fails it identically.
+
+## 0.53.0 (build 431) — 2026-11-20
+- **CONNECT on an OAuth credential now runs in the app.** One tap opens Google's consent through Identity Services and the refresh token is filed against that credential — no browser, no Playground, no pasted token.
+- **Why it had to change:** the old path sent the human to the Playground because a loopback redirect is blocked for Android OAuth client types. The only alternative, a listener on `127.0.0.1`, is precisely what that block closed; using a Desktop-app client to reach the exemption would be claiming a category this app is not in. Identity Services is Google's own answer for an Android app, and this app already used it for accounts.
+- **The paste field survives only as an escape hatch** for a token obtained elsewhere. The Playground warning and its redirect-URI advice are gone from the import dialog, because nothing in the flow uses that URI any more.
+- The scope is requested per credential at connect time, not carried in the account consent: `chromewebstore` is a publisher permission and does not belong in front of someone who only wanted mail.
+
+## 0.53.1 (build 432) — 2026-11-20
+- **Fixed: a credential connected by CONNECT could never mint.** The consent was requested against the app's built-in Web client, so the refresh token came back bound to that client — and the credential then asked its OWN client for access, which Google answers `unauthorized_client`. A refresh token belongs to the client that minted it.
+- **CONNECT now uses the credential's own client for both halves**: the `serverClientId` handed to Play Services, and the client id and secret that redeem the code. The button and the stored credential are the same identity, which is the only configuration where minting can work.
+- `exchangeServerAuthCode` takes an optional client id and secret for that reason, defaulting to the built-in pair so the account flow is unchanged.
+
+## 0.53.2 (build 433) — 2026-11-20
+- **Fixed: a repeat authorisation returned no refresh token, so connecting failed with `no refresh_token in exchange response`.** Google issues a refresh token when it first grants offline access and omits it afterwards, so deleting the accounts and re-adding hit a 200 response carrying only an access token. `requestOfflineAccess(clientId, true)` sets `forceCodeForRefreshToken`, which is the flag that exists for exactly this case. Verified in the device log: the exchange returned 200 with a valid access token and no refresh token.
+- **Fixed: removing an account threw `NetworkOnMainThreadException` and reported it as `revoke_failed`.** Revocation is an HTTPS call and the settings screen runs on the UI thread, so the request never left the phone — reported as "Google did not confirm the revocation", which read like a refusal. The revoke now runs on its own thread; the local removal still happens either way, so an account is never stranded by a network fault.
+- `requestOfflineAccess(String, boolean)` is deprecated in `play-services-auth` 22.0.0 and is the ONLY overload that sets the force flag — there is no single-argument setter (checked with `javap` against the pinned artifact). Used with a suppression and the reason recorded, rather than dropping the one parameter that makes re-consent work.
+
+## 0.53.3 (build 434) — 2026-11-20
+- **Fixed: five of six Gmail routes refused `?account=`.** Only `/gmail/messages` declared the parameter, so `/gmail/profile`, a single message, modify, trash and send all answered `unknown_param` while the account was required — the exact combination that made Gmail unusable at two accounts. All six now declare it.
+- Audited the same way by counting `Route(` against `ACCOUNT_PARAM`: Calendar 6/6, Drive complete through its single route helper.
+
+## 0.53.4 (build 435) — 2026-11-20
+- **Fixed: `identity_lookup_failed: userinfo HTTP 401 Invalid Credentials` on connect.** The identity was read from `AuthorizationResult.accessToken` BEFORE the code exchange, and that bearer's freshness is not ours to assume — a stale one answers 401. The order is now: exchange the code, then take the identity from the `id_token` in that same TLS response. The account is named by the round trip that produced the credential, and the extra userinfo call disappears from the normal path.
+- The token-only fallback (a grant already held, no server code) no longer reaches for `GoogleAccounts.sole()`, which threw `no_accounts` with an empty list and `account_required` at two accounts — exactly the case it was being invoked for. It uses the fresh access token, and refuses with `identity_lookup_failed` if there is neither.
+- **Fixed: the code exchange sent the wrong client secret.** `redeemSecret` was resolved and then ignored; the form used the build's own secret, so a credential with its own client could not redeem a code even after the client id was corrected. The refresh path correctly keeps the build secret — it redeems a token minted by the build's client.
+- New `IdTokenIdentityTest` (Robolectric): reads a well-formed Google `id_token`, and refuses a foreign issuer, a missing email, a missing `sub`, and a non-JWT. The issuer check is what stops a substituted token from naming an account.
+
+## 0.53.5 (build 436) — 2026-11-20 — CURRENT
+- **Fixed: an account could be saved holding none of its data scopes.** The device log showed the second account granted `scope: "openid userinfo.email"` although Gmail, Calendar and Drive were all requested — Google honours exactly what the human ticks, and the app stored that record as connected. Every Gmail call afterwards would have failed with a 403 naming nothing. Connect now compares the granted set against what the plugins require and fails with `scope_missing`, listing the exact permissions, so the problem surfaces at the consent screen where it can be fixed.
+- **Fixed: connecting an OAuth credential died with `identity_lookup_failed: userinfo HTTP 401`.** A credential consent asks only for its own scope (`chromewebstore`), and Google returns an `id_token` only when `openid` is present — so there was no identity, the fallback called userinfo, and that bearer had no `userinfo.email` scope. The credential consent now always includes `openid email`, which are identity rather than data and add nothing to the prompt beyond naming the account.
+- Recorded what Google granted rather than what was requested, so a stored scope set can no longer overstate access.
 
 ## Keeping this file honest
 

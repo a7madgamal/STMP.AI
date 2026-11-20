@@ -3,11 +3,15 @@ package com.mido.phonebridge
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.plugins.oauth.OauthEntry
 import com.mido.phonebridge.plugins.oauth.OauthSecret
+import com.mido.phonebridge.plugins.oauth.OauthSecretStatus
+import com.mido.phonebridge.plugins.oauth.RefreshTokenPaste
 import com.mido.phonebridge.plugins.oauth.OauthToken
 import com.mido.phonebridge.plugins.oauth.OauthTokenCache
 import com.mido.phonebridge.plugins.oauth.tokenErrorLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -99,18 +103,42 @@ class OauthPluginTest {
     }
 
     @Test
-    fun `a missing refresh token is refused by its own name`() {
-        try {
-            OauthSecret.fromVault("""{"client_secret":"GOCSPX-abc"}""")
-            fail("must refuse")
-        } catch (e: PluginError) {
-            assertEquals("oauth_bad_secret", e.code)
-            assertNotNull(e.message)
-            assertTrue(
-                "the message must name the missing field, or the repair is a guess: ${e.message}",
-                e.message!!.contains("refresh_token"),
-            )
-        }
+    fun `a stored credential WITHOUT a refresh token parses, and reports that it needs one`() {
+        // **This is what the import needs.** A downloaded client file is the client half only, so
+        // refusing to store a credential without a refresh token discarded a perfectly good import
+        // and blocked the user on a field the file cannot contain. The state is now explicit and
+        // visible rather than an error.
+        val parsed = OauthSecret.fromVault("""{"client_secret":"GOCSPX-abc"}""")
+        assertEquals("", parsed.refreshToken)
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, parsed.status)
+    }
+
+    @Test
+    fun `a stored credential WITH a refresh token reports ready`() {
+        val parsed = OauthSecret.fromVault(
+            """{"refresh_token":"1//0gTOKEN","client_secret":"GOCSPX-abc"}"""
+        )
+        assertEquals(OauthSecretStatus.READY, parsed.status)
+    }
+
+    @Test
+    fun `a blank refresh token is the same state as an absent one`() {
+        // Both mean "imported, not authorised". Distinguishing them would be a distinction with no
+        // difference to any caller.
+        val parsed = OauthSecret.fromVault(
+            """{"refresh_token":"   ","client_secret":"GOCSPX-abc"}"""
+        )
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, parsed.status)
+    }
+
+    @Test
+    fun `the status round-trips through storage`() {
+        val before = OauthSecret(refreshToken = "", clientSecret = "s")
+        val after = OauthSecret.fromVault(before.toJson())
+        assertEquals(OauthSecretStatus.NEEDS_REFRESH_TOKEN, after.status)
+        // And an empty string survives as empty rather than becoming a placeholder — a placeholder
+        // would be a lie that surfaces at the provider as invalid_grant.
+        assertEquals("", after.refreshToken)
     }
 
     @Test
@@ -168,6 +196,109 @@ class OauthPluginTest {
     fun `basic is the default auth style`() {
         val entry = OauthEntry.fromJson("""{"tokenUrl":"https://x/token"}""")
         assertEquals(OauthEntry.AUTH_BASIC, entry.authStyle)
+    }
+
+    @Test
+    fun `the add form does NOT mark the refresh token as required`() {
+        // **A regression guard for a shipped mistake.** 0.51.92 removed the save check but left the
+        // field marked `required = true`, so the dialog still showed a REQUIRED badge and still
+        // refused — the marker is the contract the user sees, not the code behind it. Mido caught it
+        // immediately: *"refresh token still required in the dialog!"*
+        //
+        // A source scan because this is a LAYOUT fact inside an Activity, and the JVM suite cannot
+        // build that Activity's views without a device.
+        val source = java.io.File("src/main/java/com/mido/phonebridge/OauthActivity.kt").readText()
+        // Slice from the refresh field's own title to the END of its `labelledField(...)` call.
+        // `required = false` is written after `inputType`, so a slice stopping there cut the very
+        // line being asserted — a guard that failed while the code was correct. The `)` that closes
+        // the call comes after `required`, so the slice ends at the first `)\n` following it.
+        val field = source.substringAfter("\"REFRESH TOKEN (OPTIONAL)\"", "")
+            .substringAfter("inputType")
+            .substringBefore("\n            )")
+            .let { "inputType" + it }
+        assertTrue(
+            "the refresh-token field must be declared with required = false, so the form does not " +
+                "demand a value the imported file can never contain",
+            field.contains("required = false"),
+        )
+        assertFalse(
+            "it must not be marked required: ${field.take(120)}",
+            field.contains("required = true"),
+        )
+    }
+
+    @Test
+    fun `no dialog predicate treats an action LABEL as a message`() {
+        // **The 0.51.93 bug, pinned.** `PaperDialog`'s predicate receives the button LABEL, not a
+        // message. A predicate written as if it were a message filter matches no field prefix, falls
+        // through to its default, and returns true for the positive button — so the toast fires and
+        // the sheet never closes. Mido: *"save shows a save hint but modal stays"*.
+        //
+        // The safe shapes are: `label == "save"` style gating (drives the action), or no predicate at
+        // all with the work in the action. What must not exist is a predicate whose condition names
+        // a FIELD.
+        val source = java.io.File("src/main/java/com/mido/phonebridge/OauthActivity.kt").readText()
+        val predicates = Regex("""refuse = \{ (\w+) ->""").findAll(source).map { it.groupValues[1] }.toList()
+        assertTrue("no dialog predicates found — the scan is broken", predicates.isNotEmpty())
+        for (name in predicates) {
+            // Only the predicate's own CONDITION, not the body it delegates to: `save(...)` legitimately
+            // mentions every field name, and matching that would fail on correct code.
+            val head = source.substringAfter("refuse = { $name ->").take(120)
+            for (fieldWord in listOf("\"(name)", "\"(client)", "\"(token)", "\"(secret)", "\"(refresh)", "\"(fail)")) {
+                assertFalse(
+                    "a dialog predicate must not test a MESSAGE prefix like $fieldWord — it receives " +
+                        "the button label, so that condition silently falls through to 'refuse' and " +
+                        "the sheet never closes:\n${head.trim()}",
+                    head.contains(fieldWord),
+                )
+            }
+        }
+    }
+
+    // --- the paste parser ---------------------------------------------------------------------
+
+    @Test
+    fun `a bare refresh token is accepted`() {
+        val token = "1//0gLONGREFRESHTOKENVALUEhere"
+        assertEquals(token, RefreshTokenPaste.extract(token))
+    }
+
+    @Test
+    fun `the whole json line is accepted, and the token is extracted`() {
+        // The most common paste: the human copies the line from the exchange response.
+        val line = """  "refresh_token": "1//0gLONGREFRESHTOKENVALUEhere","""
+        assertEquals("1//0gLONGREFRESHTOKENVALUEhere", RefreshTokenPaste.extract(line))
+    }
+
+    @Test
+    fun `quotes and a trailing comma are stripped`() {
+        assertEquals(
+            "1//0gLONGREFRESHTOKENVALUEhere",
+            RefreshTokenPaste.extract("\"1//0gLONGREFRESHTOKENVALUEhere\","),
+        )
+    }
+
+    @Test
+    fun `a client secret pasted into the token field is refused`() {
+        // These two sit adjacent in the console, and storing a secret as the refresh token fails at
+        // the PROVIDER as invalid_grant — which reads as "my credential is refused" rather than
+        // "the wrong field was filled".
+        assertNull(RefreshTokenPaste.extract("GOCSPX-abcdefghijklmnopqrstuvwxyz"))
+    }
+
+    @Test
+    fun `something too short to be a token is refused`() {
+        assertNull(RefreshTokenPaste.extract("1//x"))
+    }
+
+    @Test
+    fun `prose is refused rather than stored`() {
+        assertNull(RefreshTokenPaste.extract("copy the refresh token value from the page"))
+    }
+
+    @Test
+    fun `empty input is refused`() {
+        assertNull(RefreshTokenPaste.extract("   "))
     }
 
     @Test

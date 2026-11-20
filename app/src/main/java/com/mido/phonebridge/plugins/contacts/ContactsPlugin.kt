@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.provider.ContactsContract
 import android.util.Log
 import com.mido.phonebridge.core.ApprovalRow
+import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginPermission
 import com.mido.phonebridge.core.PluginError
@@ -71,6 +72,14 @@ class ContactsPlugin(private val ctx: Context) : Plugin {
     override fun routes(): List<Route> = listOf(
         Route(
             "GET", "/contacts", "Search your contacts", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "query",
+                    "The search text. Required: an empty query would mean 'list everyone', which " +
+                        "this route deliberately refuses.",
+                    required = true,
+                ),
+            ),
             // Pre-gate: a query that cannot succeed must not cost a tap. This also refuses the
             // empty query that would otherwise mean "dump everything".
             validate = { req ->

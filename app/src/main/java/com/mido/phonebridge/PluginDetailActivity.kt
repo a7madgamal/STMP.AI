@@ -249,11 +249,12 @@ class PluginDetailActivity : BridgeScreen() {
     private fun signInRow(): android.view.View? {
         if (plugin.id !in GOOGLE_BACKED_IDS) return null
         if (AuthManager.clientId.isBlank()) return null
-        if (AuthManager.isLoggedIn(this)) return null
+        if (AuthManager.hasAccount(this)) return null
         return Theme.statusRow(
             this,
-            "Google sign-in",
-            "Not signed in — tap to sign in. Gmail, Calendar and Drive are refused until you do.",
+            "Google account",
+            "No account connected — tap to add one. Gmail, Calendar and Drive are refused " +
+                "until you do.",
             Theme.WARNING,
             onClick = { openSignIn() },
         )
@@ -261,7 +262,11 @@ class PluginDetailActivity : BridgeScreen() {
 
     private fun openSignIn() {
         try {
-            startActivity(Intent(this, GoogleLoginActivity::class.java))
+            // ADD, explicitly: adding an account is the only flow that may open a picker.
+            startActivity(
+                Intent(this, GoogleLoginActivity::class.java)
+                    .putExtra(GoogleLoginActivity.EXTRA_ADD, true),
+            )
         } catch (e: Exception) {
             // A start that throws must still say something: the sentence above promised a way in.
             Debug.log("cannot open Google sign-in: ${e.javaClass.simpleName}: ${e.message}")

@@ -63,6 +63,10 @@ object ErrorCodes {
         "bad_time_range" to BAD_REQUEST,
         "bad_timezone" to BAD_REQUEST,
         "bad_max" to BAD_REQUEST,
+        // A query parameter the route never declared. BAD_REQUEST and pre-gate: the point is that
+        // it is ANSWERED rather than silently ignored, which is what made a wrong parameter name
+        // return a default and look like a bug (Mido, 2026-11-20: *"FAIL HARD"*).
+        "unknown_param" to BAD_REQUEST,
         "bad_lines" to BAD_REQUEST,
         // Request text carrying an invisible character that can reorder or conceal what the
         // approval screen draws: a bidi override turns `rm -rf ~/Projects` into something that
@@ -101,6 +105,17 @@ object ErrorCodes {
         // --- credentials ---
         "auth_required" to UNAUTHORIZED,
         "auth_expired" to UNAUTHORIZED,
+        // Multi-account: all four are the CALLER's fault — a missing or wrong parameter, not a
+        // broken install — so they are 4xx and noise, and none of them opens a modal.
+        "no_accounts" to BAD_REQUEST,
+        "account_required" to BAD_REQUEST,
+        "account_not_found" to NOT_FOUND,
+        // The account exists in this app but is no longer on the device, so it cannot be
+        // re-authorised. The caller's mistake, and the fix is ADD ACCOUNT.
+        "account_missing" to BAD_REQUEST,
+        // The picker returned a different account than the one being re-authorised. Nothing was
+        // stored; the human picked wrong or changed their mind. A caller error, not a fault.
+        "wrong_account" to BAD_REQUEST,
         // The vault is shut. Not the caller's fault and not ours: it is a state the
         // human clears by unlocking the app. 403 ("not allowed right now"), never 500 —
         // a locked vault is a normal condition, not a server fault.
@@ -234,6 +249,9 @@ object ErrorCodes {
         // to fix it: 409 says "your config disagrees with reality". Two codes rather than one because
         // they are repaired in different fields of the same dialog.
         "oauth_bad_config" to CONFLICT,
+        // The credential exists but has never been authorised, so it cannot mint. CONFLICT: the
+        // stored record disagrees with what a call needs, and the repair is one screen action.
+        "oauth_needs_refresh_token" to CONFLICT,
         "oauth_bad_secret" to CONFLICT,
         "unknown_oauth" to BAD_REQUEST,
         // The provider refused the mint (RFC 6749 §5.2: invalid_grant, invalid_client, …). CONFLICT,
@@ -250,6 +268,9 @@ object ErrorCodes {
         "oauth_upload_failed" to UNAVAILABLE,
         // The named file is not in the granted folder. The caller's mistake, like a bad name.
         "file_not_found" to NOT_FOUND,
+        // The client-secret file the human picked could not be used. BAD_REQUEST, not a server
+        // error: nothing is broken on this side, the file was the wrong one or was truncated.
+        "oauth_import_failed" to BAD_REQUEST,
         // No folder granted for uploads. Refused PRE-gate, so this is a caller-visible setup step
         // rather than a fault: 503 says "not ready yet", which is exactly true.
         "no_folder_granted" to UNAVAILABLE,
@@ -272,6 +293,12 @@ object ErrorCodes {
         // the same shape as google_error.
         "ssh_failed" to CONFLICT,
         "auth_error" to INTERNAL,
+        // Ours: the record exists and its credential does not read. A real fault, not a typo.
+        "account_storage_error" to INTERNAL,
+        "identity_lookup_failed" to BAD_GATEWAY,
+        // The account IS gone from this phone; Google just did not confirm the revoke. Reported
+        // as a fault because a token that may still be live is not a completed removal.
+        "revoke_failed" to INTERNAL,
         "secure_storage_error" to INTERNAL,
         "email_lookup_failed" to INTERNAL,
         "no_scopes" to INTERNAL,
@@ -329,6 +356,7 @@ object ErrorCodes {
         "bad_time_range" to "`timeMin` is not before `timeMax`.",
         "bad_timezone" to "`timeZone` is missing or not a recognised zone id.",
         "bad_max" to "`max` is outside the range this route accepts.",
+        "unknown_param" to "The request sent a query parameter this route does not accept. The error message lists the ones it does accept.",
         "bad_lines" to "`lines` is outside 1..500.",
         "hidden_characters" to
             "The request contains an invisible character that could change how the approval " +
@@ -354,7 +382,15 @@ object ErrorCodes {
         "not_clearable" to "That notification cannot be dismissed.",
 
         // --- credentials ---
-        "auth_required" to "The Google account is not signed in.",
+        "auth_required" to "That Google account has no usable credential; authorise it again.",
+        "no_accounts" to "No Google account is connected on this phone.",
+        "account_required" to "Name an account: more than one is connected, so ?account=<email> is required.",
+        "account_not_found" to "No connected Google account has that address.",
+        "account_missing" to "That account is no longer on this device; add it again to use it.",
+        "wrong_account" to "A different Google account was chosen than the one being re-authorised.",
+        "account_storage_error" to "The stored account data is unreadable; this needs fixing on the phone.",
+        "identity_lookup_failed" to "Google did not report which account a token belongs to.",
+        "revoke_failed" to "The account was removed here, but Google did not confirm the token was revoked.",
         "auth_expired" to "The OAuth token expired and needs a re-login on the phone.",
         "secret_locked" to "The vault is shut. A human unlocks it by opening the app.",
         "denied" to "No approval was recorded: the human declined, a NOTIFY card was rejected, or the gate could not be presented (screen off or locked).",
@@ -401,6 +437,7 @@ object ErrorCodes {
         "jwt_bad_secret" to "The stored JWT signing secret is empty or unusable; replace it on the JWT screen.",
         "unknown_jwt" to "No JWT credential is stored under that name; `GET /jwt` lists them.",
         "oauth_bad_config" to "The stored OAuth configuration cannot be read; fix it on the OAuth screen.",
+        "oauth_needs_refresh_token" to "This OAuth credential has been imported but never authorised, so it has no refresh token and cannot mint one. Open the OAuth screen, tap Connect on it, and finish the authorisation. Nothing was sent.",
         "oauth_bad_secret" to "The stored OAuth credential is missing its refresh token or client secret; replace them on the OAuth screen.",
         "unknown_oauth" to "No OAuth credential is stored under that name; `GET /oauth` lists them.",
         "oauth_token_refused" to "The token endpoint refused to mint an access token: the refresh token may be expired or revoked, the client secret may be wrong, or the client authenticates a different way. The provider's own error is in the message.",
@@ -411,6 +448,7 @@ object ErrorCodes {
         "oauth_upload_timeout" to "The upload did not finish in time. The file may be partly transferred: check the provider before retrying.",
         "oauth_upload_failed" to "The upload failed part-way through streaming the file.",
         "file_not_found" to "No file with that name is in the granted folder. Grant the folder on the OAuth screen, or check the name.",
+        "oauth_import_failed" to "The picked file is not a usable Google OAuth client file. The message names the member that is missing or wrong; pick the client_secret_*.json from the Credentials page.",
         "no_folder_granted" to "No folder has been granted for OAuth uploads. Open the OAuth screen and grant Downloads/STMP, then retry. Nothing was sent.",
         "refresh_token_rotated" to "The provider issued a new refresh token, which this build will not write back during a call. Replace the refresh token on the OAuth screen and retry.",
         "ssh_host_key_refused" to "The host key was refused for a reason the app could not name.",

@@ -44,6 +44,14 @@ class NotificationsPlugin(private val ctx: Context) : Plugin {
     override fun routes(): List<Route> = listOf(
         Route(
             "GET", "/notifications", "List your notifications", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "count",
+                    "How many notifications to return. Only this many are read from the system.",
+                    type = "int",
+                ),
+                ParamSpec("package", "Only notifications from this Android package name."),
+            ),
             // Same parser runs before the gate and inside the handler, so a filter
             // typo answers 400 without ever costing a tap — and the two paths cannot
             // drift apart, because there is only one implementation.

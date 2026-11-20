@@ -17,8 +17,12 @@ import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.core.StmpFolder
 import com.mido.phonebridge.plugins.files.FilesStore
+import com.mido.phonebridge.plugins.oauth.OauthClientImport
+import com.mido.phonebridge.plugins.oauth.OauthClientJson
 import com.mido.phonebridge.plugins.oauth.OauthEntry
 import com.mido.phonebridge.plugins.oauth.OauthSecret
+import com.mido.phonebridge.plugins.oauth.OauthSecretStatus
+import com.mido.phonebridge.plugins.oauth.RefreshTokenPaste
 import com.mido.phonebridge.plugins.oauth.OauthStore
 import com.mido.phonebridge.plugins.oauth.OauthTokenCache
 import com.mido.phonebridge.plugins.secrets.HostAllowlist
@@ -90,6 +94,29 @@ class OauthActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = Theme.dp(this@OauthActivity, 12) }
         content.addView(addBtn)
+
+        // **Import is its own button, and it runs BEFORE the form exists.**
+        //
+        // The alternative — a picker opened from inside the dialog — has to deliver its result into
+        // that dialog's fields, across a possible activity restart. Picking first turns the import
+        // into plain data handed to `addDialog()`, so the form is built once and already filled.
+        val importBtn = Theme.button(this, "IMPORT CLIENT JSON", Theme.ButtonStyle.NEUTRAL) {
+            importClientJson()
+        }
+        importBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(this@OauthActivity, 8) }
+        content.addView(importBtn)
+
+        content.addView(
+            Theme.text(
+                this,
+                "Import reads a client_secret_*.json from Google's console and pre-fills the client " +
+                    "id, secret and token URL. The file is read once and not stored anywhere — a " +
+                    "refresh token is not in it, so that one is still yours to supply.",
+                Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+            ).apply { setPadding(0, Theme.dp(this@OauthActivity, 6), 0, 0) }
+        )
 
         content.addView(Theme.sectionHeader(this, "Upload folder"))
         folderContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -163,7 +190,25 @@ class OauthActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { bottomMargin = Theme.dp(this@OauthActivity, 10) }
 
+        // Read the stored status BEFORE building the row: it decides whether Connect is offered
+        // and whether the card says anything at all about being unfinished.
+        val status = runCatching {
+            OauthSecret.fromVault(SecretVault.get(this, OauthStore.vaultName(name))).status
+        }.getOrNull()
+        val needsToken = status == OauthSecretStatus.NEEDS_REFRESH_TOKEN
+
         card.addView(Theme.text(this, name, Theme.TEXT_BODY_SP))
+        if (needsToken) {
+            // Said in words, on the card, because a credential that silently cannot mint is the
+            // kind of thing nobody discovers until a release fails at 2am.
+            card.addView(
+                Theme.text(
+                    this,
+                    "needs a refresh token — tap CONNECT to authorise",
+                    Theme.TEXT_CAPTION_SP, Theme.WARNING,
+                )
+            )
+        }
         card.addView(
             Theme.text(
                 this,
@@ -196,6 +241,12 @@ class OauthActivity : Activity() {
         )
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // **CONNECT is the follow-up, and it appears only when it is the useful action.**
+        //
+        // A credential imported from a client file has no refresh token, so the next thing the
+        // human needs is an authorisation — not a rotate, not a hosts editor. Showing it here, on
+        // the card that says "needs a refresh token", is what turns a blocked import into one tap.
+        if (needsToken) buttons.addView(small("connect") { connectNow(name) })
         buttons.addView(small("rotate") { rotateSecretDialog(name) })
         buttons.addView(small("edit") { addDialog(name) })
         buttons.addView(small("hosts") { hostsDialog(name) })
@@ -291,6 +342,75 @@ class OauthActivity : Activity() {
         folderContainer.addView(btn)
     }
 
+    // --- importing a client json ---------------------------------------------
+
+    /**
+     * Open the system picker for ONE document.
+     *
+     * **`ACTION_OPEN_DOCUMENT`, not the tree picker the upload grant uses, and no persisting.**
+     * That asymmetry is the whole security story of this feature: a single-document grant is
+     * read-only and needs no persisted permission at all, which is exactly "read it and pre-fill,
+     * store nothing". Taking a persistable permission here would leave the app able to re-read a
+     * file it will never look at again.
+     */
+    private fun importClientJson() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // `*/*` rather than application/json: Android's document providers report a
+            // downloaded .json as application/octet-stream, text/plain or nothing at all, and a
+            // narrower filter makes the file the human just downloaded unselectable.
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQ_IMPORT_JSON)
+    }
+
+    /**
+     * Read the picked file ONCE and hand its contents to the form.
+     *
+     * Deliberately no `takePersistableUriPermission`, no copy into cache or app storage, and no
+     * logging of the contents: the file exists only for as long as this read. The parsed values go
+     * into the dialog's fields; the raw text goes out of scope with this function.
+     */
+    private fun readAndParse(uri: android.net.Uri) {
+        val raw = try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                // Bounded read: a client file is under 1 KiB, and reading to EOF on something huge
+                // is an OOM whose failure would present as the app dying on a file pick.
+                val buf = ByteArray(8 * 1024)
+                val out = java.io.ByteArrayOutputStream()
+                var total = 0
+                while (total < OauthClientJson.MAX_BYTES) {
+                    val n = input.read(buf, 0, minOf(buf.size, OauthClientJson.MAX_BYTES - total))
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    total += n
+                }
+                out.toString("UTF-8")
+            } ?: run {
+                toast("could not open that file")
+                return
+            }
+        } catch (e: Exception) {
+            toast("could not read that file: ${e.javaClass.simpleName}")
+            return
+        }
+
+        val parsed = try {
+            OauthClientJson.parse(raw)
+        } catch (e: PluginError) {
+            // The message names a FIELD and never a value — a refusal that echoed the client secret
+            // would put it in a toast, and toasts get screenshotted.
+            toast(e.message ?: "could not read that file")
+            return
+        } catch (e: Exception) {
+            toast("could not read that file")
+            return
+        }
+
+        addDialog(imported = parsed)
+    }
+
     // --- folder grant ---------------------------------------------------------
 
     /**
@@ -314,6 +434,11 @@ class OauthActivity : Activity() {
     @Deprecated("startActivityForResult is the pattern the rest of this app uses")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT_JSON) {
+            if (resultCode != RESULT_OK) return
+            data?.data?.let { readAndParse(it) }
+            return
+        }
         if (requestCode != REQ_PICK_FOLDER || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
@@ -347,15 +472,57 @@ class OauthActivity : Activity() {
      * nothing is ambiguous — did it keep the old value or store an empty one? Rotation is a separate,
      * named action, so the answer is never a guess.
      */
-    private fun addDialog(existingName: String? = null) {
+    private fun addDialog(
+        existingName: String? = null,
+        /**
+         * Values read from a downloaded client file, or null when the form is being filled by hand.
+         *
+         * **Passed in rather than delivered into an open dialog.** An activity result that returns
+         * while a `PaperDialog` is showing has to find that dialog's `EditText`s across a possible
+         * activity restart, and a reference chain that breaks quietly is how a form ends up
+         * half-filled with no explanation. Picking the file FIRST means this function is built once,
+         * with the values already in hand.
+         */
+        imported: OauthClientImport? = null,
+    ) {
         if (!SecretVault.isUnlocked()) {
             toast("vault locked — unlock the app first")
             return
         }
         val creating = existingName == null
         val existing = existingName?.let { runCatching { OauthStore.get(this, it) }.getOrNull() }
+        // An import only ever creates. Editing an existing credential never re-reads a file, because
+        // the point of editing is to change what is there.
+        require(imported == null || creating) { "an import cannot edit an existing credential" }
 
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        // --- what the file did and did not provide ---
+        //
+        // A blank REQUIRED field with no explanation reads as a broken import. Saying which fields
+        // came from the file, and which are the human's to supply, turns "why is this empty" into a
+        // task list. Only shown when importing: a hand-filled form needs none of it.
+        if (imported != null) {
+            val filled = buildList {
+                add("client id")
+                add("client secret")
+                add("token url")
+                if (imported.name.isNotEmpty()) add("name")
+            }.joinToString(", ")
+
+            box.addView(
+                Theme.text(
+                    this,
+                    "Imported from the client file: $filled.\n" +
+                        "NOT in the file — fill these in: refresh token (required), scope, allowed " +
+                        "hosts.",
+                    Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+                ).apply {
+                    setPadding(0, 0, 0, Theme.dp(this@OauthActivity, 12))
+                }
+            )
+
+        }
 
         val nameField = labelledField(
             box, "NAME",
@@ -365,7 +532,7 @@ class OauthActivity : Activity() {
             example = "chromewebstore",
             required = true,
         ).apply {
-            setText(existingName ?: "")
+            setText(existingName ?: imported?.name ?: "")
             isEnabled = creating
             typeface = Theme.monoFont(this@OauthActivity)
         }
@@ -377,7 +544,7 @@ class OauthActivity : Activity() {
             example = "503841343554-…apps.googleusercontent.com",
             required = true,
         ).apply {
-            setText(existing?.clientId ?: "")
+            setText(existing?.clientId ?: imported?.clientId ?: "")
             typeface = Theme.monoFont(this@OauthActivity)
         }
 
@@ -393,14 +560,27 @@ class OauthActivity : Activity() {
                 example = "GOCSPX-…",
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 required = true,
-            )
+            ).apply {
+                // Filled from the file when importing, which is the whole point: this value is
+                // inside it, and it is the one part of an import that must not be re-typed.
+                imported?.let { setText(it.clientSecret) }
+            }
             refreshField = labelledField(
-                box, "REFRESH TOKEN",
-                "The long-lived token from an authorisation round trip — for Google, the OAuth " +
-                    "Playground with your own client id and secret. It is the key to the account " +
-                    "until revoked, which is why it lives in the vault and never leaves the phone.",
+                box, "REFRESH TOKEN (OPTIONAL)",
+                // **OPTIONAL, and the label says so.** Mido, 2026-11-20, twice: *"i don't like being
+                // blocked by a required field"*, then *"refresh token still required in the dialog!"*
+                // after a build that removed the save check but left this field marked REQUIRED —
+                // so the form still demanded it and still refused. The marker is the contract here,
+                // not the save code behind it.
+                //
+                // Leaving it empty saves the credential as needs_refresh_token, and the card then
+                // offers CONNECT, which builds the authorisation URL from the imported values.
+                "Leave this EMPTY if you have not authorised yet — the credential still saves, and " +
+                    "CONNECT on its card finishes it with the client id and secret already stored.\n" +
+                    "If you do have one, paste it here: it is the key to the account until revoked, " +
+                    "so it goes straight into the vault and never leaves the phone.",
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
-                required = true,
+                required = false,
             )
         } else {
             clientSecretField = null
@@ -416,7 +596,7 @@ class OauthActivity : Activity() {
             example = "https://oauth2.googleapis.com/token",
             required = true,
         ).apply {
-            setText(existing?.tokenUrl ?: "")
+            setText(existing?.tokenUrl ?: imported?.tokenUri ?: "")
             typeface = Theme.monoFont(this@OauthActivity)
         }
 
@@ -489,7 +669,19 @@ class OauthActivity : Activity() {
             box,
             actions = listOf(
                 "cancel" to {},
-                "save" to {
+                "save" to {},
+            ),
+            style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
+            // **The action runs from the predicate, like the JWT screen does it.** PaperDialog asks
+            // this BEFORE dismissing and keeps the sheet open when it returns true — which is the
+            // only way a validation failure can preserve what was typed.
+            //
+            // 0.51.93 had the save in the action and a message-matching predicate here instead. The
+            // predicate receives the button LABEL ("save"), matched no field prefix, fell through to
+            // the default and returned true — so the toast fired and the sheet never closed. Mido:
+            // *"save shows a save hint but modal stays"*.
+            refuse = { label ->
+                if (label == "save") {
                     save(
                         creating = creating,
                         existingName = existingName,
@@ -504,10 +696,10 @@ class OauthActivity : Activity() {
                         docs = docsField.text.toString(),
                         refuse = { msg -> refuse(msg) },
                     )
-                },
-            ),
-            style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
-            refuse = refuse,
+                } else {
+                    false
+                }
+            },
         )
     }
 
@@ -530,35 +722,40 @@ class OauthActivity : Activity() {
         authStyle: String,
         hosts: String,
         docs: String,
-        /** Reports a field-specific refusal. The sheet stays open; the return value is unused here. */
+        /** Reports a field-specific refusal. Called for its side effect; the return is below. */
         refuse: (String) -> Unit,
-    ) {
+    ): Boolean {
         val cleanName = name.trim().lowercase()
-        if (cleanName.isEmpty()) return refuse("(name) NAME is required")
+        if (cleanName.isEmpty()) { refuse("(name) NAME is required"); return true }
         if (!com.mido.phonebridge.core.SecretRules.isValidName(cleanName)) {
-            return refuse("(name) NAME must be lowercase [a-z0-9_-], 1-64 chars")
+            refuse("(name) NAME must be lowercase [a-z0-9_-], 1-64 chars"); return true
         }
         if (creating && runCatching { OauthStore.get(this, cleanName) }.isSuccess) {
-            return refuse("(name) NAME '$cleanName' is already used — edit it instead")
+            refuse("(name) NAME '$cleanName' is already used — edit it instead"); return true
         }
 
-        if (clientId.isBlank()) return refuse("(client) CLIENT ID is required")
-        if (tokenUrl.isBlank()) return refuse("(token) TOKEN URL is required")
+        if (clientId.isBlank()) { refuse("(client) CLIENT ID is required"); return true }
+        if (tokenUrl.isBlank()) { refuse("(token) TOKEN URL is required"); return true }
 
         val parsedUrl = runCatching { java.net.URL(tokenUrl.trim()) }.getOrNull()
-            ?: return refuse("(token) TOKEN URL is not a valid URL")
+            ?: run { refuse("(token) TOKEN URL is not a valid URL"); return true }
         if (parsedUrl.protocol != "https") {
-            return refuse("(token) TOKEN URL must be https — a client secret over http is in the clear")
+            refuse("(token) TOKEN URL must be https — a client secret over http is in the clear"); return true
         }
 
         val style = authStyle.trim().lowercase()
         if (style !in OauthEntry.AUTH_STYLES) {
-            return refuse("(auth) AUTH STYLE must be '${OauthEntry.AUTH_BASIC}' or '${OauthEntry.AUTH_BODY}'")
+            refuse("(auth) AUTH STYLE must be '${OauthEntry.AUTH_BASIC}' or '${OauthEntry.AUTH_BODY}'"); return true
         }
 
         if (creating) {
-            if (clientSecret?.isBlank() != false) return refuse("(secret) CLIENT SECRET is required")
-            if (refreshToken?.isBlank() != false) return refuse("(refresh) REFRESH TOKEN is required")
+            if (clientSecret?.isBlank() != false) { refuse("(secret) CLIENT SECRET is required"); return true }
+            // **The refresh token is NOT required.** Mido, 2026-11-20: *"i don't like being blocked
+            // by a required field … we should accept the json data and have a follow up"*.
+            //
+            // A downloaded client file cannot contain one, so demanding it here refused a file that
+            // was perfectly good. The credential is saved as `needs_refresh_token`, the card says
+            // so, and Connect finishes it.
         }
 
         // Hosts are validated as a whole before anything is written, so a typo in the last one cannot
@@ -567,7 +764,7 @@ class OauthActivity : Activity() {
             hosts.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 .map { HostAllowlist.requireRule(it) }.distinct()
         } catch (e: PluginError) {
-            return refuse("(hosts) ALLOWED HOSTS: ${e.message}")
+            refuse("(hosts) ALLOWED HOSTS: ${e.message}"); return true
         }
 
         try {
@@ -577,7 +774,10 @@ class OauthActivity : Activity() {
                 SecretVault.put(
                     this,
                     OauthStore.vaultName(cleanName),
-                    OauthSecret(refreshToken!!.trim(), clientSecret!!.trim()).toJson(),
+                    OauthSecret(
+                        refreshToken = refreshToken?.trim().orEmpty(),
+                        clientSecret = clientSecret!!.trim(),
+                    ).toJson(),
                     hosts = hostRules,
                     docs = docs.trim(),
                     // OWNED BY THIS PLUGIN. The Secrets screen lists only unowned entries, so this is
@@ -611,12 +811,23 @@ class OauthActivity : Activity() {
             // to the previous config.
             OauthTokenCache.forget(cleanName)
             BridgeService.registerOauthPlugin(this, cleanName)
-            toast(if (creating) "credential '$cleanName' saved" else "updated '$cleanName'")
+            toast(
+                when {
+                    !creating -> "updated '$cleanName'"
+                    refreshToken.isNullOrBlank() ->
+                        "'$cleanName' saved — now tap Connect on it to get a refresh token"
+                    else -> "credential '$cleanName' saved"
+                }
+            )
             render()
+            // Saved: NOT a refusal, so PaperDialog dismisses the sheet.
+            return false
         } catch (e: PluginError) {
             refuse("(fail) ${e.message}")
+            return true
         } catch (e: Exception) {
             refuse("(fail) Could not save: ${e.javaClass.simpleName}: ${e.message}")
+            return true
         }
     }
 
@@ -666,35 +877,110 @@ class OauthActivity : Activity() {
             box,
             actions = listOf(
                 "cancel" to {},
-                "replace" to {
-                    val s = secretField.text.toString()
-                    val r = refreshField.text.toString()
-                    if (s.isBlank()) return@to fail("(secret) CLIENT SECRET is required")
-                    if (r.isBlank()) return@to fail("(refresh) REFRESH TOKEN is required")
-                    try {
-                        val hosts = runCatching {
-                            SecretVault.meta(this, OauthStore.vaultName(name)).hosts
-                        }.getOrDefault(emptyList())
-                        SecretVault.put(
-                            this,
-                            OauthStore.vaultName(name),
-                            OauthSecret(r.trim(), s.trim()).toJson(),
-                            hosts = hosts,
-                            owner = "oauth",
-                        )
-                        // The old token was minted from the old credential and is now worthless.
-                        OauthTokenCache.forget(name)
-                        toast("secrets replaced for '$name'")
-                        render()
-                    } catch (e: Exception) {
-                        fail("(fail) ${e.message}")
-                    }
-                },
+                // Empty: the work runs from the predicate below, which is the only hook that can
+                // keep the sheet open on a validation failure.
+                "replace" to {},
             ),
             style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
-            refuse = refuse,
+            refuse = { label ->
+                if (label != "replace") {
+                    false
+                } else {
+                    val sec = secretField.text.toString()
+                    val ref = refreshField.text.toString()
+                    when {
+                        sec.isBlank() -> { fail("(secret) CLIENT SECRET is required"); true }
+                        ref.isBlank() -> { fail("(refresh) REFRESH TOKEN is required"); true }
+                        else -> try {
+                            // `null` keeps the allowlist; see the note in PlayAuth: an empty
+                            // list here would clear the hosts on any failed read.
+                            val hosts = runCatching {
+                                SecretVault.meta(this, OauthStore.vaultName(name)).hosts
+                            }.getOrNull()
+                            SecretVault.put(
+                                this,
+                                OauthStore.vaultName(name),
+                                OauthSecret(ref.trim(), sec.trim()).toJson(),
+                                hosts = hosts,
+                                owner = "oauth",
+                            )
+                            // The old token was minted from the old credential and is worthless.
+                            OauthTokenCache.forget(name)
+                            toast("secrets replaced for '$name'")
+                            render()
+                            false
+                        } catch (e: Exception) {
+                            fail("(fail) ${e.message}")
+                            true
+                        }
+                    }
+                }
+            },
         )
     }
+
+    /**
+     * The follow-up: everything that turns "imported" into "working", in one sheet.
+     *
+     * **This is Tier 1.** From the client file the app already holds the client id, the token URI
+     * and the registered redirect URIs, so it can build the EXACT authorisation URL and open it —
+     * with `access_type=offline` and `prompt=consent`, which are the two parameters that actually
+     * cause Google to return a refresh token and which the Playground hides behind a gear icon.
+     *
+     * What is left is unavoidable without a local listener: Google redirects to the registered URI,
+     * and this build cannot serve that, so the authorisation code comes back through the Playground
+     * and the human pastes ONE line. Tier 2 removes that paste; it needs a loopback socket, which is
+     * a separate decision.
+     */
+    /**
+     * Connect this credential, in the app, with no browser and no pasted token.
+     *
+     * **This replaces the two-step Playground flow, and the reason is the loopback deprecation.**
+     * The old path had to send the human to `developers.google.com/oauthplayground` because a
+     * loopback redirect is blocked for Android OAuth client types (Google's migration guide,
+     * October 2022) — and the only way to catch a redirect otherwise is a listener on
+     * `127.0.0.1`, which is exactly what was closed.
+     *
+     * Google's own answer for an Android app is the Identity Services `authorize()` call, which
+     * this app already uses for accounts. So the same consent produces this credential's refresh
+     * token, and [PlayAuth.oauthTarget] is what files it against the right name.
+     *
+     * What is asked for: the credential's own scope if it declares one, else the store scope.
+     * Requested HERE rather than in the account consent because `chromewebstore` is a publisher
+     * permission — putting it in front of every user who only wanted mail would be noise.
+     */
+    private fun connectNow(name: String) {
+        val scope = runCatching {
+            OauthStore.get(this, name).scope.ifBlank { DEFAULT_SCOPE }
+        }.getOrDefault(DEFAULT_SCOPE)
+
+        PlayAuth.targetOauthCredential(name)
+        try {
+            startActivity(
+                Intent(this, GoogleLoginActivity::class.java)
+                    .putExtra(GoogleLoginActivity.EXTRA_OAUTH, name)
+                    .putExtra(GoogleLoginActivity.EXTRA_SCOPE, scope),
+            )
+        } catch (e: Exception) {
+            // A start that throws must say so; the screen promised a way forward.
+            PlayAuth.targetOauthCredential(null)
+            toast("cannot open the Google consent screen: ${e.message}")
+        }
+    }
+
+
+    private fun enc(v: String): String = java.net.URLEncoder.encode(v, "UTF-8")
+
+    /**
+     * Pull a refresh token out of whatever was pasted.
+     *
+     * People paste the whole `"refresh_token": "1//0g…"` line, or the field with quotes, or with a
+     * trailing comma. Being strict here would mean the value is right and the app still refuses,
+     * which is the worst combination. Being LENIENT about SHAPE while still refusing something that
+     * obviously is not a token is the honest middle.
+     */
+    private fun extractRefreshToken(raw: String): String? = RefreshTokenPaste.extract(raw)
+
 
     private fun hostsDialog(name: String) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -797,5 +1083,11 @@ class OauthActivity : Activity() {
          */
         const val GRANT_PREFS = "oauth_grant"
         const val REQ_PICK_FOLDER = 9101
+        /** The client-json picker. Distinct from the folder picker: different grant shape. */
+        const val REQ_IMPORT_JSON = 9102
+        /** Google's authorisation endpoint, used when the entry's token URL is Google's. */
+        const val GOOGLE_AUTH_BASE = "https://accounts.google.com"
+        /** Pre-filled scope for the store this screen was built for. */
+        const val DEFAULT_SCOPE = "https://www.googleapis.com/auth/chromewebstore"
     }
 }

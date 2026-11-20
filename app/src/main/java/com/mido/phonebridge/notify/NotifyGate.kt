@@ -122,6 +122,14 @@ object NotifyGate {
         facts: RequestFacts?,
         needsAi: Boolean,
         callerLabel: String = "Caller",
+        /**
+         * The Google account this request acts as, or null for a route that touches none.
+         *
+         * **Forwarded, never invented.** The gate resolves nothing about accounts; it renders
+         * what the dispatcher resolved, so the card and the modal cannot name different
+         * accounts for the same request.
+         */
+        account: String? = null,
     ): Result {
         val id = seq.incrementAndGet()
         val latch = CountDownLatch(1)
@@ -138,6 +146,7 @@ object NotifyGate {
             needsAi = needsAi,
             fetchCapMs = FETCH_CAP_MS,
             callerLabel = callerLabel,
+            account = account,
         ) { outcome ->
             decided.set(outcome)
             latch.countDown()

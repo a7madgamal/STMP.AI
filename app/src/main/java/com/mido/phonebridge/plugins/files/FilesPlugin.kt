@@ -3,6 +3,7 @@ package com.mido.phonebridge.plugins.files
 import android.content.Context
 import android.provider.DocumentsContract
 import com.mido.phonebridge.core.ApprovalRow
+import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
@@ -52,6 +53,9 @@ class FilesPlugin(private val ctx: Context) : Plugin {
 
         Route(
             "GET", "/files/content", "DOWNLOAD A FILE", Verb.READ,
+            params = listOf(
+                ParamSpec("path", "The file name inside the granted folder. No separators.", required = true),
+            ),
             // The response is the file's bytes: never audited, for the same reason an upload's
             // body is not — a document must not be copied into an append-only log.
             auditResponseBody = false,
@@ -65,6 +69,14 @@ class FilesPlugin(private val ctx: Context) : Plugin {
 
         Route(
             "POST", "/files/upload", "UPLOAD A FILE", Verb.WRITE,
+            params = listOf(
+                ParamSpec("path", "The file name to create inside the granted folder.", required = true),
+                ParamSpec(
+                    "type",
+                    "MIME type to store. Defaults to application/octet-stream.",
+                    default = "application/octet-stream",
+                ),
+            ),
             // The body IS the file. Two independent flags, two unrelated reasons: `streamsRequest`
             // is about MEMORY (never buffer a 200 MiB body into a String), `auditRequestBody` is
             // about LEAKAGE (never copy its first 32 KiB into the log).

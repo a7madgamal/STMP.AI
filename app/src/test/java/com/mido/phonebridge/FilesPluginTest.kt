@@ -137,7 +137,12 @@ class FilesPluginTest {
         val known = card {
             com.mido.phonebridge.core.Req(
                 method = "POST", path = "/files/upload",
-                query = mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                // Wrapped with the names the route declares, exactly as dispatch builds it — the
+                // wrapper is the guard against a declaration drifting from its handler.
+                query = com.mido.phonebridge.core.QueryParams(
+                    setOf("path", "type"),
+                    mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                ),
                 pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
                 bodyLength = 43L * 1024L * 1024L,
             )
@@ -148,7 +153,12 @@ class FilesPluginTest {
         val unknown = card {
             com.mido.phonebridge.core.Req(
                 method = "POST", path = "/files/upload",
-                query = mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                // Wrapped with the names the route declares, exactly as dispatch builds it — the
+                // wrapper is the guard against a declaration drifting from its handler.
+                query = com.mido.phonebridge.core.QueryParams(
+                    setOf("path", "type"),
+                    mapOf("path" to "big.apk", "type" to "application/octet-stream"),
+                ),
                 pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
                 bodyLength = -1L,
             )
@@ -191,7 +201,8 @@ class FilesPluginTest {
     fun `the list card names the folder`() {
         val rows = FilesPlugin(org.robolectric.RuntimeEnvironment.getApplication()).describeRows(
             com.mido.phonebridge.core.Req(
-                method = "GET", path = "/files", query = emptyMap(),
+                method = "GET", path = "/files",
+                query = com.mido.phonebridge.core.QueryParams(emptySet(), emptyMap()),
                 pathParams = emptyMap(), body = org.json.JSONObject(), remote = "test",
             )
         )
