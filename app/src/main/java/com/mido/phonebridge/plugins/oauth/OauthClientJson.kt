@@ -32,7 +32,9 @@ data class OauthClientImport(
      * cryptic mismatch rather than "add the redirect URI".
      */
     val playgroundRegistered: Boolean
-        get() = redirectUris.any { it.trimEnd('/').equals(PLAYGROUND_URI, ignoreCase = true) }
+        get() = redirectUris.any {
+            it.trimEnd('/').equals(OauthClientJson.PLAYGROUND_URI, ignoreCase = true)
+        }
 }
 
 /**

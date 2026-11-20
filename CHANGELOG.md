@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.89 (build 415)**.
+Current build: **v0.51.90 (build 416)**.
 
 ---
 
@@ -5848,10 +5848,18 @@ devDependencies. `node_modules/` is gitignored.
 ## 0.51.88 (build 414) — 2026-11-20
 - `/help` now serves `contractVersion` at the **top level** as well as inside `stmp`. It only existed nested, so a client reading `help["contractVersion"]` — the obvious key, and where the number logically belongs — got null and concluded the surface had not changed. Mido reported it after a live check. Both fields come from the same constant, and a test now pins the top-level one so the two cannot drift.
 
-## 0.51.89 (build 415) — 2026-11-20 — CURRENT
+## 0.51.89 (build 415) — 2026-11-20
 - **Fixed: the OAuth screen's folder indicator was wrong.** It printed `Downloads/STMP` whenever any grant existed, so after the human picked a different tree it still claimed the expected folder. `FilesStore.rootLabel()` now asks the provider for the granted tree's own display name, and the panel shows that — with a warning when it is not the folder uploads are expected from. Mido reported it: a label that echoes the constant tells you what the app wants, not what it has, and the difference is exactly what breaks an upload.
 - The grant toast used `uri.lastPathSegment.contains("STMP")`, which is `primary:Downloads/STMP` on some providers and a bare document id on others — right by luck on one and wrong on the next. It now asks the same `rootLabel()` the panel does, so the two cannot disagree.
 - `StmpFolder.LAST_SEGMENT` added: a SAF tree's display name is the folder's own name (`STMP`), never the multi-level path the app thinks in, so any "is this the right folder" check must compare against that.
+
+## 0.51.90 (build 416) — 2026-11-20 — CURRENT
+- The OAuth screen can **import a downloaded Google client file** (`client_secret_*.json`) and pre-fill the client id, client secret, token URL and a derived name. `ACTION_OPEN_DOCUMENT`, one document, read-only, and **no persistable permission**: the file is read once and nothing is stored, which is what was asked for and is the whole reason a single-document grant is right here rather than the tree grant the upload folder uses.
+- The file is untrusted input and is treated as such: a 64 KiB cap before parsing, `token_uri` re-checked for https even though the format says https, all five mandatory members reported at once rather than one per attempt, and refusals that name a FIELD but never echo a VALUE — a parse error quoting the client secret would put it in a toast, and toasts get screenshotted.
+- A service-account key downloaded from the same console page is refused with the actual explanation ("that is a service-account key, not an OAuth client"), because "no web or installed object" tells nobody what to do next.
+- **The dialog answers "how do I get the rest".** A client file is only the client half: it has no refresh token, no scope and no API host. So an import shows what it filled, what it did not, and the exact four Playground steps for the refresh token — instead of a blank required field that reads as a broken import.
+- The import also parses `redirect_uris` for one purpose: warning when `https://developers.google.com/oauthplayground` is not registered for the client, because that failure is a cryptic `redirect_uri_mismatch` that otherwise reads like a plugin bug.
+- Import is its own button that runs BEFORE the form exists. Delivering a picker result into an already-open dialog means crossing a possible activity restart to reach its fields, and a reference chain that breaks quietly is how a form ends up half-filled with no explanation.
 
 ## Keeping this file honest
 

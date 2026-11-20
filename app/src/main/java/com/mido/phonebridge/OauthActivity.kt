@@ -17,6 +17,8 @@ import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.SecretVault
 import com.mido.phonebridge.core.StmpFolder
 import com.mido.phonebridge.plugins.files.FilesStore
+import com.mido.phonebridge.plugins.oauth.OauthClientImport
+import com.mido.phonebridge.plugins.oauth.OauthClientJson
 import com.mido.phonebridge.plugins.oauth.OauthEntry
 import com.mido.phonebridge.plugins.oauth.OauthSecret
 import com.mido.phonebridge.plugins.oauth.OauthStore
@@ -90,6 +92,29 @@ class OauthActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = Theme.dp(this@OauthActivity, 12) }
         content.addView(addBtn)
+
+        // **Import is its own button, and it runs BEFORE the form exists.**
+        //
+        // The alternative — a picker opened from inside the dialog — has to deliver its result into
+        // that dialog's fields, across a possible activity restart. Picking first turns the import
+        // into plain data handed to `addDialog()`, so the form is built once and already filled.
+        val importBtn = Theme.button(this, "IMPORT CLIENT JSON", Theme.ButtonStyle.NEUTRAL) {
+            importClientJson()
+        }
+        importBtn.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = Theme.dp(this@OauthActivity, 8) }
+        content.addView(importBtn)
+
+        content.addView(
+            Theme.text(
+                this,
+                "Import reads a client_secret_*.json from Google's console and pre-fills the client " +
+                    "id, secret and token URL. The file is read once and not stored anywhere — a " +
+                    "refresh token is not in it, so that one is still yours to supply.",
+                Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+            ).apply { setPadding(0, Theme.dp(this@OauthActivity, 6), 0, 0) }
+        )
 
         content.addView(Theme.sectionHeader(this, "Upload folder"))
         folderContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -291,6 +316,75 @@ class OauthActivity : Activity() {
         folderContainer.addView(btn)
     }
 
+    // --- importing a client json ---------------------------------------------
+
+    /**
+     * Open the system picker for ONE document.
+     *
+     * **`ACTION_OPEN_DOCUMENT`, not the tree picker the upload grant uses, and no persisting.**
+     * That asymmetry is the whole security story of this feature: a single-document grant is
+     * read-only and needs no persisted permission at all, which is exactly "read it and pre-fill,
+     * store nothing". Taking a persistable permission here would leave the app able to re-read a
+     * file it will never look at again.
+     */
+    private fun importClientJson() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // `*/*` rather than application/json: Android's document providers report a
+            // downloaded .json as application/octet-stream, text/plain or nothing at all, and a
+            // narrower filter makes the file the human just downloaded unselectable.
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQ_IMPORT_JSON)
+    }
+
+    /**
+     * Read the picked file ONCE and hand its contents to the form.
+     *
+     * Deliberately no `takePersistableUriPermission`, no copy into cache or app storage, and no
+     * logging of the contents: the file exists only for as long as this read. The parsed values go
+     * into the dialog's fields; the raw text goes out of scope with this function.
+     */
+    private fun readAndParse(uri: android.net.Uri) {
+        val raw = try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                // Bounded read: a client file is under 1 KiB, and reading to EOF on something huge
+                // is an OOM whose failure would present as the app dying on a file pick.
+                val buf = ByteArray(8 * 1024)
+                val out = java.io.ByteArrayOutputStream()
+                var total = 0
+                while (total < OauthClientJson.MAX_BYTES) {
+                    val n = input.read(buf, 0, minOf(buf.size, OauthClientJson.MAX_BYTES - total))
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    total += n
+                }
+                out.toString("UTF-8")
+            } ?: run {
+                toast("could not open that file")
+                return
+            }
+        } catch (e: Exception) {
+            toast("could not read that file: ${e.javaClass.simpleName}")
+            return
+        }
+
+        val parsed = try {
+            OauthClientJson.parse(raw)
+        } catch (e: PluginError) {
+            // The message names a FIELD and never a value — a refusal that echoed the client secret
+            // would put it in a toast, and toasts get screenshotted.
+            toast(e.message ?: "could not read that file")
+            return
+        } catch (e: Exception) {
+            toast("could not read that file")
+            return
+        }
+
+        addDialog(imported = parsed)
+    }
+
     // --- folder grant ---------------------------------------------------------
 
     /**
@@ -314,6 +408,11 @@ class OauthActivity : Activity() {
     @Deprecated("startActivityForResult is the pattern the rest of this app uses")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_IMPORT_JSON) {
+            if (resultCode != RESULT_OK) return
+            data?.data?.let { readAndParse(it) }
+            return
+        }
         if (requestCode != REQ_PICK_FOLDER || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
@@ -347,15 +446,74 @@ class OauthActivity : Activity() {
      * nothing is ambiguous — did it keep the old value or store an empty one? Rotation is a separate,
      * named action, so the answer is never a guess.
      */
-    private fun addDialog(existingName: String? = null) {
+    private fun addDialog(
+        existingName: String? = null,
+        /**
+         * Values read from a downloaded client file, or null when the form is being filled by hand.
+         *
+         * **Passed in rather than delivered into an open dialog.** An activity result that returns
+         * while a `PaperDialog` is showing has to find that dialog's `EditText`s across a possible
+         * activity restart, and a reference chain that breaks quietly is how a form ends up
+         * half-filled with no explanation. Picking the file FIRST means this function is built once,
+         * with the values already in hand.
+         */
+        imported: OauthClientImport? = null,
+    ) {
         if (!SecretVault.isUnlocked()) {
             toast("vault locked — unlock the app first")
             return
         }
         val creating = existingName == null
         val existing = existingName?.let { runCatching { OauthStore.get(this, it) }.getOrNull() }
+        // An import only ever creates. Editing an existing credential never re-reads a file, because
+        // the point of editing is to change what is there.
+        require(imported == null || creating) { "an import cannot edit an existing credential" }
 
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        // --- what the file did and did not provide ---
+        //
+        // A blank REQUIRED field with no explanation reads as a broken import. Saying which fields
+        // came from the file, and which are the human's to supply, turns "why is this empty" into a
+        // task list. Only shown when importing: a hand-filled form needs none of it.
+        if (imported != null) {
+            val filled = buildList {
+                add("client id")
+                add("client secret")
+                add("token url")
+                if (imported.name.isNotEmpty()) add("name")
+            }.joinToString(", ")
+
+            box.addView(
+                Theme.text(
+                    this,
+                    "Imported from the client file: $filled.\n" +
+                        "NOT in the file — fill these in: refresh token (required), scope, allowed " +
+                        "hosts.",
+                    Theme.TEXT_CAPTION_SP, Theme.ON_SURFACE_VARIANT,
+                ).apply {
+                    setPadding(0, 0, 0, Theme.dp(this@OauthActivity, 12))
+                }
+            )
+
+            // The authorisation will fail with a cryptic `redirect_uri_mismatch` if the client is
+            // not registered for the Playground, and that error reads exactly like a plugin bug.
+            // Said here, before the human leaves for another app.
+            if (!imported.playgroundRegistered) {
+                box.addView(
+                    Theme.text(
+                        this,
+                        "⚠ The Playground is NOT an authorised redirect URI for this client. Add " +
+                            "${OauthClientJson.PLAYGROUND_URI} to the client at " +
+                            "https://console.cloud.google.com/apis/credentials, or the " +
+                            "authorisation will fail with redirect_uri_mismatch.",
+                        Theme.TEXT_CAPTION_SP, Theme.WARNING,
+                    ).apply {
+                        setPadding(0, 0, 0, Theme.dp(this@OauthActivity, 12))
+                    }
+                )
+            }
+        }
 
         val nameField = labelledField(
             box, "NAME",
@@ -365,7 +523,7 @@ class OauthActivity : Activity() {
             example = "chromewebstore",
             required = true,
         ).apply {
-            setText(existingName ?: "")
+            setText(existingName ?: imported?.name ?: "")
             isEnabled = creating
             typeface = Theme.monoFont(this@OauthActivity)
         }
@@ -377,7 +535,7 @@ class OauthActivity : Activity() {
             example = "503841343554-…apps.googleusercontent.com",
             required = true,
         ).apply {
-            setText(existing?.clientId ?: "")
+            setText(existing?.clientId ?: imported?.clientId ?: "")
             typeface = Theme.monoFont(this@OauthActivity)
         }
 
@@ -393,12 +551,27 @@ class OauthActivity : Activity() {
                 example = "GOCSPX-…",
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 required = true,
-            )
+            ).apply {
+                // Filled from the file when importing, which is the whole point: this value is
+                // inside it, and it is the one part of an import that must not be re-typed.
+                imported?.let { setText(it.clientSecret) }
+            }
             refreshField = labelledField(
                 box, "REFRESH TOKEN",
-                "The long-lived token from an authorisation round trip — for Google, the OAuth " +
-                    "Playground with your own client id and secret. It is the key to the account " +
-                    "until revoked, which is why it lives in the vault and never leaves the phone.",
+                // **The only field an import cannot fill, so the help is the instructions.**
+                //
+                // The client file is the CLIENT half of a credential. A refresh token comes from an
+                // authorisation where a human signs in, and no download can contain one. Rather
+                // than a vague "use the Playground", these are the exact four steps — and the
+                // redirect-URI question they depend on is answered by the import itself.
+                "Not in the downloaded file — that file is only the client half. Get one from an " +
+                    "authorisation round trip: (1) open https://developers.google.com/oauthplayground" +
+                    "\n(2) gear icon → tick 'Use your own OAuth credentials' → paste this client id " +
+                    "and secret\n(3) tick the scope you need, e.g. " +
+                    "https://www.googleapis.com/auth/chromewebstore\n(4) Authorize, sign in as the " +
+                    "account that owns it, then 'Exchange authorization code for tokens' and copy " +
+                    "refresh_token.\nIt is the key to the account until revoked, which is why it " +
+                    "lives in the vault and never leaves the phone.",
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 required = true,
             )
@@ -416,7 +589,7 @@ class OauthActivity : Activity() {
             example = "https://oauth2.googleapis.com/token",
             required = true,
         ).apply {
-            setText(existing?.tokenUrl ?: "")
+            setText(existing?.tokenUrl ?: imported?.tokenUri ?: "")
             typeface = Theme.monoFont(this@OauthActivity)
         }
 
@@ -797,5 +970,7 @@ class OauthActivity : Activity() {
          */
         const val GRANT_PREFS = "oauth_grant"
         const val REQ_PICK_FOLDER = 9101
+        /** The client-json picker. Distinct from the folder picker: different grant shape. */
+        const val REQ_IMPORT_JSON = 9102
     }
 }

@@ -250,6 +250,9 @@ object ErrorCodes {
         "oauth_upload_failed" to UNAVAILABLE,
         // The named file is not in the granted folder. The caller's mistake, like a bad name.
         "file_not_found" to NOT_FOUND,
+        // The client-secret file the human picked could not be used. BAD_REQUEST, not a server
+        // error: nothing is broken on this side, the file was the wrong one or was truncated.
+        "oauth_import_failed" to BAD_REQUEST,
         // No folder granted for uploads. Refused PRE-gate, so this is a caller-visible setup step
         // rather than a fault: 503 says "not ready yet", which is exactly true.
         "no_folder_granted" to UNAVAILABLE,
@@ -411,6 +414,7 @@ object ErrorCodes {
         "oauth_upload_timeout" to "The upload did not finish in time. The file may be partly transferred: check the provider before retrying.",
         "oauth_upload_failed" to "The upload failed part-way through streaming the file.",
         "file_not_found" to "No file with that name is in the granted folder. Grant the folder on the OAuth screen, or check the name.",
+        "oauth_import_failed" to "The picked file is not a usable Google OAuth client file. The message names the member that is missing or wrong; pick the client_secret_*.json from the Credentials page.",
         "no_folder_granted" to "No folder has been granted for OAuth uploads. Open the OAuth screen and grant Downloads/STMP, then retry. Nothing was sent.",
         "refresh_token_rotated" to "The provider issued a new refresh token, which this build will not write back during a call. Replace the refresh token on the OAuth screen and retry.",
         "ssh_host_key_refused" to "The host key was refused for a reason the app could not name.",
