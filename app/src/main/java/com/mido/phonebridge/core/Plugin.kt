@@ -23,6 +23,87 @@ import org.json.JSONObject
  * /gmail/messages/{id}/trash` is DELETE, not write. Inferring was the bug class
  * the old gate-side table already cost this project.
  */
+/**
+ * One query parameter a route ACCEPTS.
+ *
+ * **Declared, not inferred.** Before this existed, a route's parameters were only knowable by
+ * reading its handler, so a caller had to guess names: `GET /gmail/messages?maxResults=10` looked
+ * right, was silently ignored, and returned the default 20. Nothing said so — an unknown parameter
+ * and an absent one were indistinguishable (Mido, 2026-11-20: *"did you use the endpoint wrong or
+ * is it a bug?"*).
+ *
+ * The list is the contract in both directions: `/help` documents exactly these, and dispatch
+ * REFUSES any parameter not listed. Guessing becomes a loud error instead of a wrong answer.
+ */
+data class ParamSpec(
+    val name: String,
+    /** What it does, in the words the caller needs. Shown by `/help`. */
+    val describe: String,
+    /** `string`, `int`, `bool`, or `enum:a|b|c`. Types the documentation and the refusal hint. */
+    val type: String = "string",
+    /** True when the route cannot work without it. */
+    val required: Boolean = false,
+    /** The value used when it is absent. Empty when the route treats absence as "no filter". */
+    val default: String = "",
+    /** Allowed values, for a constrained string. Empty means any. */
+    val allowed: List<String> = emptyList(),
+)
+
+/**
+ * A request's query parameters, WRAPPED so an undeclared name cannot be read.
+ *
+ * **This is what makes documentation drift impossible rather than merely tested for.**
+ *
+ * The rule before this was enforced on the way OUT — dispatch refused a parameter name the route
+ * had not declared — which fixed the caller's side of a wrong parameter. The other half is a
+ * HANDLER reading a name its route never declared: a typo like `query["maximum"]` where the
+ * declaration says `max` compiles, runs, returns null, and produces a silently wrong answer. A
+ * test that greps source for the strings cannot catch it reliably (it reported two false positives
+ * on Calendar's helper-read parameters and would have to be deleted).
+ *
+ * So the map itself refuses. A read of an undeclared name throws at the point of the bug, naming
+ * the parameter and the declared alternatives — the same information `unknown_param` gives a
+ * caller, given to the developer instead.
+ *
+ * [declared] is the route's own [Route.params] names. Iteration is restricted to them too, so a
+ * handler looping `query.keys` cannot see a name the route never accepted. The RAW request map is
+ * kept separately ([raw]) purely so dispatch can detect and refuse the extras.
+ */
+class QueryParams(
+    private val declared: Set<String>,
+    private val backing: Map<String, String>,
+) : Map<String, String> by backing {
+
+    /** The request's actual parameters, including any the route did not declare. */
+    val raw: Map<String, String> get() = backing
+
+    override fun get(key: String): String? {
+        if (key !in declared) {
+            throw IllegalStateException(
+                "handler read query parameter '$key', which this route does not declare. " +
+                    "Declared: ${declared.sorted().ifEmpty { "none" }}. " +
+                    "Either the declaration is missing it or the handler has a typo — and either " +
+                    "way this would have been a silent wrong answer, so it is a crash in debug."
+            )
+        }
+        return backing[key]
+    }
+
+    override fun containsKey(key: String): Boolean {
+        // Same rule: asking whether an undeclared name is present is the first half of reading it.
+        if (key !in declared) {
+            throw IllegalStateException(
+                "handler checked for query parameter '$key', which this route does not declare. " +
+                    "Declared: ${declared.sorted().ifEmpty { "none" }}."
+            )
+        }
+        return backing.containsKey(key)
+    }
+
+    /** Only declared names that are actually present, so iteration matches the declaration. */
+    override val keys: Set<String> get() = backing.keys.filterTo(mutableSetOf()) { it in declared }
+}
+
 data class Route(
     val method: String,          // "GET" | "POST" | "DELETE"
     val path: String,            // e.g. "/notifications", "/gmail/messages/{id}"
@@ -30,6 +111,19 @@ data class Route(
     val describe: String,
     /** What this route does: the audit label, and (R2) the policy key. */
     val verb: Verb,
+    /**
+     * Every query parameter this route accepts, and NOTHING else.
+     *
+     * Enforced before the gate: an undeclared parameter refuses with `unknown_param`, naming the
+     * parameter and the ones that would have worked. The effect is that this list cannot drift from
+     * the handler without a request failing — the same reason [describe] and [verb] are required
+     * rather than defaulted.
+     *
+     * An empty list means the route takes no query parameters, so ANY query string is refused.
+     * That is the honest default: a route that forgot to declare its parameters fails loudly on
+     * first use rather than quietly ignoring input.
+     */
+    val params: List<ParamSpec> = emptyList(),
     /**
      * Whether the audit records the RESPONSE body for this route.
      *
@@ -219,13 +313,64 @@ data class Route(
      * opt-in per route, not a rewrite of the gate.
      */
     fun effectiveVerb(req: Req): Verb = verbFor?.invoke(req) ?: verb
+
+    /**
+     * Refuse any query parameter this route did not declare.
+     *
+     * **FAIL HARD, before the gate.** Mido, 2026-11-20, after `?maxResults=10` returned 20 rows
+     * with no complaint: *"fail hard on ANY unexpected params with a clear error response"*.
+     *
+     * The failure mode this removes is not a crash, it is a WRONG ANSWER. Every route used to read
+     * the parameters it knew and ignore the rest, so a caller with the name slightly wrong got a
+     * default and no signal — and then reasoned about data that was not what it asked for. Silence
+     * is the one response that cannot be debugged from the caller's side.
+     *
+     * Runs here rather than in each handler because a rule repeated 43 times is a rule that is
+     * wrong 43 different ways. It is also pre-gate: a request that can never succeed must not cost
+     * a human a tap.
+     *
+     * @throws PluginError `unknown_param`, listing what WAS accepted, so the repair is visible.
+     */
+    fun checkParams(req: Req) {
+        // **Reads `raw`, not the wrapper.** [QueryParams.get] refuses undeclared names, and its
+        // `keys` hides them — which is right for a handler but useless here: this function's whole
+        // job is to SEE the extras and answer them. The wrapper guards the handler; this guards
+        // the caller.
+        val actual = req.query.raw
+        if (actual.isEmpty()) return
+        val declared = params.map { it.name }.toSet()
+        val unknown = actual.keys.filter { it !in declared }
+        if (unknown.isEmpty()) return
+
+        // Name what went wrong AND what would have worked. "unknown parameter" alone leaves the
+        // caller guessing a second time, which is the same failure one step later.
+        val accepted = if (declared.isEmpty()) {
+            "this route accepts NO query parameters"
+        } else {
+            "accepted: ${params.joinToString(", ") { p ->
+                if (p.required) "${p.name} (required)" else p.name
+            }}"
+        }
+        throw PluginError(
+            "unknown_param",
+            "unknown query parameter${if (unknown.size == 1) "" else "s"} " +
+                "${unknown.joinToString(", ") { "'$it'" }} — $accepted",
+        )
+    }
 }
 
 /** Incoming request handed to a route handler (post-approval). */
 class Req(
     val method: String,
     val path: String,
-    val query: Map<String, String>,
+    /**
+     * The query parameters — a [QueryParams], not a plain map.
+     *
+     * The type is the guarantee: a handler cannot reach an undeclared name without a crash, so a
+     * route's declaration and its handler cannot diverge quietly. Dispatch builds this with the
+     * route's declared names, which is the only place that knows them.
+     */
+    val query: QueryParams,
     val pathParams: Map<String, String>,
     val body: JSONObject,
     val remote: String,

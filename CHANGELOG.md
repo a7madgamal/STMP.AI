@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.90 (build 416)**.
+Current build: **v0.51.91 (build 417)**.
 
 ---
 
@@ -5853,13 +5853,21 @@ devDependencies. `node_modules/` is gitignored.
 - The grant toast used `uri.lastPathSegment.contains("STMP")`, which is `primary:Downloads/STMP` on some providers and a bare document id on others — right by luck on one and wrong on the next. It now asks the same `rootLabel()` the panel does, so the two cannot disagree.
 - `StmpFolder.LAST_SEGMENT` added: a SAF tree's display name is the folder's own name (`STMP`), never the multi-level path the app thinks in, so any "is this the right folder" check must compare against that.
 
-## 0.51.90 (build 416) — 2026-11-20 — CURRENT
+## 0.51.90 (build 416) — 2026-11-20
 - The OAuth screen can **import a downloaded Google client file** (`client_secret_*.json`) and pre-fill the client id, client secret, token URL and a derived name. `ACTION_OPEN_DOCUMENT`, one document, read-only, and **no persistable permission**: the file is read once and nothing is stored, which is what was asked for and is the whole reason a single-document grant is right here rather than the tree grant the upload folder uses.
 - The file is untrusted input and is treated as such: a 64 KiB cap before parsing, `token_uri` re-checked for https even though the format says https, all five mandatory members reported at once rather than one per attempt, and refusals that name a FIELD but never echo a VALUE — a parse error quoting the client secret would put it in a toast, and toasts get screenshotted.
 - A service-account key downloaded from the same console page is refused with the actual explanation ("that is a service-account key, not an OAuth client"), because "no web or installed object" tells nobody what to do next.
 - **The dialog answers "how do I get the rest".** A client file is only the client half: it has no refresh token, no scope and no API host. So an import shows what it filled, what it did not, and the exact four Playground steps for the refresh token — instead of a blank required field that reads as a broken import.
 - The import also parses `redirect_uris` for one purpose: warning when `https://developers.google.com/oauthplayground` is not registered for the client, because that failure is a cryptic `redirect_uri_mismatch` that otherwise reads like a plugin bug.
 - Import is its own button that runs BEFORE the form exists. Delivering a picker result into an already-open dialog means crossing a possible activity restart to reach its fields, and a reference chain that breaks quietly is how a form ends up half-filled with no explanation.
+
+## 0.51.91 (build 417) — 2026-11-20 — CURRENT
+- **Every route now DECLARES its query parameters, `/help` publishes them exactly, and anything undeclared is refused with `unknown_param` before the gate.** Found live: a call sent `GET /gmail/messages?maxResults=10`, the route's parameter is `max`, and the answer was 20 rows with no hint anything was ignored. Every route used to read the names it knew and silently drop the rest, so a slightly-wrong name returned a DEFAULT — an answer that looks like an answer, which is the one failure mode that cannot be debugged from the caller's side. Mido, 2026-11-20: *"document ALL params exactly and fail hard on ANY unexpected params"*.
+- **The declaration and the handler cannot diverge, structurally rather than by test.** `Req.query` is a `QueryParams`, not a plain map: reading or contains-checking a name the route never declared THROWS where the bug is, and `keys` only yields declared names so a handler cannot echo an undeclared parameter back as though it were understood. Dispatch builds the wrapper from the route's own `params`, so the type system carries the guarantee instead of a source-grep — which was tried first, produced false positives on Calendar's helper-read parameters, and was deleted rather than kept as a guard nobody trusts.
+- Refusals name the rejected parameter AND the accepted ones, marking which are required. "unknown parameter" alone costs a second guess.
+- A route that declares nothing now refuses ANY query string, which is the honest default: forgetting to declare fails loudly on first use instead of quietly ignoring input.
+- `/help` gains a `params` array per route — name, type, required, default, allowed values and a description — always emitted, so `[]` states "takes none" rather than leaving the reader unsure whether it is undocumented. The markdown says the same, built from the same array so prose and data cannot disagree.
+- Declared for all 43 routes, including `oauth`'s `path`/`url`/`field`/`fields`, Drive's `to`/`parent`/`name`/`type`, Calendar's required `timeMin`/`timeMax`/`timeZone`, and Gmail's `max`/`q`/`pageToken`.
 
 ## Keeping this file honest
 

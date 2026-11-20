@@ -1,6 +1,7 @@
 package com.mido.phonebridge.plugins.logs
 
 import android.content.Context
+import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
@@ -47,6 +48,10 @@ class LogcatPlugin(private val ctx: Context) : Plugin {
     override fun routes(): List<Route> = listOf(
         Route(
             "GET", "/logs", "Read this app's own logcat", Verb.READ,
+            params = listOf(
+                ParamSpec("lines", "How many trailing log lines to return.", type = "int"),
+                ParamSpec("filter", "Only lines containing this text."),
+            ),
             // The reply IS the log, so storing it would copy the log into the log on
             // every call — the same self-referential growth `/debug` opts out of.
             auditResponseBody = false,

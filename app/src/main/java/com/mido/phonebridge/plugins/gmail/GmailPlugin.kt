@@ -31,6 +31,24 @@ class GmailPlugin(private val ctx: Context) : Plugin {
         Route("GET", "/gmail/profile", "Show your Gmail profile", Verb.READ) { profile() },
         Route(
             "GET", "/gmail/messages", "List your Gmail messages", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "max",
+                    "How many messages to return, 1..100. Only this many are FETCHED: the value " +
+                        "goes to Gmail as maxResults, so neither the page nor the per-message " +
+                        "metadata calls exceed it. Incomplete pages are normal for any max.",
+                    type = "int", default = "20",
+                ),
+                ParamSpec(
+                    "q",
+                    "Gmail search query, in Gmail's own syntax. Defaults to 'in:inbox'.",
+                    default = "in:inbox",
+                ),
+                ParamSpec(
+                    "pageToken",
+                    "The nextPageToken from a previous reply, to fetch the following page.",
+                ),
+            ),
             // A bad `max` used to fall back to 20 silently — a caller asking for 5000
             // got a short page and no clue why. Now it is a pre-gate 400: no tap, and
             // the answer names the problem.

@@ -4,6 +4,7 @@ import android.content.Context
 import com.mido.phonebridge.core.AuthManager
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.GoogleApi
+import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
@@ -78,15 +79,59 @@ class DrivePlugin(private val ctx: Context) : Plugin {
      * instead of silently defaulting to "audit everything".
      */
     override fun routes(): List<Route> = listOf(
-        route("GET", "/drive/files", "List or search your Drive files", Verb.READ) { list(it) }
+        route(
+            "GET", "/drive/files", "List or search your Drive files", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "max", "How many files to return. Only this many are fetched from Drive.",
+                    type = "int", default = "25",
+                ),
+                ParamSpec(
+                    "q",
+                    "Drive search query. Defaults to 'trashed = false', i.e. everything not trashed.",
+                    default = "trashed = false",
+                ),
+                ParamSpec("pageToken", "The nextPageToken from a previous reply."),
+            ),
+        ) { list(it) }
             .withValidation { requireMax(it) },
         route("GET", "/drive/files/{id}", "Show a Drive file's details", Verb.READ) { get(it) },
-        route("GET", "/drive/files/{id}/content", "DOWNLOAD a Drive file", Verb.READ) { download(it) },
-        route("POST", "/drive/files", "CREATE DRIVE FOLDER", Verb.WRITE) { createFolder(it) },
-        route("POST", "/drive/files/{id}/rename", "RENAME DRIVE FILE", Verb.EDIT) { rename(it) },
-        route("POST", "/drive/files/{id}/move", "MOVE DRIVE FILE", Verb.EDIT) { move(it) },
+        route(
+            "GET", "/drive/files/{id}/content", "DOWNLOAD a Drive file", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "to",
+                    "Where to save it on the phone. 'phone' saves through MediaStore into " +
+                        "Downloads; absent streams the bytes back to the caller instead.",
+                    allowed = listOf("phone"),
+                ),
+            ),
+        ) { download(it) },
+        route(
+            "POST", "/drive/files", "CREATE DRIVE FOLDER", Verb.WRITE,
+            params = listOf(
+                ParamSpec("name", "Folder name. Falls back to the body's 'name' when absent."),
+                ParamSpec("parent", "Parent folder id. Defaults to the Drive root."),
+            ),
+        ) { createFolder(it) },
+        route(
+            "POST", "/drive/files/{id}/rename", "RENAME DRIVE FILE", Verb.EDIT,
+            params = listOf(ParamSpec("name", "The new name.")),
+        ) { rename(it) },
+        route(
+            "POST", "/drive/files/{id}/move", "MOVE DRIVE FILE", Verb.EDIT,
+            params = listOf(ParamSpec("parent", "The destination folder id.")),
+        ) { move(it) },
         route("POST", "/drive/files/{id}/trash", "TRASH DRIVE FILE", Verb.DELETE) { trash(it) },
-        route("POST", "/drive/files/upload", "UPLOAD FILE TO DRIVE", Verb.WRITE) { uploadFile(it) }
+        route(
+            "POST", "/drive/files/upload", "UPLOAD FILE TO DRIVE", Verb.WRITE,
+            params = listOf(
+                ParamSpec("name", "The file name in Drive. Falls back to the body when absent."),
+                ParamSpec("parent", "Destination folder id. Defaults to the Drive root."),
+                ParamSpec("type", "MIME type to store. Guessed from the name when absent."),
+                ParamSpec("max", "Size ceiling for this upload, in bytes.", type = "int"),
+            ),
+        ) { uploadFile(it) }
     )
 
     /**
@@ -101,6 +146,8 @@ class DrivePlugin(private val ctx: Context) : Plugin {
         path: String,
         describe: String,
         verb: Verb,
+        /** Declared so an undeclared query parameter is refused instead of ignored. */
+        params: List<ParamSpec> = emptyList(),
         handler: suspend (Req) -> Resp,
     ): Route {
         val flags = DriveRouteFlags.forPath(method, path)
@@ -113,6 +160,7 @@ class DrivePlugin(private val ctx: Context) : Plugin {
             path = path,
             describe = describe,
             verb = verb,
+            params = params,
             auditResponseBody = flags.auditResponseBody,
             auditRequestBody = flags.auditRequestBody,
             streamsRequest = flags.streamsRequest,

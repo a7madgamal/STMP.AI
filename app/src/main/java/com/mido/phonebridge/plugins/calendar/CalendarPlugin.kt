@@ -26,6 +26,42 @@ class CalendarPlugin(private val ctx: Context) : Plugin {
     override fun routes(): List<Route> = listOf(
         Route(
             "GET", "/calendar/events", "List your calendar events", Verb.READ,
+            params = listOf(
+                ParamSpec(
+                    "timeMin",
+                    "Start of the window, RFC3339 (e.g. 2026-11-20T00:00:00Z). Required.",
+                    required = true,
+                ),
+                ParamSpec(
+                    "timeMax",
+                    "End of the window, RFC3339. Required, and must be after timeMin.",
+                    required = true,
+                ),
+                ParamSpec(
+                    "timeZone",
+                    "IANA zone the window is interpreted in (e.g. Europe/Berlin). Required: " +
+                        "there is no implicit calendar zone, because one caused a window to " +
+                        "match the wrong events.",
+                    required = true,
+                ),
+                ParamSpec(
+                    "max", "How many events to return. 1 or more, capped at 2500.",
+                    type = "int", default = "250",
+                ),
+                ParamSpec(
+                    "singleEvents",
+                    "Expand recurring events into instances. 'true' or 'false'.",
+                    type = "bool", default = "true",
+                ),
+                ParamSpec(
+                    "orderBy",
+                    "Sort order. Only 'startTime' is valid with singleEvents=true.",
+                    default = "startTime",
+                ),
+                ParamSpec("q", "Free-text search over event fields."),
+                ParamSpec("pageToken", "The nextPageToken from a previous reply."),
+                ParamSpec("calendarId", "Which calendar to read. Defaults to 'primary'.", default = "primary"),
+            ),
             // Same parsers run pre-gate and in the handler, so a bad window answers
             // 400 without a tap and the two paths cannot drift.
             validate = { requireWindow(it); requireMax(it); requireSingleEvents(it); requireTimeZone(it) }

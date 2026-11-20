@@ -31,6 +31,7 @@ import com.mido.phonebridge.core.GateFloor
 import com.mido.phonebridge.core.HiddenText
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.PluginRegistry
+import com.mido.phonebridge.core.QueryParams
 import com.mido.phonebridge.core.Req
 import com.mido.phonebridge.core.Resp
 import com.mido.phonebridge.core.RespPayload
@@ -1403,7 +1404,11 @@ class HttpServer(
             val req = Req(
                 method = method,
                 path = path,
-                query = query,
+                // **Wrapped with this route's DECLARED names.** That is the whole drift guard:
+                // a handler reading a name the route never declared throws where the bug is,
+                // instead of silently getting null. Dispatch is the only place that knows the
+                // declaration, so it is the only place that can build this.
+                query = QueryParams(resolved.route.params.map { it.name }.toSet(), query),
                 pathParams = resolved.pathParams,
                 body = body,
                 remote = remote,
@@ -1435,6 +1440,16 @@ class HttpServer(
             // Runs before the description, so a bad request never even builds a
             // modal. A throw here is REJECTED_INVALID (4xx, noise) by construction —
             // see the catch below, where `gated()` is still false.
+            // **FIRST, and deliberately before validate.** A parameter the route never declared
+            // is not a bad VALUE, it is a request the route cannot answer — so it must be refused
+            // the same way, pre-gate and coded, rather than reaching a handler that will silently
+            // ignore it. Mido, 2026-11-20: *"fail hard on ANY unexpected params with a clear error
+            // response"*.
+            //
+            // A thrown `unknown_param` is REJECTED_INVALID (4xx, noise) for free, because
+            // `gated()` is still false here.
+            resolved.route.checkParams(req)
+
             resolved.route.validate?.invoke(req)
 
             val summary = describe(resolved.plugin.id, resolved.route.path, body)
@@ -2237,7 +2252,10 @@ class HttpServer(
         val req = Req(
             method = route.method,
             path = route.path,
-            query = query,
+            // Same wrapper. `describeRows` and `validate` are route code too, and they must obey
+            // the same declaration — otherwise a pre-gate read could use a name the route does
+            // not publish.
+            query = QueryParams(route.params.map { it.name }.toSet(), query),
             pathParams = pathParams,
             body = body,
             remote = remote,

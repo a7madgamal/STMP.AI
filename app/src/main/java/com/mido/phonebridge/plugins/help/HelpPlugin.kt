@@ -371,6 +371,28 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                 // that is actually a READ.
                 .put("verb", if (r.verbFor != null) "READ|WRITE|EDIT|DELETE|EXECUTE" else r.verb.name)
                 .put("gated", !r.gateExempt)
+
+            // **Every parameter the route accepts, and nothing else.**
+            //
+            // Mido, 2026-11-20: *"document ALL params exactly"*. Before this, the only way to
+            // learn a parameter name was to read the handler — so `?maxResults=10` looked right,
+            // was silently ignored, and answered 20. The list is now the contract in both
+            // directions: dispatch REFUSES anything not here, and this publishes what is.
+            //
+            // Always emitted, even when empty: an absent `params` key would read as "not
+            // documented yet", while `[]` is the true statement "this route takes none".
+            val paramsArr = JSONArray()
+            for (p in r.params) {
+                val pj = JSONObject()
+                    .put("name", p.name)
+                    .put("type", p.type)
+                    .put("required", p.required)
+                    .put("describe", p.describe)
+                if (p.default.isNotEmpty()) pj.put("default", p.default)
+                if (p.allowed.isNotEmpty()) pj.put("allowed", JSONArray(p.allowed))
+                paramsArr.put(pj)
+            }
+            v.put("params", paramsArr)
             routes.put(v)
         }
         o.put("routes", routes)
@@ -448,6 +470,34 @@ class HelpPlugin(private val ctx: Context) : Plugin {
                     "- `${r.getString("method")} ${r.getString("path")}` — " +
                         "${r.getString("verb")} · ${r.getString("describe")} · $gated"
                 )
+                // Parameters as their own indented lines. Rendered from the same array the JSON
+                // carries, so prose and data cannot disagree — the reason this builder takes the
+                // already-built `JSONObject` rather than re-deriving from the plugin.
+                //
+                // Named explicitly as the ONLY accepted set, because that is now literally true:
+                // anything else is refused with `unknown_param`.
+                val params = r.optJSONArray("params")
+                if (params != null && params.length() > 0) {
+                    for (k in 0 until params.length()) {
+                        val prm = params.getJSONObject(k)
+                        val req = if (prm.getBoolean("required")) " (required)" else ""
+                        val def = prm.optString("default", "")
+                        val defTxt = if (def.isEmpty()) "" else " [default: $def]"
+                        val allowed = prm.optJSONArray("allowed")
+                        val allowTxt = if (allowed != null && allowed.length() > 0) {
+                            " [allowed: ${(0 until allowed.length()).joinToString(", ") { allowed.getString(it) }}]"
+                        } else ""
+                        sb.appendLine(
+                            "  - `${prm.getString("name")}` — ${prm.getString("type")}$req" +
+                                "$defTxt$allowTxt — ${prm.getString("describe")}"
+                        )
+                    }
+                } else {
+                    // Said out loud rather than omitted: a caller who sends a query string to a
+                    // route with no parameters now gets a refusal, so the absence is a fact worth
+                    // printing.
+                    sb.appendLine("  - takes no query parameters")
+                }
             }
             sb.appendLine()
         }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.mido.phonebridge.Debug
 import com.mido.phonebridge.core.ApprovalRow
 import com.mido.phonebridge.core.OutboundVerb
+import com.mido.phonebridge.core.ParamSpec
 import com.mido.phonebridge.core.Plugin
 import com.mido.phonebridge.core.PluginError
 import com.mido.phonebridge.core.PluginStatus
@@ -89,6 +90,24 @@ class OauthPlugin(
             // Always a WRITE: an upload adds bytes to someone else's service. There is no method to
             // derive it from — the route decides the method, not the caller.
             Verb.WRITE,
+            params = listOf(
+                ParamSpec(
+                    "path",
+                    "File name inside this plugin's granted folder. No separators.",
+                    required = true,
+                ),
+                ParamSpec("url", "The https upload endpoint. Its host must be on the allowlist.", required = true),
+                ParamSpec(
+                    "field",
+                    "Multipart part name for the file. OMIT for a raw body (Chrome Web Store); " +
+                        "SET it for multipart (AMO).",
+                ),
+                ParamSpec(
+                    "fields",
+                    "Extra multipart text parts as a JSON object, e.g. {\"channel\":\"listed\"}. " +
+                        "Only valid together with 'field'.",
+                ),
+            ),
             // The body IS the file: never buffered (a 200 MiB body in a String is an OOM) and never
             // audited (its first 32 KiB would be copied permanently into an append-only log).
             auditRequestBody = false,

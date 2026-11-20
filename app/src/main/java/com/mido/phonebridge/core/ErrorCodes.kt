@@ -63,6 +63,10 @@ object ErrorCodes {
         "bad_time_range" to BAD_REQUEST,
         "bad_timezone" to BAD_REQUEST,
         "bad_max" to BAD_REQUEST,
+        // A query parameter the route never declared. BAD_REQUEST and pre-gate: the point is that
+        // it is ANSWERED rather than silently ignored, which is what made a wrong parameter name
+        // return a default and look like a bug (Mido, 2026-11-20: *"FAIL HARD"*).
+        "unknown_param" to BAD_REQUEST,
         "bad_lines" to BAD_REQUEST,
         // Request text carrying an invisible character that can reorder or conceal what the
         // approval screen draws: a bidi override turns `rm -rf ~/Projects` into something that
@@ -332,6 +336,7 @@ object ErrorCodes {
         "bad_time_range" to "`timeMin` is not before `timeMax`.",
         "bad_timezone" to "`timeZone` is missing or not a recognised zone id.",
         "bad_max" to "`max` is outside the range this route accepts.",
+        "unknown_param" to "The request sent a query parameter this route does not accept. The error message lists the ones it does accept.",
         "bad_lines" to "`lines` is outside 1..500.",
         "hidden_characters" to
             "The request contains an invisible character that could change how the approval " +
