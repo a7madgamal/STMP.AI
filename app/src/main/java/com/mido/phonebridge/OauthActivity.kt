@@ -686,7 +686,19 @@ class OauthActivity : Activity() {
             box,
             actions = listOf(
                 "cancel" to {},
-                "save" to {
+                "save" to {},
+            ),
+            style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
+            // **The action runs from the predicate, like the JWT screen does it.** PaperDialog asks
+            // this BEFORE dismissing and keeps the sheet open when it returns true — which is the
+            // only way a validation failure can preserve what was typed.
+            //
+            // 0.51.93 had the save in the action and a message-matching predicate here instead. The
+            // predicate receives the button LABEL ("save"), matched no field prefix, fell through to
+            // the default and returned true — so the toast fired and the sheet never closed. Mido:
+            // *"save shows a save hint but modal stays"*.
+            refuse = { label ->
+                if (label == "save") {
                     save(
                         creating = creating,
                         existingName = existingName,
@@ -701,10 +713,10 @@ class OauthActivity : Activity() {
                         docs = docsField.text.toString(),
                         refuse = { msg -> refuse(msg) },
                     )
-                },
-            ),
-            style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
-            refuse = refuse,
+                } else {
+                    false
+                }
+            },
         )
     }
 
@@ -727,34 +739,34 @@ class OauthActivity : Activity() {
         authStyle: String,
         hosts: String,
         docs: String,
-        /** Reports a field-specific refusal. The sheet stays open; the return value is unused here. */
+        /** Reports a field-specific refusal. Called for its side effect; the return is below. */
         refuse: (String) -> Unit,
-    ) {
+    ): Boolean {
         val cleanName = name.trim().lowercase()
-        if (cleanName.isEmpty()) return refuse("(name) NAME is required")
+        if (cleanName.isEmpty()) { refuse("(name) NAME is required"); return true }
         if (!com.mido.phonebridge.core.SecretRules.isValidName(cleanName)) {
-            return refuse("(name) NAME must be lowercase [a-z0-9_-], 1-64 chars")
+            refuse("(name) NAME must be lowercase [a-z0-9_-], 1-64 chars"); return true
         }
         if (creating && runCatching { OauthStore.get(this, cleanName) }.isSuccess) {
-            return refuse("(name) NAME '$cleanName' is already used — edit it instead")
+            refuse("(name) NAME '$cleanName' is already used — edit it instead"); return true
         }
 
-        if (clientId.isBlank()) return refuse("(client) CLIENT ID is required")
-        if (tokenUrl.isBlank()) return refuse("(token) TOKEN URL is required")
+        if (clientId.isBlank()) { refuse("(client) CLIENT ID is required"); return true }
+        if (tokenUrl.isBlank()) { refuse("(token) TOKEN URL is required"); return true }
 
         val parsedUrl = runCatching { java.net.URL(tokenUrl.trim()) }.getOrNull()
-            ?: return refuse("(token) TOKEN URL is not a valid URL")
+            ?: run { refuse("(token) TOKEN URL is not a valid URL"); return true }
         if (parsedUrl.protocol != "https") {
-            return refuse("(token) TOKEN URL must be https — a client secret over http is in the clear")
+            refuse("(token) TOKEN URL must be https — a client secret over http is in the clear"); return true
         }
 
         val style = authStyle.trim().lowercase()
         if (style !in OauthEntry.AUTH_STYLES) {
-            return refuse("(auth) AUTH STYLE must be '${OauthEntry.AUTH_BASIC}' or '${OauthEntry.AUTH_BODY}'")
+            refuse("(auth) AUTH STYLE must be '${OauthEntry.AUTH_BASIC}' or '${OauthEntry.AUTH_BODY}'"); return true
         }
 
         if (creating) {
-            if (clientSecret?.isBlank() != false) return refuse("(secret) CLIENT SECRET is required")
+            if (clientSecret?.isBlank() != false) { refuse("(secret) CLIENT SECRET is required"); return true }
             // **The refresh token is NOT required.** Mido, 2026-11-20: *"i don't like being blocked
             // by a required field … we should accept the json data and have a follow up"*.
             //
@@ -769,7 +781,7 @@ class OauthActivity : Activity() {
             hosts.split(',').map { it.trim() }.filter { it.isNotEmpty() }
                 .map { HostAllowlist.requireRule(it) }.distinct()
         } catch (e: PluginError) {
-            return refuse("(hosts) ALLOWED HOSTS: ${e.message}")
+            refuse("(hosts) ALLOWED HOSTS: ${e.message}"); return true
         }
 
         try {
@@ -825,10 +837,14 @@ class OauthActivity : Activity() {
                 }
             )
             render()
+            // Saved: NOT a refusal, so PaperDialog dismisses the sheet.
+            return false
         } catch (e: PluginError) {
             refuse("(fail) ${e.message}")
+            return true
         } catch (e: Exception) {
             refuse("(fail) Could not save: ${e.javaClass.simpleName}: ${e.message}")
+            return true
         }
     }
 
@@ -878,33 +894,43 @@ class OauthActivity : Activity() {
             box,
             actions = listOf(
                 "cancel" to {},
-                "replace" to {
-                    val s = secretField.text.toString()
-                    val r = refreshField.text.toString()
-                    if (s.isBlank()) return@to fail("(secret) CLIENT SECRET is required")
-                    if (r.isBlank()) return@to fail("(refresh) REFRESH TOKEN is required")
-                    try {
-                        val hosts = runCatching {
-                            SecretVault.meta(this, OauthStore.vaultName(name)).hosts
-                        }.getOrDefault(emptyList())
-                        SecretVault.put(
-                            this,
-                            OauthStore.vaultName(name),
-                            OauthSecret(r.trim(), s.trim()).toJson(),
-                            hosts = hosts,
-                            owner = "oauth",
-                        )
-                        // The old token was minted from the old credential and is now worthless.
-                        OauthTokenCache.forget(name)
-                        toast("secrets replaced for '$name'")
-                        render()
-                    } catch (e: Exception) {
-                        fail("(fail) ${e.message}")
-                    }
-                },
+                // Empty: the work runs from the predicate below, which is the only hook that can
+                // keep the sheet open on a validation failure.
+                "replace" to {},
             ),
             style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
-            refuse = refuse,
+            refuse = { label ->
+                if (label != "replace") {
+                    false
+                } else {
+                    val sec = secretField.text.toString()
+                    val ref = refreshField.text.toString()
+                    when {
+                        sec.isBlank() -> { fail("(secret) CLIENT SECRET is required"); true }
+                        ref.isBlank() -> { fail("(refresh) REFRESH TOKEN is required"); true }
+                        else -> try {
+                            val hosts = runCatching {
+                                SecretVault.meta(this, OauthStore.vaultName(name)).hosts
+                            }.getOrDefault(emptyList())
+                            SecretVault.put(
+                                this,
+                                OauthStore.vaultName(name),
+                                OauthSecret(ref.trim(), sec.trim()).toJson(),
+                                hosts = hosts,
+                                owner = "oauth",
+                            )
+                            // The old token was minted from the old credential and is worthless.
+                            OauthTokenCache.forget(name)
+                            toast("secrets replaced for '$name'")
+                            render()
+                            false
+                        } catch (e: Exception) {
+                            fail("(fail) ${e.message}")
+                            true
+                        }
+                    }
+                }
+            },
         )
     }
 
@@ -996,42 +1022,49 @@ class OauthActivity : Activity() {
             box,
             actions = listOf(
                 "cancel" to {},
-                "save token" to {
-                    val raw = tokenField.text.toString()
-                    val cleaned = extractRefreshToken(raw)
-                    if (cleaned == null) {
-                        return@to refuse(
-                            "(token) that does not look like a refresh token — the exchange shows " +
-                                "one starting with '1//'. Paste the refresh_token value itself."
-                        ).let { }
-                    }
-                    try {
-                        // The client secret is already in the vault; this only fills the half that
-                        // was missing, so the imported values are never re-typed.
-                        val existing = OauthSecret.fromVault(
-                            SecretVault.get(this, OauthStore.vaultName(name))
-                        )
-                        val hosts = runCatching {
-                            SecretVault.meta(this, OauthStore.vaultName(name)).hosts
-                        }.getOrDefault(emptyList())
-                        SecretVault.put(
-                            this,
-                            OauthStore.vaultName(name),
-                            OauthSecret(refreshToken = cleaned, clientSecret = existing.clientSecret).toJson(),
-                            hosts = hosts,
-                            owner = "oauth",
-                        )
-                        // Any cached token was minted before this credential existed.
-                        OauthTokenCache.forget(name)
-                        toast("'$name' is connected")
-                        render()
-                    } catch (e: Exception) {
-                        refuse("(fail) ${e.message}")
-                    }
-                },
+                "save token" to {},
             ),
             style = { index -> if (index == 1) Theme.ButtonStyle.SUCCESS else Theme.ButtonStyle.NEUTRAL },
-            refuse = refuse,
+            refuse = { label ->
+                if (label != "save token") {
+                    false
+                } else {
+                    when (val cleaned = extractRefreshToken(tokenField.text.toString())) {
+                        null -> {
+                            refuse(
+                                "(token) that does not look like a refresh token — the exchange " +
+                                    "shows one starting with '1//'. Paste the refresh_token value itself."
+                            )
+                            true
+                        }
+                        else -> try {
+                            // The client secret is already in the vault; this only fills the half
+                            // that was missing, so the imported values are never re-typed.
+                            val existing = OauthSecret.fromVault(
+                                SecretVault.get(this, OauthStore.vaultName(name))
+                            )
+                            val hosts = runCatching {
+                                SecretVault.meta(this, OauthStore.vaultName(name)).hosts
+                            }.getOrDefault(emptyList())
+                            SecretVault.put(
+                                this,
+                                OauthStore.vaultName(name),
+                                OauthSecret(refreshToken = cleaned, clientSecret = existing.clientSecret).toJson(),
+                                hosts = hosts,
+                                owner = "oauth",
+                            )
+                            // Any cached token was minted before this credential existed.
+                            OauthTokenCache.forget(name)
+                            toast("'$name' is connected")
+                            render()
+                            false
+                        } catch (e: Exception) {
+                            refuse("(fail) ${e.message}")
+                            true
+                        }
+                    }
+                }
+            },
         )
     }
 

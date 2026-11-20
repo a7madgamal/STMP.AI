@@ -36,10 +36,23 @@ object PaperDialog {
      * @param actions label → handler, drawn as buttons along the bottom. The handler runs after
      *   the dialog is dismissed, so a handler that opens another screen does not leave this one
      *   behind it.
-     * @param refuse return true from this to KEEP THE DIALOG OPEN: the action's handler does not run,
-     *   and whatever the handler drew (an error line beside the field it is about) is already on
-     *   screen. A form whose positive button always closes cannot report a validation failure
-     *   without throwing away everything the human typed — which is the defect this exists to stop.
+     * @param refuse asked BEFORE the action runs, to decide whether the action should be BLOCKED.
+     *
+     *   **It receives the button's LABEL, not a message.** That is the trap: a caller who reads the
+     *   name as "the refusal message" writes field-matching logic, the label matches no field, and
+     *   the function returns true for the positive button — so the sheet never closes and the action
+     *   never runs. Reported on 0.51.93: *"save shows a save hint but modal stays"*.
+     *
+     *   Two supported styles, and the parameter is the same shape for both:
+     *   - **Pre-flight veto** (what the label is for): return true to block this action. The handler
+     *     then never runs, so an action that validates its own input does not need this at all.
+     *   - **Error line** (what `@param` used to describe): return true to keep the sheet on screen
+     *     with the handler's message already drawn beside the field. This only works if the handler
+     *     has ALREADY run, which it has not — hence the note below.
+     *
+     *   The old doc claimed "the action's handler does not run, and whatever the handler drew is
+     *   already on screen", which contradicted itself. The ordering is now stated once: the poll
+     *   happens first, the handler second, and only on a false.
      */
     fun show(
         ctx: Context,

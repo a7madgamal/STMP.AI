@@ -227,6 +227,34 @@ class OauthPluginTest {
         )
     }
 
+    @Test
+    fun `no dialog predicate treats an action LABEL as a message`() {
+        // **The 0.51.93 bug, pinned.** `PaperDialog`'s predicate receives the button LABEL, not a
+        // message. A predicate written as if it were a message filter matches no field prefix, falls
+        // through to its default, and returns true for the positive button — so the toast fires and
+        // the sheet never closes. Mido: *"save shows a save hint but modal stays"*.
+        //
+        // The safe shapes are: `label == "save"` style gating (drives the action), or no predicate at
+        // all with the work in the action. What must not exist is a predicate whose condition names
+        // a FIELD.
+        val source = java.io.File("src/main/java/com/mido/phonebridge/OauthActivity.kt").readText()
+        val predicates = Regex("""refuse = \{ (\w+) ->""").findAll(source).map { it.groupValues[1] }.toList()
+        assertTrue("no dialog predicates found — the scan is broken", predicates.isNotEmpty())
+        for (name in predicates) {
+            // Only the predicate's own CONDITION, not the body it delegates to: `save(...)` legitimately
+            // mentions every field name, and matching that would fail on correct code.
+            val head = source.substringAfter("refuse = { $name ->").take(120)
+            for (fieldWord in listOf("\"(name)", "\"(client)", "\"(token)", "\"(secret)", "\"(refresh)", "\"(fail)")) {
+                assertFalse(
+                    "a dialog predicate must not test a MESSAGE prefix like $fieldWord — it receives " +
+                        "the button label, so that condition silently falls through to 'refuse' and " +
+                        "the sheet never closes:\n${head.trim()}",
+                    head.contains(fieldWord),
+                )
+            }
+        }
+    }
+
     // --- the paste parser ---------------------------------------------------------------------
 
     @Test

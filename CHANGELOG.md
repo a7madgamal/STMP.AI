@@ -13,7 +13,7 @@ change from undoing it. Dates are on each heading; find a release's commit with
 `git log --oneline --grep "<version>"` — see the note below on why an entry cannot carry its own
 hash.
 
-Current build: **v0.51.93 (build 419)**.
+Current build: **v0.51.94 (build 420)**.
 
 ---
 
@@ -5877,9 +5877,15 @@ devDependencies. `node_modules/` is gitignored.
 - **No placeholder is ever stored for a missing token.** An empty string is preserved as empty: a placeholder would be a lie that surfaces at the provider, further away from the cause.
 - Phase B of `docs/plans/OAUTH-REFRESH-TOKEN-PLAN.md` (a loopback listener, so the app catches the redirect itself and no paste is needed) is NOT in this build. Google supports it for Desktop (`installed`) clients — verified against the loopback-migration guide — but it adds a listening socket reachable by every app on the phone, which is a separate decision.
 
-## 0.51.93 (build 419) — 2026-11-20 — CURRENT
+## 0.51.93 (build 419) — 2026-11-20
 - **Fixed: the add form still marked REFRESH TOKEN as required.** 0.51.92 removed the save check but left the field declared `required = true`, so the dialog still showed a REQUIRED badge and still refused — and the marker is the contract the user reads, not the code behind it. Mido hit it immediately: *"refresh token still required in the dialog!"*. The field is now labelled **REFRESH TOKEN (OPTIONAL)** with `required = false`, and its help says to leave it empty when the credential has not been authorised yet.
 - A test now pins that marker, because this regression is invisible to a compile and to the save logic: it was a layout fact inside an Activity, and the suite has no device to build those views on.
+
+## 0.51.94 (build 420) — 2026-11-20 — CURRENT
+- **Fixed: saving an OAuth credential showed its toast and then left the sheet open.** The save work had been moved into the action while a message-matching predicate was passed to `PaperDialog` — but that predicate receives the button **label** (`"save"`), matched no field prefix, fell through to its default and returned true, so the action was blocked and the sheet never dismissed. Mido: *"save shows a save hint but modal stays"*.
+- The predicate's contract was the real defect: its doc said the handler does not run "and whatever the handler drew is already on screen", which contradicts itself, because the handler has not run when the predicate is polled. It now says plainly that it receives the LABEL, states the poll-then-handle ordering once, and names the failure it caused.
+- All three OAuth dialogs (add/edit, rotate secrets, connect) now do their work from the predicate and return "was it refused", which is the pattern the JWT screen already used — the only shape that can keep a sheet open on a validation failure *and* close it on success.
+- A test pins it: no dialog predicate may test a message prefix, because that condition can only ever be wrong.
 
 ## Keeping this file honest
 
